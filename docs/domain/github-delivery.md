@@ -134,11 +134,37 @@ characters; last 8 lines, 600 characters.
 
 ## 2. Attaching a repository
 
-- **A repository is required at project creation**: `owner/name` plus an existing
-  connection for that owner. The connection's token probes the repo; success adopts
-  the remote default branch, a read-only repo still creates with a warning, and
-  404/401/network produce warnings with `defaultBranch` falling back to `main`. The
-  connection's PAT is bound to the project and proved against the repo.
+- **A board that delivers software needs a repository at project creation**: `owner/name`
+  plus an existing connection for that owner. The connection's token probes the repo;
+  success adopts the remote default branch, a read-only repo still creates with a
+  warning, and 404/401/network produce warnings with `defaultBranch` falling back to
+  `main`. The connection's PAT is bound to the project and proved against the repo.
+- **A board that delivers results needs none** (ruling 667). Creation takes `delivers:
+  software | results` on all three doors (the New project dialog's "This board
+  delivers", the controller's `create_project`, and a board import, which reads it off
+  the file's roster: `results` when no agent it deploys may write a repository). With
+  `results` the owner and the repository name are given together or not at all; with
+  neither, no connection is resolved, nothing is probed, no credential is bound and
+  `project.md` gets `repo: null`. Every agent of a results board is deployed with
+  `execute-code-or-write-repo` and the scoped delivery grants `off`, so a repository
+  attached to one is read and never written. Nothing stores the choice; `project.created`
+  records it.
+- **A repository can be removed** (**Remove…** in project settings, `remove-repo`,
+  `edit-policy`, ruling 667): refused while a deployed agent may write it
+  (`capabilities.delivery`) and while a task that is not archived has unfinished work
+  on it: a pull request still open (`pr.state` `review` or `accepted`) or, short of the
+  terminal stage, a delivered revision. It writes `repo: null`, unbinds the credential,
+  deletes the repository's reading and audits `project.repo.removed {from,
+  credentialUnbound}`. Tasks keep their branch and pull request records.
+- **A project with no repository attaches one** (**Attach…** in the same row, the Change
+  dialog under that name; `change-repo`, `attachProjectRepo`, ruling 667). It has no
+  credential to probe with, so the attach is checked with the repository owner's
+  connection, else the instance default. With no connection, or on a repository that
+  token cannot see, it refuses and writes nothing. Otherwise it takes the repository's
+  default branch from GitHub (an unprobed attach would keep the placeholder `main`, and
+  ruling 128's bootstrap would create that branch on a repository whose default is
+  another), binds that connection's credential and proves it, and records the reading.
+  A token that can only read is accepted when no deployed agent writes the repository.
 - **Creation can create the repository** (ruling 462). With `createRepository`
   (`{ private, description? }`: the controller's `create_project` argument, or the New
   project modal's "Create this repository on GitHub if it does not exist") a 404 probe
@@ -859,8 +885,8 @@ credential handed to a model.
 ## 9. Identifiers and knobs
 
 - Audit: `github.pat.*`, `github.credential.*`, `org.connection.*`, `secrets.resealed`,
-  `project.repo.updated`, `project.repository.created` (ruling 462, a repository made
-  at project creation), `github.repo.bootstrapped` (ruling 128, a repository-level
+  `project.repo.updated`, `project.repo.removed` (ruling 667), `project.repository.created`
+  (ruling 462, a repository made at project creation), `github.repo.bootstrapped` (ruling 128, a repository-level
   change like `github.credential.assigned`), `github.branch.created|deleted`,
   `github.branch.prepare_failed`, `github.branch_update.operator|acceptance`,
   `github.collision.resolved`,

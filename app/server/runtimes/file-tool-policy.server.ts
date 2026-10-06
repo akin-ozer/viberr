@@ -95,7 +95,7 @@ export function fileWriteDenyReason(
     `Withheld by capability policy: "${label}" (${id}) is not granted on this run, so ${tool} ` +
     `writes only into the task's attachments folder \`${attachments}\`, where the files you ` +
     `post on the task go, and ${scratch.map((dir) => `\`${dir}\``).join(", ")} for scratch. ` +
-    `\`${filePath}\` is outside both: write the file there by its absolute path, and leave the ` +
-    "repository checkout as it is."
+    `\`${filePath}\` is outside both: write the file there by its absolute path, and leave ` +
+    "everything else as it is."
   );
 }

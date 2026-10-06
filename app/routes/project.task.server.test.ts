@@ -296,9 +296,9 @@ describe("U39-32: the accept dialog's base lag", () => {
  * a viewer who may see it.
  */
 describe("ruling 521: the completion packet", () => {
-  it("ships the packet for the revision under review, with the reviewer's name and the screenshot it picked", async () => {
-    // CANARY: return `completion: null` from the loader, or hand
-    // `completionView` a `canSee` of null for a member, and this empties.
+  /** VIB-142 with revision `rev_1` delivered and approved, and Operator's
+   *  packet written for it. */
+  async function deliverAndSummarize() {
     const { updateTaskFile, resolveTaskFilePath } = await import("~/server/files/task-writer.server");
     const { rebuildPath } = await import("~/server/projections/rebuilder.server");
     const { writeTaskAttachment } = await import("~/server/files/task-attachments.server");
@@ -325,15 +325,34 @@ describe("ruling 521: the completion packet", () => {
       taskKey: "VIB-142",
       summary: "A task attaches one repository and records its branch first.",
       changes: "- **Policy gate**: refuses a second repository.",
+      gaps: "Detaching a repository is not covered.",
       screenshots: [{ name: "attach-dialog.png", caption: "The attach dialog" }],
     });
     expect(written.written).toBe(true);
+    /** Rewrites the task's stage and archive mark, as an acceptance or an
+     *  archive leaves them. */
+    return async (patch: { stage?: string; archived?: boolean }) => {
+      await updateTaskFile(ref, (parsed) => {
+        Object.assign(parsed.frontmatter, patch);
+      });
+      rebuildPath(app.db, resolveTaskFilePath(ref), { dataRoot: app.dataRoot });
+    };
+  }
 
+  it("ships the packet for the revision under review, with the reviewer's name and the screenshot it picked", async () => {
+    // CANARY: return `completion: null` from the loader, or hand
+    // `completionView` a `canSee` of null for a member, and this empties.
+    await deliverAndSummarize();
     expect((await loadTask("VIB-142")).completion).toEqual({
       subjectSha: "aaaaaaa",
       packet: {
         summary: "A task attaches one repository and records its branch first.",
         changes: "- **Policy gate**: refuses a second repository.",
+        considerations: null,
+        assumptions: null,
+        gaps: "Detaching a repository is not covered.",
+        files: [],
+        hiddenFiles: 0,
         screenshots: [{ name: "attach-dialog.png", caption: "The attach dialog" }],
         hiddenScreenshots: 0,
         at: expect.any(String),
@@ -351,7 +370,21 @@ describe("ruling 521: the completion packet", () => {
         },
       ],
       change: { files: 9, add: 412, del: 87, small: false },
+      paths: null,
     });
+  });
+
+  it("ruling 668: keeps the packet on an accepted task in the archive, and ships none for a task archived unfinished", async () => {
+    // CANARY: restore `taskFile && !archived` and an accepted task loses its
+    // result the day its epic is archived; drop the archive check and a task
+    // abandoned at Review shows a summary of work nobody accepted.
+    const set = await deliverAndSummarize();
+    await set({ archived: true });
+    expect((await loadTask("VIB-142")).completion).toBeNull();
+    await set({ stage: "done" });
+    expect((await loadTask("VIB-142")).completion?.packet?.gaps).toBe(
+      "Detaching a repository is not covered.",
+    );
   });
 
   it("counts the reviewer a project rule requires, though nobody engaged it on the task", async () => {

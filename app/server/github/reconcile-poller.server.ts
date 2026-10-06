@@ -195,7 +195,15 @@ function noteReconcileFailure(db: DatabaseSync, slug: string): void {
   }
 }
 
-/** Active projects that have at least one branched task worth reconciling. */
+/**
+ * Active projects that have at least one branched task worth reconciling.
+ *
+ * Ruling 667: and a repository to reconcile against. A project whose
+ * repository was removed keeps the branch names its finished tasks recorded,
+ * and each pass over it answered `no_repo_configured`, which the failure count
+ * below read as GitHub failing: three ticks later every admin was told
+ * "GitHub sync is failing for this project" about a board that has none.
+ */
 function projectsToPoll(db: DatabaseSync): string[] {
   // SAFETY: `task_projections.project_slug` is NOT NULL TEXT
   // (0001_baseline.sql), so each row of this single-column SELECT holds a slug.
@@ -205,7 +213,7 @@ function projectsToPoll(db: DatabaseSync): string[] {
         `SELECT DISTINCT t.project_slug AS slug
            FROM task_projections t
            JOIN projects p ON p.slug = t.project_slug
-          WHERE t.branch IS NOT NULL AND p.archived = 0
+          WHERE t.branch IS NOT NULL AND p.archived = 0 AND p.repo IS NOT NULL
           ORDER BY t.project_slug ASC`,
       )
       .all() as { slug: string }[]

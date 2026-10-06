@@ -969,6 +969,7 @@ function repoPanel(overrides: Partial<ComponentProps<typeof RepoPanel>> = {}) {
       repoBusy={false}
       changeResult={undefined}
       onChangeRepo={() => {}}
+      onRemoveRepo={() => {}}
       repo="akin-ozer/viberr"
       credential={CREDENTIAL}
       canGrant
@@ -1064,6 +1065,46 @@ describe("RepoPanel", () => {
     )!;
     expect(box.checked).toBe(false);
     expect(box.disabled).toBe(true);
+  });
+
+  /**
+   * Ruling 667 (owner, 2026-10-06): a board that delivers results needs no
+   * repository. A project that has one can give it up through a confirmed
+   * Remove, and a project with none shows no GitHub-only control, only the way
+   * to attach one.
+   */
+  it("ruling 667: Remove takes the repository away through a confirm, and a project with none offers Attach and nothing about GitHub", () => {
+    // CANARY: submit on the first click and a repository goes with one stray
+    // press; keep the credential card or the after-merge row for a project
+    // with no repository and it is warned about a sync it has no use for.
+    const onRemoveRepo = vi.fn();
+    const withRepo = render(repoPanel({ onRemoveRepo }));
+    fireEvent.click(withRepo.getByText("Remove…"));
+    expect(onRemoveRepo).not.toHaveBeenCalled();
+    const dialog = withRepo.container.querySelector<HTMLElement>('[data-screen-label="Repository removal dialog"]')!;
+    expect(dialog.textContent).toContain("Remove akin-ozer/viberr from this project?");
+    expect(dialog.textContent).toContain(
+      "Viberr refuses while an agent may write the repository, a pull request is still open, or a delivered revision is not yet accepted.",
+    );
+    fireEvent.click(
+      withRepo.getByText("Remove repository", { selector: ".confirm-actions button.btn.danger" }),
+    );
+    expect(onRemoveRepo).toHaveBeenCalledTimes(1);
+    cleanup();
+
+    const { container, getByText, queryByText } = render(repoPanel({ repo: null, credential: NO_CREDENTIAL }));
+    expect(container.querySelector(".kv-row")!.textContent).toContain("none · tasks are delivered as files");
+    expect(queryByText("Remove…")).toBeNull();
+    expect(queryByText("After merge")).toBeNull();
+    expect(container.querySelector(".cred-card")).toBeNull();
+    fireEvent.click(getByText("Attach…"));
+    expect(container.querySelector("dialog h3")!.textContent).toBe("Attach repository");
+    expect(container.textContent).toContain("This project has no repository. Enter the one to attach, as owner/name.");
+    // The attach checks the repository itself: no "can't be verified" here.
+    expect(container.textContent).toContain(
+      "takes the repository's default branch from GitHub, and binds that connection to this project",
+    );
+    expect(container.textContent).not.toContain("can't be verified until one is");
   });
 
   it("a configured credential offers Rotate + a confirmed Remove (finding #13)", () => {

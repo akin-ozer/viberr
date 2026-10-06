@@ -3245,6 +3245,43 @@ describe("buildAnalyzePrompt — server-side delivery contract (both backends)",
     expect(prompt).not.toContain("Analyze the repository");
     expect(prompt).not.toContain("Clone");
   });
+
+  it("ruling 667: a run with no repository keeps its workspace contract: its knowledge bases, the task's files, and what it hands back", () => {
+    // The contract used to be dropped whole with the repository, so a
+    // deliverer on a board with none was told nothing about the attachments
+    // folder or that its delivery is the files it saves. CANARY: put the
+    // contract back inside `if (input.repo)` and every line below is missing.
+    const noRepo = {
+      ...base,
+      repo: null,
+      cloned: false,
+      kbReadDirs: ["/data/kb/estimate-rulings"],
+      attachmentsDropDir: "/data/projects/est/tasks/EST-1/attachments",
+      delivery: { canBranch: false, canCommitPush: false, canOpenPr: false, repoWrite: false },
+    };
+    const delivering = buildAnalyzePrompt(noRepo);
+    expect(delivering).toContain("## Workspace contract (follow exactly)");
+    expect(delivering).toContain(
+      "There is no checkout: nothing to branch, commit or push, and no pull request. Your working directory is this task's scratch space: nothing in it is delivered or shown to anyone.",
+    );
+    expect(delivering).toContain("the knowledge-base folder `/data/kb/estimate-rulings` is yours to READ");
+    expect(delivering).toContain(
+      "The task's attachments folder, `/data/projects/est/tasks/EST-1/attachments` (an absolute path outside your working directory; never create it inside the working directory), is yours to READ and to COPY files INTO.",
+    );
+    expect(delivering).toContain(
+      'Your delivery is the files you save on the task (see "Files on the task thread" below)',
+    );
+    expect(delivering).toContain("Report the exact name of every file you saved on the task back in your reply.");
+    expect(delivering).not.toContain("checkout;");
+    expect(delivering).not.toContain("git commit");
+
+    const supporting = buildAnalyzePrompt({ ...noRepo, delivers: false });
+    expect(supporting).toContain(
+      "You are a SUPPORTING agent: the delivering agent's files are the task's delivery, not yours.",
+    );
+    expect(supporting).toContain("default to reviewing the files delivered on the task");
+    expect(supporting).not.toContain("Your delivery is the files you save");
+  });
 });
 
 describe("directiveRequestsDelivery (F10-31)", () => {

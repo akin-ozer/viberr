@@ -186,7 +186,9 @@ runs are confined:
 ## Enabling GitHub integration
 
 Branch/PR traceability uses **user-provided GitHub tokens, encrypted at rest**
-(AES-256-GCM with `VIBERR_SECRET_ENCRYPTION_KEY`).
+(AES-256-GCM with `VIBERR_SECRET_ENCRYPTION_KEY`). A board that delivers results (files
+saved on each task, no code) needs none of this: create it with "Results · no code" in
+the New project dialog.
 
 1. Create a token on GitHub — *Settings → Developer settings → Fine-grained personal
    access token*, resource owner = the org/user owning the project repo, grant access to

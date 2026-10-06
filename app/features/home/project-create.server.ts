@@ -25,6 +25,8 @@ import {
 } from "~/server/runtimes/model-catalog.server";
 import type { RealBackend } from "~/server/runtimes/runtime-registry.server";
 import { BACKEND_LABEL } from "~/shared/text/backend-label";
+import type { BoardDelivers } from "~/shared/board-delivers";
+import { SCOPED_DELIVERY_CAPABILITY_IDS } from "~/shared/capabilities";
 import { withActionWatchdog } from "~/server/actions/action-watchdog.server";
 import { recordAudit, type AuditDetails } from "~/server/audit/audit-recorder.server";
 import { AppError } from "~/server/errors/app-error.server";
@@ -111,6 +113,35 @@ function presetWorkflow(
           by: "Human approval (strict policy) before work advances",
         }
       : { ...b },
+  );
+}
+
+/** The grants that let an agent change a repository: the headline, and the
+ *  scoped steps it gates. */
+const REPO_WRITE_CAPABILITY_IDS: readonly string[] = [
+  "execute-code-or-write-repo",
+  ...SCOPED_DELIVERY_CAPABILITY_IDS,
+];
+
+/**
+ * Ruling 667: the roster of a board that delivers results. Every specialist
+ * is deployed with its repo-write grants explicitly off, the grants the AWS
+ * calculator board's agents were built with, so its deliverer hands back the
+ * files it saves on the task (ruling 535) and stays that way if a repository
+ * is attached later for the agents to read. An explicit `off` is the one mode
+ * no layer reinterprets (B-AG1). The operator's own row is left alone.
+ */
+function withoutRepoWrite(agents: AgentDeployment[]): AgentDeployment[] {
+  return agents.map((a) =>
+    a.profileId === OPERATOR_PROFILE_ID
+      ? a
+      : {
+          ...a,
+          capabilities: [
+            ...a.capabilities.filter((c) => !REPO_WRITE_CAPABILITY_IDS.includes(c.capabilityId)),
+            ...REPO_WRITE_CAPABILITY_IDS.map((capabilityId) => ({ capabilityId, mode: "off" as const })),
+          ],
+        },
   );
 }
 
@@ -430,7 +461,12 @@ export interface CreateProjectInput {
   name: string;
   /** Task key prefix, 2–4 uppercase letters. */
   key: string;
-  /** Connection owner (repo account) — Phase-4 stand-in list. */
+  /** Ruling 667: what the board delivers; `software` when left out. A board
+   *  that delivers results needs no repository: `owner` and `repoName` may
+   *  both be empty, and its agents are deployed with repo-write withheld. */
+  delivers?: BoardDelivers;
+  /** Connection owner (repo account) — Phase-4 stand-in list. Empty for a
+   *  results board with no repository. */
   owner: string;
   /** Repo name under the owner (already slugified by the modal). */
   repoName: string;
@@ -496,6 +532,8 @@ export interface CreateProjectResult {
   name: string;
   /** Display path for the toast (ruling 3 — real store path). */
   storePath: string;
+  /** Ruling 667: `<owner>/<name>`, or null for a project with no repository. */
+  repo: string | null;
   /**
    * UI-09: what the repository probe found, or null when no token was
    * available to probe with. A non-`ok` value means the project was created but
@@ -560,15 +598,16 @@ export interface NewProjectIdentity {
   key: string;
   owner: string;
   repoName: string;
-  /** `<owner>/<repoName>`. */
-  repo: string;
+  /** `<owner>/<repoName>`, or null for a results board with no repository
+   *  (ruling 667). */
+  repo: string | null;
   slug: string;
 }
 
 /** The fields {@link checkNewProjectIdentity} reads. */
 export type NewProjectIdentityInput = Pick<
   CreateProjectInput,
-  "name" | "key" | "owner" | "repoName" | "createRepository"
+  "name" | "key" | "delivers" | "owner" | "repoName" | "createRepository"
 >;
 
 export function checkNewProjectIdentity(
@@ -586,13 +625,27 @@ export function checkNewProjectIdentity(
   if (isReservedTaskPrefix(key)) throw AppError.validation(RESERVED_TASK_PREFIX_REFUSAL);
   const owner = input.owner.trim();
   const repoName = input.repoName.trim();
-  // Repo-bound projects only (owner ruling 2026-07-17, reverses F10): every
-  // project needs `<owner>/<name>` — agents deliver through GitHub, so a
-  // repo-less project dead-ends the moment execution starts. Creation is
-  // therefore gated behind adding a PAT connection.
-  if (!owner || !repoName) {
+  // Repo-bound projects (owner ruling 2026-07-17, reverses F10): a board that
+  // delivers software needs `<owner>/<name>`, because its agents deliver
+  // through GitHub and a repo-less one dead-ends the moment execution starts.
+  // Ruling 667 (owner, 2026-10-06) narrows that to the boards it was written
+  // for: a board that delivers results hands back files saved on the task, so
+  // its repository is optional and creation needs no connection.
+  const results = input.delivers === "results";
+  if (!results && (!owner || !repoName)) {
     throw AppError.validation(
-      "A GitHub repository is required. Pick a GitHub connection and a repository name. Add a PAT in Instance settings → GitHub connections first.",
+      "A GitHub repository is required for a board that delivers software. Pick a GitHub connection and a repository name. Add a PAT in Instance settings → GitHub connections first. A board that delivers results needs none.",
+    );
+  }
+  if (results && Boolean(owner) !== Boolean(repoName)) {
+    throw AppError.validation(
+      "Give both a GitHub connection and a repository name, or neither: a board that delivers results needs no repository.",
+    );
+  }
+  const repo = owner && repoName ? `${owner}/${repoName}` : null;
+  if (input.createRepository && repo === null) {
+    throw AppError.validation(
+      "There is no repository to create: name the GitHub connection and the repository, or leave `createRepository` out.",
     );
   }
   if (input.createRepository && !GITHUB_REPO_NAME.test(repoName)) {
@@ -611,7 +664,7 @@ export function checkNewProjectIdentity(
       userMessage: `A project at projects/${slug} already exists.`,
     });
   }
-  return { name, key, owner, repoName, repo: `${owner}/${repoName}`, slug };
+  return { name, key, owner, repoName, repo, slug };
 }
 
 async function createProjectImpl(
@@ -679,8 +732,12 @@ async function createProjectImpl(
     ],
     // Preinstall the default agent roster — the operator plus the base
     // specialists it can assign — so every project can run governed agent work.
-    // Ruling 464: a designed roster replaces the base specialists.
-    agents: presetAgents(input.policy, roster),
+    // Ruling 464: a designed roster replaces the base specialists. Ruling
+    // 667: on a board that delivers results none of them may write a repository.
+    agents: presetAgents(
+      input.policy,
+      input.delivers === "results" ? withoutRepoWrite(roster) : roster,
+    ),
     // Ship the anti-noise guardrails ON — timeline compaction + chatter
     // rejection are product defaults (PRD's #1 risk), not opt-in.
     guardrails: DEFAULT_GUARDRAILS,
@@ -699,6 +756,7 @@ async function createProjectImpl(
       description: desc,
       details: {
         template: blueprint?.stages ? "custom" : template.id,
+        delivers: input.delivers ?? "software",
         policy: input.policy,
         customStages: blueprint?.stages?.length ?? 0,
         customMembers: blueprint?.members.length ?? 0,
@@ -712,8 +770,9 @@ async function createProjectImpl(
 /** What the repository probe (and, asked for, its creation) settled before
  *  anything is written: ruling 653 shares it with a board import. */
 export interface ReachedRepository {
-  /** The connection whose PAT the project is bound to. */
-  patId: string;
+  /** The connection whose PAT the project is bound to; null for a project
+   *  with no repository (ruling 667), which binds none. */
+  patId: string | null;
   defaultBranch: string;
   /** UI-09: what the probe found when it was not clean, or null. */
   repoWarning: string | null;
@@ -736,6 +795,11 @@ export async function reachProjectRepository(
   ctx: CreateProjectContext = {},
 ): Promise<ReachedRepository> {
   const { owner, repoName, repo, slug } = identity;
+  // Ruling 667: no repository, so no connection to resolve and nothing to
+  // probe. `defaultBranch` keeps the schema's own fallback and names nothing.
+  if (repo === null) {
+    return { patId: null, defaultBranch: "main", repoWarning: null, repoNote: null, repoAccess: null };
+  }
   // Resolve the selected connection so we can (a) fetch the repo's real
   // default branch and (b) bind its PAT to the project — a project isn't
   // "connected" to GitHub just by holding a repo string; branch/PR sync and
@@ -893,16 +957,19 @@ export async function writeNewProject(
   reprojectProject(db, ctx, slug);
 
   // Bind the selected connection's PAT to the project so credential health,
-  // branch creation, and PR sync work against the real repo.
-  setProjectCredential(db, { projectSlug: slug, patId: reached.patId }, actor);
-  // F15-01: creation is the first moment this PAT meets the project's REAL
-  // repository, and a fine-grained token's chips stay `assumed` until something
-  // probes it. Attach/rotate has always followed the bind with that
-  // revalidation; creation did not, which is why a brand-new project showed a
-  // credential card affirming scopes nothing had proven. Best-effort by
-  // contract — the bind has already happened, and a degraded GitHub must not
-  // fail the creation.
-  await proveAttachedCredential(db, slug, actor, ctx);
+  // branch creation, and PR sync work against the real repo. Ruling 667: a
+  // project with no repository has no connection to bind.
+  if (reached.patId !== null) {
+    setProjectCredential(db, { projectSlug: slug, patId: reached.patId }, actor);
+    // F15-01: creation is the first moment this PAT meets the project's REAL
+    // repository, and a fine-grained token's chips stay `assumed` until something
+    // probes it. Attach/rotate has always followed the bind with that
+    // revalidation; creation did not, which is why a brand-new project showed a
+    // credential card affirming scopes nothing had proven. Best-effort by
+    // contract — the bind has already happened, and a degraded GitHub must not
+    // fail the creation.
+    await proveAttachedCredential(db, slug, actor, ctx);
+  }
 
   if (reached.repoAccess) recordRepoAccess(db, slug, reached.repoAccess);
   recordAudit(db, {
@@ -926,6 +993,7 @@ export async function writeNewProject(
     key,
     name,
     storePath: `${getDataRoot(ctx.dataRoot)}/projects/${slug}`,
+    repo: frontmatter.repo,
     repoWarning: reached.repoWarning,
     repoNote: reached.repoNote,
     agents: frontmatter.agents.map((a) => {

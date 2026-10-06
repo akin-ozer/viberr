@@ -72,7 +72,9 @@ export function Rail({
 
       {/* Design pass 2026-09-08: no "Workspace" eyebrow — it labelled the only
           group in the rail; space under the switcher does the separating. */}
-      {WORKSPACE_NAV.map((n) => (
+      {/* Ruling 667: a project with no repository has no GitHub page to
+          visit; attaching one is in Settings. */}
+      {WORKSPACE_NAV.filter((n) => n.id !== "github" || projectRepo).map((n) => (
         <Link
           key={n.id}
           // P13-D-35: the Board item is the one nav target that owns URL state

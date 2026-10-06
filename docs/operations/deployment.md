@@ -227,7 +227,9 @@ end-of-run compaction works in a copy of its own (`runs/<runId>-compaction/`).
 admin, open **Profile → Agent accounts**, and connect at least one backend for yourself.
 Home's setup checklist (ruling 532) lists it with the instance's other gaps, each a link
 to where it is closed: a GitHub connection, an account of your own beside the bootstrap
-admin, and the first project.
+admin, and the first project. GitHub is needed only for a board that delivers software:
+a board that delivers results is created with no repository (ruling 667), and the
+checklist stops listing GitHub once a project exists on an instance with no connection.
 Until somebody does, the instance runs no agents: an agent started on a task whose owner
 has nothing connected is refused before any process starts, with an honest
 `run·unavailable` error run and a blocked recovery packet naming the owner and the
@@ -400,7 +402,8 @@ is the two-second check, and the same URL over `http://` shows the throttle.
 - Boot writes the shipped agent assets (each built-in agent's definition and expertise
   skill, the base profile templates) into a store that lacks them.
 - Home's setup checklist lists what is still missing, until nothing is (ruling 532): for
-  an org admin a GitHub connection, an account other than the bootstrap admin, their own
+  an org admin a GitHub connection (only while the instance has one or has no project
+  yet, ruling 667), an account other than the bootstrap admin, their own
   Claude or Codex account and the first project; for everyone else the last two. Once
   there is a project, its cross hides it until the sign-in or the browser's session ends
   (ruling 621).

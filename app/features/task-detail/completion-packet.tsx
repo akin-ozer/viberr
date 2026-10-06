@@ -1,12 +1,13 @@
 import { useId } from "react";
 import type { CompletionVerdictRow, CompletionView } from "~/server/tasks/completion-packet.server";
-import { COMPLETION_SMALL_CHANGE_LINES } from "~/shared/completion-packet";
+import { COMPLETION_NOTES, COMPLETION_SMALL_CHANGE_LINES } from "~/shared/completion-packet";
 import { Collapsible } from "~/ui/collapsible";
 import { Icon, type IconName } from "~/ui/icon";
 import { LocalRelative } from "~/ui/local-time";
 import { Markdown } from "~/ui/markdown";
 import { Pill } from "~/ui/pill";
 import { AttachmentThumb } from "./attachment-image";
+import { fileExtension, fileFamily } from "./attachment-kind";
 import { useAttachmentLightbox } from "./attachment-lightbox";
 import { ChangesPanel } from "./changes-slot";
 
@@ -23,6 +24,13 @@ import { ChangesPanel } from "./changes-slot";
  * work is marked stale rather than counted. A change of at most
  * `COMPLETION_SMALL_CHANGE_LINES` lines opens whole; a larger one shows
  * Operator's summary of it, with the diff one press away.
+ *
+ * Ruling 668 (owner, 2026-10-06): the same card is the task's result once it
+ * is accepted. It carries what Operator said to weigh, what the work assumed
+ * and what is missing, and, for a task delivered as files, the files that are
+ * the result. A task delivered as a revision shows no files: its pull request
+ * holds them, so the result names the pull request, the change's size and the
+ * paths it changed.
  */
 export interface CompletionDiff {
   url: string;
@@ -30,6 +38,14 @@ export interface CompletionDiff {
   prNumber: number;
   revisionSha: string;
   delivererName: string | null;
+}
+
+/** Ruling 668: the card as the result of an accepted task. */
+export interface CompletionResult {
+  /** The task's pull request, or null for a task that has none. `url` is
+   *  null once the project has given its repository up (ruling 667): the
+   *  record stays, with nowhere to link. */
+  pr: { number: number; url: string | null; merged: boolean } | null;
 }
 
 const RESULT_ICON = {
@@ -96,6 +112,7 @@ export function CompletionPacket({
   verdictSatisfiedBy = null,
   diff = null,
   standalone = false,
+  result = null,
 }: {
   view: CompletionView;
   /** The attachments serving route's base, or null where there is none. */
@@ -108,22 +125,33 @@ export function CompletionPacket({
   /** Its own card, for an offer made as a recommendation rather than as a
    *  decision; inside the decision card otherwise. */
   standalone?: boolean;
+  /** Ruling 668: the task is accepted, so this is its result. */
+  result?: CompletionResult | null;
 }) {
   const id = useId();
   const lightbox = useAttachmentLightbox();
-  const { packet, verdicts, change } = view;
+  const { packet, change, paths } = view;
   const subject = view.subjectSha ?? "the delivered files";
   const Title = standalone ? "h2" : "h3";
   const Label = standalone ? "h3" : "h4";
   const href = (name: string) => `${attachmentsBase}/${encodeURIComponent(name)}`;
   const shots = attachmentsBase && packet ? packet.screenshots : [];
+  const files = attachmentsBase && packet ? packet.files : [];
   const small = change?.small ?? false;
+  // On an accepted task nobody is still owed a verdict.
+  const verdicts = result ? view.verdicts.filter((v) => v.result !== "pending") : view.verdicts;
+  const notes = packet
+    ? COMPLETION_NOTES.flatMap(({ key, label }) => {
+        const text = packet[key];
+        return text ? [{ key, label, text }] : [];
+      })
+    : [];
 
   const section = (
     <section className="cmp" aria-labelledby={`${id}-h`} data-comment-anchor="completion">
       <div className="cmp-head">
         <Title id={`${id}-h`} className="cmp-title">
-          Completion
+          {result ? "Result" : "Completion"}
         </Title>
         {packet ? (
           <span className="cmp-by">
@@ -162,9 +190,59 @@ export function CompletionPacket({
         </>
       )}
 
-      <Label className="cmp-k">Reviewers</Label>
+      {files.length > 0 ? (
+        <>
+          <Label className="cmp-k">Files</Label>
+          <ul className="cmp-files">
+            {files.map((f) => {
+              const ext = fileExtension(f.name);
+              return (
+                <li key={f.name}>
+                  <a
+                    className="attach-file cmp-file"
+                    href={href(f.name)}
+                    target="_blank"
+                    rel="noreferrer"
+                    onClick={lightbox({ name: f.name, url: href(f.name) })}
+                  >
+                    <span className="cmp-file-ext" data-kind={fileFamily(f.name)} aria-hidden="true">
+                      {ext.length > 0 && ext.length <= 5 ? ext : "file"}
+                    </span>
+                    <span className="cmp-file-main">
+                      <span className="cmp-file-name">{f.name}</span>
+                      {f.caption ? <span className="cmp-file-what">{f.caption}</span> : null}
+                    </span>
+                  </a>
+                </li>
+              );
+            })}
+          </ul>
+        </>
+      ) : null}
+      {packet && packet.hiddenFiles > 0 ? (
+        <p className="cmp-none">
+          {plural(packet.hiddenFiles, "result file", "result files")} Operator named{" "}
+          {packet.hiddenFiles === 1 ? "is" : "are"} not shown: attachments are for project
+          members, and a file removed since is gone.
+        </p>
+      ) : null}
+
+      {notes.map((note) => (
+        <div key={note.key} className="cmp-note">
+          <Label className="cmp-k">{note.label}</Label>
+          <div className="cmp-summary md-body">
+            <Markdown text={note.text} headingBase={standalone ? 4 : 5} />
+          </div>
+        </div>
+      ))}
+
+      {result && verdicts.length === 0 && !verdictSatisfiedBy ? null : (
+        <Label className="cmp-k">Reviewers</Label>
+      )}
       {verdicts.length === 0 && !verdictSatisfiedBy ? (
-        <p className="cmp-none">No reviewer is engaged on this task, and none has given a verdict.</p>
+        result ? null : (
+          <p className="cmp-none">No reviewer is engaged on this task, and none has given a verdict.</p>
+        )
       ) : (
         <ul className="cmp-verdicts">
           {verdicts.map((row) => (
@@ -208,15 +286,36 @@ export function CompletionPacket({
         </p>
       ) : null}
 
-      {change || diff ? (
+      {change || diff || (result && (result.pr || paths)) ? (
         <>
           <Label className="cmp-k">Changes</Label>
-          {change ? (
+          {change || result?.pr ? (
             <p className="cmp-stat">
-              {plural(change.files, "file", "files")} changed
-              <span className="cmp-add">+{change.add}</span>
-              <span className="cmp-del">−{change.del}</span>
-              {!small ? (
+              {result?.pr ? (
+                <>
+                  {result.pr.url ? (
+                    <a className="linkish" href={result.pr.url} target="_blank" rel="noreferrer">
+                      PR #{result.pr.number}
+                    </a>
+                  ) : (
+                    <span>PR #{result.pr.number}</span>
+                  )}
+                  <span>{result.pr.merged ? "merged" : "accepted, merge pending"}</span>
+                  {change ? (
+                    <span className="cmp-sep" aria-hidden="true">
+                      ·
+                    </span>
+                  ) : null}
+                </>
+              ) : null}
+              {change ? (
+                <>
+                  {plural(change.files, "file", "files")} changed
+                  <span className="cmp-add">+{change.add}</span>
+                  <span className="cmp-del">−{change.del}</span>
+                </>
+              ) : null}
+              {change && !small && !result ? (
                 <>
                   <span className="cmp-sep" aria-hidden="true">
                     ·
@@ -232,6 +331,23 @@ export function CompletionPacket({
             <div className="cmp-summary md-body">
               <Markdown text={packet.changes} headingBase={standalone ? 4 : 5} />
             </div>
+          ) : null}
+          {result && paths && paths.shown.length > 0 ? (
+            <Collapsible className="cmp-paths" contentKey={paths.shown.length} max={120}>
+              <ul>
+                {paths.shown.map((path) => (
+                  <li key={path} className="mono">
+                    {path}
+                  </li>
+                ))}
+              </ul>
+              {paths.more > 0 || paths.truncated ? (
+                <p className="cmp-none">
+                  {paths.more > 0 ? `And ${plural(paths.more, "more path", "more paths")}. ` : ""}
+                  The pull request lists every file.
+                </p>
+              ) : null}
+            </Collapsible>
           ) : null}
           {diff ? (
             <ChangesPanel

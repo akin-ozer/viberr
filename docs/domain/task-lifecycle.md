@@ -728,13 +728,29 @@ packet goes away (`retryReviewDeadlockEscalation`, ruling 328).
   `completionPacket` in task.md ([file-formats.md §2](../architecture/file-formats.md)),
   the operator's summary of the work, its summary of the code changes when they run past
   200 changed lines, and the screenshots it picked from the task's image attachments, each
-  with a caption. Only the operator writes it (`write_completion_packet`), bound to the
+  with a caption. Ruling 668: it also says what to weigh, what was assumed and what is
+  missing (`considerations`, `assumptions`, `gaps`, each given only when there is
+  something to say), and on a task delivered as files it names the files that are the
+  result, each with a line saying what it is. Those files come from the delivery under
+  review as it was kept (ruling 597) and must still be on the task, so a draft saved
+  after the delivery, an input or one of the browser's working files is never a result;
+  a task delivered as a revision names none, because its pull request holds them. Only
+  the operator writes it (`write_completion_packet`), bound to the
   review subject like a verdict, and its offers to accept (the `accept_completion` card, a
   decision with an `accept_completion` option, the fold's card) are refused until it
   describes the current subject ([operator.md §5](operator.md)). A person's acceptance
   never waits for it. The task page shows it inside the decision that offers acceptance,
   or on its own card at the top of the main column while an acceptance card waits or the
-  task stands at the boundary with a packet written, and never on a closed task. Beside
+  task stands at the boundary with a packet written. **Once the task is accepted the same
+  card is its result** (ruling 668): titled "Result", it stays at the top of the main
+  column of a task at the terminal stage, in the archive too, with the summary, the
+  notes, the result files (a task delivered as files) or the pull request, the change's
+  size, the operator's summary of the change and the first 40 paths it changed (a task
+  delivered as a revision), and the reviewers who gave a verdict on the accepted work.
+  The diff reader is the offer's alone, and nobody is shown as still owed a verdict. A
+  task accepted with no packet on file (a person's own acceptance before the operator
+  offered it, or a force-accept) has no result card. A reader on another task gets the
+  same result as one text (`read_board`'s `outcome.completion`, ruling 569). Beside
   the summary it reads live: each reviewer's verdict on the revision under review (the
   required reviewers first, one with no verdict there shown as waiting, with any verdict
   it gave on earlier work marked stale; then anyone else who gave one, marked not
@@ -825,7 +841,9 @@ whenever the open PR does not carry the delivered revision (ruling 134(c)), and 
 disabled control naming the refusal for a diverged remote. A task whose deliverable is
 the files saved on it is refused before the push and offered no delivery (ruling 647,
 which retired ruling 391's no-commits sentence for it). Entering the review stage with no PR writes a
-typed event, never silence (§5). Ruling 163: a delivery that moved the PR's head on a
+typed event, never silence (§5), except on a project with no repository, where no pull
+request can exist and a delivery attempt answers that the task is delivered as files
+(ruling 667). Ruling 163: a delivery that moved the PR's head on a
 task standing PAST the stage where its reviewers can run, with a revision that changed
 or failed after the last verdict, records the transition back to that stage in the same
 delivery ("Transition: KNC-20 returns from Merge to Review: `17e4a8c` changed after the

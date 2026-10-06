@@ -716,9 +716,12 @@ export async function performDelivery(
                 `no review PR was opened. One opened now would review whatever the remote branch ` +
                 `already holds, not this task's work. Run the delivering agent, then deliver again.`
               : push.status === "no_repo"
-                ? `${taskKey}'s project has no GitHub repository configured, so nothing could be ` +
-                  `pushed and no review PR was opened. Set the repository in project settings, then ` +
-                  `deliver again.`
+                ? // Ruling 667: a standing state of a board that delivers
+                  // results, not a setting somebody forgot.
+                  `${taskKey}'s project has no repository, so there is no branch to push and no ` +
+                  `review PR to open: a task here is delivered as the files its delivering agent ` +
+                  `saves on it. Hand delivery to an agent that can save files, or attach a ` +
+                  `repository in project settings if this board should deliver code.`
                 : push.status === "no_branch"
                   ? `${taskKey}'s workspace is not on a task branch, so nothing was pushed and no ` +
                     `review PR was opened: ${push.reason}. The delivering run must commit on the ` +

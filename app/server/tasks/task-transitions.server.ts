@@ -48,6 +48,7 @@ import {
   humanActorRef,
   nextTransitionChainDepth,
   OPERATOR_TRANSITION_CHAIN_CAP,
+  projectRepoFor,
   requireAcceptCompletion,
   requireAction,
   requireAnyMember,
@@ -658,7 +659,13 @@ export async function transitionStage(
     // told the person the operator was deciding a push and a PR for it.
     // Ruling 576: nor does a task a reviewer verified has nothing to deliver
     // (R19-8); live on AWSC-11 the note followed that verification by 30s.
-    if (!livePr && !deliveredAsFiles(moved) && !noChangeApplies(moved)) {
+    // Ruling 667: nor does any task of a project with no repository.
+    if (
+      !livePr &&
+      !deliveredAsFiles(moved) &&
+      !noChangeApplies(moved) &&
+      projectRepoFor(ctx, input.projectSlug) !== null
+    ) {
       void surfaceDeliveryEvent(
         db,
         ctx,

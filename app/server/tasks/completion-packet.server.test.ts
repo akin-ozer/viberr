@@ -7,6 +7,7 @@ import {
   writeTask,
   type TestStore,
 } from "../../../test-support/test-store";
+import { keepDelivery } from "~/server/files/kept-deliveries.server";
 import { readProjectFile } from "~/server/files/project-writer.server";
 import { writeTaskAttachment } from "~/server/files/task-attachments.server";
 import { readTaskFile } from "~/server/files/task-writer.server";
@@ -14,14 +15,19 @@ import { rebuildAll } from "~/server/projections/rebuilder.server";
 import type { TaskFrontmatter } from "~/schemas/task-file.schema";
 import { operatorWriteCompletionPacket } from "./operator-moves.server";
 import { resolveOperatorAuthority } from "./operator-authority.server";
-import { completionView } from "./completion-packet.server";
+import {
+  completionPacketFact,
+  completionPacketText,
+  completionView,
+} from "./completion-packet.server";
 
 /**
  * Ruling 521: the completion packet Operator writes before it offers a task
  * for acceptance, and the view the task page draws from it. The offer's
  * refusals are the operator suite's (`operatorAcceptCompletion`), the tool
  * doors the toolkit's and the plan executor's; this suite owns what the
- * writer accepts and stores, and what the page is told.
+ * writer accepts and stores, and what the page is told. Ruling 668: and the
+ * notes and result files that make the packet the task's result.
  */
 
 const SHA = "a".repeat(40);
@@ -86,6 +92,10 @@ function seed(patch: Partial<TaskFrontmatter> = {}): void {
 function write(input: {
   summary?: string;
   changes?: string;
+  considerations?: string;
+  assumptions?: string;
+  gaps?: string;
+  files?: { name: string; caption?: string }[];
   screenshots?: { name: string; caption?: string }[];
 }) {
   return operatorWriteCompletionPacket(
@@ -119,6 +129,10 @@ describe("ruling 521: the operator writes the completion packet", () => {
       headSha: SHA,
       summary: "One repo per task; the branch is recorded before GitHub is touched.",
       changes: null,
+      considerations: null,
+      assumptions: null,
+      gaps: null,
+      files: [],
       screenshots: [{ name: "after.png", caption: "The GitHub page with the repo attached" }],
       at: expect.any(String),
     });
@@ -303,5 +317,168 @@ describe("ruling 521: what the task page is told", () => {
       workRevision: { ...fm.workRevision!, id: "rev_2", headSha: "c".repeat(40) },
     };
     expect(completionView(redelivered, { canSee: null, nameOf, ruleReviewers: [] })!.packet?.staleFor).toBe("aaaaaaa");
+  });
+});
+
+describe("ruling 668: the packet names the result of a task delivered as files", () => {
+  const STAMP = "2026-10-06T08:30:52.847Z";
+  const DELIVERED = ["estimate.json", "inventory.csv", "summary.md"];
+
+  /** VIB-1 delivered as files at `STAMP`, the delivery kept as it stood
+   *  (ruling 597), and one more file saved on the task after it. */
+  function seedFiles(): void {
+    seed({ workRevision: null, branch: null, github: null, deliveredAt: STAMP });
+    for (const name of DELIVERED) attach(name);
+    keepDelivery(store.slug, "VIB-1", STAMP, DELIVERED, store.dataRoot);
+    attach("late-draft.md");
+  }
+
+  it("stores the files it named from the delivery and the three notes, and counts the files on the timeline", async () => {
+    // CANARY: drop `...notes` or `files` from the packet the writer builds and
+    // the result card has nothing to show for them.
+    seedFiles();
+    const result = await write({
+      summary: "The estimate comes to $2,126.77 a month.",
+      considerations: "  Reserved pricing was not applied.  ",
+      assumptions: "730 hours a month.",
+      gaps: "Nobody gave data transfer figures.",
+      files: [{ name: "estimate.json", caption: " The calculator import " }, { name: "summary.md" }],
+    });
+    expect(result.outcome).toBe("done");
+    expect(result.message).toContain("stays on the task as its result once a person accepts it");
+    expect(parsed().frontmatter.completionPacket).toEqual({
+      subject: `files:${STAMP}`,
+      summary: "The estimate comes to $2,126.77 a month.",
+      changes: null,
+      considerations: "Reserved pricing was not applied.",
+      assumptions: "730 hours a month.",
+      gaps: "Nobody gave data transfer figures.",
+      files: [
+        { name: "estimate.json", caption: "The calculator import" },
+        { name: "summary.md", caption: "" },
+      ],
+      screenshots: [],
+      at: expect.any(String),
+    });
+    expect(parsed().timeline[0]!.text).toBe(
+      "The operator summarized the files delivered on this task for the person who accepts it, with 2 result files.",
+    );
+  });
+
+  const listed = "The delivered files: `estimate.json`, `inventory.csv`, `summary.md`.";
+  const refusals: [string, Parameters<typeof write>[0], string][] = [
+    [
+      "it names no result file",
+      {},
+      `VIB-1 is delivered as files, so the packet names the ones that are its result: pass \`files\`, the final version of each output a person takes away, each with a line saying what it is. Leave out inputs, drafts, logs and working files. ${listed}`,
+    ],
+    [
+      "a named file was saved after the delivery the reviewers judged",
+      { files: [{ name: "estimate.json" }, { name: "late-draft.md" }] },
+      `\`late-draft.md\` is not among the files VIB-1 delivered, which is what the reviewers judged. ${listed}`,
+    ],
+    [
+      "more than twelve files are named",
+      { files: Array.from({ length: 13 }, (_, i) => ({ name: `part-${i}.md` })) },
+      "Name at most 12 result files: the ones a person takes away.",
+    ],
+    [
+      "a note runs past its cap",
+      { files: [{ name: "estimate.json" }], gaps: "x".repeat(2001) },
+      "Gaps is 2001 characters; keep it under 2000.",
+    ],
+  ];
+  it.each(refusals)("refuses, and writes nothing, when %s", async (_label, input, sentence) => {
+    // CANARY: drop any one refusal and its row writes a packet.
+    seedFiles();
+    const result = await write(input);
+    expect(result.outcome).toBe("noop");
+    expect(result.message).toContain(sentence);
+    expect(parsed().frontmatter.completionPacket).toBeUndefined();
+  });
+
+  it("tells the operator which files it may name: the kept delivery's, or the task's when none was kept", () => {
+    // CANARY: offer every file on the task and a draft saved after the
+    // delivery, or the browser's own snapshots, is offered as the result.
+    seedFiles();
+    const fact = () =>
+      completionPacketFact(parsed().frontmatter, {
+        projectSlug: store.slug,
+        taskKey: "VIB-1",
+        dataRoot: store.dataRoot,
+      });
+    expect(fact()).toMatchObject({
+      state: "none",
+      resultFilesRequired: true,
+      resultFileCandidates: DELIVERED,
+      changesSummaryRequired: false,
+    });
+    expect(fact().note).toContain("the packet names the ones that are the result (`files`, from `resultFileCandidates`)");
+
+    // A delivery nobody kept: the task's files, less the browser's working files.
+    seed({ workRevision: null, branch: null, github: null, deliveredAt: "2026-10-06T09:00:00.000Z" });
+    attach("page-2026-10-06T02-39-32-303Z.yml");
+    expect(fact().resultFileCandidates).toEqual([...DELIVERED, "late-draft.md"].sort());
+  });
+
+  it("names no files for a revision, whose pull request holds them, and says so", async () => {
+    // CANARY: keep `files` on a revision's packet and the result of a code
+    // task lists attachments beside the pull request that holds its files.
+    seed();
+    attach("after.png");
+    const result = await write({ files: [{ name: "after.png" }], gaps: "The cron run is unproven." });
+    expect(result.outcome).toBe("done");
+    expect(result.message).toContain("`files` was left out: this task's pull request holds its files.");
+    expect(parsed().frontmatter.completionPacket).toMatchObject({ files: [], gaps: "The cron run is unproven." });
+    expect(
+      completionPacketFact(parsed().frontmatter, {
+        projectSlug: store.slug,
+        taskKey: "VIB-1",
+        dataRoot: store.dataRoot,
+      }),
+    ).toMatchObject({ resultFilesRequired: false, resultFileCandidates: [] });
+  });
+
+  it("hands the page the notes, the result files the viewer may see, and the paths a revision changed", async () => {
+    // CANARY: pass the packet's files through without `canSee` and a viewer
+    // who may not see the attachments is handed their names.
+    const nameOf = (id: string) => id;
+    seedFiles();
+    await write({
+      assumptions: "730 hours a month.",
+      files: [{ name: "estimate.json", caption: "The calculator import" }, { name: "summary.md" }],
+    });
+    const fm = parsed().frontmatter;
+    const member = completionView(fm, { canSee: (name) => name === "estimate.json", nameOf, ruleReviewers: [] })!;
+    expect(member.packet).toMatchObject({
+      considerations: null,
+      assumptions: "730 hours a month.",
+      gaps: null,
+      files: [{ name: "estimate.json", caption: "The calculator import" }],
+      hiddenFiles: 1,
+    });
+    expect(member.paths).toBeNull();
+    expect(completionView(fm, { canSee: null, nameOf, ruleReviewers: [] })!.packet).toMatchObject({
+      files: [],
+      hiddenFiles: 2,
+    });
+    // Another task reads the same result as one text (ruling 569).
+    expect(completionPacketText(fm.completionPacket!)).toBe(
+      "The attach flow works.\n\nAssumptions:\n730 hours a month.\n\n" +
+        "Result files:\n- estimate.json: The calculator import\n- summary.md",
+    );
+
+    // A revision: the paths the pull request changes, the first forty of them.
+    const changed = Array.from({ length: 42 }, (_, i) => `app/file-${String(i).padStart(2, "0")}.ts`);
+    seed({
+      pr: {
+        number: 7,
+        state: "merged",
+        title: "Attach one repository",
+        paths: { headSha: SHA, changed, truncated: false },
+      },
+    });
+    const code = completionView(parsed().frontmatter, { canSee: null, nameOf, ruleReviewers: [] })!;
+    expect(code.paths).toEqual({ shown: changed.slice(0, 40), more: 2, truncated: false });
   });
 });

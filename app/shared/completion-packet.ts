@@ -20,8 +20,22 @@ export const COMPLETION_SUMMARY_MAX = 4000;
 export const COMPLETION_CHANGES_MAX = 4000;
 /** How many screenshots one packet may show. */
 export const COMPLETION_SCREENSHOTS_MAX = 6;
-/** One screenshot's caption, in characters. */
+/** One screenshot's or one result file's caption, in characters. */
 export const COMPLETION_CAPTION_MAX = 200;
+/** Ruling 668: one of the packet's notes (what to weigh, what was assumed,
+ *  what is missing), in characters. */
+export const COMPLETION_NOTE_MAX = 2000;
+/** Ruling 668: how many result files one packet may name. */
+export const COMPLETION_FILES_MAX = 12;
+/** Ruling 668: how many of a merged change's paths the result card lists. */
+export const RESULT_PATHS_SHOWN = 40;
+
+/** Ruling 668: the packet's notes, in the order every surface prints them. */
+export const COMPLETION_NOTES = [
+  { key: "considerations", label: "Considerations" },
+  { key: "assumptions", label: "Assumptions" },
+  { key: "gaps", label: "Gaps" },
+] as const;
 
 /** The change stats a task records (`github.changed`, the PR's own counts). */
 export interface ChangeStats {

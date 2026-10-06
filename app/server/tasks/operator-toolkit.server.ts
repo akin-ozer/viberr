@@ -60,7 +60,11 @@ import {
   type OperatorOpenPacketInput,
   type OperatorPacketOptionInput,
 } from "./operator-packets.server";
-import { COMPLETION_SCREENSHOTS_MAX } from "~/shared/completion-packet";
+import {
+  COMPLETION_FILES_MAX,
+  COMPLETION_NOTE_MAX,
+  COMPLETION_SCREENSHOTS_MAX,
+} from "~/shared/completion-packet";
 import {
   operatorUpdateBranchFromBase,
   updateBranchGate,
@@ -1294,11 +1298,33 @@ export function buildOperatorToolkit(deps: ToolkitDeps): OperatorToolkit {
     add(
       tool(
         "write_completion_packet",
-        "Write the completion packet: what a person reads before accepting this task into Done (ruling 521). Write it before EVERY acceptance offer, `accept_completion` or a decision packet with an `accept_completion` option: both are refused until the packet describes the work under review, and a new revision or delivery makes it stale, so write it again then. Viberr shows each reviewer's verdict and the change itself beside it, read live, so never restate a verdict or paste a diff into it. `summary`: what was done against the goal and why it is complete, for a person who has not followed the task: the outcome first, then anything they must know before accepting (a follow-up, a known limit, a check only the deployed site can answer). Markdown, a few short paragraphs or bullets. `changes`: what changed in the code, by area, naming the files that matter. Required when get_task's `completionPacket.changesSummaryRequired` is true (a change of more than 200 lines, which the page shows as your summary with the diff one press away); otherwise leave it out and the diff is shown whole. `screenshots`: the images among this task's attachments that show the result, by exact file name from `completionPacket.screenshotCandidates`, each with a one-line caption of what it shows. Pick the ones a person needs to judge visible work; leave it out when nothing visible changed.",
+        "Write the completion packet: what a person reads before accepting this task into Done, and what stays on the task as its result once they do (rulings 521 and 668). Write it before EVERY acceptance offer, `accept_completion` or a decision packet with an `accept_completion` option: both are refused until the packet describes the work under review, and a new revision or delivery makes it stale, so write it again then. Viberr shows each reviewer's verdict and the change itself beside it, read live, so never restate a verdict or paste a diff into it. `summary`: what was done against the goal and why it is complete, for a person who has not followed the task: the outcome first. Markdown, a few short paragraphs or bullets. `considerations`: the choices the work made that the person should weigh: an option taken over another and why, a trade-off, a default. `assumptions`: what the work took as given without a person confirming it. `gaps`: what the result does not cover and what is still owed: an input nobody gave, a check nobody ran, a follow-up. Give each of those three when there is something to say and leave out one that does not apply; never write \"none\". Draw them from the agents' reports, the files and the reviewers' verdicts, not from memory. `files`: on a task delivered as files (get_task's `completionPacket.resultFilesRequired`), the files that ARE the result, by exact name from `completionPacket.resultFileCandidates`, each with a line saying what the file is. Name the final version of each output a person takes away, never an input, a draft, a log or a working file. Leave `files` out when the delivery is a revision: its pull request holds the files. `changes`: what changed in the code, by area, naming the files that matter. Required when get_task's `completionPacket.changesSummaryRequired` is true (a change of more than 200 lines, which the page shows as your summary with the diff one press away); otherwise leave it out and the diff is shown whole. `screenshots`: the images among this task's attachments that show the result, by exact file name from `completionPacket.screenshotCandidates`, each with a one-line caption of what it shows. Pick the ones a person needs to judge visible work; leave it out when nothing visible changed.",
         {
           summary: z
             .string()
             .describe("What was done and why it is complete, for the person who accepts (markdown, under 4000 characters)."),
+          considerations: z
+            .string()
+            .optional()
+            .describe(`The choices made that the person should weigh (markdown, under ${COMPLETION_NOTE_MAX} characters). Leave out when there are none.`),
+          assumptions: z
+            .string()
+            .optional()
+            .describe(`What the work took as given without confirmation (markdown, under ${COMPLETION_NOTE_MAX} characters). Leave out when there are none.`),
+          gaps: z
+            .string()
+            .optional()
+            .describe(`What the result does not cover, or what is still owed (markdown, under ${COMPLETION_NOTE_MAX} characters). Leave out when there are none.`),
+          files: z
+            .array(
+              z.object({
+                name: z.string().describe("The delivered file's exact name."),
+                caption: z.string().optional().describe("One line: what the file is."),
+              }),
+            )
+            .max(COMPLETION_FILES_MAX)
+            .optional()
+            .describe(`For a task delivered as files: up to ${COMPLETION_FILES_MAX} files that are the result, final versions only.`),
           changes: z
             .string()
             .optional()
@@ -1320,6 +1346,15 @@ export function buildOperatorToolkit(deps: ToolkitDeps): OperatorToolkit {
             summary: prose(args.summary),
           };
           if (args.changes) input.changes = prose(args.changes);
+          if (args.considerations) input.considerations = prose(args.considerations);
+          if (args.assumptions) input.assumptions = prose(args.assumptions);
+          if (args.gaps) input.gaps = prose(args.gaps);
+          if (args.files) {
+            input.files = args.files.map((f) => ({
+              name: f.name,
+              caption: f.caption ? prose(f.caption) : null,
+            }));
+          }
           if (args.screenshots) {
             input.screenshots = args.screenshots.map((s) => ({
               name: s.name,

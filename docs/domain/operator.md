@@ -443,7 +443,11 @@ files by whole lines (`fromLine`, up to 32,000 bytes a page; rulings 436 and 624
 EMPTY repository (HEAD with no commit) is initialized first: the server makes the default
 branch's first commit (ruling 128's bootstrap) and moves the checkout onto it, and the
 doctrine tells the operator an empty repository is never a person's chore, so it never asks
-anyone to push a first commit (ruling 468).
+anyone to push a first commit (ruling 468). A project with no repository (ruling 667) has
+no view to provision: the drive clones nothing, and the turn's workspace paragraph says
+every task on the board is delivered as the files its delivering agent saves, that
+delivery is handed with `run_agent` and `delivers: true`, and that `deliver_for_review`
+and `update_branch_from_base` are never called there.
 
 **Backends.** Writes and shell are denied on both. On Claude the operator gets the
 in-process MCP server `viberr` (loaded up front, `alwaysLoad`), its granted org MCP servers
@@ -497,7 +501,7 @@ A withheld capability means the tool is **not built**; the model cannot reach it
 | `lease_files` | `operatorLeaseFiles` (ruling 417: lease path globs to THIS task until it merges) | `deliver-review-pr` |
 | `update_branch_from_base` | `operatorUpdateBranchFromBase` (merge, never rebase; conflict → the delivering agent, or a packet when no agent can take it, ruling 475) | `update-task-branch` |
 | `transition_stage` | `operatorTransitionStage` | `stage-transitions` |
-| `write_completion_packet` | `operatorWriteCompletionPacket` → `writeCompletionPacket` (ruling 521: records `completionPacket` in task.md for the review subject, the operator's `summary`, its `changes` summary, required for a change of more than 200 lines, and up to 6 `screenshots` named from the task's image attachments with a caption each; refuses (`noop`) while nothing is delivered, an empty or oversized summary, a large change without `changes`, and a screenshot that is not an image or not among the attachments, listing the images it has; writes a `note` titled "Completion packet" and audit `task.completion_packet.written`; the Codex plan carries the summary in `text`, the changes in `reason`) | `completion-for-acceptance` |
+| `write_completion_packet` | `operatorWriteCompletionPacket` → `writeCompletionPacket` (ruling 521: records `completionPacket` in task.md for the review subject, the operator's `summary`, its `changes` summary, required for a change of more than 200 lines, and up to 6 `screenshots` named from the task's image attachments with a caption each; ruling 668: also `considerations`, `assumptions` and `gaps`, each optional markdown of at most 2,000 characters, and `files`, up to 12 result files with a caption each, required on a task delivered as files and taken only from that delivery as it was kept (ruling 597) and still on the task, while a revision's `files` are left out with a line saying its pull request holds them; refuses (`noop`) while nothing is delivered, an empty or oversized summary or note, a large change without `changes`, a files delivery that names no result file or one outside the delivery, listing the delivered files, and a screenshot that is not an image or not among the attachments, listing the images it has; writes a `note` titled "Completion packet" and audit `task.completion_packet.written`; the Codex plan carries the summary in `text`, the changes in `reason`, the notes and the files in `result`) | `completion-for-acceptance` |
 | `accept_completion` | `operatorAcceptCompletion` | `completion-for-acceptance` |
 
 Every action returns `OperatorActionResult` with `outcome: done | recommended |
@@ -599,7 +603,9 @@ Details that matter:
   and after its own move the reply carries the sentence; either way the drive writes the
   packet and offers the task itself. `get_task` carries `completionPacket` (`state`:
   `current | stale | none | not_applicable`, `changedLines`, `changesSummaryRequired`,
-  `screenshotCandidates`, the newest 20 image attachments, and a `note` saying what to do).
+  `screenshotCandidates`, the newest 20 image attachments, `resultFilesRequired` and
+  `resultFileCandidates`, the delivered files a packet may name as the result (ruling
+  668), and a `note` saying what to do).
 - **Delivery.** Its description says it never serves a task whose deliverable is a
   result, which is delivered on the task (ruling 531, §4). `deliver_for_review` runs
   `performDelivery`, with NO cached-state short-circuit (ruling 134): rework on a task whose PR is already open is pushed to

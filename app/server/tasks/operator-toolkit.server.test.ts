@@ -866,6 +866,8 @@ describe("buildOperatorToolkit — open_decision_packet declares goalDraft (ruli
    * in AWSC-7's verdict. CANARIES: drop `outcome` from the single-task read and
    * the finished task reads like an unfinished one; stop filtering on the
    * current subject and a verdict on an earlier delivery reads as the result.
+   * Ruling 668: the outcome is the whole result. CANARY: read the summary
+   * alone and the reader misses what the result leaves out and which files it is.
    */
   it("ruling 569: read_board(taskKey) carries a finished task's outcome, and nothing stale", async () => {
     const store = setupTestStore(ctxDb);
@@ -881,6 +883,10 @@ describe("buildOperatorToolkit — open_decision_packet declares goalDraft (ruli
           subject: `files:${deliveredAt}`,
           summary: "The Judge approved the files and scored them 90/100.",
           changes: null,
+          considerations: null,
+          assumptions: null,
+          gaps: "Reserved pricing was not priced.",
+          files: [{ name: "estimate.json", caption: "The calculator import" }],
           screenshots: [],
           at: "2026-09-28T20:31:34.480Z",
         },
@@ -925,7 +931,10 @@ describe("buildOperatorToolkit — open_decision_packet declares goalDraft (ruli
       return JSON.parse(answer.content[0]!.text) as { outcome?: unknown };
     };
     expect((await call("VIB-2")).outcome).toEqual({
-      completion: "The Judge approved the files and scored them 90/100.",
+      completion:
+        "The Judge approved the files and scored them 90/100.\n\n" +
+        "Gaps:\nReserved pricing was not priced.\n\n" +
+        "Result files:\n- estimate.json: The calculator import",
       verdicts: [
         {
           agent: "estimate-judge",
@@ -1503,7 +1512,8 @@ describe("buildOperatorToolkit — the acceptance-stage move reads the pull requ
 describe("buildOperatorToolkit — the completion packet goes with the acceptance decision (ruling 521)", () => {
   it("refuses a decision offering accept_completion until write_completion_packet describes the delivered revision", async () => {
     // CANARY: drop the check from `operatorOpenPacket` and the first open
-    // files a decision whose card has nothing summarized on it.
+    // files a decision whose card has nothing summarized on it. Ruling 668:
+    // stop passing the tool's notes to the writer and the result has none.
     const store = setupTestStore(ctxDb);
     writeTask(store.dataRoot, store.slug, {
       frontmatter: baseTaskFrontmatter("VIB-1", {
@@ -1549,6 +1559,7 @@ describe("buildOperatorToolkit — the completion packet goes with the acceptanc
     };
     const summary = {
       summary: "One repository per task.",
+      gaps: "Detaching a repository is not covered.",
       screenshots: [{ name: "after.png", caption: "The attach dialog" }],
     };
     // SAFETY: the SDK types a handler's argument as its own generic; each
@@ -1569,6 +1580,10 @@ describe("buildOperatorToolkit — the completion packet goes with the acceptanc
     expect(packet()).toBeNull();
 
     expect(await call("write_completion_packet", summary)).toContain("[done]");
+    expect(
+      readTaskFile({ projectSlug: store.slug, taskKey: "VIB-1", dataRoot: store.dataRoot })!.parsed
+        .frontmatter.completionPacket,
+    ).toMatchObject({ gaps: "Detaching a repository is not covered.", assumptions: null, files: [] });
     expect(await call("open_decision_packet", decision)).toContain("[done]");
     expect(packet()!.options.map((o) => o.kind)).toEqual(["accept_completion", "request_edit"]);
   });

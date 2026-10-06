@@ -1,6 +1,7 @@
 import { Fragment, useEffect, useRef, useState } from "react";
 import { useFetcher, useNavigate } from "react-router";
 import {
+  AttachRepoLine,
   BLOCK_REASON_ID,
   NewProjectConnectionField,
   NewProjectNameFields,
@@ -269,6 +270,10 @@ export function BoardImportDialog({
   const [createRepo, setCreateRepo] = useState(false);
   const [repoPrivate, setRepoPrivate] = useState(true);
   const [connOwner, setConnOwner] = useState(() => connections[0] ?? "");
+  // Ruling 667: a board none of whose agents writes a repository needs none,
+  // and takes one only when the person attaches it.
+  const [attachRepo, setAttachRepo] = useState(false);
+  const needsRepo = preview.delivers === "software" || attachRepo;
   const [choices, setChoices] = useState<ReadonlyMap<string, BoardResourceChoice>>(() => new Map());
   const [attempted, setAttempted] = useState(0);
   const refusalShake = useRefusalShake(attempted);
@@ -325,11 +330,13 @@ export function BoardImportDialog({
       ? "name"
       : effKey.length < 2
         ? "key"
-        : connOwner.length === 0
-          ? "conn"
-          : effRepo.length === 0
-            ? "repo"
-            : null;
+        : !needsRepo
+          ? null
+          : connOwner.length === 0
+            ? "conn"
+            : effRepo.length === 0
+              ? "repo"
+              : null;
   const blockedReason =
     blocked === "name"
       ? slugTaken
@@ -361,9 +368,9 @@ export function BoardImportDialog({
     fd.set("file", file);
     fd.set("name", name.trim());
     fd.set("key", effKey);
-    fd.set("owner", connOwner);
-    fd.set("repoName", effRepo);
-    if (createRepo) fd.set("createRepository", repoPrivate ? "private" : "public");
+    fd.set("owner", needsRepo ? connOwner : "");
+    fd.set("repoName", needsRepo ? effRepo : "");
+    if (needsRepo && createRepo) fd.set("createRepository", repoPrivate ? "private" : "public");
     fd.set("choices", JSON.stringify(Object.fromEntries(differing.map((r) => [`${r.kind}:${r.key}`, choices.get(`${r.kind}:${r.key}`) ?? "copy"]))));
     fetcher.submit(fd, { method: "post", action: "/org/settings", encType: "multipart/form-data" });
   };
@@ -421,26 +428,40 @@ export function BoardImportDialog({
               keyInUse={keyInUse}
               submit={submit}
             />
-            <NewProjectConnectionField
-              connections={connections}
-              health={connectionHealth}
-              connOwner={connOwner}
-              setConnOwner={setConnOwner}
-              isAdmin
-            />
-            <NewProjectRepoField
-              repoRef={repoRef}
-              invalidField={invalidField}
-              repo={repo}
-              setRepo={editRepo}
-              derived={!repoTouched}
-              effOwner={connOwner}
-              effRepo={effRepo}
-              createRepo={createRepo}
-              setCreateRepo={setCreateRepo}
-              repoPrivate={repoPrivate}
-              setRepoPrivate={setRepoPrivate}
-            />
+            {preview.delivers === "results" && (
+              <div className="field">
+                <span className="flabel">Repository</span>
+                <span className="fhint flush">
+                  None of this board&apos;s agents writes a repository, so it needs none.
+                </span>
+                <AttachRepoLine attachRepo={attachRepo} setAttachRepo={setAttachRepo} />
+              </div>
+            )}
+            {needsRepo && (
+              <>
+                <NewProjectConnectionField
+                  connections={connections}
+                  health={connectionHealth}
+                  connOwner={connOwner}
+                  setConnOwner={setConnOwner}
+                  isAdmin
+                />
+                <NewProjectRepoField
+                  repoRef={repoRef}
+                  invalidField={invalidField}
+                  repo={repo}
+                  setRepo={editRepo}
+                  derived={!repoTouched}
+                  effOwner={connOwner}
+                  effRepo={effRepo}
+                  createRepo={createRepo}
+                  setCreateRepo={setCreateRepo}
+                  repoPrivate={repoPrivate}
+                  setRepoPrivate={setRepoPrivate}
+                  readOnly={preview.delivers === "results"}
+                />
+              </>
+            )}
           </>
         )}
         <BoardFlow preview={preview} />

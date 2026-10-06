@@ -488,9 +488,11 @@ export async function loader({ request, params }: Route.LoaderArgs) {
   // deployed agents' names). A screenshot rides the attachments' own bar: a
   // viewer who may not see the attachments sees none of it, and one that has
   // left the store is counted, not drawn. Checked by name rather than against
-  // the list above, which stops at the newest 100.
+  // the list above, which stops at the newest 100. Ruling 668: an accepted
+  // task keeps it as its result, in the archive too.
+  const accepted = detail.stage === detail.stages[detail.stages.length - 1]?.id;
   const completion =
-    taskFile && !archived
+    taskFile && (!archived || accepted)
       ? completionView(taskFile.parsed.frontmatter, {
           canSee: runsVisible
             ? (name) => taskAttachmentExists(params.slug, params.key, name)

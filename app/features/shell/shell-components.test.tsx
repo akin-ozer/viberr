@@ -427,6 +427,41 @@ describe("acce-19: the rail's violations count says what it counts", () => {
   });
 });
 
+describe("ruling 667: the rail lists GitHub only for a project that has a repository", () => {
+  const items = (container: HTMLElement) =>
+    [...container.querySelectorAll("a.nav-item")].map((a) => a.getAttribute("href")!.split("/").pop());
+
+  it("drops the GitHub item for a project with none, and keeps every other item in its place", () => {
+    // CANARY: list the whole nav whatever the project is and a board that
+    // delivers results carries a page of credential warnings in its rail.
+    const withRepo = railAt("/projects/viberr-core/board");
+    expect(items(withRepo.container)).toContain("github");
+    cleanup();
+    const none = renderAt(
+      <Rail
+        projectSlug="viberr-core"
+        projectName="Viberr Core"
+        projectRepo={null}
+        membersCount={1}
+        boardCount={4}
+        reviewCount={0}
+        violations={0}
+      />,
+      "/projects/viberr-core/board",
+    );
+    expect(items(none.container)).toEqual([
+      "board",
+      "epics",
+      "review",
+      "controller",
+      "agents",
+      "policy",
+      "activity",
+      "settings",
+    ]);
+  });
+});
+
 describe("P13-D-35: in-app paths back to the board keep filter and search", () => {
   it("keeps the project crumb pointed at the filtered board", () => {
     const { container } = topbarAt(

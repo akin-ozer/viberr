@@ -1588,6 +1588,30 @@ describe("ruling 463: list_github_connections", () => {
     const create = toolkit.tools.find((t) => t.name === "create_project")!;
     expect(create.description).toContain("call list_github_connections FIRST");
   });
+
+  it("ruling 667: create_project makes a board that delivers results with no repository, and says so in its reply", async () => {
+    // The controller settles what a board delivers before it designs it
+    // (ruling 530), and until this ruling it still had to name a repository
+    // for a board that commits nothing. CANARY: keep `owner` and `repoName`
+    // required in the tool's shape and the call never reaches the server;
+    // drop `delivers` from the input it builds and the server asks for a
+    // repository; drop the reply's sentence and the controller is not told
+    // the board has none.
+    const reply = await call(ids.contributor, "create_project", {
+      name: "Supplier Invoices",
+      key: "INV",
+      delivers: "results",
+      policy: "balanced",
+    });
+    expect(reply).toContain("[done] Project Supplier Invoices created");
+    expect(reply).toContain(
+      "It has no repository: its tasks are delivered as the files their delivering agent saves on them.",
+    );
+    const { readProjectFile } = await import("~/server/files/project-writer.server");
+    expect(
+      readProjectFile({ projectSlug: "supplier-invoices", dataRoot: app.dataRoot })!.parsed.frontmatter.repo,
+    ).toBeNull();
+  });
 });
 
 /**

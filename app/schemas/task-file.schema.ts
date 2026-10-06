@@ -1328,6 +1328,16 @@ const completionScreenshotSchema = z
   })
   .loose();
 
+/** Ruling 668: one file the operator named as the task's result. */
+const completionFileSchema = z
+  .object({
+    /** The file's name in the task's attachments store. */
+    name: z.string().min(1),
+    /** What the file is, in the operator's words. */
+    caption: z.string().default(""),
+  })
+  .loose();
+
 /**
  * Ruling 521 (owner, 2026-09-27): the operator's summary of finished work,
  * which a person reads before accepting it into the terminal stage.
@@ -1340,6 +1350,10 @@ const completionScreenshotSchema = z
  * copied into it: each reviewer's verdict on the current subject, and the
  * change itself. Sizes are the writer's to enforce (`~/shared/completion-packet`),
  * so this schema, which every page ships, stays small.
+ *
+ * Ruling 668 (owner, 2026-10-06): it also says what to weigh, what was
+ * assumed and what is missing, names the files that are the result of a task
+ * delivered as files, and stays on the task once it is accepted, as its result.
  */
 const completionPacketSchema = z
   .object({
@@ -1352,6 +1366,16 @@ const completionPacketSchema = z
     /** The operator's summary of the code changes, by area; null when the
      *  change is small enough to show whole. */
     changes: z.string().nullable().default(null),
+    /** Ruling 668: the choices made that the person should weigh; null for none. */
+    considerations: z.string().nullable().default(null),
+    /** Ruling 668: what the work took as given without confirmation. */
+    assumptions: z.string().nullable().default(null),
+    /** Ruling 668: what the result does not cover, or what is still owed. */
+    gaps: z.string().nullable().default(null),
+    /** Ruling 668: the files that are the result, for a task delivered as
+     *  files; empty when the delivery is a revision, whose pull request holds
+     *  them. */
+    files: z.array(completionFileSchema).default([]),
     screenshots: z.array(completionScreenshotSchema).default([]),
     at: z.string().min(1),
   })

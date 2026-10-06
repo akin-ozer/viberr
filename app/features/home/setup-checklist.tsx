@@ -9,9 +9,9 @@ import type { HomeSetupStep } from "./home-query.server";
  * viewer still owes open and the rest checked, until every one is done and the
  * card leaves Home (the loader sends null). The first step the viewer can take
  * leads: its sentence shows and its action is the primary one. Every other
- * open step keeps its own action in reach, so the order is advice, not a gate;
- * the one step that cannot start, a project with no GitHub connection to take
- * a repository from, says what it waits on instead.
+ * open step keeps its own action in reach, so the order is advice, not a gate.
+ * Ruling 667: no step waits on another, since a board that delivers results
+ * needs no GitHub connection.
  *
  * Each action opens the place the thing is done: GitHub and the new account in
  * Instance settings with their dialog already open, Claude or Codex on the
@@ -43,10 +43,7 @@ export function SetupChecklist({
   onClose: () => void;
 }) {
   const done = steps.filter((step) => step.state === "done").length;
-  const lead = steps.findIndex(
-    (step) => step.state !== "done" && step.state !== "blocked",
-  );
-  const withGithub = steps.some((step) => step.id === "github");
+  const lead = steps.findIndex((step) => step.state !== "done");
   const closable = steps.some(
     (step) => step.id === "project" && step.state === "done",
   );
@@ -82,7 +79,7 @@ export function SetupChecklist({
       <ol className="setup-steps">
         {steps.map((step, index) => {
           const leads = index === lead;
-          const view = stepView(step, { leads, withGithub, onNewProject });
+          const view = stepView(step, { leads, onNewProject });
           const state =
             step.state === "done" ? "done" : leads ? "lead" : "open";
           return (
@@ -112,11 +109,7 @@ export function SetupChecklist({
 
 function stepView(
   step: HomeSetupStep,
-  {
-    leads,
-    withGithub,
-    onNewProject,
-  }: { leads: boolean; withGithub: boolean; onNewProject: () => void },
+  { leads, onNewProject }: { leads: boolean; onNewProject: () => void },
 ): StepView {
   const btn = leads ? "btn sm primary" : "btn sm";
   switch (step.id) {
@@ -126,7 +119,7 @@ function stepView(
         sentence:
           step.state === "failed"
             ? `${step.owner}'s token failed its last check, so agents can't push.`
-            : "Agents push branches and open pull requests through a GitHub token.",
+            : "A board that delivers software pushes branches and opens pull requests through a GitHub token. A board that delivers results needs none.",
         fact:
           step.state === "done"
             ? step.owner + (step.more > 0 ? ` +${step.more}` : "")
@@ -182,18 +175,13 @@ function stepView(
     case "project":
       return {
         title: "First project",
-        sentence: "A board, its repository, and what agents may do on their own.",
+        sentence: "A board, what it delivers, and what agents may do on their own.",
         fact: null,
-        action:
-          step.state === "blocked" ? (
-            <span className="setup-wait">
-              {withGithub ? "After GitHub" : "Waits on an admin to connect GitHub"}
-            </span>
-          ) : (
-            <button type="button" className={btn} onClick={onNewProject}>
-              New project
-            </button>
-          ),
+        action: (
+          <button type="button" className={btn} onClick={onNewProject}>
+            New project
+          </button>
+        ),
       };
   }
 }

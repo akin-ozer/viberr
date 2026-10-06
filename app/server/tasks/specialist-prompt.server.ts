@@ -566,50 +566,85 @@ export function buildAnalyzePrompt(input: AnalyzePromptInput): string {
     `"${input.title}". Goal: ${input.goal}.` +
     (input.repo
       ? ` Work from the repository checked out in your workspace: read the code you need (structure, dependencies, the change on your branch) to do the task well.`
-      : ` This task has no repository attached: it is planning/documentation/advisory work. Do not look for or clone a repo; work from the goal and the directive.`);
+      : // Ruling 667: a standing state of the board, not a kind of work.
+        ` This project has no repository attached: its tasks are delivered as the files saved on them. Do not look for a repo or try to fetch one; work from the goal, the directive and the task's files.`);
   // Workspace + delivery CONTRACT (NFR15 traceability). The run gets a dedicated
   // per-task cwd, and Git's ceiling prevents accidental parent-repo discovery.
   // This prompt is guidance, not an OS filesystem boundary.
+  //
+  // Ruling 667: the two lines every run's contract carries, with or without a
+  // checkout: the knowledge bases it may read, and the task's attachments
+  // folder. `outside` names what the folder is not part of.
+  const kbDirs = (input.kbReadDirs ?? []).map((dir) => `\`${dir}\``);
+  const kbLine =
+    kbDirs.length > 0
+      ? `- Read-only exception: the knowledge-base ` +
+        (kbDirs.length === 1 ? `folder ${kbDirs[0]} is` : `folders ${kbDirs.join(", ")} are`) +
+        ` yours to READ. ${kbDirs.length === 1 ? "It holds" : "They hold"} the rulings and conventions this work is held to, ` +
+        `indexed in your instructions, and reading the documents you need there is ` +
+        `part of the task, not a step outside it. Never write, create or delete ` +
+        `anything in ${kbDirs.length === 1 ? "it" : "them"}.` +
+        (input.kbCorrectionTool ? KB_CONTRACT_CORRECTION_SENTENCE : ``) +
+        `\n`
+      : ``;
+  const attachmentsLine = (checkout: boolean): string =>
+    input.attachmentsDropDir
+      ? `- The task's attachments folder, \`${input.attachmentsDropDir}\` (an absolute path ` +
+        (checkout
+          ? `outside this checkout; never create it inside the working directory and never commit it`
+          : `outside your working directory; never create it inside the working directory`) +
+        `), is yours to READ and to COPY files INTO. ` +
+        ATTACHMENTS_READ_SENTENCE +
+        ` Copying a file into it is how a file is posted on the task ` +
+        `thread (see "Files on the task thread").` +
+        (input.taskFileReader ? OTHER_TASK_FILES_SENTENCE : ``) +
+        ` Everything else ` +
+        `outside the working directory` +
+        (kbDirs.length > 0 ? `, apart from reading the knowledge-base folders above,` : ``) +
+        ` stays off-limits.\n`
+      : input.attachmentsReadDir
+        ? `- Read-only exception: the task's attachments folder, \`${input.attachmentsReadDir}\` ` +
+          `(an absolute path outside ${checkout ? "this checkout" : "your working directory"}), is yours to READ. ` +
+          ATTACHMENTS_READ_SENTENCE +
+          ` Never write into it.` +
+          (input.taskFileReader ? OTHER_TASK_FILES_SENTENCE : ``) +
+          ` Everything else outside the working directory` +
+          (kbDirs.length > 0 ? `, apart from reading the knowledge-base folders above,` : ``) +
+          ` stays off-limits.\n`
+        : ``;
+  if (!input.repo) {
+    // Ruling 667: the contract of a run with no checkout. It used to be
+    // dropped whole with the repository, and with it the attachments folder,
+    // the knowledge bases and ruling 535's "your delivery is the files you
+    // save": a deliverer on a board with no repository was told nothing about
+    // what it hands back.
+    prompt +=
+      `\n\n## Workspace contract (follow exactly)\n` +
+      `- There is no checkout: nothing to branch, commit or push, and no pull request. ` +
+      `Your working directory is this task's scratch space: ` +
+      `nothing in it is delivered or shown to anyone.\n` +
+      kbLine +
+      attachmentsLine(false) +
+      (input.delivers
+        ? input.attachmentsDropDir
+          ? `- Your delivery is the files you save on the task (see "Files on the task thread" below): the result, in the files and formats the goal names. Those files are what the reviewers judge and what the person accepts, so save the final version of each there, and cite each one by name in your reply.\n` +
+            `- Report the exact name of every file you saved on the task back in your reply.`
+          : `- You can save no file on this task, so your reply is the whole of what you hand back: put the result in it.`
+        : `- You are a SUPPORTING agent: the delivering agent's files are the task's delivery, not yours.` +
+          (input.attachmentsDropDir
+            ? ` A file a directive asks you to save (a report, a ledger) goes into the task's attachments folder above, as "Files on the task thread" says.`
+            : ``) +
+          `\n- Respond to what you were actually asked (see the directive below): if it asks for a review, give one (approve or request changes, with specific reasons that name the file and the passage); if it asks a question or for advice, answer it directly and concisely. You are a conversational teammate, not a boilerplate reviewer. Do the thing that was asked. When no directive is given, default to reviewing the files delivered on the task.`);
+  }
   if (input.repo) {
     const { canBranch, canCommitPush } = input.delivery;
-    const kbDirs = (input.kbReadDirs ?? []).map((dir) => `\`${dir}\``);
     prompt +=
       `\n\n## Workspace contract (follow exactly)\n` +
       `- Work ONLY inside the current working directory; it is the dedicated ` +
       `workspace for this task. Never \`cd\` to a parent directory or touch any ` +
       `repository outside it.\n` +
-      (kbDirs.length > 0
-        ? `- Read-only exception: the knowledge-base ` +
-          (kbDirs.length === 1 ? `folder ${kbDirs[0]} is` : `folders ${kbDirs.join(", ")} are`) +
-          ` yours to READ. ${kbDirs.length === 1 ? "It holds" : "They hold"} the rulings and conventions this work is held to, ` +
-          `indexed in your instructions, and reading the documents you need there is ` +
-          `part of the task, not a step outside it. Never write, create or delete ` +
-          `anything in ${kbDirs.length === 1 ? "it" : "them"}.` +
-          (input.kbCorrectionTool ? KB_CONTRACT_CORRECTION_SENTENCE : ``) +
-          `\n`
-        : ``) +
-      (input.attachmentsDropDir
-        ? `- The task's attachments folder, \`${input.attachmentsDropDir}\` (an absolute path ` +
-          `outside this checkout; never create it inside the working directory ` +
-          `and never commit it), is yours to READ and to COPY files INTO. ` +
-          ATTACHMENTS_READ_SENTENCE +
-          ` Copying a file into it is how a file is posted on the task ` +
-          `thread (see "Files on the task thread").` +
-          (input.taskFileReader ? OTHER_TASK_FILES_SENTENCE : ``) +
-          ` Everything else ` +
-          `outside the working directory` +
-          (kbDirs.length > 0 ? `, apart from reading the knowledge-base folders above,` : ``) +
-          ` stays off-limits.\n`
-        : input.attachmentsReadDir
-          ? `- Read-only exception: the task's attachments folder, \`${input.attachmentsReadDir}\` ` +
-            `(an absolute path outside this checkout), is yours to READ. ` +
-            ATTACHMENTS_READ_SENTENCE +
-            ` Never write into it.` +
-            (input.taskFileReader ? OTHER_TASK_FILES_SENTENCE : ``) +
-            ` Everything else outside the working directory` +
-            (kbDirs.length > 0 ? `, apart from reading the knowledge-base folders above,` : ``) +
-            ` stays off-limits.\n`
-          : ``) +
+      kbLine +
+      attachmentsLine(true) +
       (input.cloned
         ? `- The repository \`${input.repo}\` is already checked out in the current directory.` +
           // Ruling 129: a REUSED checkout says what its refresh did, so an

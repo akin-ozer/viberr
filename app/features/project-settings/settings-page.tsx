@@ -2007,6 +2007,7 @@ function ChangeRepoDialog({
   useEffect(() => {
     if (done) close();
   }, [done, close]);
+  const verb = current ? "Change" : "Attach";
   const [repo, setRepo] = useState("");
   const [ack, setAck] = useState(false);
   const [sent, setSent] = useState(false);
@@ -2033,16 +2034,25 @@ function ChangeRepoDialog({
   };
   const flagged = refused > 0 ? missing : null;
   return (
-    <dialog ref={ref} className="confirm-card" aria-label="Change repository">
+    <dialog ref={ref} className="confirm-card" aria-label={verb + " repository"}>
       {/* colo-7: a primary commit, so the primary wash, not the danger one. */}
       <div className="confirm-icon primary">
         <Icon name="github" />
       </div>
-      <h3>Change repository</h3>
-      <p>
-        Currently <code className="mono">{current ?? "unset"}</code>. Enter the
-        repository to use instead, as <span className="mono">owner/name</span>.
-      </p>
+      <h3>{verb} repository</h3>
+      {/* Ruling 667: a project with no repository attaches one here. */}
+      {current ? (
+        <p>
+          Currently <code className="mono">{current}</code>. Enter the
+          repository to use instead, as <span className="mono">owner/name</span>.
+        </p>
+      ) : (
+        <p>
+          This project has no repository. Enter the one to attach, as{" "}
+          <span className="mono">owner/name</span>. Agents that hold repo-write
+          then deliver through it.
+        </p>
+      )}
       <div className="field">
         <input
           ref={repoRef}
@@ -2058,9 +2068,12 @@ function ChangeRepoDialog({
         />
       </div>
       <p className="repo-note">
-        {hasCredential
-          ? "Viberr checks it with the attached credential first, and changes nothing if the token can't push to it."
-          : "No credential is attached, so the new repository can't be verified until one is."}
+        {!current
+          ? // Ruling 667: an attach finds its own token to check with.
+            "Viberr checks it first with the GitHub connection for its owner, or the instance's default one, takes the repository's default branch from GitHub, and binds that connection to this project. Nothing changes if the check fails."
+          : hasCredential
+            ? "Viberr checks it with the attached credential first, and changes nothing if the token can't push to it."
+            : "No credential is attached, so the new repository can't be verified until one is."}
       </p>
       {footprintTasks > 0 && (
         <label
@@ -2077,8 +2090,8 @@ function ChangeRepoDialog({
           <span>
             {countLabel(footprintTasks, "task")} in this project{" "}
             {footprintTasks === 1 ? "carries" : "carry"} branch/PR records
-            against the current repository. They keep their history, but every
-            future sync runs against the new one.
+            against {current ? "the current repository" : "a repository this project had before"}.
+            They keep their history, but every future sync runs against the new one.
           </span>
         </label>
       )}
@@ -2119,7 +2132,7 @@ function ChangeRepoDialog({
           aria-busy={busy}
           onClick={submit}
         >
-          Change repository
+          {verb} repository
         </button>
       </div>
     </dialog>
@@ -2138,6 +2151,7 @@ export function RepoPanel({
   repoBusy,
   changeResult,
   onChangeRepo,
+  onRemoveRepo,
   onSetBranchCleanup,
   onGrantScope,
   onSetCredential,
@@ -2162,6 +2176,8 @@ export function RepoPanel({
   repoBusy: boolean;
   changeResult: { ok: boolean; toast?: string; error?: string } | undefined;
   onChangeRepo: (repo: string, confirmFootprint: boolean) => void;
+  /** Ruling 667: take the repository away from a board that does not write it. */
+  onRemoveRepo: () => void;
   onSetBranchCleanup: (enabled: boolean) => void;
   onGrantScope: () => void;
   onSetCredential: () => void;
@@ -2173,6 +2189,7 @@ export function RepoPanel({
   instanceAdmin?: boolean;
 }) {
   const [changing, setChanging] = useState(false);
+  const [removing, setRemoving] = useState(false);
   const rechecking = inFlight === "grant-scope";
   // Close the dialog only when a change SUCCEEDS — a probe refusal keeps it
   // open with the typed reason so the owner can correct the input.
@@ -2215,7 +2232,8 @@ export function RepoPanel({
             {repo ? (
               <span className="mono">{repo}</span>
             ) : (
-              <span className="fine md dim">not set</span>
+              // Ruling 667: a standing state, not a missing setting.
+              <span className="fine md dim">none · tasks are delivered as files</span>
             )}
             {canEditPolicy && (
               <button
@@ -2228,7 +2246,17 @@ export function RepoPanel({
                   setChanging(true);
                 }}
               >
-                Change…
+                {repo ? "Change…" : "Attach…"}
+              </button>
+            )}
+            {canEditPolicy && repo && (
+              <button
+                type="button"
+                className="btn ghost sm"
+                disabled={repoBusy}
+                onClick={() => setRemoving(true)}
+              >
+                Remove…
               </button>
             )}
           </span>
@@ -2243,6 +2271,7 @@ export function RepoPanel({
         {/* R15-6: merged task branches piled up on the repo (vib-1..4, 7, 9 were
             still there when the ruling landed). Default ON; the deletion itself
             still refuses the default branch and any branch with an open PR. */}
+        {repo && (
         <div className="kv-row">
           <span className="k">After merge</span>
           <span className="v light">
@@ -2260,6 +2289,7 @@ export function RepoPanel({
             </label>
           </span>
         </div>
+        )}
       </div>
 
       {changing && (
@@ -2277,6 +2307,17 @@ export function RepoPanel({
           onSubmit={onChangeRepo}
         />
       )}
+      {removing && repo && (
+        <ConfirmDialog
+          screenLabel="Repository removal dialog"
+          title={`Remove ${repo} from this project?`}
+body="Tasks are then delivered as the files their agents save on them. The project's credential is unbound and the connection stays in Instance settings. Branch and pull request records on existing tasks stay as history. Viberr refuses while an agent may write the repository, a pull request is still open, or a delivered revision is not yet accepted."
+          confirmLabel="Remove repository"
+          busy={repoBusy}
+          onCancel={() => setRemoving(false)}
+          onConfirm={onRemoveRepo}
+        />
+      )}
 
       {/* F21-5 (R19-11 / owner ruling Q-V1, PAT half): the credential card is
           the project's token fingerprint, its scope verdicts and its
@@ -2287,8 +2328,9 @@ export function RepoPanel({
           with the same component. The /github page fixed this in pass 19 and
           Settings did not, so a project Viewer read the masked tail here. The
           loader redacts the same fields it hides, so the withheld detail never
-          reaches the browser at all. */}
-      {canGrant ? (
+          reaches the browser at all. Ruling 667: with no repository there is
+          no credential to speak of, and attaching one is the row above. */}
+      {!repo ? null : canGrant ? (
         <CredentialCard
           credential={credential}
           onOpenTask={onOpenTask}
@@ -2651,6 +2693,9 @@ export function SettingsPage({
                   { method: "post" },
                 );
               }}
+              onRemoveRepo={() =>
+                repoFetcher.submit({ intent: "remove-repo", _csrf: csrf }, { method: "post" })
+              }
               onSetBranchCleanup={(enabled) =>
                 repoFetcher.submit(
                   {

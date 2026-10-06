@@ -137,6 +137,7 @@ import {
   type OperatorOverrides,
   type RosterEntry,
 } from "~/features/home/project-create.server";
+import { BOARD_DELIVERS, type BoardDelivers } from "~/shared/board-delivers";
 import { listHomeProjectsForUser } from "~/features/home/home-query.server";
 import {
   deleteAgentProfile,
@@ -1764,7 +1765,7 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
   add(
     tool(
       "list_github_connections",
-      "The instance's GitHub connections, the ones create_project needs (ruling 463). Per connection: `owner` (what create_project's `owner` takes), whether it is the `default`, the token's kind (classic or fine_grained), its validation (`valid`, `failed` with GitHub's reason, or `unvalidated`) and when it was last checked, its expiry, the required scopes it lacks, and `reach`: which repositories the TOKEN can reach, read from GitHub when the token was last validated, each with whether it is private and whether the token can push to it. `reach.status` is `read`, `unknown` (the read failed, with the reason; never read it as zero) or `not_read` (the connection predates the read; an org admin presses Re-check on it in Instance settings). A fine-grained token reaches exactly the repositories it was granted, so a repository missing from a `read` reach is one this token cannot see. Never carries token material. Open to any signed-in person, the same people the New project dialog shows these connections to.",
+      "The instance's GitHub connections, the ones create_project takes a software board's repository from (ruling 463; a board that delivers results needs none, ruling 667). Per connection: `owner` (what create_project's `owner` takes), whether it is the `default`, the token's kind (classic or fine_grained), its validation (`valid`, `failed` with GitHub's reason, or `unvalidated`) and when it was last checked, its expiry, the required scopes it lacks, and `reach`: which repositories the TOKEN can reach, read from GitHub when the token was last validated, each with whether it is private and whether the token can push to it. `reach.status` is `read`, `unknown` (the read failed, with the reason; never read it as zero) or `not_read` (the connection predates the read; an org admin presses Re-check on it in Instance settings). A fine-grained token reaches exactly the repositories it was granted, so a repository missing from a `read` reach is one this token cannot see. Never carries token material. Open to any signed-in person, the same people the New project dialog shows these connections to.",
       {},
       run(() => {
         const connections = listConnections(db).map((c) => ({
@@ -1800,7 +1801,7 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
         if (connections.length === 0) {
           return json({
             connections,
-            note: "No GitHub connection exists, so create_project cannot run yet. An org admin adds one in Instance settings → GitHub connections.",
+            note: "No GitHub connection exists, so create_project cannot make a board that delivers software yet: an org admin adds a connection in Instance settings → GitHub connections. A board that delivers results needs none (`delivers: \"results\"`, with no `owner` or `repoName`).",
           });
         }
         return json({ connections });
@@ -1812,12 +1813,22 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
   add(
     tool(
       "create_project",
-      "Create a project, optionally with the WHOLE custom shape in one request: stages (entry first, Done-equivalent last), boundary choices, members (existing users by email), description. Open to any signed-in person; the asker becomes the project's admin. Requires a GitHub connection for the repo owner: call list_github_connections FIRST, which names every connection's owner and the repositories its token reaches (ruling 463), so you never guess whether one exists or whether it can see the repository. The repository need not exist yet: `createRepository` has the server create it with the connection's token first (ruling 462). The move into the final stage stays a human decision whatever is asked. When you have designed the project's agents, pass them as `agents` (ruling 464), each with its model and effort: the project then gets the operator plus exactly that roster, not the generic Developer and Reviewer beside it. The reply lists every deployment written. deploy_agent adds one later; remove_agent_deployment takes one off.",
+      "Create a project, optionally with the WHOLE custom shape in one request: stages (entry first, Done-equivalent last), boundary choices, members (existing users by email), description. Open to any signed-in person; the asker becomes the project's admin. Say what the board delivers in `delivers`, which you settled before designing it (ruling 667). `software` (the default): tasks change a repository and ship as pull requests, so it requires a GitHub connection for the repo owner: call list_github_connections FIRST, which names every connection's owner and the repositories its token reaches (ruling 463), so you never guess whether one exists or whether it can see the repository. The repository need not exist yet: `createRepository` has the server create it with the connection's token first (ruling 462). `results`: the no-code kind, where a person files a task and the agents hand back files on it. It needs no repository and no GitHub connection, so leave `owner` and `repoName` out; pass both only when the agents must read an existing repository, which they then read and never write. Its agents are deployed with repo-write withheld whatever their templates grant, and the one that makes the result delivers the files it saves on the task. Never ask a person for a repository a results board does not need. The move into the final stage stays a human decision whatever is asked. When you have designed the project's agents, pass them as `agents` (ruling 464), each with its model and effort: the project then gets the operator plus exactly that roster, not the generic Developer and Reviewer beside it. The reply lists every deployment written. deploy_agent adds one later; remove_agent_deployment takes one off.",
       {
         name: z.string(),
         key: z.string().describe("Task key prefix, 2 to 4 letters."),
-        owner: z.string().describe("GitHub owner of the repo (a configured connection)."),
-        repoName: z.string().describe("Repository name under that owner."),
+        delivers: z
+          .enum(BOARD_DELIVERS)
+          .optional()
+          .describe("What the board delivers: `software` (the default; needs a repository) or `results` (files saved on each task; needs none)."),
+        owner: z
+          .string()
+          .optional()
+          .describe("GitHub owner of the repo (a configured connection). Required for a software board; leave out for a results board with no repository."),
+        repoName: z
+          .string()
+          .optional()
+          .describe("Repository name under that owner. Required with `owner`, left out with it."),
         createRepository: z
           .strictObject({
             private: z
@@ -1904,8 +1915,9 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
         async (args: {
           name: string;
           key: string;
-          owner: string;
-          repoName: string;
+          delivers?: BoardDelivers;
+          owner?: string;
+          repoName?: string;
           createRepository?: CreateRepositoryRequest;
           policy: "strict" | "balanced" | "auto";
           description?: string;
@@ -1918,10 +1930,11 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
           const input: CreateProjectInput = {
             name: args.name,
             key: args.key,
-            owner: args.owner,
-            repoName: args.repoName,
+            owner: args.owner ?? "",
+            repoName: args.repoName ?? "",
             policy: args.policy,
           };
+          if (args.delivers) input.delivers = args.delivers;
           if (args.createRepository) input.createRepository = args.createRepository;
           if (args.agents) input.agents = args.agents;
           if (args.operator) input.operator = args.operator;
@@ -1944,6 +1957,9 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
           return (
             `[done] Project ${created.name} created at ${created.storePath} (slug ${created.slug}, keys ${created.key}-n). ` +
             `You are its admin.` +
+            (created.repo === null
+              ? " It has no repository: its tasks are delivered as the files their delivering agent saves on them."
+              : "") +
             (created.repoNote ? ` ${created.repoNote}` : "") +
             (created.repoWarning ? ` Warning: ${created.repoWarning}` : "") +
             ` Deployed: ${deployed}.`
@@ -2408,8 +2424,10 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
           // missing beats an empty read that reads like "the file is not
           // there" (ruling 246: existence before type).
           return (
-            `[unavailable] ${project.name} has no GitHub repository set, so it has no default ` +
-            "branch to read. Set one on the project's GitHub tab first."
+            `[unavailable] ${project.name} has no repository, so it has no default branch to ` +
+            "read. A board that delivers results needs none (ruling 667): its work is the files on " +
+            "its tasks, which `read_task_attachment` opens. A project admin attaches a repository " +
+            "in the project's Settings when its agents should read or write one."
           );
         }
         const request: Parameters<typeof readProjectDefaultBranchFile>[1] = {
