@@ -183,7 +183,8 @@ export async function action({ request, params }: Route.ActionArgs) {
       //
       // Owner ruling 2026-07-26: …and one door that changes WHICH repository
       // (ruling 539 named it Change). The human types the new owner/name; the
-      // server probes it with the bound credential and refuses misses.
+      // server probes it with the bound credential, or with a connection when
+      // none is bound (ruling 669), and refuses misses.
       case "change-repo": {
         const result = await changeProjectRepo(
           db,

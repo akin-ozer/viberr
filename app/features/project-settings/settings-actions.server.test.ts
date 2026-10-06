@@ -482,6 +482,43 @@ describe("renameStage", () => {
 
 /* ------- repository change (owner ruling 2026-07-26, ruling 539) ------- */
 
+/** Deploy one specialist on the store's project, its repo-write headline in `mode`. */
+function deploy(store: TestStore, mode: "direct" | "off"): void {
+  const file = readProjectFile({ projectSlug: store.slug, dataRoot: store.dataRoot })!;
+  writeProject(store.dataRoot, {
+    ...file.parsed.frontmatter,
+    agents: [
+      {
+        profileId: "builder",
+        capabilities: [
+          { capabilityId: "execute-code-or-write-repo", mode },
+          { capabilityId: "attach-evidence-references", mode: "direct" },
+        ],
+        extras: [],
+        definition: { kind: "specialist", name: "Calculator Builder", role: "Estimate", backends: ["codex"], model: "gpt-6-luna" },
+      },
+    ],
+  });
+  rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
+}
+
+/** A GitHub connection under `owner`, the instance default. Returns its PAT's id. */
+function connect(store: TestStore, owner: string): string {
+  const pat = createPat(
+    store.db,
+    { userId: store.users.arda.id, label: `connection · ${owner}`, token: "github_pat_connect01" },
+    admin(store),
+  );
+  const now = new Date().toISOString();
+  store.db
+    .prepare(
+      `INSERT INTO github_connections (id, owner, pat_id, is_default, created_at, updated_at)
+       VALUES (?, ?, ?, 1, ?, ?)`,
+    )
+    .run(owner, owner, pat.id, now, now);
+  return pat.id;
+}
+
 describe("changeProjectRepo — the one door that changes a project's repository", () => {
   const REPO_OK = "akin-ozer/viberr";
 
@@ -594,12 +631,13 @@ describe("changeProjectRepo — the one door that changes a project's repository
     expect(listAuditEvents(store.db, { action: "project.repo.updated" })).toHaveLength(0);
   });
 
-  it("F20-15: REFUSES a repo the credential can only READ — a project must be able to push", async () => {
-    const store = setupTestStore(ctx);
-    await misconfigure(store);
-    bindCredential(store);
+  it("F20-15: REFUSES a repo the credential can only READ where an agent writes it, and takes it where none does (ruling 669)", async () => {
     // Repo is VISIBLE (res.ok) but the token's computed permissions say no push —
-    // the octocat/Hello-World live case. `res.ok` alone must not adopt it.
+    // the octocat/Hello-World live case. `res.ok` alone must not adopt it for a
+    // board that delivers through its repository. CANARY: require push of
+    // every board and a results board cannot change the repository its agents
+    // only read, though it could attach it; require it of none and a board
+    // whose agent commits adopts a repository it cannot push to.
     const gh = fakeGithubFetch({
       [`GET /repos/octocat/Hello-World`]: {
         body: {
@@ -609,21 +647,41 @@ describe("changeProjectRepo — the one door that changes a project's repository
         },
       },
     });
-    await expect(
+    const change = (store: TestStore) =>
       changeProjectRepo(
         store.db,
         { projectSlug: store.slug, repo: "octocat/Hello-World" },
         admin(store),
         { dataRoot: store.dataRoot },
         { fetchImpl: gh.fetchImpl },
-      ),
-    ).rejects.toMatchObject({ status: 400 });
+      );
+
+    const writes = setupTestStore(ctx);
+    await misconfigure(writes);
+    deploy(writes, "direct");
+    bindCredential(writes);
+    await expect(change(writes)).rejects.toMatchObject({
+      status: 400,
+      userMessage:
+        "The attached credential can see octocat/Hello-World but cannot push to it. A project needs write access to open branches and PRs. Grant the token write access (or pick a repo you own), then try again. Nothing was changed.",
+    });
     // Nothing changed, nothing audited.
     expect(
-      readProjectFile({ projectSlug: store.slug, dataRoot: store.dataRoot })!.parsed
+      readProjectFile({ projectSlug: writes.slug, dataRoot: writes.dataRoot })!.parsed
         .frontmatter.repo,
     ).toBe("akin/viberr");
-    expect(listAuditEvents(store.db, { action: "project.repo.updated" })).toHaveLength(0);
+    expect(listAuditEvents(writes.db, { action: "project.repo.updated" })).toHaveLength(0);
+
+    const reads = setupTestStore(ctx);
+    await misconfigure(reads);
+    deploy(reads, "off");
+    bindCredential(reads);
+    expect((await change(reads)).changed).toBe(true);
+    expect(readRepoHealth(reads.db, reads.slug)?.result).toMatchObject({
+      status: "connected",
+      repo: "octocat/Hello-World",
+      readOnly: true,
+    });
   });
 
   it("F20-15: ACCEPTS a repo the credential can push to (permissions.push true)", async () => {
@@ -649,26 +707,97 @@ describe("changeProjectRepo — the one door that changes a project's repository
     expect(result.changed).toBe(true);
   });
 
-  it("with NO credential bound the change applies unprobed, saying so", async () => {
+  it("ruling 669: with NO credential bound it is checked with a connection, takes GitHub's default branch and binds that connection", async () => {
+    // The `defaultBranch` on file is the repository's the project is leaving.
+    // A change that wrote the new one unchecked kept it, and ruling 128's
+    // bootstrap would then create that branch on the new repository and make
+    // it the default there. CANARY: restore the unchecked write and
+    // `defaultBranch` stays `main` on a repository whose default is `trunk`,
+    // with no credential bound and no reading taken.
     const store = setupTestStore(ctx);
     await misconfigure(store);
+    const patId = connect(store, "akin-ozer");
+    const gh = fakeGithubFetch({
+      [`GET /repos/${REPO_OK}`]: {
+        body: { full_name: REPO_OK, default_branch: "trunk", private: true, permissions: { push: true } },
+      },
+    });
     const result = await changeProjectRepo(
       store.db,
       { projectSlug: store.slug, repo: REPO_OK },
       admin(store),
       { dataRoot: store.dataRoot },
+      { fetchImpl: gh.fetchImpl },
     );
-    expect(result.changed).toBe(true);
-    expect(result.toast).toContain("Attach a credential to verify");
+    expect(result).toEqual({
+      toast:
+        "Repository changed: akin/viberr → akin-ozer/viberr (default branch trunk), checked and bound with akin-ozer's connection",
+      changed: true,
+      repo: REPO_OK,
+    });
     expect(
-      readProjectFile({ projectSlug: store.slug, dataRoot: store.dataRoot })!.parsed
-        .frontmatter.repo,
-    ).toBe(REPO_OK);
+      readProjectFile({ projectSlug: store.slug, dataRoot: store.dataRoot })!.parsed.frontmatter,
+    ).toMatchObject({ repo: REPO_OK, defaultBranch: "trunk" });
+    expect(
+      store.db.prepare(`SELECT pat_id FROM project_github_credentials WHERE project_slug = ?`).get(store.slug),
+    ).toEqual({ pat_id: patId });
+    expect(readRepoHealth(store.db, store.slug)?.result).toMatchObject({
+      status: "connected",
+      repo: REPO_OK,
+      remoteDefaultBranch: "trunk",
+    });
+    expect(listAuditEvents(store.db, { action: "project.repo.updated" })[0]!.details).toMatchObject({
+      from: "akin/viberr",
+      to: REPO_OK,
+      probed: true,
+      defaultBranch: "trunk",
+      connection: "akin-ozer",
+    });
+  });
+
+  it("ruling 669: REFUSES with no credential and no connection to check it with, and a repository GitHub names no default branch for", async () => {
+    // Nothing is written unchecked. CANARY: let the first through and a
+    // typo'd repository is written with the default branch of the one the
+    // project left; let the second through and that branch is the one tasks
+    // on the new repository start from.
+    const projectRepo = (store: TestStore) =>
+      readProjectFile({ projectSlug: store.slug, dataRoot: store.dataRoot })!.parsed.frontmatter.repo;
+    const bare = setupTestStore(ctx);
+    await misconfigure(bare);
+    await expect(
+      changeProjectRepo(bare.db, { projectSlug: bare.slug, repo: REPO_OK }, admin(bare), { dataRoot: bare.dataRoot }),
+    ).rejects.toMatchObject({
+      status: 400,
+      userMessage:
+        "This project has no credential attached, so changing to akin-ozer/viberr needs a GitHub connection to check it with. Add one in Instance settings → GitHub connections, then change the repository here. Nothing was changed.",
+    });
+    expect(projectRepo(bare)).toBe("akin/viberr");
+    expect(listAuditEvents(bare.db, { action: "project.repo.updated" })).toHaveLength(0);
+
+    const bound = setupTestStore(ctx);
+    await misconfigure(bound);
+    bindCredential(bound);
+    const gh = fakeGithubFetch({ [`GET /repos/${REPO_OK}`]: { body: { full_name: REPO_OK } } });
+    await expect(
+      changeProjectRepo(
+        bound.db,
+        { projectSlug: bound.slug, repo: REPO_OK },
+        admin(bound),
+        { dataRoot: bound.dataRoot },
+        { fetchImpl: gh.fetchImpl },
+      ),
+    ).rejects.toMatchObject({
+      status: 400,
+      userMessage:
+        "GitHub named no default branch for akin-ozer/viberr, so Viberr cannot tell which branch tasks start from. Nothing was changed.",
+    });
+    expect(projectRepo(bound)).toBe("akin/viberr");
   });
 
   it("a project with remote footprint demands the acknowledgment", async () => {
     const store = setupTestStore(ctx);
     await misconfigure(store);
+    bindCredential(store);
     writeTask(store.dataRoot, store.slug, {
       frontmatter: baseTaskFrontmatter("VIB-9", {
         stage: "review",
@@ -715,11 +844,15 @@ describe("changeProjectRepo — the one door that changes a project's repository
         "2 tasks in this project carry branch/PR records against akin/viberr. Confirm the change to proceed; those records keep their history but future sync runs against akin-ozer/viberr.",
     });
 
+    const gh = fakeGithubFetch({
+      [`GET /repos/${REPO_OK}`]: { body: { full_name: REPO_OK, default_branch: "main" } },
+    });
     const confirmed = await changeProjectRepo(
       store.db,
       { projectSlug: store.slug, repo: REPO_OK, confirmFootprint: true },
       admin(store),
       { dataRoot: store.dataRoot },
+      { fetchImpl: gh.fetchImpl },
     );
     expect(confirmed.changed).toBe(true);
   });
@@ -762,25 +895,6 @@ describe("changeProjectRepo — the one door that changes a project's repository
  */
 describe("removeProjectRepo — the door that takes a project's repository away (ruling 667)", () => {
   const ctxOf = (store: TestStore) => ({ dataRoot: store.dataRoot });
-  /** Deploy one specialist, its repo-write headline in `mode`. */
-  function deploy(store: TestStore, mode: "direct" | "off"): void {
-    const file = readProjectFile({ projectSlug: store.slug, dataRoot: store.dataRoot })!;
-    writeProject(store.dataRoot, {
-      ...file.parsed.frontmatter,
-      agents: [
-        {
-          profileId: "builder",
-          capabilities: [
-            { capabilityId: "execute-code-or-write-repo", mode },
-            { capabilityId: "attach-evidence-references", mode: "direct" },
-          ],
-          extras: [],
-          definition: { kind: "specialist", name: "Calculator Builder", role: "Estimate", backends: ["codex"], model: "gpt-6-luna" },
-        },
-      ],
-    });
-    rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
-  }
 
   it("removes the repository, unbinds the credential, forgets its reading and audits the removal", async () => {
     // CANARY: leave the credential bound, or the reading on file, and a board
@@ -899,16 +1013,7 @@ describe("changeProjectRepo attaches a repository to a project that has none (ru
     const file = readProjectFile({ projectSlug: store.slug, dataRoot: store.dataRoot })!;
     writeProject(store.dataRoot, { ...file.parsed.frontmatter, repo: null, defaultBranch: "main" });
     rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
-    if (!connection) return { store, patId: null };
-    const pat = createPat(store.db, { userId: store.users.arda.id, label: "connection · acme", token: "github_pat_attach01" }, admin(store));
-    const now = new Date().toISOString();
-    store.db
-      .prepare(
-        `INSERT INTO github_connections (id, owner, pat_id, is_default, created_at, updated_at)
-         VALUES (?, ?, ?, 1, ?, ?)`,
-      )
-      .run("acme", "acme", pat.id, now, now);
-    return { store, patId: pat.id };
+    return { store, patId: connection ? connect(store, "acme") : null };
   }
   const attach = (store: TestStore, routes: Parameters<typeof fakeGithubFetch>[0]) =>
     changeProjectRepo(
@@ -983,19 +1088,7 @@ describe("changeProjectRepo attaches a repository to a project that has none (ru
     expect(readRepoHealth(store.db, store.slug)?.result).toMatchObject({ status: "connected", readOnly: true });
 
     const writer = repoLess().store;
-    const file = readProjectFile({ projectSlug: writer.slug, dataRoot: writer.dataRoot })!;
-    writeProject(writer.dataRoot, {
-      ...file.parsed.frontmatter,
-      agents: [
-        {
-          profileId: "developer",
-          capabilities: [{ capabilityId: "execute-code-or-write-repo", mode: "direct" }],
-          extras: [],
-          definition: { kind: "specialist", name: "Developer", role: "Implementation", backends: ["claude"], model: "sonnet" },
-        },
-      ],
-    });
-    rebuildAll(writer.db, { dataRoot: writer.dataRoot, force: true });
+    deploy(writer, "direct");
     await expect(attach(writer, readOnly)).rejects.toMatchObject({
       status: 400,
       userMessage:

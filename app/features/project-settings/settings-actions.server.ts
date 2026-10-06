@@ -824,9 +824,18 @@ export function repoFootprintTasks(db: DatabaseSync, projectSlug: string): numbe
 
 /** What a probe of the repository a project is about to point at found. */
 interface RepoTarget {
-  /** GitHub's own default branch for it; null when the answer carried none. */
-  defaultBranch: string | null;
+  /** GitHub's own default branch for it. */
+  defaultBranch: string;
   reading: RepoAccessResult;
+}
+
+/**
+ * Whether the board delivers through its repository: a deployed agent may
+ * write it. The change refuses a repository its token can only read exactly
+ * then (F20-15), and the removal refuses on the same fact.
+ */
+function boardWritesRepo(projectSlug: string, ctx: SettingsMutationContext): boolean {
+  return listDeployedSpecialists(projectSlug, ctx).some((agent) => agent.capabilities.delivery);
 }
 
 /**
@@ -839,6 +848,11 @@ interface RepoTarget {
  * Adopting a read-only-visible repository silently defers the failure to the
  * first delivery, so a PROVEN read-only target is refused where the board
  * pushes (`needsPush`); an unknown or absent permissions block still passes.
+ *
+ * Ruling 669: the answer has to name the repository's default branch. The
+ * project takes it from here and from nowhere else, and one it kept from
+ * another repository is a branch ruling 128's bootstrap would create on this
+ * one.
  */
 async function probeRepoTarget(
   client: GithubClient,
@@ -853,14 +867,20 @@ async function probeRepoTarget(
         `${who.subject} can see ${repo} but cannot push to it. A project needs write access to open branches and PRs. Grant the token write access (or pick a repo you own), then try again. Nothing was changed.`,
       );
     }
+    const defaultBranch = res.data.default_branch;
+    if (!defaultBranch) {
+      throw AppError.validation(
+        `GitHub named no default branch for ${repo}, so Viberr cannot tell which branch tasks start from. Nothing was changed.`,
+      );
+    }
     const reading: RepoAccessResult = {
       status: "connected",
       repo,
-      remoteDefaultBranch: res.data.default_branch,
+      remoteDefaultBranch: defaultBranch,
       private: res.data.private ?? false,
     };
     if (readOnly) reading.readOnly = true;
-    return { defaultBranch: res.data.default_branch, reading };
+    return { defaultBranch, reading };
   }
   if (res.kind === "network") {
     throw AppError.validation(
@@ -883,36 +903,40 @@ async function probeRepoTarget(
 }
 
 /**
- * Ruling 667: a project with no repository takes one.
+ * Rulings 667 and 669: the change of a project that has no credential to ask
+ * GitHub with.
  *
- * It has no credential: creation bound none, and removing a repository
- * unbinds it. The bound-credential probe therefore had nothing to ask with,
- * and an attach that skipped it kept the placeholder `defaultBranch: main`.
- * On a repository whose default is `master` the next branch preparation would
- * find no `main`, and ruling 128's bootstrap would create one from the root
- * commit and make it the repository's default branch.
+ * That is a project with no repository (creation bound none, and removing a
+ * repository unbinds its credential), and one whose credential was cleared or
+ * whose token can no longer be read. The bound-credential probe has nothing
+ * to ask with there, and a change that skipped it kept the `defaultBranch` on
+ * file: the placeholder `main`, or the default of the repository the project
+ * left. On a repository whose default is another branch the next branch
+ * preparation would find no such ref, and ruling 128's bootstrap would create
+ * it from the root commit and make it the repository's default branch.
  *
- * So the attach is checked with the connection the project is about to be
+ * So the change is checked with the connection the project is about to be
  * given: the repository owner's, else the instance default (the choice
  * `runSetCredential` makes). It refuses with no connection and on a miss,
  * adopts the repository's own default branch, and binds that connection, so
  * the project leaves this door as creation would have left it. A board none
- * of whose agents writes the repository may attach one its token can only
- * read.
+ * of whose agents writes the repository may take one its token can only read.
  */
-async function attachProjectRepo(
+async function changeRepoByConnection(
   db: DatabaseSync,
-  input: { projectSlug: string; repo: string; footprint: number },
+  input: { projectSlug: string; from: string | null; repo: string; footprint: number },
   actor: SettingsActor,
   ctx: SettingsMutationContext,
   options: { fetchImpl?: typeof fetch },
 ): Promise<{ toast: string; changed: boolean; repo: string }> {
-  const { projectSlug, repo } = input;
+  const { projectSlug, from, repo } = input;
   const owner = repo.split("/")[0] ?? "";
   const connection = getConnection(db, slugify(owner)) ?? getDefaultConnection(db);
   if (!connection) {
     throw AppError.validation(
-      `Attaching ${repo} needs a GitHub connection to check it with. Add one in Instance settings → GitHub connections, then attach the repository here. Nothing was changed.`,
+      from === null
+        ? `Attaching ${repo} needs a GitHub connection to check it with. Add one in Instance settings → GitHub connections, then attach the repository here. Nothing was changed.`
+        : `This project has no credential attached, so changing to ${repo} needs a GitHub connection to check it with. Add one in Instance settings → GitHub connections, then change the repository here. Nothing was changed.`,
     );
   }
   const token = getPatToken(db, connection.patId);
@@ -923,17 +947,11 @@ async function attachProjectRepo(
   }
   const clientOptions: GithubClientOptions = { token };
   if (options.fetchImpl) clientOptions.fetchImpl = options.fetchImpl;
-  const target = await probeRepoTarget(createGithubClient(clientOptions), repo, {
+  const { defaultBranch, reading } = await probeRepoTarget(createGithubClient(clientOptions), repo, {
     subject: `The ${connection.owner} connection's token`,
     object: `the ${connection.owner} connection's token`,
-    needsPush: listDeployedSpecialists(projectSlug, ctx).some((agent) => agent.capabilities.delivery),
+    needsPush: boardWritesRepo(projectSlug, ctx),
   });
-  if (!target.defaultBranch) {
-    throw AppError.validation(
-      `GitHub named no default branch for ${repo}, so Viberr cannot tell which branch tasks start from. Nothing was changed.`,
-    );
-  }
-  const defaultBranch = target.defaultBranch;
 
   await updateProjectFile(projectRef(ctx, projectSlug), (parsed) => {
     parsed.frontmatter.repo = repo;
@@ -943,12 +961,12 @@ async function attachProjectRepo(
   const auditActor = { userId: actor.userId, label: actor.label };
   setProjectCredential(db, { projectSlug, patId: connection.patId }, auditActor);
   invalidateRepoAccess(db, projectSlug);
-  recordRepoAccess(db, projectSlug, target.reading);
+  recordRepoAccess(db, projectSlug, reading);
   const proving: Parameters<typeof proveAttachedCredential>[3] = { dataRoot: ctx.dataRoot };
   if (options.fetchImpl) proving.fetchImpl = options.fetchImpl;
   await proveAttachedCredential(db, projectSlug, auditActor, proving);
   const details: AuditDetails = {
-    from: null,
+    from,
     to: repo,
     probed: true,
     defaultBranch,
@@ -963,8 +981,9 @@ async function attachProjectRepo(
     projectSlug,
     details,
   });
+  const landed = from === null ? `Repository attached: ${repo}` : `Repository changed: ${from} → ${repo}`;
   return {
-    toast: `Repository attached: ${repo} (default branch ${defaultBranch}), checked and bound with ${connection.owner}'s connection`,
+    toast: `${landed} (default branch ${defaultBranch}), checked and bound with ${connection.owner}'s connection`,
     changed: true,
     repo,
   };
@@ -979,9 +998,11 @@ async function attachProjectRepo(
  * Contract:
  *  - the human TYPES the new `owner/name` — nothing is inferred from
  *    the connection owner and there is no automatic failover;
- *  - when a credential is bound, the new repo is probed live and a miss
- *    REFUSES the change (a change must not install the next
- *    misconfiguration); a hit also refreshes `defaultBranch` from GitHub;
+ *  - the new repo is probed live and a miss REFUSES the change (a change
+ *    must not install the next misconfiguration); a hit also takes
+ *    `defaultBranch` from GitHub. The bound credential asks; with none bound
+ *    a connection does, and is bound (rulings 667 and 669). Nothing is
+ *    written unchecked;
  *  - a project whose tasks already carry PRs or pushed commits demands
  *    `confirmFootprint` — those records keep pointing at the old repo;
  *  - `edit-policy` tier (admin), audited from → to;
@@ -1029,46 +1050,32 @@ export async function changeProjectRepo(
       `${countLabel(footprint, "task")} in this project ${footprint === 1 ? "carries" : "carry"} branch/PR records against ${from ?? "a repository it had before"}. Confirm the change to proceed; those records keep their history but future sync runs against ${repo}.`,
     );
   }
-  // Ruling 667: a project with no repository takes one through its own arm,
-  // which has to find a token to check the repository with.
-  if (from === null) {
-    return attachProjectRepo(db, { projectSlug: input.projectSlug, repo, footprint }, actor, ctx, options);
-  }
-
-  // Verify the target with the BOUND credential before anything is written.
-  // No credential → nothing to probe with; the change applies and the
-  // credential card keeps saying so.
+  // Verify the target before anything is written, with the BOUND credential.
+  // Rulings 667 and 669: a project with nothing of its own to ask with (no
+  // repository, or a credential cleared since) is checked with a connection.
   const ghOptions: GithubContextOptions = {};
   if (options.fetchImpl) ghOptions.fetchImpl = options.fetchImpl;
   const gh = getProjectGithubContext(db, input.projectSlug, ghOptions);
-  let probed = false;
-  let defaultBranch: string | null = null;
-  let reading: RepoAccessResult | null = null;
-  if (gh.status === "ok") {
-    const target = await probeRepoTarget(gh.client, repo, {
-      subject: "The attached credential",
-      object: "the attached credential",
-      needsPush: true,
-    });
-    probed = true;
-    defaultBranch = target.defaultBranch;
-    reading = target.reading;
+  if (gh.status !== "ok") {
+    return changeRepoByConnection(db, { projectSlug: input.projectSlug, from, repo, footprint }, actor, ctx, options);
   }
+  const { defaultBranch, reading } = await probeRepoTarget(gh.client, repo, {
+    subject: "The attached credential",
+    object: "the attached credential",
+    needsPush: boardWritesRepo(input.projectSlug, ctx),
+  });
 
   await updateProjectFile(projectRef(ctx, input.projectSlug), (parsed) => {
     parsed.frontmatter.repo = repo;
-    if (defaultBranch) parsed.frontmatter.defaultBranch = defaultBranch;
+    parsed.frontmatter.defaultBranch = defaultBranch;
   });
   reprojectProject(db, ctx, input.projectSlug);
   // The 30 s memoized repo-access probe still describes the OLD repo.
   invalidateRepoAccess(db, input.projectSlug);
   // Ruling 517: and so does the reading the board's banner and Home's pill
-  // show. The probe above is a reading of the new one; an unprobed change
-  // leaves the old reading, which no surface shows for a repository the
-  // project no longer points at.
-  if (reading) recordRepoAccess(db, input.projectSlug, reading);
-  const details: AuditDetails = { from, to: repo, probed };
-  if (defaultBranch) details.defaultBranch = defaultBranch;
+  // show. The probe above is a reading of the new one.
+  recordRepoAccess(db, input.projectSlug, reading);
+  const details: AuditDetails = { from, to: repo, probed: true, defaultBranch };
   if (footprint > 0) details.footprintTasks = footprint;
   recordAudit(db, {
     action: "project.repo.updated",
@@ -1080,9 +1087,7 @@ export async function changeProjectRepo(
   });
 
   return {
-    toast: probed
-      ? `Repository changed: ${from ?? "unset"} → ${repo}${defaultBranch ? ` (default branch ${defaultBranch})` : ""}`
-      : `Repository set to ${repo}. Attach a credential to verify access`,
+    toast: `Repository changed: ${from ?? gh.repo} → ${repo} (default branch ${defaultBranch})`,
     changed: true,
     repo,
   };
