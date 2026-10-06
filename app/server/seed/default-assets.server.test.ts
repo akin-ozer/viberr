@@ -1012,6 +1012,12 @@ describe("the seeded-prompt sweep: the shipped prompts say what the code does", 
 
     expect(operator).toContain("call `ask_for_repository` with the reason and stop (ruling 672)");
     expect(operator).toContain("while it stands the question is not yours to ask again");
+    // The doctrine is the same text for every operator, so it says when the
+    // tool is absent instead of telling an operator without it to call it.
+    expect(operator).toContain(
+      "The tool is in your toolkit only while the question is yours to ask. It is absent once a person decided the board keeps none",
+    );
+    expect(operator).toContain("and when opening decision packets is not granted to you. Without it, deliver what can be delivered as files");
     expect(skill).toContain("- `ask_for_repository` asks a person to connect a repository to a board that has none (ruling 672)");
     expect(definition).toContain("A board that builds software can start without one too (ruling 672)");
     expect(handbook).toContain("which it may connect later (ruling 672)");

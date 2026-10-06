@@ -5988,6 +5988,28 @@ describe("delegated-ask disclosure is mechanical, not just prose (R20-9)", () =>
     await interruptRunningRuns("VIB-1");
   });
 
+  it("ruling 672: the repository question, asked after prompting an agent, carries the disclosure too", async () => {
+    // CANARY: open it through the plain packet writer and the one packet that
+    // decides the whole board reaches a person with nothing said about the
+    // agent the operator asked first.
+    deployRoster(PACKET_POLICY);
+    seedTask("impl");
+    const toolkit = await toolkitFor();
+    const prompt = toolkit.tools.find((t) => t.name === "run_agent")!;
+    await prompt.handler(
+      { profileId: "developer", prompt: "Which repository holds the checkout page?", delivers: true },
+      {},
+    );
+    const ask = toolkit.tools.find((t) => t.name === "ask_for_repository")!;
+    await ask.handler({ reason: "VIB-1 changes the checkout page's code." }, {});
+
+    const packet = task().packet!;
+    expect(packet.title).toBe("Connect a repository to Viberr Core?");
+    expect(packet.body).toContain("VIB-1 changes the checkout page's code.");
+    expect(packet.body).toContain("the operator prompted Dev on this task");
+    await interruptRunningRuns("VIB-1");
+  });
+
   it("discloses even when the model leaves the body empty", async () => {
     deployRoster(PACKET_POLICY);
     seedTask("impl");

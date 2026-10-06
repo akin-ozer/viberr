@@ -15,6 +15,7 @@ import {
   type YamlMapping,
 } from "~/server/files/frontmatter.server";
 import { readZip, writeZip, type ZipFileInput } from "~/server/files/zip.server";
+import { isNoRepositoryRulingDoc } from "~/shared/repository-ask";
 import { KB_REFRESH_MODES, type KbRefreshMode } from "./resources.server";
 
 /**
@@ -104,6 +105,18 @@ export interface BoardDefinition {
 export interface BoardFolderFile {
   path: string;
   data: Buffer;
+}
+
+/**
+ * Ruling 672: the documents of a knowledge base that a board file carries:
+ * every one but a project's decision that its board connects no repository
+ * (`no-repository-<slug>.md`), which is one person's, on one instance. An
+ * export writes these, the reader leaves such a document out of a file that
+ * holds one, and an import compares the instance's folder through this too,
+ * so a board imported beside its source still finds its rulings "Already here".
+ */
+export function boardKbFiles(files: readonly BoardFolderFile[]): BoardFolderFile[] {
+  return files.filter((f) => !isNoRepositoryRulingDoc(f.path));
 }
 
 /** A board file unpacked into its parts. */
@@ -273,7 +286,9 @@ export function readBoardFile(bytes: Uint8Array): BoardBundle {
     } else if (top === "skills" && name && segments.length > 2) {
       addTo(bundle.skills, name, { path: segments.slice(2).join("/"), data: file.data });
     } else if (top === "kb" && name && segments.length > 2) {
-      addTo(bundle.kbs, name, { path: segments.slice(2).join("/"), data: file.data });
+      const [kept] = boardKbFiles([{ path: segments.slice(2).join("/"), data: file.data }]);
+      if (kept) addTo(bundle.kbs, name, kept);
+      else bundle.ignored.push(rel);
     } else {
       bundle.ignored.push(rel);
     }

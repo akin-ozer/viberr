@@ -1426,6 +1426,50 @@ describe("Codex structured operator completion", () => {
     expect(body).toContain("not by that agent");
   });
 
+  it("ruling 672: a plan that prompts an agent and then asks for a repository discloses the consultation on that packet too", async () => {
+    // CANARY: open the repository question through the plain packet writer
+    // and the one packet that decides the whole board reaches a person with
+    // nothing said about the agent the operator asked first.
+    deployWithDeveloper("direct");
+    await start();
+    adapter.finish(
+      store,
+      JSON.stringify({
+        reasoning: "",
+        actions: [
+          {
+            tool: "run_agent",
+            profileId: "developer",
+            delivers: true,
+            toStageId: null,
+            packetType: null,
+            text: "Which repository holds the checkout page?",
+            reason: null,
+            packetOptions: null,
+          },
+          {
+            tool: "ask_for_repository",
+            profileId: null,
+            delivers: null,
+            toStageId: null,
+            packetType: null,
+            text: null,
+            reason: "VIB-1 changes the checkout page's code.",
+            packetOptions: null,
+          },
+        ],
+      }),
+      "finished",
+    );
+    await eventually(() => {
+      expect(task().packet).not.toBeNull();
+    });
+    expect(task().packet!.title).toBe("Connect a repository to Viberr Core?");
+    const body = task().packet!.body ?? "";
+    expect(body).toContain("VIB-1 changes the checkout page's code.");
+    expect(body).toContain("the operator prompted Dev on this task");
+  });
+
   it("R20-9: a REFUSED prompt discloses nothing — it consulted nobody", async () => {
     // The guard's other half: `noteConsultedProfile` records only `done`, so a
     // hand-off the policy denied cannot manufacture a consultation that never
@@ -6329,10 +6373,12 @@ describe("R19-1 — the operator's read-only repository view", () => {
     expect(adapter7.pending?.spec.allowedTools).not.toContain("mcp__viberr__ask_for_repository");
   });
 
-  it("ruling 672: an operator whose packets are withheld is not told to call a tool it does not have", async () => {
+  it("ruling 672: an operator whose packets are withheld is not told by its workspace section to call a tool it does not have", async () => {
     // CANARY: word the workspace section from the project alone and an
     // operator with `generate-packets` off reads "call `ask_for_repository`"
-    // with no such tool mounted.
+    // with no such tool mounted. (The shipped doctrine is one text for every
+    // operator; it says when the tool is absent, which the seed's own test
+    // holds.)
     deploy(null);
     const project = readProjectFile({ projectSlug: store7.slug, dataRoot: store7.dataRoot })!;
     writeProject(store7.dataRoot, {

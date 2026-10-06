@@ -554,16 +554,56 @@ describe("what the review of ruling 672 found (each a refusal or a record that w
   });
 
   it("is waiting on a project admin and nobody else, and anyone who cannot answer sends it to one", async () => {
-    // CANARY: count it for whoever resolves packets and a maintainer's inbox
-    // holds a decision they cannot make; route it to "a maintainer" and the
-    // people told cannot answer it either.
+    // CANARY: count it for whoever resolves packets, or for the task's owner,
+    // and an inbox holds a decision its person cannot make; route it to "a
+    // maintainer" and the people told cannot answer it either; leave it out
+    // of what the controller lists and a maintainer who asks what is waiting
+    // is told "nothing" about a packet on their own board.
     const store = board("off");
+    // The task's owner is a contributor: the owner exception is not a way in.
+    writeTask(store.dataRoot, store.slug, {
+      frontmatter: baseTaskFrontmatter("VIB-1", { stage: "impl", readiness: "ready", ownerUserId: store.users.selin.id }),
+      goal: "Change the checkout page.",
+    });
     await ask(store);
     rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
-    const mine = (user: TestStoreUser) =>
-      decisionsRequiring(store.db, user.id, { projectSlug: store.slug }).mine.map((d) => d.taskKey);
-    expect(mine(store.users.arda)).toEqual(["VIB-1"]);
-    expect(mine(store.users.murat)).toEqual([]);
+    const waiting = (user: TestStoreUser) => {
+      const found = decisionsRequiring(store.db, user.id, { projectSlug: store.slug });
+      return { mine: found.mine.map((d) => d.taskKey), needsProjectAdmin: found.needsProjectAdmin.map((d) => d.taskKey) };
+    };
+    expect(waiting(store.users.arda)).toEqual({ mine: ["VIB-1"], needsProjectAdmin: [] });
+    expect(waiting(store.users.murat)).toEqual({ mine: [], needsProjectAdmin: ["VIB-1"] });
+    expect(waiting(store.users.selin)).toEqual({ mine: [], needsProjectAdmin: ["VIB-1"] });
+
+    // What the controller tells a maintainer who asks what is waiting.
+    const listed = z
+      .object({
+        forYou: z.array(z.object({ task: z.string() })),
+        waitingOnAProjectAdmin: z.array(z.object({ task: z.string(), packet: z.object({ title: z.string() }) })),
+        howToAnswer: z.string(),
+      })
+      .parse(
+        JSON.parse(
+          await callToolText(
+            buildControllerToolkit({
+              db: store.db,
+              ctx: at(store),
+              user: { id: store.users.murat.id, email: store.users.murat.email, name: store.users.murat.name },
+              projectSlug: store.slug,
+            }).tools,
+            "list_decisions",
+            {},
+          ),
+        ),
+      );
+    expect(listed.forYou).toEqual([]);
+    expect(listed.waitingOnAProjectAdmin).toEqual([
+      { task: "VIB-1", packet: { title: "Connect a repository to Viberr Core?" } },
+    ]);
+    expect(listed.howToAnswer).toBe(
+      "Nothing here is this person's to answer. Each decision under `waitingOnAProjectAdmin` asks whether the board connects a repository. " +
+        "Both answers decide the board, so a project admin gives one: this person opens the task page at `answerAt` and sends it to one.",
+    );
 
     await expect(
       requestPacketMaintainerDecision(store.db, { projectSlug: store.slug, taskKey: "VIB-1" }, actorOf(store.users.arda), at(store)),

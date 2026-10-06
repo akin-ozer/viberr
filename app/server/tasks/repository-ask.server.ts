@@ -270,23 +270,31 @@ export async function connectionOutlivedItsDecision(
   actor: TaskActor,
   cause: Error,
 ): Promise<AppError> {
+  // What the refusal says was settled is what was: a task whose question
+  // could not be answered is named, and a failure to settle at all is said.
+  let settled = "The repository stays connected, and every task still asking was answered.";
   try {
-    await afterRepositoryConnected(
+    const outcome = await afterRepositoryConnected(
       db,
       ctx,
       { projectSlug: input.projectSlug, repo: input.repo, byController: false },
       actor,
     );
+    if (outcome.missed.length > 0) {
+      settled = `The repository stays connected. The question on ${outcome.missed.map((m) => m.taskKey).join(", ")} is still open: answer it there.`;
+    }
   } catch (error) {
     logger.warn("a connection whose decision was not recorded could not be settled", {
       taskKey: input.taskKey,
       err: toError(error),
     });
+    settled =
+      "The repository stays connected. What that settles on the board's other tasks could not be recorded: a question still open on one is answered there.";
   }
   const why = cause instanceof AppError ? cause.userMessage : cause.message;
   return AppError.conflict(
     `${input.repo} was connected to this board, but the decision could not be recorded on ${input.taskKey}: ${endSentence(why)} ` +
-      "The repository stays connected, and every task still asking was answered. If no agent here may write it yet, ask the controller to switch the board to pull requests.",
+      `${settled} If no agent here may write it yet, ask the controller to switch the board to pull requests.`,
   );
 }
 

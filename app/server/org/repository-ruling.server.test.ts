@@ -19,7 +19,7 @@ import {
   removeNoRepositoryRuling,
   repositoryAskState,
 } from "./repository-ruling.server";
-import { saveKnowledgeBase } from "./resources.server";
+import { deleteKnowledgeBase, saveKnowledgeBase } from "./resources.server";
 import { setProjectRulingsKb } from "~/features/project-settings/settings-actions.server";
 
 /**
@@ -184,8 +184,34 @@ describe("the ruling that a board connects no repository (ruling 672)", () => {
     expect(noRepositoryRuling(store.slug, at)).toEqual({ kb: "core-house-rules", doc: DOC });
     expect(repositoryAskState(projectOf(store), at)).toBe("declined");
 
-    // Clearing the rulings knowledge base lifts every ruling, this one too.
+    // Clearing the rulings knowledge base lifts every ruling, this one too,
+    // and leaves no copy to come back. CANARY: keep the document in the old
+    // folder and a board that connects a repository next, then names that
+    // knowledge base again, tells every run it connects none.
     await setProjectRulingsKb(store.db, { projectSlug: store.slug, dir: null }, actorOf(store.users.arda), at);
+    expect(repositoryAskState(projectOf(store), at)).toBe("open");
+    expect(existsSync(path.join(kbDirPath("core-house-rules", store.dataRoot), DOC))).toBe(false);
+    expect(listAuditEvents(store.db, { action: "project.repo.ruling_removed" })[0]?.details).toEqual({
+      kb: "core-house-rules",
+      doc: DOC,
+      repo: null,
+    });
+    await setProjectRulingsKb(store.db, { projectSlug: store.slug, dir: "core-house-rules" }, actorOf(store.users.arda), at);
+    expect(repositoryAskState(projectOf(store), at)).toBe("open");
+  });
+
+  it("stays named when its knowledge base is deleted: the project is not quietly left with no rulings setting", async () => {
+    // CANARY: clear `rulingsKb` on a delete and the project's settings stop
+    // saying its rulings knowledge base is missing, with no record that
+    // anything changed. (A rename, above, is followed; a delete is not.)
+    const store = repoLess(null);
+    const at = { dataRoot: store.dataRoot };
+    const kb = await saveKnowledgeBase(store.db, { name: "house-rules", refresh: "on change" }, actorOf(store.users.arda), at);
+    writeProject(store.dataRoot, { ...projectOf(store), rulingsKb: "house-rules" });
+    await record(store);
+    await deleteKnowledgeBase(store.db, kb.kb.id, actorOf(store.users.arda), at);
+    expect(projectOf(store).rulingsKb).toBe("house-rules");
+    // The decision went with the folder, so the question may be asked again.
     expect(repositoryAskState(projectOf(store), at)).toBe("open");
   });
 

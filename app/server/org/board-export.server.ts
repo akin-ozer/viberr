@@ -20,6 +20,7 @@ import {
   BOARD_FILE_EXTENSION,
   BOARD_FILE_LIMITS,
   BOARD_FILE_MAX_BYTES,
+  boardKbFiles,
   serializeBoardFile,
   writeBoardFile,
   type BoardDefinition,
@@ -35,7 +36,6 @@ import {
   listSkills,
   type OrgSeedContext,
 } from "./resources.server";
-import { isNoRepositoryRulingDoc } from "~/shared/repository-ask";
 import { readStoreFolderFiles } from "./store-files.server";
 
 /**
@@ -304,9 +304,7 @@ export function exportBoard(
     // person's, on this instance, and does not travel with the board.
     kbFiles.set(
       dir,
-      kb.folderExists
-        ? readStoreFolderFiles(kbDirPath(dir, ctx.dataRoot)).filter((f) => !isNoRepositoryRulingDoc(f.path))
-        : [],
+      kb.folderExists ? boardKbFiles(readStoreFolderFiles(kbDirPath(dir, ctx.dataRoot))) : [],
     );
   }
   const skillRows = new Map(listSkills(db, ctx).map((s) => [s.name, s]));

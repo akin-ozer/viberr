@@ -68,6 +68,11 @@ export interface DecisionsForUser {
   mine: DecisionRef[];
   /** Open decisions the user could act on ONLY via the org-admin override. */
   overrideEligible: DecisionRef[];
+  /** Ruling 672: open repository questions on boards this user is a member
+   *  of and cannot answer. Both answers decide the board, so they wait on a
+   *  project admin. Never this user's inbox; listed so that whoever asks what
+   *  is waiting is not told "nothing" about a packet they can see. */
+  needsProjectAdmin: DecisionRef[];
 }
 
 /** The columns the open-decision query below selects. A type alias, not an
@@ -209,6 +214,7 @@ export function decisionsRequiring(
 
   const mine: DecisionRef[] = [];
   const overrideEligible: DecisionRef[] = [];
+  const needsProjectAdmin: DecisionRef[] = [];
   // A task needs exactly one human action, so it contributes exactly one
   // decision even when it carries a packet AND is acceptance-ready.
   const seen = new Set<string>();
@@ -245,6 +251,8 @@ export function decisionsRequiring(
       // (resolveProjectAuthority grants it whenever the member role is below the
       // required tier, not only to non-members).
       overrideEligible.push(ref);
+    } else if (boardDecision && role !== null) {
+      needsProjectAdmin.push(ref);
     }
     // viewer / contributor-non-owner (or owner of a maintainer-only rec) with no
     // org-admin override → nothing.
@@ -280,5 +288,5 @@ export function decisionsRequiring(
     );
   }
 
-  return { mine, overrideEligible };
+  return { mine, overrideEligible, needsProjectAdmin };
 }

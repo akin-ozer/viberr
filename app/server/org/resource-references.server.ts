@@ -170,11 +170,16 @@ async function rewriteProjects(
           };
         });
         // Ruling 672: the project's RULINGS knowledge base is a reference to
-        // the same folder (ruling 239), and it was left pointing at the old
-        // name: every run then read no rulings at all, and a decision kept
-        // there (that the board connects no repository) stopped standing.
+        // the same folder (ruling 239), and a RENAME left it pointing at the
+        // old name: every run then read no rulings at all, and a decision kept
+        // there (that the board connects no repository) stopped standing. A
+        // DELETE leaves the name as it is, as before: the project's settings
+        // and its runs then say the knowledge base does not resolve, where
+        // clearing it here would say nothing to anyone.
         const rulingsKb =
-          kind === "kb" && (fm.rulingsKb ?? null) === from ? to : (fm.rulingsKb ?? null);
+          kind === "kb" && to !== null && (fm.rulingsKb ?? null) === from
+            ? to
+            : (fm.rulingsKb ?? null);
         if (rulingsKb !== (fm.rulingsKb ?? null)) changed = true;
         if (!changed) return parsed;
         return { ...parsed, frontmatter: { ...fm, agents, rulingsKb } };

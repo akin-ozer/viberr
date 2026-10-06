@@ -1702,9 +1702,21 @@ export function DecisionPacket({
         {!canResolve && (
           <p className="deny-note spaced">
             <Icon name="lock" />
-            You can&rsquo;t resolve this decision: a maintainer, an admin, or
-            this task&rsquo;s owner can. You can still comment or ask the operator
-            below.
+            {boardDecision ? (
+              // Ruling 672: neither a maintainer nor the task's owner can
+              // answer the repository question, so the note names who does.
+              <>
+                You can&rsquo;t answer this decision: both answers decide the
+                board, so a project admin gives one. You can still comment or
+                ask the operator below.
+              </>
+            ) : (
+              <>
+                You can&rsquo;t resolve this decision: a maintainer, an admin, or
+                this task&rsquo;s owner can. You can still comment or ask the
+                operator below.
+              </>
+            )}
           </p>
         )}
 

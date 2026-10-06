@@ -4165,7 +4165,7 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
   add(
     tool(
       "list_decisions",
-      "Everything on a board that is waiting for a PERSON to decide: open packets with all their options, pending operator recommendations, and completions ready to accept. Read-only, and deliberately so (ruling 251): nothing here answers a decision. It exists so you can brief the person fully and hand them the one link that opens the control. Every packet carries `ownWords` as well as its options: the card always offers a free-text directive as its last choice, so a person is never limited to the options on it - brief that too, especially when none of the options fit. Every entry also carries `releases`, split by WHEN (ruling 336): `releases.direct` are the tasks whose LAST wait is this one (they move the moment it completes), and `releases.downstream` are the rest of the chain, each of which needs one of the direct ones to be built, reviewed and accepted first. Only `direct` is a number about this click: live, one acceptance freed its two direct dependents in two seconds and its one downstream task fifty-three minutes later, after another full cycle. Both count only waits that can actually clear. Read either as what a decision UNBLOCKS, never as what it FINISHES: an acceptance that releases nothing still completes real work and usually needs one click, while a design packet with two direct may be the longer road. `kind` and `notAcceptableReason` carry that other half. Scoped to the conversation's project by default, or pass `projectSlug`; with neither it reads every project this person can see.",
+      "Everything on a board that is waiting for a PERSON to decide: open packets with all their options, pending operator recommendations, and completions ready to accept. Read-only, and deliberately so (ruling 251): nothing here answers a decision. It exists so you can brief the person fully and hand them the one link that opens the control. Every packet carries `ownWords` as well as its options: the card always offers a free-text directive as its last choice, so a person is never limited to the options on it - brief that too, especially when none of the options fit. Every entry also carries `releases`, split by WHEN (ruling 336): `releases.direct` are the tasks whose LAST wait is this one (they move the moment it completes), and `releases.downstream` are the rest of the chain, each of which needs one of the direct ones to be built, reviewed and accepted first. Only `direct` is a number about this click: live, one acceptance freed its two direct dependents in two seconds and its one downstream task fifty-three minutes later, after another full cycle. Both count only waits that can actually clear. Read either as what a decision UNBLOCKS, never as what it FINISHES: an acceptance that releases nothing still completes real work and usually needs one click, while a design packet with two direct may be the longer road. `kind` and `notAcceptableReason` carry that other half. `waitingOnAProjectAdmin` lists the repository questions (ruling 672) this person can see and cannot answer: say a project admin answers them, and never count them as this person's. Scoped to the conversation's project by default, or pass `projectSlug`; with neither it reads every project this person can see.",
       {
         projectSlug: z.string().optional().describe("One project. Omit inside a project conversation to use it; omit outside one to read every project this person can see."),
         taskKey: z.string().optional().describe("Just this task. Defaults to the conversation's task when it is anchored to one."),
@@ -4301,6 +4301,10 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
 
         const forYou = render(found.mine);
         const viaOverride = render(found.overrideEligible);
+        // Ruling 672: a repository question this person can see and cannot
+        // answer. Left out, a maintainer who asked what was waiting was told
+        // "nothing" about a packet that `run_agent_on_task` then refused on.
+        const forProjectAdmin = render(found.needsProjectAdmin);
         return json({
           forYou,
           // Named separately and never folded into the count: reach as an org
@@ -4308,10 +4312,17 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
           // draws), and telling someone these are "waiting on you" would be
           // false.
           onlyViaOrgAdminOverride: viaOverride,
+          // Never this person's to answer, and never counted as theirs.
+          waitingOnAProjectAdmin: forProjectAdmin,
           howToAnswer:
-            forYou.length + viaOverride.length === 0
-              ? "Nothing is waiting on a person here."
-              : "Open the task page at `answerAt`, pick the option by its number, and confirm. A packet also takes a typed note that is recorded on the task's contract and read by every later run.",
+            (forYou.length + viaOverride.length === 0
+              ? forProjectAdmin.length === 0
+                ? "Nothing is waiting on a person here."
+                : "Nothing here is this person's to answer."
+              : "Open the task page at `answerAt`, pick the option by its number, and confirm. A packet also takes a typed note that is recorded on the task's contract and read by every later run.") +
+            (forProjectAdmin.length > 0
+              ? " Each decision under `waitingOnAProjectAdmin` asks whether the board connects a repository. Both answers decide the board, so a project admin gives one: this person opens the task page at `answerAt` and sends it to one."
+              : ""),
         });
       }),
     ),

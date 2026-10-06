@@ -181,11 +181,15 @@ export async function recordNoRepositoryRuling(
 }
 
 /**
- * The project names another rulings knowledge base, so the decision goes with
- * it: the document is written into the new one and taken out of the old. The
- * decision is the board's, not the knowledge base's, and a project that only
- * changed where its rulings live has not been asked again. A project that
- * clears its rulings knowledge base keeps no rulings, this one included.
+ * The project names another rulings knowledge base, or none: the decision is
+ * the board's, not the knowledge base's, so it goes where the project's
+ * rulings go. Named another, the document is written into the new one and
+ * taken out of the old: a project that only changed where its rulings live
+ * has not been asked again. Cleared, the project keeps no rulings, this one
+ * included, and the document is removed. Either way the old knowledge base
+ * keeps no copy: one left behind would come back as a binding ruling if the
+ * project named that knowledge base again, on a board that may have a
+ * repository by then.
  */
 export function moveNoRepositoryRuling(
   db: DatabaseSync,
@@ -194,15 +198,29 @@ export function moveNoRepositoryRuling(
   ctx: RulingContext = {},
 ): void {
   const standing = rulingIn(input.fromKb, input.projectSlug, ctx);
-  if (!standing || input.toKb === null || input.toKb === input.fromKb) return;
+  if (!standing || input.toKb === input.fromKb) return;
   const from = kbStoreTargetForDir(db, standing.kb, ctx);
-  const to = kbStoreTargetForDir(db, input.toKb, ctx);
-  if (!from || !to) return;
-  const text = readFileSync(path.join(from.rootAbs, standing.doc), "utf8");
-  writeStoreDoc(db, to, [], standing.doc, text, actor, { overwrite: true });
+  if (!from) return;
+  if (input.toKb !== null) {
+    const to = kbStoreTargetForDir(db, input.toKb, ctx);
+    if (!to) return;
+    const text = readFileSync(path.join(from.rootAbs, standing.doc), "utf8");
+    writeStoreDoc(db, to, [], standing.doc, text, actor, { overwrite: true });
+    publishResourceUpdated("kb", to.id);
+  }
   deleteStoreNode(db, from, [standing.doc], actor);
   publishResourceUpdated("kb", from.id);
-  publishResourceUpdated("kb", to.id);
+  if (input.toKb === null) {
+    recordAudit(db, {
+      action: "project.repo.ruling_removed",
+      actor,
+      subjectKind: "project",
+      subjectId: input.projectSlug,
+      projectSlug: input.projectSlug,
+      // No repository: the project stopped naming a rulings knowledge base.
+      details: { kb: standing.kb, doc: standing.doc, repo: null },
+    });
+  }
 }
 
 /**

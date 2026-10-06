@@ -838,7 +838,9 @@ contributor-owner can `request-maintainer-decision`, which notifies and audits
 `task.packet.escalated` without touching the packet. On the repository question a
 maintainer is stranded too: the same intent sends it to a project admin (its note, its
 notification "Decision needs a project admin: …" and its toast say so), and
-`decisionsRequiring` counts that packet as waiting on a project admin only.
+`decisionsRequiring` counts that packet as waiting on a project admin only, and lists it
+for a member who cannot answer under `needsProjectAdmin`, which the controller's
+`list_decisions` shows as `waitingOnAProjectAdmin`.
 `packetIdentity` (the id, or a content fingerprint) is snapshotted before any await,
 re-compared before the irreversible GitHub write and again inside the file lock; a
 replaced packet answers "This decision was replaced by a newer one." Confirming any

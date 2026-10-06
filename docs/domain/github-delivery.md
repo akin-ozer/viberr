@@ -160,8 +160,10 @@ characters; last 8 lines, 600 characters.
   board import dialog has the same one); the controller leaves `owner` and `repoName`
   out. Creation's reply says so (`SOFTWARE_WITHOUT_REPOSITORY_NOTE`).
 - **The operator asks for a repository once** (ruling 672). On a project with no
-  repository, an operator whose task needs one (its goal changes a codebase or names a
-  repository, or a person wants a pull request) calls `ask_for_repository`. It opens the
+  repository, an operator whose task needs one (its goal changes a repository's code,
+  or it has to ship as a pull request) calls `ask_for_repository`. A task that only
+  reads a repository is not this question: a project admin attaches one for the agents
+  to read in the project's settings. It opens the
   one packet whose answers act on the board, with `cause: repository:<slug>`, so an
   answer on one task reaches every task that asked. Both answers take `edit-policy`:
   - `connect_repository`: the person types `owner/name` (the card's box, opened with the
@@ -188,8 +190,12 @@ characters; last 8 lines, 600 characters.
     its workspace section says not to ask. Deleting the document makes the question
     askable again. It moves with the project when the project names another rulings
     knowledge base, a rename of the knowledge base follows into `rulingsKb`, and a board
-    file leaves it out of the knowledge base it exports. Clearing the project's rulings
-    knowledge base lifts it with every other ruling.
+    file leaves it out of the knowledge base it carries (`boardKbFiles`: an export
+    writes none, an import takes none from a file and compares the instance's folder
+    without it). Clearing the project's rulings knowledge base lifts it with every other
+    ruling and removes the document, so it cannot come back when that knowledge base is
+    named again. A deleted knowledge base takes the document with it and leaves
+    `rulingsKb` naming it, as before.
   A repository attached any other way (project settings, the controller's
   `connect_project_repository`) removes that document (`project.repo.ruling_removed`)
   and answers every task still asking. The settings door starts no controller; the

@@ -140,4 +140,28 @@ describe("ruling 672: the repository question's card", () => {
     expect(admin.container.textContent).not.toContain("a project admin gives one");
     expect(admin.queryByRole("button", { name: "Send to a project admin" })).toBeNull();
   });
+
+  it("tells a person who resolves no packets that a project admin answers, not a maintainer or the task's owner", () => {
+    // CANARY: keep the sentence every other packet shows and a viewer reads
+    // that a maintainer or the task's owner can answer, under two answers
+    // each marked as a project admin's.
+    const { container } = render(
+      <DecisionPacket
+        packet={QUESTION}
+        busy={false}
+        canResolve={false}
+        canResolveCompletion={false}
+        canEditGoal={false}
+        canArchive={false}
+        onResolveCustom={() => {}}
+        onResolve={() => {}}
+        onAsk={() => {}}
+      />,
+    );
+    const note = [...container.querySelectorAll(".deny-note")].map((n) => n.textContent ?? "").join(" ");
+    expect(note).toContain(
+      "You can\u2019t answer this decision: both answers decide the board, so a project admin gives one. You can still comment or ask the operator below.",
+    );
+    expect(note).not.toContain("owner can");
+  });
 });

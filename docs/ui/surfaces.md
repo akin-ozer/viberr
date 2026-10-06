@@ -637,8 +637,11 @@ base`, `Edit MCP server`, `GitHub sign-in`).
   the repository the operator could name and kept apart from the note the other answer
   takes. Both of its answers are a project admin's (`edit-policy`): for anyone else each
   option is inert and says so, the card reads "Both answers decide the board, so a project
-  admin gives one", and "Send to a project admin" sends it up. A board that had a
-  repository before states its records in an "Earlier records" observation.
+  admin gives one", and "Send to a project admin" sends it up. A person who resolves no
+  packets reads "You can't answer this decision: both answers decide the board, so a
+  project admin gives one", where every other packet names a maintainer, an admin or the
+  task's owner. A board that had a repository before states its records in an "Earlier
+  records" observation.
 - **The task page's agent components** (ruling 500, AICSS's free components redrawn in the
   app's tokens): the decision packet is an approval card, a tile in its tone (amber for a
   question with a hand, coral for a block with an alert) beside the kind as its title and

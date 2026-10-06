@@ -488,6 +488,38 @@ describe("ruling 672: a board file does not carry a decision made on this instan
     expect(rulings.length).toBeGreaterThan(0);
     expect(paths.filter((p) => p.endsWith(ruling.doc))).toEqual([]);
   });
+
+  it("still finds the board's rulings already here beside its source, and takes no such document from a file that holds one", async () => {
+    // CANARY: compare the instance's whole folder with the file and a board's
+    // rulings read "Differs" from the day its decision is recorded, so an
+    // import beside the source forks the two boards' rulings by default; read
+    // the document out of a file and a board is brought up already refused.
+    const source = await sourceBoard();
+    const ruling = await recordNoRepositoryRuling(
+      source.db,
+      { projectSlug: source.slug, byName: "Arda Test", taskKey: "REL-1", at: "2026-10-06T18:00:00.000Z" },
+      actorOf(source.users.arda),
+      { dataRoot: source.dataRoot },
+    );
+    const beside = previewBoardImport(source.db, exported(source), { dataRoot: source.dataRoot });
+    expect(beside.resources.find((r) => r.kind === "kb")).toMatchObject({ key: ruling.kb, status: "same" });
+
+    // A file that holds one all the same: hand-made, or a copied folder.
+    const entries = readZip(exported(source).bytes, { maxEntries: 200, maxTotalBytes: 10_000_000 });
+    const folder = entries[0]!.path.split("/")[0]!;
+    const carried = `${folder}/kb/${ruling.kb}/${ruling.doc}`;
+    const file = {
+      name: "carried.zip",
+      bytes: writeZip([...entries, { path: carried, data: Buffer.from("# Viberr Core connects no repository\n") }], new Date()),
+    };
+    const target = targetStore();
+    expect(previewBoardImport(target.db, file, { dataRoot: target.dataRoot }).notes).toContainEqual(
+      expect.stringContaining(`left out: \`kb/${ruling.kb}/${ruling.doc}\``),
+    );
+    await importInto(target, file);
+    expect(existsSync(path.join(kbDirPath(ruling.kb, target.dataRoot), "rulings.md"))).toBe(true);
+    expect(existsSync(path.join(kbDirPath(ruling.kb, target.dataRoot), ruling.doc))).toBe(false);
+  });
 });
 
 describe("ruling 671: an import names a repository GitHub confirms", () => {
