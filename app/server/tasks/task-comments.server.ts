@@ -6,6 +6,7 @@
  */
 
 import { existsSync } from "node:fs";
+import { storedFileName } from "~/server/files/file-store-root.server";
 import {
   checkAttachmentBatch,
   withAttachmentClaims,
@@ -524,8 +525,9 @@ function commentFiles(
     throw AppError.validation(`${input.taskKey} is archived. Restore it before attaching a file.`);
   }
   const names = checkAttachmentBatch(files, MESSAGE_BATCH);
+  // Ruling 675: composed, as `names` are and as the store resolves them.
   const agentSaved = new Set(
-    existing.parsed.timeline.flatMap((e) => (e.actor.kind === "agent" ? (e.attachments ?? []) : [])),
+    existing.parsed.timeline.flatMap((e) => (e.actor.kind === "agent" ? (e.attachments ?? []).map(storedFileName) : [])),
   );
   const listed = names.map((name, i) => `\`${name}\` (${attachmentKb(files[i]!.data.byteLength)})`).join(", ");
   const words = input.text.trim();

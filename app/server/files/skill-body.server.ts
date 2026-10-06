@@ -206,6 +206,35 @@ export function readSkillBodyDetailed(
   };
 }
 
+/**
+ * Ruling 679: how much of a skill a run handed its skills as prompt text
+ * cannot be given: the characters of its SKILL.md body past
+ * {@link SKILL_INJECTION_BUDGET}, 0 when it fits, null when it has no readable
+ * body. An agent that holds other skills ahead of this one is given less.
+ *
+ * A clipped skill says so to the run that received it and to a server log, and
+ * to nobody who could shorten it. Live on the AWS calculator board the
+ * controller, told to carry each round's rules into the agents' skills, grew
+ * the Estimate Judge's to 31,289 characters and the Cloud Solutions
+ * Architect's to 30,575; every save answered "updated", and the last 7,289 and
+ * 6,575 characters of them reached no run, the newest rules among them.
+ */
+export function skillBodyOverBudget(name: string, dataRoot?: string): { chars: number; over: number } | null {
+  let resolved: ReturnType<typeof resolveContainedSkillFile>;
+  try {
+    resolved = resolveContainedSkillFile(name, dataRoot);
+  } catch {
+    return null;
+  }
+  if ("reason" in resolved) return null;
+  try {
+    const chars = splitFrontmatter(readFileSync(resolved.file, "utf8")).body.trim().length;
+    return { chars, over: Math.max(0, chars - SKILL_INJECTION_BUDGET) };
+  } catch {
+    return null;
+  }
+}
+
 export interface SkillInjectionSet {
   /** The skills that contributed text, in declaration order. */
   parts: { name: string; body: string }[];

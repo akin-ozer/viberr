@@ -43,6 +43,44 @@ export type ControllerToolText = {
   content: ({ type: "text"; text: string } | { type: "image"; data: string; mimeType: string })[];
 };
 
+/**
+ * Ruling 677: the most text one controller tool reply carries, in UTF-8 bytes.
+ *
+ * The Claude CLI refuses an MCP result over 25,000 tokens (ruling 436), and
+ * what it hands the model instead is a path to a file with advice to grep it,
+ * tools the controller is denied. Live on the AWS calculator board
+ * `get_project` came to 93,696 characters, and on all three turns that called
+ * it the controller was told to read a file it could not open. Pretty-printed
+ * JSON runs about three bytes to a token, so 60,000 bytes stays under the cap
+ * with room for a reply that is denser than that.
+ */
+const CONTROLLER_REPLY_MAX_BYTES = 60_000;
+
+/**
+ * Ruling 677: a reply a turn can carry. One within {@link CONTROLLER_REPLY_MAX_BYTES}
+ * is returned as it is. A longer one is cut at the last line break that fits,
+ * and its first line says so, with the sizes, before anything else is read: a
+ * head the model can use and a plain account of what is missing, where the CLI
+ * would have returned neither. Each tool still bounds its own reply (a page, a
+ * limit, an excerpt); this is what stands behind the one that did not.
+ */
+function carriedReply(text: string): string {
+  const bytes = Buffer.byteLength(text, "utf8");
+  if (bytes <= CONTROLLER_REPLY_MAX_BYTES) return text;
+  const size = (n: number) => n.toLocaleString("en-US");
+  const note = (kept: number) =>
+    `[cut] This reply is ${size(bytes)} bytes and a turn carries ${size(CONTROLLER_REPLY_MAX_BYTES)}: ` +
+    `what follows is its first ${size(kept)}, and the rest is not here. ` +
+    "Ask for less (one item, a limit, a later page) rather than taking this as the whole of it.\n";
+  // Room for the note at its longest, then back to a line break and off any
+  // character the byte cut would have split.
+  const room = CONTROLLER_REPLY_MAX_BYTES - Buffer.byteLength(note(bytes), "utf8");
+  const head = Buffer.from(text, "utf8").subarray(0, room).toString("utf8").replace(/\uFFFD+$/, "");
+  const lineEnd = head.lastIndexOf("\n");
+  const kept = lineEnd > 0 ? head.slice(0, lineEnd) : head;
+  return note(Buffer.byteLength(kept, "utf8")) + kept;
+}
+
 /** Uniform not-visible copy: a missing project and a forbidden one read
  *  identically, so a probe cannot learn that a project exists (R15-4). */
 export function notVisible(slug: string): string {
@@ -115,7 +153,15 @@ export function controllerToolGuards(
     return async (): Promise<ControllerToolText> => {
       try {
         const answer = await fn();
-        return answer instanceof Object ? answer : textResult(answer);
+        // Ruling 677: no reply leaves here longer than a turn carries.
+        if (answer instanceof Object) {
+          return {
+            content: answer.content.map((part) =>
+              part.type === "text" ? { type: "text" as const, text: carriedReply(part.text) } : part,
+            ),
+          };
+        }
+        return textResult(carriedReply(answer));
       } catch (error) {
         if (error instanceof AppError) {
           const denied = error.status === 403 || error.status === 401;

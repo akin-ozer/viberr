@@ -339,6 +339,48 @@ describe("writeTaskAttachment", () => {
  * the server may read (another person's credentials, the store's state). No
  * reader of an attachment follows one, and no writer writes through one.
  */
+describe("ruling 675: an attachment's name across Unicode forms", () => {
+  const composed = "İçerik ve Eğitim Üretim Teklifi.txt";
+  const decomposed = composed.normalize("NFD");
+  const text = (value: string) => new TextEncoder().encode(value);
+
+  it("stores an upload under the composed name, whatever form the browser sent", () => {
+    // CANARY: drop `storedFileName` from `checkAttachmentUpload` and the file
+    // keeps the decomposed name a Mac sent, which no agent's typed path opens.
+    const root = mkdtempSync(path.join(tmpdir(), "viberr-675-"));
+    try {
+      const written = writeTaskAttachment("p1", "VIB-1", decomposed, text("the estate"), root);
+      expect(written.name).toBe(composed);
+      expect(readdirSync(path.join(root, "projects", "p1", "tasks", "VIB-1", "attachments"))).toEqual([composed]);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it("reads a file stored decomposed by the composed name, and an upload of that name replaces it", () => {
+    // CANARY: resolve attachments with `resolveStoreSegment` again and the
+    // composed name reads nothing on a disk that keeps names byte for byte,
+    // and the upload lands beside the old file as a second one named alike.
+    const root = mkdtempSync(path.join(tmpdir(), "viberr-675-"));
+    try {
+      const dir = path.join(root, "projects", "p1", "tasks", "VIB-1", "attachments");
+      mkdirSync(dir, { recursive: true });
+      writeFileSync(path.join(dir, decomposed), "stored before the ruling");
+      expect(path.basename(resolveTaskAttachment("p1", "VIB-1", composed, root))).toBe(decomposed);
+      expect(readTaskAttachment("p1", "VIB-1", composed, root)).toMatchObject({
+        kind: "text",
+        text: "stored before the ruling",
+      });
+      const again = writeTaskAttachment("p1", "VIB-1", composed, text("replaced"), root);
+      expect(again).toEqual({ name: decomposed, bytes: 8, replaced: true });
+      expect(readdirSync(dir)).toEqual([decomposed]);
+      expect(readFileSync(path.join(dir, decomposed), "utf8")).toBe("replaced");
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+});
+
 describe("ruling 552: a link in the attachments folder is never followed", () => {
   function plant() {
     root = mkdtempSync(path.join(tmpdir(), "viberr-attach-"));
@@ -465,6 +507,63 @@ describe("ruling 574: readTaskAttachment reads any text file", () => {
       const docx = readTaskAttachment("p1", "VIB-1", "report.docx", root);
       expect(docx).toEqual({
         unreadable: expect.stringContaining("`report.docx` is a binary .docx file (6 bytes): its bytes are not text."),
+      });
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+});
+
+describe("ruling 676: a text file's embedded files are named, not spelled out", () => {
+  it("reads a self-contained page as its markup, with each embedded image left out by its length", () => {
+    // CANARY: read the bytes as text without `withoutEmbeddedFiles` and the
+    // first page is base64 from its first line to its last, as it was for the
+    // controller on AWSC-117's report, and `nextOffset` sends the reader on
+    // through seventeen more pages of it.
+    const root = mkdtempSync(path.join(tmpdir(), "viberr-676-"));
+    try {
+      const image = "iVBORw0KGgo".repeat(6_000);
+      const dot = "R0lGODlhAQABAIAAAAAAAP///ywAAAAAAQABAAACAUwAOw==";
+      const page =
+        `<style>@page{background-image:url(data:image/png;base64,${image})}</style>\n` +
+        `<img class="logo" src="data:image/jpeg;base64,${image}==">\n` +
+        `<img class="dot" src="data:image/gif;base64,${dot}">\n` +
+        "<h1>1. Amaç ve Kapsam</h1>\n";
+      writeTaskAttachment("p1", "VIB-1", "report.html", new TextEncoder().encode(page), root);
+      const read = readTaskAttachment("p1", "VIB-1", "report.html", root);
+      expect(read).toEqual({
+        kind: "text",
+        name: "report.html",
+        bytes: new TextEncoder().encode(page).byteLength,
+        truncated: false,
+        text:
+          "<style>@page{background-image:url(data:image/png;base64,[66,000 base64 characters left out])}</style>\n" +
+          '<img class="logo" src="data:image/jpeg;base64,[66,002 base64 characters left out]">\n' +
+          `<img class="dot" src="data:image/gif;base64,${dot}">\n` +
+          "<h1>1. Amaç ve Kapsam</h1>\n",
+        leftOut:
+          "2 embedded files are left out of this text (132,002 base64 characters in all), each marked where it stands. " +
+          "Offsets count the text as it is returned here; the file on disk is whole.",
+      });
+      // The file itself keeps every byte.
+      expect(readFileSync(resolveTaskAttachment("p1", "VIB-1", "report.html", root), "utf8")).toBe(page);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it("says nothing was left out of a file that embeds nothing", () => {
+    // CANARY: set `leftOut` on every text read and a plain file claims a cut
+    // it never had.
+    const root = mkdtempSync(path.join(tmpdir(), "viberr-676-"));
+    try {
+      writeTaskAttachment("p1", "VIB-1", "notes.md", new TextEncoder().encode("base64 is an encoding\n"), root);
+      expect(readTaskAttachment("p1", "VIB-1", "notes.md", root)).toEqual({
+        kind: "text",
+        name: "notes.md",
+        bytes: 22,
+        truncated: false,
+        text: "base64 is an encoding\n",
       });
     } finally {
       rmSync(root, { recursive: true, force: true });

@@ -333,6 +333,8 @@ export function writeStoreFiles(
   dirPath: string[],
   files: UploadFileInput[],
   actor: AuditActor,
+  /** Ruling 678: the task whose file this is a copy of, for the audit row. */
+  copiedFrom?: { projectSlug: string; taskKey: string; name: string },
 ): UploadResult {
   const base = sanitizeDirPath(dirPath);
   const cleaned = files
@@ -377,12 +379,14 @@ export function writeStoreFiles(
 
   if (cleaned.length > 0) {
     touchResource(db, target);
+    const details: AuditDetails = { path: base.join("/"), count: cleaned.length };
+    if (copiedFrom) details.copiedFrom = copiedFrom;
     recordAudit(db, {
       action: "org.store.files_added",
       actor,
       subjectKind: `org_${target.kind}`,
       subjectId: target.id,
-      details: { path: base.join("/"), count: cleaned.length },
+      details,
     });
   }
   return {

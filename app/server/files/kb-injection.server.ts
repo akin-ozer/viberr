@@ -117,6 +117,23 @@ const KB_SIZE_CLASSES: readonly { below: number; label: string }[] = [
   { below: 1_000_000, label: "500k to 1M chars" },
 ];
 
+/** Ruling 678: a file's size as its index line prints it, in the wide classes
+ *  ruling 506 gives a document's, so a re-saved template does not move a
+ *  cached prompt. */
+const KB_FILE_SIZE_CLASSES: readonly { below: number; label: string }[] = [
+  { below: 10 * 1024, label: "under 10 KB" },
+  { below: 100 * 1024, label: "10 to 100 KB" },
+  { below: 1024 * 1024, label: "100 KB to 1 MB" },
+  { below: 10 * 1024 * 1024, label: "1 to 10 MB" },
+];
+
+function kbFileSizeClass(size: number): string {
+  return KB_FILE_SIZE_CLASSES.find((c) => size < c.below)?.label ?? "10 MB or more";
+}
+
+/** How many files that are not documents one index names (ruling 678). */
+const KB_INDEX_MAX_OTHER_FILES = 40;
+
 /** A document's size as its index line prints it (ruling 506). */
 export function kbSizeClass(size: number): string {
   return KB_SIZE_CLASSES.find((c) => size < c.below)?.label ?? "1M chars or more";
@@ -172,6 +189,22 @@ export interface KbDoc {
  *  walks the documents a run is indexed with the same symlink and containment
  *  rules. */
 export function collectKbDocs(dir: string): KbDoc[] {
+  return walkKbFiles(dir, isInjectableKbDoc);
+}
+
+/**
+ * Ruling 678: the files a knowledge base holds that are NOT documents: a
+ * report template, a sample workbook, a logo. A run reads none of them through
+ * `read_knowledge_doc`, which reads text, so the index names them apart and a
+ * run opens them from its shell. Walked by the rules {@link collectKbDocs}
+ * walks by.
+ */
+export function collectKbOtherFiles(dir: string): KbDoc[] {
+  return walkKbFiles(dir, (name) => !isInjectableKbDoc(name));
+}
+
+/** Every file under `dir` whose name `keep` takes, sorted by relative path. */
+function walkKbFiles(dir: string, keep: (fileName: string) => boolean): KbDoc[] {
   const out: KbDoc[] = [];
   // F10-18: never follow a symlink out of the KB root, and never loop on a
   // symlink cycle. `lstatSync` does not follow symlinks; symlinked entries are
@@ -215,7 +248,7 @@ export function collectKbDocs(dir: string): KbDoc[] {
       if (st.isSymbolicLink()) continue; // never follow symlinks out of the root
       if (st.isDirectory()) {
         walk(childAbs, [...relParts, entry], depth + 1);
-      } else if (st.isFile() && isInjectableKbDoc(entry)) {
+      } else if (st.isFile() && keep(entry)) {
         out.push({
           rel: [...relParts, entry].join("/"),
           abs: childAbs,
@@ -318,15 +351,27 @@ export function readKbIndexDetailed(
       );
     }
     const docs = collectKbDocs(dir);
-    if (docs.length === 0) {
-      logger.warn("declared knowledge base is empty; run proceeds WITHOUT it", {
-        kb: name,
-      });
-      return miss("its store folder holds no documents a run can read");
-    }
+    // Ruling 678: the files it holds that are not documents, which a run opens
+    // from its shell.
+    const others = collectKbOtherFiles(dir);
     // Ruling 578: a private folder is the server's alone, so a run with no
     // knowledge tool has no way in, and its index must not send it to a path.
     const hidden = isPrivateKbFolder(dir);
+    if (docs.length === 0 && (others.length === 0 || hidden)) {
+      logger.warn("declared knowledge base is empty; run proceeds WITHOUT it", {
+        kb: name,
+      });
+      return miss(
+        others.length === 0
+          ? "its store folder holds no documents a run can read"
+          : "its store folder holds no documents, and it is private (ruling 578), so no run can open the files it does hold",
+      );
+    }
+    if (docs.length === 0) {
+      // A folder of templates and nothing else is still given: its index is
+      // the list of those files.
+      return { body: `Folder \`${dir}\`. No documents.${otherFilesNote(others, false)}` };
+    }
     if (hidden && reader.hasKnowledgeTool === false) {
       return miss(
         "it is private (ruling 578): its folder is closed to every shell, and this run has no knowledge tool to read it",
@@ -366,10 +411,12 @@ export function readKbIndexDetailed(
       );
     }
     return {
-      body: hidden
-        ? `Folder \`${dir}\` is private (ruling 578): no shell on this run can open it, so read each document with \`read_knowledge_doc\`. ` +
-          `${countLabel(docs.length, "document")}:\n\n${entries.join("\n")}`
-        : `Folder \`${dir}\`. ${countLabel(docs.length, "document")}:\n\n${entries.join("\n")}`,
+      body:
+        (hidden
+          ? `Folder \`${dir}\` is private (ruling 578): no shell on this run can open it, so read each document with \`read_knowledge_doc\`. ` +
+            `${countLabel(docs.length, "document")}:\n\n${entries.join("\n")}`
+          : `Folder \`${dir}\`. ${countLabel(docs.length, "document")}:\n\n${entries.join("\n")}`) +
+        otherFilesNote(others, hidden),
     };
   } catch (error) {
     logger.warn("knowledge base unreadable; run proceeds WITHOUT it", {
@@ -378,6 +425,34 @@ export function readKbIndexDetailed(
     });
     return miss("its store folder could not be read");
   }
+}
+
+/**
+ * Ruling 678: the lines of an index that name the folder's other files.
+ *
+ * A knowledge base is a folder, and a board keeps there what its work must
+ * follow as well as what its agents must know: the report a delivery is laid
+ * out like, a sample workbook, a logo. None of those is a document, so the
+ * index said nothing of them and a run learned of one only when a rule spelled
+ * out its path. They are named here with where a run opens them. A private
+ * folder is closed to every shell and `read_knowledge_doc` reads documents, so
+ * there the lines say no run can open them rather than send one to try.
+ */
+function otherFilesNote(files: readonly KbDoc[], hidden: boolean): string {
+  if (files.length === 0) return "";
+  const listed = files.slice(0, KB_INDEX_MAX_OTHER_FILES);
+  const lines = listed.map((file) => `- \`${file.rel}\` · ${kbFileSizeClass(file.size)}`);
+  if (files.length > listed.length) {
+    lines.push(`- … ${countLabel(files.length - listed.length, "more file")} in this folder, not listed here.`);
+  }
+  const what = `${countLabel(files.length, "other file")} here ${files.length === 1 ? "is" : "are"} not ${files.length === 1 ? "a document" : "documents"}`;
+  return (
+    `\n\n${what}` +
+    (hidden
+      ? ", and no run can open them: the folder is closed to every shell and `read_knowledge_doc` reads documents only:"
+      : " (a template, a sample, an image): `read_knowledge_doc` does not read them, so open one from your shell in the folder above:") +
+    `\n\n${lines.join("\n")}`
+  );
 }
 
 export interface KbInjectionSet {

@@ -1053,6 +1053,35 @@ describe("the seeded-prompt sweep: the shipped prompts say what the code does", 
     }
   });
 
+  /**
+   * Rulings 677 to 679: asked to make a delivered report a board's template,
+   * the controller left it on the task that made it, and the skills it wrote
+   * had outgrown what a run is given without a save ever saying so.
+   */
+  it("rulings 677 to 679: the guide keeps a board's template in a knowledge base, a skill within what a run is given, and names the reader of one correction", async () => {
+    // CANARY: drop the guide's template bullet or the tool it names, its
+    // sentence on a skill's size, `read_kb_correction`, or the outgoing hash.
+    const { PRIOR_SHIPPED_HASHES, shippedCopyIsUnedited } = await import("./default-assets.server");
+    const { SKILL_INJECTION_BUDGET } = await import("~/server/files/skill-body.server");
+    const guide = read("controller-guide.skill.md");
+    const results = markdownSection(guide, "A board that delivers results");
+    expect(results).toContain("**A file the result must follow lives in a knowledge base, not on a task** (ruling 678).");
+    expect(results).toContain("rulings knowledge base with `copy_task_file_to_knowledge_base`");
+    expect(results).toContain("an archived task hands nothing over");
+    expect(results).toContain("Carry the step into the\n  skill of the agent that makes the result and of the reviewer that checks it");
+    // The number is the budget's own, so a change to one is a change to both.
+    expect(results).toContain(
+      `gets at most ${SKILL_INJECTION_BUDGET.toLocaleString("en-US")} characters of them, and \`save_skill\` says when\n  one is past that (ruling 679)`,
+    );
+    expect(markdownSection(guide, "Keeping a project's rulings current")).toContain("(`read_kb_correction` reads one\n  whole)");
+    const rel = path.join("skills", "controller-guide", "SKILL.md");
+    expect(
+      shippedCopyIsUnedited(rel, "a79f832fe1ac95d577e0a8a6915126558a5ff5516347fb87c16afacb03cb70fd", {}),
+      "the guide's outgoing hash is not recorded",
+    ).toBe(true);
+    expect(PRIOR_SHIPPED_HASHES[rel]).not.toContain(sha256Hex(guide));
+  });
+
   it("a GitHub read needs membership, not maintainer", () => {
     const skill = read("controller-guide.skill.md");
     expect(skill).not.toContain("reading GitHub state at depth need maintainer");

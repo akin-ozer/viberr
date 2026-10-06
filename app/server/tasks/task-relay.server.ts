@@ -10,6 +10,7 @@ import {
   withAttachmentClaims,
   readAttachmentBytes,
 } from "~/server/files/task-attachments.server";
+import { storedFileName } from "~/server/files/file-store-root.server";
 import { isAppError } from "~/server/errors/app-error.server";
 import { MAX_UPLOAD_BYTES } from "~/shared/attachment-kinds";
 import { joinDependencyEntries } from "~/shared/dependencies";
@@ -561,7 +562,7 @@ function stageRelayFiles(
   if (wanted.length > RELAY_MAX_FILES) {
     return { refused: `a relay carries at most ${RELAY_MAX_FILES} files, and this one names ${wanted.length}.` };
   }
-  const taken = new Set(listTaskAttachmentNames(projectSlug, to, dataRoot).map((n) => n.toLowerCase()));
+  const taken = new Set(listTaskAttachmentNames(projectSlug, to, dataRoot).map((n) => storedFileName(n).toLowerCase()));
   const files: StagedRelayFile[] = [];
   for (const name of wanted) {
     let abs: string;
@@ -589,14 +590,16 @@ function stageRelayFiles(
     }
     if ("tooLarge" in read) return { refused: `\`${name}\` cannot be relayed.` };
     const data = read.bytes;
-    let as = name;
+    // Ruling 675: the name it lands under is the composed one the store
+    // writes, so the comment that claims it names the file that is there.
+    let as = storedFileName(name);
     let reused = false;
-    if (taken.has(name.toLowerCase())) {
-      const there = readAttachmentBytes(resolveTaskAttachment(projectSlug, to, name, dataRoot), MAX_UPLOAD_BYTES);
+    if (taken.has(as.toLowerCase())) {
+      const there = readAttachmentBytes(resolveTaskAttachment(projectSlug, to, as, dataRoot), MAX_UPLOAD_BYTES);
       if (there && "bytes" in there && there.bytes.equals(data)) {
         reused = true;
       } else {
-        as = nextFreeName(name, taken);
+        as = nextFreeName(as, taken);
       }
     }
     taken.add(as.toLowerCase());
@@ -618,7 +621,7 @@ function nextFreeName(name: string, taken: ReadonlySet<string>): string {
 /** What the relay comment says it carried, and under which names. */
 function relayFilesSentence(files: readonly StagedRelayFile[]): string {
   if (files.length === 0) return "";
-  const named = files.map((f) => (f.as === f.name ? `\`${f.as}\`` : `\`${f.name}\` (here as \`${f.as}\`, a file of that name was already on this task)`));
+  const named = files.map((f) => (f.as === storedFileName(f.name) ? `\`${f.as}\`` : `\`${f.name}\` (here as \`${f.as}\`, a file of that name was already on this task)`));
   return `\n\nWith ${files.length === 1 ? "the file" : "the files"} ${joinDependencyEntries(named)}, now on this task's attachments.`;
 }
 

@@ -17,7 +17,12 @@
  */
 import { constants, copyFileSync, mkdirSync, readdirSync, statSync } from "node:fs";
 import path from "node:path";
-import { resolveStoreSegment, taskAttachmentsDir, taskDir } from "./file-store-root.server";
+import {
+  resolveStoreSegment,
+  resolveStoredSegment,
+  taskAttachmentsDir,
+  taskDir,
+} from "./file-store-root.server";
 
 /** A `deliveredAt` stamp: an ISO instant in UTC, as Viberr writes it. */
 const STAMP = /^(\d{4}-\d{2}-\d{2})T(\d{2}):(\d{2}):(\d{2}(?:\.\d{1,9})?)Z$/;
@@ -110,7 +115,7 @@ export function resolveKeptDeliveryFile(
   const dir = stampDir(stamp);
   if (!dir) return null;
   try {
-    return resolveStoreSegment(path.join(taskDeliveriesDir(slug, key, dataRoot), dir), name.trim());
+    return resolveStoredSegment(path.join(taskDeliveriesDir(slug, key, dataRoot), dir), name.trim());
   } catch {
     return null;
   }

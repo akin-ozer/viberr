@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import type { DatabaseSync } from "node:sqlite";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -409,6 +409,28 @@ describe("ruling 557: a task takes the files it works from", () => {
       to: "VIB-2",
       files: ["sample-01-input.csv"],
     });
+  });
+
+  /**
+   * Ruling 675: the owner's AWSC-117 input, uploaded from a Mac, was stored
+   * with its name decomposed, and a rule that had each task take it would have
+   * been refused on every task: "has no attachment X. It holds: X."
+   */
+  it("ruling 675: takes a file stored decomposed by its composed name, and it lands and is claimed composed", async () => {
+    const composed = "Aidea _ İçerik ve Eğitim _ AWS Maliyet Teklifi.pdf";
+    save("VIB-3", composed.normalize("NFD"), "the proposal");
+    // CANARY: resolve the source byte for byte and this take is refused with
+    // two names no reader can tell apart.
+    expect(await take("VIB-2", "VIB-3", [composed])).toMatch(/^\[done\] Took 1 file from VIB-3/);
+    expect(readdirSync(attachmentsOf("VIB-2"))).toEqual([composed]);
+    expect(timeline("VIB-2")[0]!.attachments).toEqual([composed]);
+    // CANARY: land it under the name as typed and a name typed decomposed is
+    // claimed under one form and stored under the other, so a run finishing
+    // meanwhile takes the file as its own (ruling 538).
+    save("VIB-3", "Çıktı.md".normalize("NFD"), "the output");
+    expect(await take("VIB-2", "VIB-3", ["Çıktı.md".normalize("NFD")])).toMatch(/^\[done\] Took 1 file from VIB-3/);
+    expect(readdirSync(attachmentsOf("VIB-2")).sort()).toEqual([composed, "Çıktı.md"].sort());
+    expect(timeline("VIB-2")[0]!.attachments).toEqual(["Çıktı.md"]);
   });
 
   it("refuses this task, another project's task, a missing task, an archived task and a missing file, and writes nothing", async () => {

@@ -62,7 +62,7 @@ describe("readKbIndexDetailed — the index a run receives (ruling 283)", () => 
     expect(body).toContain("`ports.json`");
   });
 
-  it("ignores non-text files and dotfiles", () => {
+  it("counts only text files as documents, and ignores dotfiles", () => {
     const { dataRoot, kbDir } = freshKb();
     writeFileSync(path.join(kbDir, "real.md"), "# Real", "utf8");
     writeFileSync(path.join(kbDir, "contract.pdf"), "%PDF-1.4", "utf8");
@@ -70,10 +70,69 @@ describe("readKbIndexDetailed — the index a run receives (ruling 283)", () => 
     mkdirSync(path.join(kbDir, ".git"), { recursive: true });
     writeFileSync(path.join(kbDir, ".git", "config.md"), "# Git", "utf8");
     const body = readKbIndexDetailed("notes", dataRoot).body;
-    expect(body).toContain("`real.md`");
-    expect(body).not.toContain("contract.pdf");
+    expect(body).toMatch(/^Folder `[^`]+`\. 1 document:\n\n- `real\.md`/);
     expect(body).not.toContain("secret");
     expect(body).not.toContain(".git");
+  });
+
+  /**
+   * Ruling 678: a knowledge base's folder also holds what a board's work must
+   * follow (a report template, a sample, a logo). The index said nothing of a
+   * file that is not a document, so a run learned of one only from a rule that
+   * spelled out its path.
+   */
+  it("ruling 678: names the folder's other files apart from its documents, with where a run opens them", () => {
+    // CANARY: drop `otherFilesNote` from the body and a template copied into
+    // the rulings knowledge base reaches no run's prompt.
+    const { dataRoot, kbDir } = freshKb("rulings");
+    writeFileSync(path.join(kbDir, "rulings.md"), "# Rulings\n", "utf8");
+    writeFileSync(path.join(kbDir, "proposal-template.html"), "<h1>1. Amaç</h1>", "utf8");
+    mkdirSync(path.join(kbDir, "brand"), { recursive: true });
+    writeFileSync(path.join(kbDir, "brand", "logo.png"), Buffer.alloc(200 * 1024));
+    writeFileSync(path.join(kbDir, ".DS_Store"), "x", "utf8");
+    expect(readKbIndexDetailed("rulings", dataRoot).body).toBe(
+      `Folder \`${kbDir}\`. 1 document:\n\n` +
+        "- `rulings.md` · under 1k chars\n  # Rulings\n\n" +
+        "2 other files here are not documents (a template, a sample, an image): `read_knowledge_doc` does not read them, " +
+        "so open one from your shell in the folder above:\n\n" +
+        "- `brand/logo.png` · 100 KB to 1 MB\n" +
+        "- `proposal-template.html` · under 10 KB",
+    );
+  });
+
+  it("ruling 678: a folder that holds only such files is still given, as the list of them", () => {
+    // CANARY: answer "holds no documents" for it and a knowledge base made
+    // for a board's templates reaches no run, while the copy that filled it
+    // said every run given it would see the files.
+    const { dataRoot, kbDir } = freshKb("templates");
+    writeFileSync(path.join(kbDir, "proposal-template.pdf"), "%PDF-1.4", "utf8");
+    const given = readKbIndexDetailed("templates", dataRoot);
+    expect(given.unresolved).toBeUndefined();
+    expect(given.body).toBe(
+      `Folder \`${kbDir}\`. No documents.\n\n` +
+        "1 other file here is not a document (a template, a sample, an image): `read_knowledge_doc` does not read them, " +
+        "so open one from your shell in the folder above:\n\n- `proposal-template.pdf` · under 10 KB",
+    );
+    // CANARY: give a private one the same index and a run is sent to a
+    // folder its shell is refused, for files no tool of its own reads.
+    chmodSync(kbDir, 0o700);
+    expect(readKbIndexDetailed("templates", dataRoot, { hasKnowledgeTool: true })).toEqual({
+      body: "",
+      unresolved: {
+        name: "templates",
+        reason: "its store folder holds no documents, and it is private (ruling 578), so no run can open the files it does hold",
+      },
+    });
+  });
+
+  it("ruling 678: says nothing about other files when the folder holds only documents", () => {
+    // CANARY: print the note for an empty list and every index on the
+    // instance gains a line, which moves every cached prompt.
+    const { dataRoot, kbDir } = freshKb();
+    writeFileSync(path.join(kbDir, "real.md"), "# Real", "utf8");
+    expect(readKbIndexDetailed("notes", dataRoot).body).toBe(
+      `Folder \`${kbDir}\`. 1 document:\n\n- \`real.md\` · under 1k chars\n  # Real`,
+    );
   });
 
   /**
@@ -312,6 +371,15 @@ describe("a private knowledge base (ruling 578)", () => {
           "it is private (ruling 578): its folder is closed to every shell, and this run has no knowledge tool to read it",
       },
     ]);
+    // Ruling 678: a file that is not a document is closed to every run there,
+    // and the index says so instead of sending one to its shell.
+    // CANARY: print the open folder's sentence for a private one and a run is
+    // told to open a file its shell is refused.
+    writeFileSync(path.join(kbDir, "answer-sheet.xlsx"), "PK", "utf8");
+    expect(readKbIndexDetailed("keys", dataRoot, { hasKnowledgeTool: true }).body).toContain(
+      "1 other file here is not a document, and no run can open them: the folder is closed to every shell and " +
+        "`read_knowledge_doc` reads documents only:\n\n- `answer-sheet.xlsx` · under 10 KB",
+    );
     // An open folder reads as it always did, on either backend.
     chmodSync(kbDir, 0o755);
     expect(readKbIndexes(["keys"], dataRoot, { hasKnowledgeTool: false }).parts[0]?.body).toMatch(/^Folder `[^`]+`\. 1 document/);

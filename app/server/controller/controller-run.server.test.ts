@@ -314,6 +314,28 @@ describe("controller mounts (ruling 107)", () => {
     expect(built.prefix.dynamic.join("")).toContain("kb-architecture (not registered)");
   });
 
+  /**
+   * Ruling 679: the guide this repository ships is the controller's doctrine,
+   * and it reaches the turn whole. Ruling 672's section took it past the 24,000
+   * characters an agent's skills share, and every turn after that deploy read
+   * it without its last sections.
+   */
+  it("ruling 679: the shipped guide reaches the controller's turn whole, with room left beside it", async () => {
+    const { seedDefaultAgentAssets } = await import("~/server/seed/default-assets.server");
+    const { CONTROLLER_SKILL_BUDGET } = await import("./controller-run.server");
+    const { readSkillBodies } = await import("~/server/files/skill-body.server");
+    seedDefaultAgentAssets(app.dataRoot);
+    const { prompt } = await build({});
+    // CANARY: read the controller's skills under the shared 24,000 again and
+    // the guide ends in "(skill truncated: …)" with "Answer style" gone.
+    expect(prompt).not.toContain("skill truncated");
+    expect(prompt).toContain("When you acted, list what changed as short factual lines. When you were refused, the refusal is the answer.");
+    // CANARY: let the guide grow to the budget's edge and the next section
+    // written into it is the one a turn never reads; a tenth is kept free.
+    const [guide] = readSkillBodies(["controller-guide"], app.dataRoot, Number.MAX_SAFE_INTEGER).parts;
+    expect(guide!.body.length).toBeLessThanOrEqual(CONTROLLER_SKILL_BUDGET * 0.9);
+  });
+
   it("tells the model the diagnostics are attached, on every turn", async () => {
     // No org MCP mounted: the sentence is not conditional on grants.
     const { prompt } = await build({}, { mountedMcps: [] });

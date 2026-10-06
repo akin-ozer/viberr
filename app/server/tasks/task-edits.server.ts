@@ -5,6 +5,7 @@
  */
 
 import { lstatSync, unlinkSync } from "node:fs";
+import { storedFileName } from "~/server/files/file-store-root.server";
 import {
   checkAttachmentBatch,
   checkAttachmentUpload,
@@ -601,9 +602,11 @@ export async function attachTaskFile(
   // a review to a deliverer's saved files by WHEN they were saved, not by
   // their bytes), so a person's upload never overwrites one: the approval
   // would stand on content no reviewer read. Their own files they may replace.
-  const name = input.name.trim();
+  // Ruling 675: compared composed, as the store resolves the name, so the
+  // same name sent in the other Unicode form is still the agent's file.
+  const name = storedFileName(input.name.trim());
   const agentSaved = existing.parsed.timeline.some(
-    (e) => e.actor.kind === "agent" && (e.attachments ?? []).includes(name),
+    (e) => e.actor.kind === "agent" && (e.attachments ?? []).some((held) => storedFileName(held) === name),
   );
   // Ruling 558: the name is held from before the file lands until the note
   // claims it, so a run completing meanwhile never takes it as its own, and a

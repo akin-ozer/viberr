@@ -40,9 +40,16 @@ const LONG_RUN = "run_ops_long";
 const LONG_LINES = 620;
 /** The tool's own page bounds, restated so the arithmetic below is readable. */
 const DEFAULT_PAGE = 200;
-const MAX_PAGE = 500;
-/** `readStoreDoc`'s own per-read ceiling, which the tool takes as its default. */
+const MAX_PAGE = 250;
+/** Ruling 677: a run whose every line is long, so a page of them is bounded
+ *  by what a reply carries before it is bounded by its count. */
+const WORDY_RUN = "run_ops_wordy";
+const WORDY_LINES = 60;
+const WORDY_TEXT = "w".repeat(2_000);
+/** `readStoreDoc`'s own per-read ceiling: the most of a document it takes. */
 const READ_DOC_BYTES = 256 * 1024;
+/** Ruling 677: one page of a store document, in bytes (`READ_PAGE_BYTES`). */
+const READ_PAGE = 32_000;
 
 interface Actors {
   orgAdmin: string; // arda
@@ -122,10 +129,25 @@ beforeAll(async () => {
     sdk: "claude-agent-sdk",
     state: "error",
   });
+  upsertRun(app.db, {
+    id: WORDY_RUN,
+    projectSlug: SLUG,
+    taskKey: "VIB-142",
+    threadId: "thread_ops_wordy",
+    role: "developer",
+    kind: "primary",
+    agentProfileId: "developer",
+    agentName: "dev",
+    backend: "claude",
+    model: "claude-opus-4-8",
+    sdk: "claude-agent-sdk",
+    state: "finished",
+  });
   for (const [runId, count] of [
     [PROJECT_RUN, LOG_LINES],
     [CONTROLLER_RUN, LOG_LINES],
     [LONG_RUN, LONG_LINES],
+    [WORDY_RUN, WORDY_LINES],
   ] as const) {
     for (let i = 0; i < count; i += 1) {
       insertRunLine(app.db, {
@@ -133,7 +155,7 @@ beforeAll(async () => {
         seq: i,
         occurredAt: "2026-09-01T00:00:00.000Z",
         raw: JSON.stringify({ i }),
-        display: { t: "00:00:00", ev: "text", tag: "assistant", text: `l${i}` },
+        display: { t: "00:00:00", ev: "text", tag: "assistant", text: runId === WORDY_RUN ? WORDY_TEXT : `l${i}` },
       });
     }
   }
@@ -280,11 +302,14 @@ const RUN_LOG_REPLY = z.strictObject({
   lines: z.array(z.object({ seq: z.number(), at: z.string() })),
 });
 
-const STORE_DOC_REPLY = z.object({
+const STORE_DOC_REPLY = z.strictObject({
   resource: z.object({ kind: z.string(), id: z.string(), name: z.string() }),
   path: z.array(z.string()),
   truncated: z.boolean(),
+  characters: z.number(),
   text: z.string(),
+  offset: z.number().optional(),
+  nextOffset: z.number().optional(),
 });
 
 /** A tool answer that is not a refusal, read through its schema. */
@@ -869,6 +894,39 @@ describe("read_run_log: every page is bounded, and says where it sits", () => {
     expect(zeroForward.lines.length).toBe(1);
   });
 
+  /**
+   * Ruling 677: a count alone bounds nothing. A line's `display` runs to
+   * kilobytes, and a page of 200 of those is a reply no turn receives.
+   */
+  it("ruling 677: a page of long lines holds what a reply carries, from the end the cursor reads from, and its cursors reach the rest", async () => {
+    const wordy = (args: Record<string, JsonValue>) =>
+      call(ids.projectAdmin, "read_run_log", { runId: WORDY_RUN, ...args });
+    // CANARY: return every line the count allows and this reply is 125 KB,
+    // which the guards cut mid-line with the page's cursors already wrong.
+    const reply = await wordy({});
+    expect(Buffer.byteLength(reply, "utf8")).toBeLessThan(60_000);
+    const newest = parsed(RUN_LOG_REPLY, reply);
+    // Fewer than the 60 the run holds and the 200 the page allows, and more
+    // than a handful: the bound is the reply's size, 48,000 bytes of lines.
+    expect(newest.lines.length).toBeGreaterThan(15);
+    expect(newest.lines.length).toBeLessThan(30);
+    // CANARY: keep the oldest of a backward page and the failure at the end
+    // of the log is the part left out.
+    expect(newest.page.lastSeq).toBe(WORDY_LINES - 1);
+    expect(newest.page.firstSeq).toBe(WORDY_LINES - newest.lines.length);
+    expect(newest.page.next.older).toEqual({ before: newest.page.firstSeq });
+    // The cursor continues with no gap and no overlap.
+    const older = parsed(RUN_LOG_REPLY, await wordy(newest.page.next.older!));
+    expect(older.page.lastSeq).toBe(newest.page.firstSeq! - 1);
+    // CANARY: keep the newest of a forward page and the lines just after the
+    // cursor are skipped.
+    const forward = parsed(RUN_LOG_REPLY, await wordy({ since: 9 }));
+    expect(forward.page.firstSeq).toBe(10);
+    expect(forward.page.lastSeq).toBe(9 + forward.lines.length);
+    expect(forward.page.next.newer).toEqual({ since: forward.page.lastSeq });
+    expect(forward.lines.length).toBe(newest.lines.length);
+  });
+
   it("an empty page says it is empty without inventing a sequence number", async () => {
     // Past the end of the run: `getRunLog` would answer headSeq = the cursor
     // the caller sent, a number that exists nowhere in the run.
@@ -949,19 +1007,33 @@ describe("read_store_doc: org admins only, like the store browser", () => {
     );
     expect(body.resource.id).toMatch(/^kb_/);
 
-    // A document longer than one read comes back CLIPPED and says so. Without
-    // this arm `truncated` could be the constant `false` and read identically —
-    // which is how a model states half a file as the whole of it.
-    const long = parsed(
-      STORE_DOC_REPLY,
-      await call(ids.orgAdmin, "read_store_doc", {
-        kind: "kb",
-        id: kbId,
-        path: ["ops-long.md"],
-      }),
+    expect(body.characters).toBe(16);
+    expect(body).not.toHaveProperty("nextOffset");
+
+    // Ruling 677: a document longer than one page comes back a page at a time
+    // and says so. Without this arm `truncated` could be the constant `false`
+    // and read identically, which is how a model states half a file as the
+    // whole of it.
+    // CANARY: return the document whole and this reply is 256 KB, which no
+    // turn receives: the document cannot be read at all.
+    const doc = { kind: "kb", id: kbId, path: ["ops-long.md"] };
+    const read = (offset: number) => call(ids.orgAdmin, "read_store_doc", { ...doc, offset });
+    const first = parsed(STORE_DOC_REPLY, await call(ids.orgAdmin, "read_store_doc", doc));
+    expect(first.text).toBe("x".repeat(READ_PAGE));
+    expect(first).toMatchObject({ truncated: true, characters: READ_DOC_BYTES, nextOffset: READ_PAGE });
+    expect(first).not.toHaveProperty("offset");
+    // CANARY: start every page at 0 and the second read is the first again.
+    const second = parsed(STORE_DOC_REPLY, await read(first.nextOffset!));
+    expect(second).toMatchObject({ offset: READ_PAGE, nextOffset: 2 * READ_PAGE, truncated: true });
+    // The last page of a document longer than the reader takes still says it
+    // was cut, and offers no page after it.
+    const last = parsed(STORE_DOC_REPLY, await read(READ_DOC_BYTES - 100));
+    expect(last.text).toBe("x".repeat(100));
+    expect(last.truncated).toBe(true);
+    expect(last).not.toHaveProperty("nextOffset");
+    expect(await read(READ_DOC_BYTES)).toBe(
+      "[error] `ops-long.md` reads as 262,144 characters; offset 262,144 is past its end.",
     );
-    expect(long.truncated).toBe(true);
-    expect(long.text.length).toBe(READ_DOC_BYTES);
   });
 
   it("says so when the target or the file is gone", async () => {

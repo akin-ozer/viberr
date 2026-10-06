@@ -1,7 +1,10 @@
 import type { TaskMutationContext } from "~/server/tasks/task-mutation.server";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { listNotifications } from "~/server/projections/notifications.server";
+import { writeFileSync } from "node:fs";
+import path from "node:path";
 import type { DatabaseSync } from "node:sqlite";
+import { taskDir } from "~/server/files/file-store-root.server";
 import type { RunOperatorInput } from "~/server/runtimes/operator-run.server";
 import { z } from "zod";
 import { createTestDbContext } from "../../../test-support/test-db";
@@ -28,7 +31,12 @@ import type {
 } from "~/schemas/task-file.schema";
 import { readProjectFile } from "~/server/files/project-writer.server";
 import { readTaskFile, updateTaskFile } from "~/server/files/task-writer.server";
-import { listTaskAttachments, MAX_UPLOAD_BYTES } from "~/server/files/task-attachments.server";
+import {
+  listTaskAttachments,
+  MAX_UPLOAD_BYTES,
+  readTaskAttachment,
+  writeTaskAttachment,
+} from "~/server/files/task-attachments.server";
 import { insertUser } from "~/server/auth/user-store.server";
 import { listScopeViolations } from "~/server/projections/policy-violations.server";
 import { rebuildAll } from "~/server/projections/rebuilder.server";
@@ -4422,6 +4430,52 @@ describe("ruling 573: a comment with files", () => {
     const parsed = readTaskFile({ projectSlug: store.slug, taskKey: task.key, dataRoot: store.dataRoot })!.parsed;
     expect(parsed.timeline.some((e) => e.type === "comment")).toBe(false);
     expect(listTaskAttachments(store.slug, task.key, store.dataRoot)).toEqual([]);
+  });
+
+  /**
+   * Rulings 388 and 675: a comment's file never replaces one an agent run
+   * saved, and the same name sent in the other Unicode form is that file.
+   */
+  it("refuses a file named like one an agent saved, in either Unicode form", async () => {
+    // CANARY: collect the agent's names as its entry holds them and an upload
+    // of "Çıktı.md" replaces the file an agent saved under the decomposed
+    // name (a copy of a Mac upload, say), now that the store finds a file by
+    // either form.
+    const store = setupProjectedStore(ctx);
+    const task = await createTask(store.db, { projectSlug: store.slug, title: "Size the estate" }, actorOf(store.users.arda), {
+      dataRoot: store.dataRoot,
+    });
+    const decomposed = "Çıktı.md".normalize("NFD");
+    // The agent's own write, from its shell: the store's upload door would
+    // compose the name.
+    writeTaskAttachment(store.slug, task.key, "seed.md", new TextEncoder().encode("x"), store.dataRoot);
+    writeFileSync(path.join(taskDir(store.slug, task.key, store.dataRoot), "attachments", decomposed), "the agent's output");
+    await updateTaskFile({ projectSlug: store.slug, taskKey: task.key, dataRoot: store.dataRoot }, (parsed) => {
+      parsed.timeline.unshift({
+        occurredAt: new Date().toISOString(),
+        type: "comment",
+        actor: { kind: "agent", backend: "claude", profileId: "dev", roleHint: "Developer" },
+        title: null,
+        text: "Output attached.",
+        toAgent: false,
+        evidence: null,
+        attachments: [decomposed],
+      });
+    });
+    await expect(
+      commentToAgent(
+        store.db,
+        {
+          projectSlug: store.slug,
+          taskKey: task.key,
+          text: "Mine.",
+          files: [{ name: "Çıktı.md", data: new TextEncoder().encode("mine") }],
+        },
+        actorOf(store.users.arda),
+        { dataRoot: store.dataRoot },
+      ),
+    ).rejects.toThrow(/an agent run saved/);
+    expect(readTaskAttachment(store.slug, task.key, "Çıktı.md", store.dataRoot)).toMatchObject({ text: "the agent's output" });
   });
 });
 
