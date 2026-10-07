@@ -50,9 +50,9 @@ export function useProfileFields(initial: AgentProfileView | null): ProfileField
   const [definition, setDefinition] = useState(initial ? initial.desc : "");
   const [persona, setPersona] = useState(initial ? initial.definition : "");
   // Model + effort picks (seeded from the profile in edit mode). The catalog
-  // (`useModelCatalog`, which the modal calls next) supplies the option lists +
-  // defaults; a seeded value that is not in the catalog is still preserved and
-  // rendered.
+  // (`useModelCatalog`, which the modal calls after the grant pickers) supplies
+  // the option lists + defaults; a seeded value that is not in the catalog is
+  // still preserved and rendered.
   const [model, setModel] = useState(initial ? initial.model : "");
   const [effort, setEffort] = useState(initial ? initial.effort : "");
 

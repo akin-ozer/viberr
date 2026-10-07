@@ -50,9 +50,12 @@ import { useRefusalShake } from "~/ui/use-refusal-shake";
  * server-side and never touched here.
  *
  * Ruling 689(e) split the modal on the task page's recipe: its fields, grant
- * pickers and save gate are hooks in `create-profile-modal-form.ts`, and what
- * it reads off the profile (the seeds, the save's requirements, the footer's
- * sentence) is pure functions in `create-profile-modal-derive.ts`.
+ * pickers and save gate are hooks in `create-profile-modal-form.ts`, whose
+ * state initialisers seed the fields and the resource grants from the profile
+ * (a new profile starts from `{ skills: [], mcps: [], kb: [] }` in
+ * `useGrantPickers`, the state ruling 54 cites). The capability policy for the
+ * profile's kind, the capability seed (`seedCaps`), the save's requirements and
+ * the footer's sentence are pure functions in `create-profile-modal-derive.ts`.
  */
 
 /** The editor's working policy: capability id → the mode its toggle shows.
