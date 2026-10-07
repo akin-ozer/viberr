@@ -551,7 +551,9 @@ Playwright (`npm run e2e -- e2e/01-home-board.spec.ts`).
    `alert()` and a page stored in the other Unicode form than it is asked for in, from a
    folder shaped as the server hands a kept delivery over (0710 in the agent group, files
    0640: the uid reads a file by name and can neither list the folder nor write in it),
-   and checks both PNG widths, the sibling picture drawn (by its pixels), a `100vh`
+   writing in a scratch made as the server makes one in a task's `.captures/` (2770 under
+   a 0710 parent the uid can neither list nor put a link in), with its job on standard
+   input, and checks both PNG widths, the sibling picture drawn (by its pixels), a `100vh`
    section one screen tall in a picture three screens tall, that the page's image, fetch
    and navigation to another loopback port and to a remote host loaded nothing (a
    listener on that port records no request of the page), the report naming what the page

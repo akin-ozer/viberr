@@ -494,7 +494,10 @@ re-asserts the modes: `/data` 0750 in group `viberr-agents`, `state/`, `audit-ex
 `projects/` 0755, and each task's `workspace/`, `attachments/`, `.operator-scratch/` 2770 in
 the agent group ([agents-and-runtime.md §8](../domain/agents-and-runtime.md#8-boot-recovery)).
 A task's `sources/` is not among them (ruling 690): it is the server's own, like `task.md`
-beside it, so an agent reads a kept source and cannot rewrite or delete it.
+beside it, so an agent reads a kept source and cannot rewrite or delete it. Nor is its
+`.captures/` (ruling 691, the page renderer's scratch): that folder and each run's folder
+in it are the server's own, 0710 in the agent group, and only one render's own folder
+below them is 2770, made when the render starts.
 There is no `auth/`,
 `cache/` or `logs/` directory; application logs are structured JSON on stdout. Full layout
 with retention: [`../architecture/data-model.md`](../architecture/data-model.md#2-data-root-layout).
