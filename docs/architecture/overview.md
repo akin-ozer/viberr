@@ -154,7 +154,9 @@ for governed state.
    start the 20 s lock-ownership guard (fails closed).
 5. `seedDefaultAgentAssets`: write the shipped skills, the `agents/definitions/` doctrine
    files and the base profile templates when missing or still identical to a version the
-   app shipped (`state/shipped-assets.json` plus `PRIOR_SHIPPED_HASHES`).
+   app shipped (`state/shipped-assets.json` plus `PRIOR_SHIPPED_HASHES`). What it replaced
+   is audited once the database is open, in step 7 (`org.shipped_assets.refreshed`, ruling
+   681(f)).
 6. Self-heal the projection DB if `PRAGMA quick_check` reports corruption (salvage the
    non-rebuildable tables into a fresh file, move the corrupt one aside).
 7. Open SQLite, apply migrations, ensure the single-flight indexes, backfill the

@@ -422,7 +422,15 @@ raw vendor line never reach an audit row.
   carries none: a knowledge base's display name or refresh mode, a skill's summary
   (its text on disk is compared with what the save sent), an MCP server saved with the
   name, the address and the credential it had. A document that is one board's own and
-  named after it (`no-repository-<slug>.md`, ruling 672) names that board alone.
+  named after it (`no-repository-<slug>.md`, ruling 672) names that board alone, whoever
+  writes it, and no board when that board is not given the knowledge base.
+  `org.agent_profile.updated` carries the same `resource` with `kind: "template"` and the
+  profile id as its key, naming the boards whose deployment leaves to the template a
+  field the edit changed.
+- `org.shipped_assets.refreshed {assets, version, revision}` is one row per boot that
+  replaced a shipped file with the current version (ruling 681(f)), actor the system:
+  the store-relative paths it replaced and the build that did. It names no board, and a
+  boot that refreshed nothing writes none.
   `org.store.doc_written` also carries `task {project, key}` when the write is an
   agent's correction or its undo (ruling 498).
 - `task.acceptance.forced` carries `bypassed` (the gate sentences joined with " | "),
@@ -460,7 +468,8 @@ Where it is read:
   skill or an MCP server is audited with no project and names, in `resource`, the boards
   whose runs are given it at that moment; each of those boards' audit panel shows the row as a
   change ("<person> edited a passage of **rules.md** in the project's rulings
-  **house-rules**.", "… rewrote the skill **estimating**, which Scout uses."). No
+  **house-rules**.", "… rewrote the skill **estimating**, which Scout uses.", "… changed
+  the agent template **Developer**, which this board follows."). No
   sentence quotes a document: an edit's `edited` passage is read as whether there was
   one, so a private knowledge base (ruling 578) is safe whoever reads the panel. An org
   admin's row links the knowledge-base document it wrote; nobody else is handed the

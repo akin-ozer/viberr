@@ -37,6 +37,7 @@ import { logger } from "~/server/logging/logger.server";
 import { assertSkillBodyWellFormed } from "~/server/files/skill-body.server";
 import { sha256Hex } from "~/server/files/content-hash.server";
 import { newId } from "~/shared/ids/new-id.server";
+import { noRepositoryRulingProject } from "~/shared/repository-ask";
 import {
   getDefaultConnectionTokenFresh,
   type FreshnessOptions,
@@ -85,18 +86,28 @@ export interface StoreTarget {
  * the row otherwise names only a row id and a path inside the folder) and
  * which boards' runs are given it at this moment (`resource.boards`), which is
  * what puts the write on those boards' Activity.
+ *
+ * A board's "no repository" ruling (ruling 672) is one board's own document,
+ * and its name carries the board's slug. Two boards can name one knowledge
+ * base as their rulings, so a write to that document names its own board and
+ * no other, whoever makes it: the decision's own writer, a person in Instance
+ * settings, the controller's edit, or an agent's correction.
  */
 function recordStoreWrite(
   db: DatabaseSync,
   target: StoreTarget,
   action: string,
   actor: AuditActor,
-  details: AuditDetails,
-  ofBoard?: string,
+  /** `path` is the document or folder the write names, inside the store folder. */
+  details: AuditDetails & { path?: string },
 ): void {
   const resource = auditedResource(target.kind, target.key, target.dataRoot);
-  if (ofBoard !== undefined) {
-    resource.boards = resource.boards.filter((board) => board.project === ofBoard);
+  const ownBoard =
+    target.kind === "kb" && details.path !== undefined
+      ? noRepositoryRulingProject(details.path)
+      : null;
+  if (ownBoard !== null) {
+    resource.boards = resource.boards.filter((board) => board.project === ownBoard);
   }
   recordAudit(db, {
     action,
@@ -105,16 +116,6 @@ function recordStoreWrite(
     subjectId: target.id,
     details: { ...details, resource },
   });
-}
-
-/**
- * Ruling 681: the one board a document is about, when it is one board's own
- * (its "no repository" ruling, whose name carries the board's slug). The write
- * is on that board's Activity alone: two boards can name one knowledge base as
- * their rulings, and the other is not shown a document named after this one.
- */
-export interface OwnBoardWrite {
-  ofBoard?: string;
 }
 
 // ------------------------------------------------------------------ scan
@@ -630,7 +631,7 @@ export function writeStoreDoc(
      * board's Activity does not show the write a second time.
      */
     onTask?: { projectSlug: string; taskKey: string };
-  } & OwnBoardWrite = {},
+  } = {},
 ): StoreDocResult {
   const base = sanitizeDirPath(dirPath);
   const cleaned = name.trim().replace(/[\\/]/g, "-");
@@ -692,7 +693,7 @@ export function writeStoreDoc(
   if (appendedBytes !== undefined) details.appended = appendedBytes;
   if (opts.edit) details.edited = { replaced: opts.edit.replaced, text: opts.edit.text };
   if (opts.onTask) details.task = { project: opts.onTask.projectSlug, key: opts.onTask.taskKey };
-  recordStoreWrite(db, target, "org.store.doc_written", actor, details, opts.ofBoard);
+  recordStoreWrite(db, target, "org.store.doc_written", actor, details);
   const result: StoreDocResult = {
     path: [...base, withExt],
     bytes: written.length,
@@ -717,7 +718,6 @@ export function deleteStoreNode(
   target: StoreTarget,
   nodePath: string[],
   actor: AuditActor,
-  opts: OwnBoardWrite = {},
 ): DeleteNodeResult {
   const parts = sanitizeDirPath(nodePath);
   if (parts.length === 0) {
@@ -738,7 +738,6 @@ export function deleteStoreNode(
     wasDir ? "org.store.folder_deleted" : "org.store.file_deleted",
     actor,
     { path: parts.join("/"), filesRemoved },
-    opts.ofBoard,
   );
   return { name: parts[parts.length - 1]!, wasDir, filesRemoved };
 }

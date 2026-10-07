@@ -5,6 +5,7 @@ import {
   recordAudit,
   type AuditActor,
 } from "~/server/audit/audit-recorder.server";
+import type { AgentDeploymentDefinition } from "~/schemas/project-file.schema";
 import { AppError } from "~/server/errors/app-error.server";
 import {
   parseAgentProfileContent,
@@ -31,6 +32,7 @@ import {
   assertModelForBackend,
   foreignModelBackend,
 } from "~/server/runtimes/model-catalog.server";
+import { auditedTemplate } from "./resource-references.server";
 import {
   listTemplateResourceDrift,
   listTemplateTextDrift,
@@ -488,6 +490,29 @@ function copiesClause(diverged: TemplateCopyDrift[], propagated: PropagatedCopy[
   return null;
 }
 
+/** A template's fields as a deployment's copy of them is named, each read as
+ *  the text two versions of the template are compared by. */
+const TEMPLATE_FIELDS: readonly [keyof AgentDeploymentDefinition, (t: ParsedTemplate) => string][] = [
+  ["name", (t) => t.frontmatter.name],
+  ["role", (t) => t.frontmatter.role ?? ""],
+  ["desc", (t) => t.frontmatter.desc],
+  ["backends", (t) => JSON.stringify(t.frontmatter.backends)],
+  ["model", (t) => t.frontmatter.model],
+  ["effort", (t) => t.frontmatter.effort ?? ""],
+  ["stages", (t) => JSON.stringify(t.frontmatter.stages)],
+  ["resources", (t) => JSON.stringify(t.frontmatter.resources)],
+  // A template's persona is its markdown body (F10-30).
+  ["persona", (t) => t.description],
+];
+
+/** Ruling 681: the fields one save of a template changed. */
+function templateChanges(
+  before: ParsedTemplate,
+  after: ParsedTemplate,
+): (keyof AgentDeploymentDefinition)[] {
+  return TEMPLATE_FIELDS.filter(([, read]) => read(before) !== read(after)).map(([field]) => field);
+}
+
 export async function saveGlobalAgentProfile(
   db: DatabaseSync,
   input: SaveGagentInput,
@@ -588,6 +613,9 @@ export async function saveGlobalAgentProfile(
         diverged: diverged.map((d) => d.projectSlug),
         propagated: propagated.map((p) => p.projectSlug),
         personaPropagated: personaPropagated.map((p) => p.projectSlug),
+        // Ruling 681: the boards whose agent leaves to this template something
+        // the edit changed, which reaches them the moment it is saved.
+        resource: auditedTemplate(input.id, templateChanges(existing, merged), ctx.dataRoot),
       },
     });
     const used = usedByProject(db)[input.id] ?? 0;

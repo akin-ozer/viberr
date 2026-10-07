@@ -2015,7 +2015,11 @@ export async function saveMcpServer(
     const held = auditedResource("mcp", name, ctx.dataRoot);
     const details: McpSaveAudit = { name, transport, renamed: existing.name !== name };
     const reachChanged =
-      existing.name !== name || repointed || rawCred !== "" || input.clearCred === true || oauthDropped;
+      existing.name !== name ||
+      repointed ||
+      rawCred !== "" ||
+      (input.clearCred === true && existing.hasCred) ||
+      oauthDropped;
     if (reachChanged) details.resource = held;
     if (existing.name !== name) details.renamedFrom = existing.name;
     if (oauthDropped) details.oauthDropped = true;

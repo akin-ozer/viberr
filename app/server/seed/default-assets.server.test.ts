@@ -2,13 +2,16 @@ import { execFileSync } from "node:child_process";
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import { afterAll, describe, expect, it, vi } from "vitest";
+import { afterAll, afterEach, describe, expect, it, vi } from "vitest";
 import { readdirSync } from "node:fs";
 import { z } from "zod";
 import type { CapabilityMode } from "~/schemas/project-file.schema";
 import { sha256Hex } from "~/server/files/content-hash.server";
 import { logger } from "~/server/logging/logger.server";
+import { getBuildInfo } from "~/server/ops/build-info.server";
 import { DONE_SIGNAL_RULE } from "~/server/tasks/done-signal.server";
+import { listAuditEvents } from "../../../test-support/audit-log";
+import { createTestDbContext } from "../../../test-support/test-db";
 import { SEED_AGENT_PROFILES } from "./agent-catalog.server";
 
 /**
@@ -45,6 +48,8 @@ function markdownSection(text: string, heading: string): string {
 afterAll(() => {
   for (const dir of roots) rmSync(dir, { recursive: true, force: true });
 });
+const dbCtx = createTestDbContext();
+afterEach(dbCtx.cleanup);
 
 describe("shipped default assets", () => {
   it("exposes every persona/skill body with real content", async () => {
@@ -489,6 +494,45 @@ describe("shipped-asset refresh (B-OP1)", () => {
       JSON.parse(readFileSync(manifestPath, "utf8")),
     );
     expect(after[OPERATOR_REL]).toBe(sha256Hex(shipped()));
+  });
+
+  // CANARY: record nothing after a refresh and an upgrade that replaced the
+  // operator's doctrine leaves a log line and no row; record on every boot
+  // and each restart of an unchanged build writes one.
+  it("ruling 681: a boot that refreshed a shipped file records which and under which build, and one that refreshed nothing records nothing", async () => {
+    const { recordShippedAssetRefresh, seedDefaultAgentAssets } = await import("./default-assets.server");
+    const dataRoot = freshStore();
+    const db = dbCtx.makeDb();
+    /** One boot: the refresh, then its record once there is a database. */
+    const boot = () => recordShippedAssetRefresh(db, seedDefaultAgentAssets(dataRoot));
+
+    // A first boot writes every file and replaces none.
+    boot();
+    expect(listAuditEvents(db)).toEqual([]);
+
+    // A previous release's doctrine, as that release recorded writing it.
+    const manifestPath = path.join(dataRoot, "state", "shipped-assets.json");
+    const oldDoctrine = "---\nid: operator\n---\n\nCall assign_specialist, then prompt_specialist.\n";
+    writeFileSync(path.join(dataRoot, OPERATOR_REL), oldDoctrine, "utf8");
+    const manifest = manifestSchema.parse(JSON.parse(readFileSync(manifestPath, "utf8")));
+    manifest[OPERATOR_REL] = sha256Hex(oldDoctrine);
+    writeFileSync(manifestPath, JSON.stringify(manifest, null, 2), "utf8");
+
+    boot();
+    // The same build started again: nothing left to refresh.
+    boot();
+
+    const build = getBuildInfo();
+    expect(
+      listAuditEvents(db).map((row) => [row.action, row.actorLabel, row.projectSlug, row.details]),
+    ).toEqual([
+      [
+        "org.shipped_assets.refreshed",
+        "system",
+        null,
+        { assets: [OPERATOR_REL], version: build.version, revision: build.revision },
+      ],
+    ]);
   });
 
   it("never touches a copy a human edited", async () => {

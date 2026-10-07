@@ -14,10 +14,16 @@ import {
   parseAgentProfileContent,
   serializeAgentProfile,
 } from "~/server/files/agent-profile-file.server";
+import type {
+  AgentDeployment,
+  AgentDeploymentDefinition,
+  ProjectFrontmatter,
+} from "~/schemas/project-file.schema";
 import {
   deploymentName,
   deploymentResources,
   deploymentRuntimeIdentity,
+  type DeploymentRuntimeIdentity,
 } from "~/server/agents/deployment-view.server";
 import { logger } from "~/server/logging/logger.server";
 import { toError } from "~/shared/errors";
@@ -289,11 +295,12 @@ export type ResourceBoard = {
 };
 
 /** The resource a write changed and the boards given it, as the write's audit
- *  row keeps them. `kind` is the row's `subject_kind` without `org_`. */
+ *  row keeps them. `kind` is the row's `subject_kind` without `org_`, and
+ *  `template` for an agent profile template. */
 export type AuditedResource = {
-  kind: OrgResourceKind;
+  kind: OrgResourceKind | "template";
   /** The grant key: a knowledge base's store directory, a skill's folder
-   *  name, an MCP server's name. */
+   *  name, an MCP server's name. A template's profile id. */
   key: string;
   boards: ResourceBoard[];
 };
@@ -324,11 +331,61 @@ export function auditedResource(
   dataRoot?: string,
   heldAs: string = key,
 ): AuditedResource {
+  const boards = boardsWhere(dataRoot, (fm, holders) => ({
+    rulings: kind === "kb" && (fm.rulingsKb ?? "").trim() === heldAs,
+    agents: holders((_deployment, identity) =>
+      deploymentResources(identity)[GRANT_LIST[kind]].includes(heldAs),
+    ),
+  }));
+  return { kind, key, boards: heldAs ? boards : [] };
+}
+
+/**
+ * Ruling 681: the boards an edit of one agent profile template reaches now.
+ * `changed` is what the edit changed, as a deployment's copy names each field.
+ * A deployment of the profile is reached when it wrote no copy at all, or when
+ * its copy leaves one of those fields to the template. A copy that holds them,
+ * as a library deploy holds the fields a save snapshots, keeps its own until a
+ * person takes the template's again, and that is the board's own row
+ * (`project.agent_profile.resources_synced`). An edit that changed nothing
+ * reaches no board.
+ */
+export function auditedTemplate(
+  profileId: string,
+  changed: readonly (keyof AgentDeploymentDefinition)[],
+  dataRoot?: string,
+): AuditedResource {
+  const boards = boardsWhere(dataRoot, (_fm, holders) => ({
+    rulings: false,
+    agents: holders(
+      (deployment, { def, template }) =>
+        deployment.profileId === profileId &&
+        template !== null &&
+        changed.some((field) => def === null || def[field] === undefined),
+    ),
+  }));
+  return { kind: "template", key: profileId, boards };
+}
+
+/** The names of a board's deployed agents a predicate holds for. */
+type Holders = (
+  holds: (deployment: AgentDeployment, identity: DeploymentRuntimeIdentity) => boolean,
+) => string[];
+
+/**
+ * Every board, asked what it is given; one that is given nothing is left out.
+ * Never throws: a projects folder that cannot be listed names no board, and a
+ * board that cannot be read is skipped.
+ */
+function boardsWhere(
+  dataRoot: string | undefined,
+  given: (fm: ProjectFrontmatter, holders: Holders) => Omit<ResourceBoard, "project">,
+): ResourceBoard[] {
   const boards: ResourceBoard[] = [];
   const root = projectsDir(dataRoot);
   let projects: string[] = [];
   try {
-    if (heldAs && existsSync(root)) projects = readdirSync(root).sort();
+    if (existsSync(root)) projects = readdirSync(root).sort();
   } catch {
     projects = [];
   }
@@ -338,17 +395,16 @@ export function auditedResource(
       const read = readProjectFile({ projectSlug: project, dataRoot });
       if (!read) continue;
       const fm = read.parsed.frontmatter;
-      const rulings = kind === "kb" && (fm.rulingsKb ?? "").trim() === heldAs;
-      const agents = fm.agents.flatMap((deployment) => {
-        const identity = deploymentRuntimeIdentity(deployment, dataRoot);
-        return deploymentResources(identity)[GRANT_LIST[kind]].includes(heldAs)
-          ? [deploymentName(deployment, identity)]
-          : [];
-      });
-      if (rulings || agents.length > 0) boards.push({ project, rulings, agents });
+      const board = given(fm, (holds) =>
+        fm.agents.flatMap((deployment) => {
+          const identity = deploymentRuntimeIdentity(deployment, dataRoot);
+          return holds(deployment, identity) ? [deploymentName(deployment, identity)] : [];
+        }),
+      );
+      if (board.rulings || board.agents.length > 0) boards.push({ project, ...board });
     } catch {
       // Unreadable project: it cannot be asked what it holds.
     }
   }
-  return { kind, key, boards };
+  return boards;
 }

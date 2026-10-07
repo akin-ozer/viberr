@@ -50,10 +50,18 @@ export function noRepositoryRulingDoc(projectSlug: string): string {
 }
 
 /**
+ * The project a file at a knowledge base's root is such a document of, or
+ * null. The one reading of the name `noRepositoryRulingDoc` writes.
+ */
+export function noRepositoryRulingProject(relPath: string): string | null {
+  return /^no-repository-([^/]+)\.md$/.exec(relPath)?.[1] ?? null;
+}
+
+/**
  * Whether a file at a knowledge base's root is some project's such document.
  * A board file leaves them out: each is one person's decision on one
  * instance, and a board brought up elsewhere has not been asked.
  */
 export function isNoRepositoryRulingDoc(relPath: string): boolean {
-  return /^no-repository-[^/]+\.md$/.test(relPath);
+  return noRepositoryRulingProject(relPath) !== null;
 }

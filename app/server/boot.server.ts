@@ -63,7 +63,10 @@ import {
   settleAbandonedWaits,
   recoverUnreactedAgentRuns,
 } from "./runtimes/run-recovery.server";
-import { seedDefaultAgentAssets } from "./seed/default-assets.server";
+import {
+  recordShippedAssetRefresh,
+  seedDefaultAgentAssets,
+} from "./seed/default-assets.server";
 import { ensureBaseAgentsDeployed } from "./seed/ensure-base-agents.server";
 import { convertTemplateReviewEntry } from "./seed/review-entry-conversion.server";
 import { startScheduleRunner } from "./tasks/schedule.server";
@@ -756,7 +759,7 @@ export async function bootServer(): Promise<void> {
   // definition + the base profile templates) into the store when a store lacks
   // them — before anything reads them. Idempotent and best-effort (never blocks
   // boot).
-  seedDefaultAgentAssets();
+  const refreshedAssets = seedDefaultAgentAssets();
   // Before the first handle opens: if the projection database is corrupt (a WAL
   // clobbered over a bind mount, a torn page after a hard kill), salvage its
   // non-reconstructable rows and rebuild a fresh, valid file instead of
@@ -779,6 +782,9 @@ export async function bootServer(): Promise<void> {
     );
   }
   const db = getDb();
+  // Ruling 681(f): what the refresh above replaced, on the record now that
+  // there is a database to hold it.
+  recordShippedAssetRefresh(db, refreshedAssets);
 
   // Ruling 481(a): before anything can write a notification. A root whose
   // `notifications.kind` CHECK predates a kind gets it widened in place, so an

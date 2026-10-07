@@ -780,6 +780,8 @@ const RESOURCE_ACTIONS = [
   "org.mcp.updated",
   "org.mcp.tool_policy.changed",
   "org.mcp.removed",
+  // A template edit reaches the boards whose agent still resolves it live.
+  "org.agent_profile.updated",
 ] as const;
 
 /** `details_json` as SQLite's JSON functions take it. They raise on text that
@@ -821,7 +823,7 @@ function resourceRowsWhere(slug: string) {
 const resourceDetailsSchema = z.object({
   resource: z
     .object({
-      kind: z.enum(["kb", "skill", "mcp"]),
+      kind: z.enum(["kb", "skill", "mcp", "template"]),
       key: z.string().min(1),
       boards: z
         .array(
@@ -847,11 +849,18 @@ const resourceDetailsSchema = z.object({
   private: z.boolean().catch(false),
   renamedFrom: detailText,
   rewritten: z.boolean().catch(false),
+  // A template's row names it; its `key` is the profile id.
+  name: detailText,
 });
 
 const resourceDetails = resourceDetailsSchema.catch(() => resourceDetailsSchema.parse({}));
 
-const RESOURCE_NOUN = { kb: "knowledge base", skill: "skill", mcp: "MCP server" } as const;
+const RESOURCE_NOUN = {
+  kb: "knowledge base",
+  skill: "skill",
+  mcp: "MCP server",
+  template: "agent template",
+} as const;
 
 /** ", which A and B read": the board's agents that hold the resource. One or
  *  two are named; past that, the first and how many others. */
@@ -936,6 +945,11 @@ function resourceEntry(row: AuditRow, slug: string): AuditLogEntry {
       break;
     case "org.mcp.removed":
       entry.text = `${actor} removed ${thing()}${held(true)}.`;
+      break;
+    case "org.agent_profile.updated":
+      // The board's agent goes by the template's name while it follows it, so
+      // the sentence names the template once.
+      entry.text = `${actor} changed ${thing(d.name ?? resource.key)}, which this board follows.`;
       break;
   }
   return entry;

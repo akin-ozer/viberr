@@ -6,9 +6,10 @@ import { createTestDbContext } from "../../../test-support/test-db";
 import { setupTestStore } from "../../../test-support/test-store";
 import { readProjectFile } from "~/server/files/project-writer.server";
 import {
+  auditedResource,
+  auditedTemplate,
   countProjectDeploymentGrants,
   countTemplateGrants,
-  auditedResource,
   updateResourceReferences,
 } from "./resource-references.server";
 
@@ -324,5 +325,36 @@ describe("auditedResource — the boards given a resource (ruling 681)", () => {
     expect(auditedResource("mcp", "pricing", store.dataRoot).boards).toEqual([
       { project: store.slug, rulings: false, agents: ["judge"] },
     ]);
+  });
+
+  // CANARY: name every board that deploys the profile and the board whose
+  // copy holds the changed field is told of an edit that never reaches it; ask
+  // only whether a copy exists and the board whose copy left the persona to
+  // the template is not told its agent's persona changed.
+  it("names the boards an edit of a template reaches: a deployment with no copy, or a copy that leaves the template what the edit changed", () => {
+    const store = setupTestStore(ctx);
+    writeProfile(store.dataRoot, "judge", "specialist", {});
+    const judge = { profileId: "judge", capabilities: [], extras: [] };
+    const copy = { name: "Judge", model: "sonnet", stages: ["review"] };
+    writeBoardHolding(store.dataRoot, "no-copy", {}, { agents: [judge] });
+    writeBoardHolding(store.dataRoot, "own-model", {}, { agents: [{ ...judge, definition: copy }] });
+    writeBoardHolding(store.dataRoot, "other-agent", {});
+
+    // The persona changed: both boards leave it to the template.
+    expect(auditedTemplate("judge", ["persona"], store.dataRoot)).toEqual({
+      kind: "template",
+      key: "judge",
+      boards: [
+        { project: "no-copy", rulings: false, agents: ["judge"] },
+        { project: "own-model", rulings: false, agents: ["Judge"] },
+      ],
+    });
+    // The model changed: one board's copy names its own.
+    expect(auditedTemplate("judge", ["model"], store.dataRoot).boards).toEqual([
+      { project: "no-copy", rulings: false, agents: ["judge"] },
+    ]);
+    // Nothing changed, or no such template: no board.
+    expect(auditedTemplate("judge", [], store.dataRoot).boards).toEqual([]);
+    expect(auditedTemplate("nobody", ["model"], store.dataRoot).boards).toEqual([]);
   });
 });

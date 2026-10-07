@@ -760,7 +760,9 @@ base`, `Edit MCP server`, `GitHub sign-in`).
   signed by **Goal chain**).
 - The Activity **audit** column carries the instance writes to what the board's runs
   are given (ruling 681): a write to the knowledge base the board names as its rulings, or to a
-  knowledge base, a skill or an MCP server one of its deployed agents holds. Each reads
+  knowledge base, a skill or an MCP server one of its deployed agents holds, or an edit of
+  an agent template its agent still follows ("<person> changed the agent template
+  **Developer**, which this board follows."). Each reads
   as who changed which document of which resource and why it is here: "<person> edited a
   passage of **rules.md** in the project's rulings **house-rules**.", "<person> added the
   document **key.md** to the knowledge base **golden-set**, which Scout reads.",

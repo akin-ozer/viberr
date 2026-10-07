@@ -1230,29 +1230,50 @@ describe("ruling 681: the instance writes to what a board's runs are given", () 
     ]);
   });
 
-  // CANARY: drop `ofBoard` from the ruling's write or its removal and the
+  // CANARY: take the document's own board out of `recordStoreWrite` and the
   // second board, given the same rulings, reads the first board's slug in a
-  // document's name.
-  it("a board's own ruling document, named after it, is on that board's panel alone", async () => {
+  // document's name, whichever door wrote it.
+  it("a board's own ruling document, named after it, is on that board's panel alone, whoever writes it", async () => {
     const store = setupTestStore(ctx);
     const actor = personOf(store);
     const where = { dataRoot: store.dataRoot };
-    await kbNamed(store, "Shared rules");
+    const shared = await kbNamed(store, "Shared rules");
     writeBoardHolding(store.dataRoot, store.slug, {}, { rulingsKb: "shared-rules" });
-    writeBoardHolding(store.dataRoot, "second-board", {}, { rulingsKb: "shared-rules" });
+    writeBoardHolding(store.dataRoot, "second-board", { kb: ["shared-rules"] }, { rulingsKb: "shared-rules" });
+    const doc = "no-repository-viberr-core.md";
 
+    // The decision's own writer, the controller's edit of one passage, and a
+    // person deleting the document in Instance settings.
     await recordNoRepositoryRuling(
       store.db,
       { projectSlug: store.slug, byName: "Arda", taskKey: "VIB-7", at: "2026-10-07T10:00:00.000Z" },
       actor,
       where,
     );
+    const edit = await editKbPassage(
+      store.db,
+      { kb: "shared-rules", doc, was: "Nothing is committed", now: "Nothing at all is committed", actor },
+      where,
+    );
+    expect(edit.ok).toBe(true);
+    deleteStoreNode(store.db, shared.target, [doc], actor);
+    // And the connection of a repository, which removes one that stands.
+    await recordNoRepositoryRuling(
+      store.db,
+      { projectSlug: store.slug, byName: "Arda", taskKey: "VIB-7", at: "2026-10-07T11:00:00.000Z" },
+      actor,
+      where,
+    );
     removeNoRepositoryRuling(store.db, { projectSlug: store.slug, repo: "acme/app" }, actor, where);
 
     const who = store.users.arda.name;
+    const rules = "the project's rulings **shared-rules**";
     expect(sentences(store)).toEqual([
-      `${who} deleted **no-repository-viberr-core.md** from the project's rulings **shared-rules**.`,
-      `${who} added the document **no-repository-viberr-core.md** to the project's rulings **shared-rules**.`,
+      `${who} deleted **${doc}** from ${rules}.`,
+      `${who} added the document **${doc}** to ${rules}.`,
+      `${who} deleted **${doc}** from ${rules}.`,
+      `${who} edited a passage of **${doc}** in ${rules}.`,
+      `${who} added the document **${doc}** to ${rules}.`,
     ]);
     expect(listAuditLog(store.db, "second-board")).toEqual([]);
     expect(countAuditLog(store.db, "second-board")).toBe(0);
@@ -1306,6 +1327,46 @@ describe("ruling 681: the instance writes to what a board's runs are given", () 
       `${arda.name} cleared the project's rulings.`,
       `${arda.name} named **house-rules** the project's rulings.`,
     ]);
+  });
+
+  // CANARY: leave `org.agent_profile.updated` out of RESOURCE_ACTIONS and a
+  // board whose agent follows a template is not told the template changed;
+  // name every board that deploys the profile and the board whose own copy
+  // the edit never reaches is told of it.
+  it("an edit of an agent template is on the board whose agent follows it, and not on one that holds its own copy", async () => {
+    const store = setupProjectedStore(ctx);
+    const arda = store.users.arda;
+    const actor = { userId: arda.id, label: arda.email };
+    const where = { dataRoot: store.dataRoot };
+    seedDefaultAgentAssets(store.dataRoot);
+    rebuildAll(store.db, where);
+    // A library deploy holds its own copy of what a save snapshots.
+    await deployAgentProfileFromLibrary(
+      store.db,
+      { projectSlug: store.slug, profileId: "developer" },
+      actor,
+      where,
+    );
+    writeBoardHolding(store.dataRoot, "follower", {}, {
+      agents: [{ profileId: "developer", capabilities: [], extras: [] }],
+    });
+    const template = {
+      id: "developer",
+      name: "Developer",
+      backend: "claude" as const,
+      summary: "Implements the change, and says what it left out.",
+      persona: "",
+      stages: ["ready", "impl"],
+    };
+
+    await saveGlobalAgentProfile(store.db, template, actor, where);
+    // Saved again as it stands: nothing changed, so no board is told.
+    await saveGlobalAgentProfile(store.db, template, actor, where);
+
+    expect(sentences(store, "follower")).toEqual([
+      `${arda.name} changed the agent template **Developer**, which this board follows.`,
+    ]);
+    expect(sentences(store).filter((text) => text.includes("agent template"))).toEqual([]);
   });
 
   // CANARY: sort the two legs by `occurred_at` alone and the board's own row,
