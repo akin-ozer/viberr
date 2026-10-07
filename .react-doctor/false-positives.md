@@ -203,7 +203,7 @@ scan run from inside an agent worktree under `.claude/` sees no files at all.
   members, revalidation-policy `overlaps`), `codexVendor().pathDirs` (0 or 1), and
   order-keeping de-duplication of one profile's grant list (`kbDirsOf`, `resolveOne`,
   `nextList`, `difference`). Two more are small in practice, not by a constant. The MCP
-  editor's write-tool chips (resource-modals `marked.includes(tool)` in each chip's class
+  editor's write-tool chips (mcp-modal-fields `marked.includes(tool)` in each chip's class
   and `aria-pressed`) scan one server's own tools: the discovered `tools/list` names (no
   cap), the saved write tools and names typed in. `marked` starts as the discovery
   suggestion on a server nobody has reviewed, and MCP_WRITE_TOOLS_MAX caps it only on
@@ -231,7 +231,7 @@ scan run from inside an agent worktree under `.claude/` sees no files at all.
   `resources[kind]`, mention-notify `fullNameKeys(u.name)`, operator-moves
   `o.newTask?.blockedBy`), or code that runs once despite sitting in the loop's source (a
   `.find()` as the `for…of` iterable, agents-page `resourceCatalog?.find(...)`; an
-  `.includes()` in a per-chip `onClick` updater, resource-modals). Verify the receiver's
+  `.includes()` in a per-chip `onClick` updater, mcp-modal-fields). Verify the receiver's
   type, or that it is the loop variable's own, or where the call actually runs.
 
 - `react-doctor/js-index-maps` — `array.find()` inside a loop where the array is re-read
