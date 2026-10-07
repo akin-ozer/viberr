@@ -10322,3 +10322,21 @@ a.pr-branch:hover { background: var(--tint-hover); }
 }
 .board-res-ico .ico { width: 14px; height: 14px; }
 .board-problems { margin: .375rem 0 0; padding-left: 1.125rem; display: flex; flex-direction: column; gap: .25rem; }
+
+/* ---------- appended: ruling 691, a page capture in the lightbox ---------- */
+/* Viberr's picture of a delivered page is the whole page, up to six screens
+   tall. Shrunk into the lightbox's 76vh it is unreadable, so a capture opens
+   at the page's own width in a scroller the keyboard reaches, the way a
+   markdown preview does (`.lightbox-doc`). The scroller takes the picture's
+   corner, and the picture inside it is as tall as it is. */
+.lightbox-card .lightbox-shot {
+  max-height: 76vh; overflow: auto; overscroll-behavior: contain;
+  border-radius: var(--radius-box);
+}
+.lightbox-card .lightbox-shot > .lightbox-img { max-height: none; }
+/* The card hangs from the window's middle (`left: 50%`), so sized by its
+   content it is never wider than half the window: a 1280px picture came out
+   612px wide in a 1280px window (measured). The desktop picture's card takes
+   the page's width and its own .5rem inset instead; the phone picture's card
+   still hugs its 390px. */
+.modal-card.lightbox-card.page { width: min(1296px, calc(100vw - 2rem)); max-width: none; }

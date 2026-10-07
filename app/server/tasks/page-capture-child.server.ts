@@ -512,7 +512,7 @@ function walkExpression(view: JobView): string {
   const pause = (ms) => new Promise((done) => setTimeout(done, ms));
   try { await Promise.race([document.fonts.ready, pause(3000)]); } catch {}
   const root = document.documentElement;
-  const step = Math.max(window.innerHeight || 0, 200);
+  const step = ${view.height};
   const end = Math.min(Math.max(root ? root.scrollHeight : 0, document.body ? document.body.scrollHeight : 0), ${end});
   for (let y = 0; y < end; y += step) { window.scrollTo(0, y); await pause(80); }
   window.scrollTo(0, 0);

@@ -616,7 +616,13 @@ Details that matter:
   `current | stale | none | not_applicable`, `changedLines`, `changesSummaryRequired`,
   `screenshotCandidates`, the newest 20 image attachments, `resultFilesRequired` and
   `resultFileCandidates`, the delivered files a packet may name as the result (ruling
-  668), and a `note` saying what to do).
+  668), `pageCaptures`, and a `note` saying what to do). Ruling 691: `pageCaptures` lists,
+  for the files delivery under review, each page Viberr pictured (`file`), the pictures'
+  names among the attachments (`pictures`) and why a page has none (`problem`); it is
+  empty when the delivery holds no page or the record on file pictures an earlier
+  delivery. The card shows those pictures beside each result file that is a page without
+  the operator naming them, so neither candidate list offers one, and a capture named
+  under `files` or `screenshots` is left out with a sentence naming the page it pictures.
 - **Delivery.** Its description says it never serves a task whose deliverable is a
   result, which is delivered on the task (ruling 531, §4). `deliver_for_review` runs
   `performDelivery`, with NO cached-state short-circuit (ruling 134): rework on a task whose PR is already open is pushed to

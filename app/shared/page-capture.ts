@@ -57,11 +57,22 @@ export function pageCaptureName(file: string, view: PageCaptureViewId): string {
   return `${file}.capture-${view}.png`;
 }
 
-const CAPTURE_NAME_RE = /\.capture-(?:desktop|phone)\.png$/i;
+const CAPTURE_NAME_RE = /\.capture-(desktop|phone)\.png$/i;
 
 /** True for a name only Viberr's own page pictures carry. */
 export function isPageCaptureName(name: string): boolean {
   return CAPTURE_NAME_RE.test(name);
+}
+
+/** The page a picture's name says it is of. */
+export function pageOfCaptureName(name: string): string {
+  return name.replace(CAPTURE_NAME_RE, "");
+}
+
+/** The width a picture's name says it was taken at; null for any other name. */
+export function viewOfCaptureName(name: string): PageCaptureViewId | null {
+  const view = CAPTURE_NAME_RE.exec(name)?.[1]?.toLowerCase();
+  return view === "desktop" || view === "phone" ? view : null;
 }
 
 /** The system actor that writes a delivery's capture note. */

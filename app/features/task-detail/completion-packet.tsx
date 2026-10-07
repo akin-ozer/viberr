@@ -1,6 +1,7 @@
 import { useId } from "react";
 import type { CompletionVerdictRow, CompletionView } from "~/server/tasks/completion-packet.server";
 import { COMPLETION_NOTES, COMPLETION_SMALL_CHANGE_LINES } from "~/shared/completion-packet";
+import { pageCaptureView } from "~/shared/page-capture";
 import { Collapsible } from "~/ui/collapsible";
 import { Icon, type IconName } from "~/ui/icon";
 import { LocalRelative } from "~/ui/local-time";
@@ -31,6 +32,11 @@ import { ChangesPanel } from "./changes-slot";
  * the result. A task delivered as a revision shows no files: its pull request
  * holds them, so the result names the pull request, the change's size and the
  * paths it changed.
+ *
+ * Ruling 691: a result file that is a page (HTML or markdown) carries Viberr's
+ * own pictures of it under its row, at a desktop and a phone width, or the
+ * reason there is none. The source still opens from the row; the picture is
+ * what a reader of the page gets. Operator names none of them.
  */
 export interface CompletionDiff {
   url: string;
@@ -213,6 +219,38 @@ export function CompletionPacket({
                       {f.caption ? <span className="cmp-file-what">{f.caption}</span> : null}
                     </span>
                   </a>
+                  {f.page && f.page.shots.length > 0 ? (
+                    <div className="attach-grid cmp-shots">
+                      {f.page.shots.map((s) => {
+                        const view = pageCaptureView(s.view);
+                        // The version is for the browser's cache alone (the
+                        // route ignores it): a rework replaces the picture
+                        // under the same name.
+                        const url = `${href(s.name)}?v=${encodeURIComponent(s.at)}`;
+                        return (
+                          <AttachmentThumb
+                            key={s.name}
+                            variant="panel"
+                            href={url}
+                            name={s.name}
+                            openLabel={`Open the ${view.id} picture of ${f.name}`}
+                            onOpen={lightbox({ name: s.name, url })}
+                          >
+                            <span className="cmp-caption">
+                              {view.label}
+                              {s.cut ? ", the top of a longer page" : ""}
+                            </span>
+                          </AttachmentThumb>
+                        );
+                      })}
+                    </div>
+                  ) : null}
+                  {f.page?.note ? (
+                    <p className="cmp-none">
+                      {f.page.shots.length > 0 ? "Not every picture of this page was made" : "No picture of this page"}
+                      : {f.page.note}
+                    </p>
+                  ) : null}
                 </li>
               );
             })}
