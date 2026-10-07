@@ -862,18 +862,21 @@ const RESOURCE_NOUN = {
   template: "agent template",
 } as const;
 
-/** ", which A and B read": the board's agents that hold the resource. One or
- *  two are named; past that, the first and how many others. */
-function heldBy(kind: keyof typeof RESOURCE_NOUN, agents: readonly string[], past: boolean): string {
+/** A board's agents as a sentence names them: one or two by name; past that,
+ *  the first and how many others. */
+function namedAgents(agents: readonly [string, ...string[]]): string {
   const [first, second] = agents;
+  if (second === undefined) return first;
+  return `${first} and ${agents.length === 2 ? second : `${agents.length - 1} others`}`;
+}
+
+/** ", which A and B read": the board's agents that hold the resource. */
+function heldBy(kind: keyof typeof RESOURCE_NOUN, agents: readonly string[], past: boolean): string {
+  const [first, ...rest] = agents;
   if (first === undefined) return "";
-  const names =
-    second === undefined
-      ? first
-      : `${first} and ${agents.length === 2 ? second : `${agents.length - 1} others`}`;
-  const one = second === undefined && !past;
+  const one = rest.length === 0 && !past;
   const verb = kind === "kb" ? (one ? "reads" : "read") : past ? "used" : one ? "uses" : "use";
-  return `, which ${names} ${verb}`;
+  return `, which ${namedAgents([first, ...rest])} ${verb}`;
 }
 
 /** One resource row as the board's panel shows it. */
@@ -946,11 +949,18 @@ function resourceEntry(row: AuditRow, slug: string): AuditLogEntry {
     case "org.mcp.removed":
       entry.text = `${actor} removed ${thing()}${held(true)}.`;
       break;
-    case "org.agent_profile.updated":
-      // The board's agent goes by the template's name while it follows it, so
-      // the sentence names the template once.
-      entry.text = `${actor} changed ${thing(d.name ?? resource.key)}, which this board follows.`;
+    case "org.agent_profile.updated": {
+      // An agent goes by its template's name unless its own copy names it, so
+      // the sentence names the template once and only an agent called otherwise.
+      const template = d.name ?? resource.key;
+      const [first, ...rest] = board.agents.filter((agent) => agent !== template);
+      const followers =
+        first === undefined
+          ? "this board follows"
+          : `${namedAgents([first, ...rest])} ${rest.length === 0 ? "follows" : "follow"}`;
+      entry.text = `${actor} changed ${thing(template)}, which ${followers}.`;
       break;
+    }
   }
   return entry;
 }

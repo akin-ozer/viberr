@@ -17,6 +17,7 @@ import { fakeGithubFetch, unreachableFetch } from "../../../test-support/fake-gi
 import { writeBoardHolding } from "../../../test-support/resource-boards";
 import { deployAgentProfileFromLibrary } from "~/features/agents/agent-profile-actions.server";
 import { setProjectRulingsKb } from "~/features/project-settings/settings-actions.server";
+import { primaryRunBackend, readTemplate } from "~/server/agents/deployment-view.server";
 import { encodeActorRef } from "~/server/files/actor-ref.server";
 import { saveGlobalAgentProfile } from "~/server/org/gagents.server";
 import {
@@ -1332,7 +1333,8 @@ describe("ruling 681: the instance writes to what a board's runs are given", () 
   // CANARY: leave `org.agent_profile.updated` out of RESOURCE_ACTIONS and a
   // board whose agent follows a template is not told the template changed;
   // name every board that deploys the profile and the board whose own copy
-  // the edit never reaches is told of it.
+  // the edit never reaches is told of it; compare a template's backends as a
+  // list and the editor's first save, which keeps one, reads as a change.
   it("an edit of an agent template is on the board whose agent follows it, and not on one that holds its own copy", async () => {
     const store = setupProjectedStore(ctx);
     const arda = store.users.arda;
@@ -1347,25 +1349,34 @@ describe("ruling 681: the instance writes to what a board's runs are given", () 
       actor,
       where,
     );
-    writeBoardHolding(store.dataRoot, "follower", {}, {
-      agents: [{ profileId: "developer", capabilities: [], extras: [] }],
+    const developer = { profileId: "developer", capabilities: [], extras: [] };
+    writeBoardHolding(store.dataRoot, "follower", {}, { agents: [developer] });
+    // A copy that names the agent and leaves the rest to the template.
+    writeBoardHolding(store.dataRoot, "renamer", {}, {
+      agents: [{ ...developer, definition: { name: "Builder" } }],
     });
-    const template = {
+    // The template as its editor loads it: the backend a run starts on, and
+    // the summary and stages it has.
+    const shipped = readTemplate("developer", store.dataRoot)!;
+    const loaded = {
       id: "developer",
-      name: "Developer",
-      backend: "claude" as const,
-      summary: "Implements the change, and says what it left out.",
+      name: shipped.name,
+      backend: primaryRunBackend(shipped.backends),
+      summary: shipped.desc,
       persona: "",
-      stages: ["ready", "impl"],
+      stages: shipped.stages,
     };
 
-    await saveGlobalAgentProfile(store.db, template, actor, where);
-    // Saved again as it stands: nothing changed, so no board is told.
-    await saveGlobalAgentProfile(store.db, template, actor, where);
+    // Saved as it was loaded: nothing a run is given changed, so no board is told.
+    await saveGlobalAgentProfile(store.db, loaded, actor, where);
+    expect(sentences(store, "follower")).toEqual([]);
+    const edited = { ...loaded, summary: "Implements the change, and says what it left out." };
+    await saveGlobalAgentProfile(store.db, edited, actor, where);
+    await saveGlobalAgentProfile(store.db, edited, actor, where);
 
-    expect(sentences(store, "follower")).toEqual([
-      `${arda.name} changed the agent template **Developer**, which this board follows.`,
-    ]);
+    const changed = `${arda.name} changed the agent template **Developer**, which`;
+    expect(sentences(store, "follower")).toEqual([`${changed} this board follows.`]);
+    expect(sentences(store, "renamer")).toEqual([`${changed} Builder follows.`]);
     expect(sentences(store).filter((text) => text.includes("agent template"))).toEqual([]);
   });
 

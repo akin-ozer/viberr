@@ -411,7 +411,7 @@ raw vendor line never reach an audit row.
 - `project.required_reviewers.updated` records the ruling-178 rule (via the controller
   or the project settings form).
 - Every write to a knowledge base, a skill or an MCP server that changes what a run is
-  given carries `resource {kind: "kb" | "skill" | "mcp", key, boards: [{project,
+  given carries `resource {kind: "kb" | "skill" | "mcp" | "template", key, boards: [{project,
   rulings, agents}]}` (ruling 681): the grant key, and the boards that name it as their
   rulings or whose deployed agents hold it, as they stood at the write. That is every
   `org.store.*` row (which before named only a row id and a path inside the folder), a
@@ -424,15 +424,14 @@ raw vendor line never reach an audit row.
   name, the address and the credential it had. A document that is one board's own and
   named after it (`no-repository-<slug>.md`, ruling 672) names that board alone, whoever
   writes it, and no board when that board is not given the knowledge base.
-  `org.agent_profile.updated` carries the same `resource` with `kind: "template"` and the
-  profile id as its key, naming the boards whose deployment leaves to the template a
-  field the edit changed.
+  `org.store.doc_written` also carries `task {project, key}` when the write is an
+  agent's correction or its undo (ruling 498). `org.agent_profile.updated` carries the
+  same `resource` with `kind: "template"` and the profile id as its key, naming the
+  boards whose deployment leaves to the template a field the edit changed.
 - `org.shipped_assets.refreshed {assets, version, revision}` is one row per boot that
   replaced a shipped file with the current version (ruling 681(f)), actor the system:
-  the store-relative paths it replaced and the build that did. It names no board, and a
-  boot that refreshed nothing writes none.
-  `org.store.doc_written` also carries `task {project, key}` when the write is an
-  agent's correction or its undo (ruling 498).
+  the store-relative paths it replaced and the build that did. It names no board, a
+  file a build adds is not listed, and a boot that refreshed nothing writes none.
 - `task.acceptance.forced` carries `bypassed` (the gate sentences joined with " | "),
   `bypassedGates` (the same list), `skippedStages`, `validation` and `withdrawnPacket`
   (U35-3; null when the force answered the open decision instead, ruling 471).

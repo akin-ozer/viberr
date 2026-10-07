@@ -6,6 +6,7 @@ import {
   type AuditActor,
 } from "~/server/audit/audit-recorder.server";
 import type { AgentDeploymentDefinition } from "~/schemas/project-file.schema";
+import { primaryRunBackend } from "~/server/agents/deployment-view.server";
 import { AppError } from "~/server/errors/app-error.server";
 import {
   parseAgentProfileContent,
@@ -496,7 +497,9 @@ const TEMPLATE_FIELDS: readonly [keyof AgentDeploymentDefinition, (t: ParsedTemp
   ["name", (t) => t.frontmatter.name],
   ["role", (t) => t.frontmatter.role ?? ""],
   ["desc", (t) => t.frontmatter.desc],
-  ["backends", (t) => JSON.stringify(t.frontmatter.backends)],
+  // The backend a run starts on: the editor keeps one, and a template that
+  // listed a second after it runs the same as before.
+  ["backends", (t) => primaryRunBackend(t.frontmatter.backends)],
   ["model", (t) => t.frontmatter.model],
   ["effort", (t) => t.frontmatter.effort ?? ""],
   ["stages", (t) => JSON.stringify(t.frontmatter.stages)],

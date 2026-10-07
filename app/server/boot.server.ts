@@ -755,11 +755,6 @@ export async function bootServer(): Promise<void> {
   // writers, silent SQLite loss. The guard re-verifies ownership on a timer and
   // fails CLOSED (loud shutdown) the moment the file is gone or replaced.
   startDataRootLockGuard();
-  // Ship the default agent assets (each agent's expertise skill + its detailed
-  // definition + the base profile templates) into the store when a store lacks
-  // them — before anything reads them. Idempotent and best-effort (never blocks
-  // boot).
-  const refreshedAssets = seedDefaultAgentAssets();
   // Before the first handle opens: if the projection database is corrupt (a WAL
   // clobbered over a bind mount, a torn page after a hard kill), salvage its
   // non-reconstructable rows and rebuild a fresh, valid file instead of
@@ -782,9 +777,12 @@ export async function bootServer(): Promise<void> {
     );
   }
   const db = getDb();
-  // Ruling 681(f): what the refresh above replaced, on the record now that
-  // there is a database to hold it.
-  recordShippedAssetRefresh(db, refreshedAssets);
+  // Ship the default agent assets (each agent's expertise skill + its detailed
+  // definition + the base profile templates) into the store when a store lacks
+  // them — before anything reads them. Idempotent and best-effort (never blocks
+  // boot). Ruling 681(f): what a refresh replaced goes on the record in the
+  // same step, so no boot can replace a file and stop before it says so.
+  recordShippedAssetRefresh(db, seedDefaultAgentAssets());
 
   // Ruling 481(a): before anything can write a notification. A root whose
   // `notifications.kind` CHECK predates a kind gets it widened in place, so an
