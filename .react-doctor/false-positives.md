@@ -4,13 +4,11 @@ Consumed by the /doctor triage loop (step 2): diagnostics matching a pattern her
 dropped before fixing. Patterns that say "verify" require an actual Read/grep of the
 flagged site before suppressing — never suppress on filename alone.
 
-Scope note: `doctor.config.ts` excludes `**/design/**`, `**/.claude/**`, `**/data/**`, and
-`**/*.server.test.ts` at the scanner level — none of them are shipped app code. `design/`
-is the standalone mockup bundle (static HTML/JSX prototypes the app never bundles); the
-other three are checkouts or fixtures of this same repo (agent worktrees, the gitignored
-VIBERR_DATA_ROOT, server-only test files). Scanning them double-counts every finding
-against stale copies — `design/support.js` alone accounted for 45 phantom
-`postmessage-origin-risk` hits before it was scoped out.
+Scope note: `doctor.config.ts` excludes `**/.claude/**`, `**/data/**`,
+`**/*.server.test.ts`, `**/tools/oxlint/**` and `**/test-support/**` at the scanner level —
+none of them are shipped app code. The first three are checkouts or fixtures of this same
+repo (agent worktrees, the gitignored VIBERR_DATA_ROOT, server-only test files), and
+scanning them double-counts every finding against stale copies.
 
 ## Verified false positives
 

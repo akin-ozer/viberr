@@ -15,8 +15,6 @@ docker-data
 coverage
 test-results
 e2e
-design
-planning
 docs
 
 # NOT excluded, on purpose: test-support/.

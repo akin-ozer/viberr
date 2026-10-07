@@ -7,8 +7,7 @@ import type { CredentialKind } from "./backend-credentials.server";
  * and when a resume is refused in favour of a fresh session — on both backends,
  * for all three run kinds. Nothing else in the tree may spell one of these
  * figures; the adapters, the run service, the sink and the docs all read them
- * here. The measurements behind them are in
- * `planning/prompt-cache-2026-09-21/RESEARCH.md` and the ruling text.
+ * here. The measurements behind them are in the ruling text.
  *
  * A leaf module on purpose (types only from elsewhere): both adapters, the run
  * service and the insights query import it, and it must never import them.

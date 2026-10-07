@@ -1145,7 +1145,7 @@ describe("the prompt-cache panel: a backend that reports no write (rulings 395 a
 });
 
 /**
- * Ruling 505: what PLAN.md (`planning/prompt-cache-2026-09-21/`) asked the page
+ * Ruling 505: what the prompt-cache plan asked the page
  * for. PR 1's acceptance was that the page reproduce the plan's baseline table
  * (the mean first write, reads per run, the peak prompt's spread, Codex on its
  * own rows); PR 6 asked whether a Codex resume idle past ten minutes ever reads

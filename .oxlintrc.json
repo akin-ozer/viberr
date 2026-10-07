@@ -12,7 +12,6 @@
     ".pi/**",
     ".roo/**",
     ".windsurf/**",
-    "design/**",
     "tools/oxlint/anti-slop/**"
   ],
   "jsPlugins": [
