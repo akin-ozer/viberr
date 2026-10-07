@@ -1545,7 +1545,7 @@ describe("a run interrupted by a restart", () => {
      * timeline says the opposite one panel away — "Viberr did NOT re-invoke the
      * operator for it… Run the operator from this page when you are ready."
      *
-     * CANARY: restore the old sentence in `runs-panels.tsx`.
+     * CANARY: restore the old sentence in `runs-panels-derive.ts` (`interruptedFooter`).
      */
     expect(container.textContent).toContain(
       "interrupted by a restart; the task record says what recovery did",
