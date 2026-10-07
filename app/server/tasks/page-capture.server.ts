@@ -3,10 +3,12 @@ import {
   constants as fsConstants,
   existsSync,
   fstatSync,
+  mkdirSync,
   openSync,
   readSync,
   readdirSync,
   rmSync,
+  rmdirSync,
   statSync,
   unlinkSync,
   writeSync,
@@ -36,7 +38,10 @@ import {
 import { readTaskFile, updateTaskFile } from "~/server/files/task-writer.server";
 import { logger } from "~/server/logging/logger.server";
 import {
+  TASK_CAPTURE_SCRATCH_DIR,
+  isServersOwnDir,
   passThroughDirForAgents,
+  passThroughDirForAgentsOrWarn,
   shareDirWithAgentsOrWarn,
   shareFileForAgentsToRead,
   type AgentLaunch,
@@ -103,21 +108,27 @@ import { isRelayComment } from "./task-relay.server";
  *    a job, reads back PNG bytes it checks by their own header, and stores
  *    them through its own writer.
  *  - **Where the server writes.** No file inside a folder an agent can write
- *    (rulings 485 and 495). The renderer's scratch is under the task's
- *    `workspace/`, the agents' own tree: the server makes its folders there,
- *    as it does for a gate run, and from then on only reads what the renderer
- *    left. A kept delivery's files are handed to the renderer in
- *    `.capture-input/` beside `deliveries/`, a folder whose parent only the
- *    server writes: the agent group passes through it and reads, and can
- *    neither list it nor put anything in it. A folder that cannot be made so
- *    is each page's reason for no picture, never a copy made anyway.
+ *    (rulings 485 and 495), and no folder either. The renderer's scratch is
+ *    `.captures/<run>/<captureId>/` in the task's own directory, beside
+ *    `deliveries/` and not under `workspace/`: `.captures/` and the run's
+ *    folder are the server's own, passed through by the agent group and
+ *    neither listed nor written by it, so no entry on the way can be a link
+ *    an agent put there, and each is checked as the server's own directory
+ *    before anything is made, listed or removed below it. Only the one
+ *    render's folder, made new, is shared for the renderer to write, and from
+ *    then on the server only reads what the renderer left and removes it as
+ *    the person. A kept delivery's files are handed to the renderer in
+ *    `.capture-input/` beside it, a folder whose parent only the server
+ *    writes: the agent group passes through it and reads, and can neither
+ *    list it nor put anything in it. A folder that cannot be made so is each
+ *    page's reason for no picture, never a copy made anyway.
  *  - **What is kept.** `<file>.capture-desktop.png` and
  *    `<file>.capture-phone.png` in the task's attachments (the next delivery's
  *    picture of the same file replaces them), a copy in the kept delivery they
  *    picture, the `pageCaptures` record bound to that delivery's stamp, one
  *    timeline note that claims the pictures, and audit `task.pages.captured`.
  *    A tool capture keeps nothing on the task: its pictures stay in the
- *    scratch, under the run that asked, until that run ends.
+ *    scratch, in the folder of the run that asked, until that run ends.
  *  - **What it can break.** Nothing: a dead browser, a hang, a missing report
  *    or a picture that fails its header check is that page's `error`, one log
  *    line and one sentence in the note. The delivery, its kept copy, the
@@ -152,6 +163,16 @@ const REPORT_TEXT_MAX_CHARS = 200;
 const REPORT_NAME_MAX_CHARS = 80;
 
 const NO_OWNER = "the task has no owner to render it as";
+/** Why nothing was rendered when the scratch could not be made. */
+const NO_SCRATCH = "the render's scratch folder could not be made";
+/** The folder of `.captures/` for a render no run asked for: a delivery's
+ *  own, or an ask whose caller could not name its run. A run's folder is its
+ *  id, which never holds a dot (`assertPathSafeRunId`). */
+const NO_RUN_HOME = "no.run";
+
+/** A render that did not start, with a reason a task can show: free of
+ *  deployment paths, which the log line beside the throw carries. */
+class RenderRefused extends Error {}
 /** Why a page past the cap has no picture, as the record keeps it. */
 const PAST_PAGE_CAP = `a delivery is pictured up to ${PAGE_CAPTURE_MAX_PAGES} pages`;
 /** How many pages one record names: the pictured ones and the next after the
@@ -386,11 +407,32 @@ function reportText(text: string, max = REPORT_TEXT_MAX_CHARS): string {
 /** A name from the report: what a page asked for is the page's own text. */
 const reportName = (name: string): string => reportText(name, REPORT_NAME_MAX_CHARS);
 
+/** Remove one render's scratch, or a folder inside it: what the renderer
+ *  wrote goes as the person who wrote it (ruling 485), and the emptied
+ *  folder the server made goes with the server's `rmdir` (ruling 495). */
 async function removeScratch(dir: string, launch: AgentLaunch | null): Promise<void> {
   try {
     await removeAgentTree(dir, launch);
   } catch (error) {
     logger.warn("a page capture's scratch folder could not be removed", { dir, err: toError(error) });
+  }
+}
+
+/**
+ * Remove a run's folder of `.captures/` (or the one for renders no run asked
+ * for): each render's scratch in it, then the folder. Nothing is listed or
+ * removed unless the folder is the server's own directory, so never through a
+ * link. The folder itself goes with the server's own `rmdir`, which walks
+ * nothing and refuses a folder with anything in it: no agent can write in it
+ * or beside it (ruling 485 is about the trees one can).
+ */
+async function removeCaptureHome(home: string, launch: AgentLaunch | null): Promise<void> {
+  if (!isServersOwnDir(home)) return;
+  try {
+    for (const scratch of readdirSync(home)) await removeScratch(path.join(home, scratch), launch);
+    if (readdirSync(home).length === 0) rmdirSync(home);
+  } catch (error) {
+    logger.warn("a run's page capture folder could not be removed", { dir: home, err: toError(error) });
   }
 }
 
@@ -545,32 +587,40 @@ async function render(request: RenderRequest): Promise<Render> {
   const { db, ctx, projectSlug, taskKey, launch, pages, views } = request;
   const captureId = newId("cap");
   const task = taskDir(projectSlug, taskKey, ctx.dataRoot);
-  const workspaceRoot = path.join(task, "workspace");
-  const capturesRoot = path.join(workspaceRoot, ".captures");
-  // Ruling 460: the renderer runs as the person's uid, so the folders it
-  // writes are the agents' to write.
-  shareDirWithAgentsOrWarn(workspaceRoot);
-  shareDirWithAgentsOrWarn(capturesRoot);
-  // One render runs at a time, so what else is here is a render a restart cut
-  // short or the stretches of a run that has ended: removed before this one
-  // starts. A run still going keeps its own, so two reviewers on one task do
-  // not take each other's pictures away.
-  const runDir = runFolder(request.runId);
-  for (const other of readdirSync(capturesRoot)) {
-    if (other === runDir || runIsLive(db, other)) continue;
-    await removeScratch(path.join(capturesRoot, other), launch);
-  }
-  let home = capturesRoot;
-  if (runDir) {
-    home = path.join(capturesRoot, runDir);
-    shareDirWithAgentsOrWarn(home);
-    // The run's own last stretch is replaced by this one.
-    for (const last of readdirSync(home)) await removeScratch(path.join(home, last), launch);
-  }
+  const capturesRoot = path.join(task, TASK_CAPTURE_SCRATCH_DIR);
+  const homeName = runFolder(request.runId) ?? NO_RUN_HOME;
+  const home = path.join(capturesRoot, homeName);
   const scratch = path.join(home, captureId);
-  shareDirWithAgentsOrWarn(scratch);
   const tmp = path.join(scratch, "tmp");
-  shareDirWithAgentsOrWarn(tmp);
+  try {
+    // Level by level: each folder is the server's own directory, in a parent
+    // only the server writes, before anything is listed, made or removed
+    // below it. A link on the way (which no agent can put there) refuses the
+    // render and nothing is touched through it.
+    passThroughDirForAgentsOrWarn(capturesRoot);
+    // One render runs at a time, so what else is here is a render a restart
+    // cut short or the stretches of a run that has ended: removed before this
+    // one starts. A run still going keeps its own, so two reviewers on one
+    // task do not take each other's pictures away.
+    for (const other of readdirSync(capturesRoot)) {
+      if (other === homeName || runIsLive(db, other)) continue;
+      await removeCaptureHome(path.join(capturesRoot, other), launch);
+    }
+    passThroughDirForAgentsOrWarn(home);
+    // The last render kept here (the run's own last stretch) is replaced by
+    // this one.
+    for (const last of readdirSync(home)) await removeScratch(path.join(home, last), launch);
+    // Ruling 460: the renderer runs as the person's uid, so this one folder
+    // is the agents' to write. Made new, under a name nobody has been told
+    // yet: `mkdir` refuses an entry that is already there, a link included.
+    mkdirSync(scratch);
+    shareDirWithAgentsOrWarn(scratch);
+    mkdirSync(tmp);
+    shareDirWithAgentsOrWarn(tmp);
+  } catch (error) {
+    logger.warn("a page render's scratch folder could not be made", { projectSlug, taskKey, err: toError(error) });
+    throw new RenderRefused(NO_SCRATCH, { cause: error });
+  }
   const out = path.join(scratch, "out");
   const job: ChildJob = {
     root: taskAttachmentsDir(projectSlug, taskKey, ctx.dataRoot),
@@ -603,7 +653,7 @@ async function render(request: RenderRequest): Promise<Render> {
           err: toError(error),
         });
         await removeScratch(scratch, launch);
-        throw new Error("the delivered files could not be handed to the renderer", { cause: error });
+        throw new RenderRefused("the delivered files could not be handed to the renderer", { cause: error });
       }
     }
     outcome = await runPersonCommand({
@@ -1325,7 +1375,8 @@ async function capturePage(
     });
   } catch (error) {
     logger.warn("a page could not be captured", { taskKey, file: name, reason: errorMessage(error) });
-    return said(`[error] ${code(name)} could not be captured: the renderer could not be started.`);
+    const reason = error instanceof RenderRefused ? error.message : "the renderer could not be started";
+    return said(`[error] ${code(name)} could not be captured: ${reason}.`);
   }
   if (rendered.scratch) {
     // Only the pictures are kept for the run: the browser's profile and the
@@ -1449,8 +1500,10 @@ export function captureTaskPage(
  * A run has ended: the pictures `capture_page` kept for it go, as the task's
  * person (ruling 485), whose agent user the renderer wrote them as. Called by
  * the completion pipeline for every run that ends; a run that asked for no
- * picture has no folder and costs one look. Never throws: what cannot be
- * removed now is removed before the next render on the task.
+ * picture has no folder and costs one look. The folder is looked for through
+ * no link: `.captures/` and the run's folder in it are each the server's own
+ * directory, or nothing is done. Never throws: what cannot be removed now is
+ * removed before the next render on the task.
  */
 export async function removeRunPageCaptures(
   db: DatabaseSync,
@@ -1460,11 +1513,12 @@ export async function removeRunPageCaptures(
   try {
     const runDir = runFolder(input.runId);
     if (!runDir) return;
-    const dir = path.join(taskDir(input.projectSlug, input.taskKey, ctx.dataRoot), "workspace", ".captures", runDir);
-    if (!existsSync(dir)) return;
+    const root = path.join(taskDir(input.projectSlug, input.taskKey, ctx.dataRoot), TASK_CAPTURE_SCRATCH_DIR);
+    const home = path.join(root, runDir);
+    if (!isServersOwnDir(root) || !isServersOwnDir(home)) return;
     const file = readTaskFile(taskRef(ctx, input.projectSlug, input.taskKey));
     const launch = taskOwnerLaunch(db, file?.parsed.frontmatter.ownerUserId ?? null, ctx.dataRoot, NO_OWNER);
-    await removeAgentTree(dir, launch);
+    await removeCaptureHome(home, launch);
   } catch (error) {
     logger.warn("a run's page captures could not be removed", {
       projectSlug: input.projectSlug,

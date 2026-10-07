@@ -1,9 +1,11 @@
 import {
   chmodSync,
   existsSync,
+  lstatSync,
   mkdirSync,
   readFileSync,
   readdirSync,
+  symlinkSync,
   truncateSync,
   unlinkSync,
   utimesSync,
@@ -40,7 +42,12 @@ import { interruptRun, startRun } from "~/server/runtimes/run-service.server";
 import { getRun } from "~/server/runtimes/run-store.server";
 import { applyAgentCompletionEffects } from "./agent-completion.server";
 import { readAgentTaskAttachment } from "./board-read.server";
-import { PAGE_CAPTURE_WAIT_MS, captureTaskPage, requestDeliveryCaptures } from "./page-capture.server";
+import {
+  PAGE_CAPTURE_WAIT_MS,
+  captureTaskPage,
+  removeRunPageCaptures,
+  requestDeliveryCaptures,
+} from "./page-capture.server";
 import { attachTaskFile } from "./task-edits.server";
 
 /**
@@ -152,9 +159,17 @@ const timeline = () =>
   readTaskFile({ projectSlug: store.slug, taskKey: "VIB-1", dataRoot: store.dataRoot })!.parsed.timeline;
 const onTask = () => readdirSync(attachments()).filter((name) => !name.startsWith(".")).sort();
 const pngOf = (file: string) => imageHeader(readFileSync(file));
-/** Where a render keeps its scratch, and where a delivery's files are handed
- *  to the renderer. */
-const scratchRoot = (key = "VIB-1") => path.join(taskDir(store.slug, key, store.dataRoot), "workspace", ".captures");
+/** Where a task's renders keep their scratch (a folder per run, and `no.run`
+ *  for a delivery's own), and where a delivery's files are handed to the
+ *  renderer: both in the task's own directory, which only the server writes. */
+const scratchRoot = (key = "VIB-1") => path.join(taskDir(store.slug, key, store.dataRoot), ".captures");
+/** Every render's scratch folder still on the task, as `<run>/<captureId>`. */
+const scratches = (key = "VIB-1") =>
+  existsSync(scratchRoot(key))
+    ? readdirSync(scratchRoot(key)).flatMap((home) =>
+        readdirSync(path.join(scratchRoot(key), home)).map((capture) => `${home}/${capture}`),
+      )
+    : [];
 const inputRoot = (key = "VIB-1") => path.join(taskDir(store.slug, key, store.dataRoot), ".capture-input");
 /** The files the stand-in browser was told to open, in order, once each. */
 const opened = () => [...new Set(fake.pages().map((page) => decodeURIComponent(new URL(page.url).pathname.split("/").pop()!)))];
@@ -398,7 +413,10 @@ describe("a delivered page is pictured (ruling 691)", () => {
       expect(read).toMatchObject({ image: { mimeType: "image/png" } });
     }
     // The render's scratch is gone with it.
-    expect(readdirSync(path.join(taskDir(store.slug, "VIB-1", store.dataRoot), "workspace", ".captures"))).toEqual([]);
+    // CANARY: make the scratch under `workspace/` again, where an agent can
+    // write, and no folder is here to be empty.
+    expect(readdirSync(scratchRoot())).toEqual(["no.run"]);
+    expect(scratches()).toEqual([]);
     expect(listAuditEvents(store.db, { action: "task.pages.captured" })[0]).toMatchObject({
       taskKey: "VIB-1",
       details: { deliveredAt: stamp, pages: 2, captured: 2, failed: [], more: 0, runsAs: "server" },
@@ -500,7 +518,7 @@ describe("a delivered page is pictured (ruling 691)", () => {
     expect(existsSync(log) ? childLines() : []).toEqual([]);
     expect(fake.launches()).toEqual([]);
     expect(existsSync(inputRoot())).toBe(false);
-    expect(readdirSync(scratchRoot())).toEqual([]);
+    expect(scratches()).toEqual([]);
     // The tool reads the task's own folder and copies nothing, so it can
     // still show the page, and the note says so.
     expect(captureNote()!.text).toBe(
@@ -754,7 +772,7 @@ describe("a delivered page is pictured (ruling 691)", () => {
     );
     // The copy is gone with the render, and so is the render's scratch.
     expect(existsSync(inputRoot())).toBe(false);
-    expect(readdirSync(scratchRoot())).toEqual([]);
+    expect(scratches()).toEqual([]);
   });
 
   it("pictures the first 8 pages of a delivery and says of each page past them, on the task and in the record, why it has no picture", async () => {
@@ -795,7 +813,7 @@ describe("a delivered page is pictured (ruling 691)", () => {
     expect(captureNote()).toBeUndefined();
     expect(onTask()).toEqual(["post.html"]);
     expect(captureAudits()).toEqual([]);
-    expect(readdirSync(scratchRoot())).toEqual([]);
+    expect(scratches()).toEqual([]);
   });
 
   it("one render runs at a time: a newer delivery of a task replaces the one still waiting, and an agent's ask goes ahead of the deliveries that wait", async () => {
@@ -1040,7 +1058,10 @@ describe("a delivered page is pictured (ruling 691)", () => {
     };
     await withBrowser("", async () => {
       const reply = await ask("post.html", { runId: first });
-      expect(reply.text).toContain(`/workspace/.captures/${first}/`);
+      // Beside the kept deliveries, in a folder of the run's own, and not
+      // under the workspace agents write.
+      expect(reply.text).toContain(`/VIB-1/.captures/${first}/cap_`);
+      expect(reply.text).not.toContain("/workspace/");
       expect(reply.text.endsWith("scratch, your next capture replaces it, and it goes when this run ends.")).toBe(true);
       // CANARY: leave the browser's profile and the render's temp files
       // where they are and each capture keeps megabytes nobody reads.
@@ -1081,5 +1102,74 @@ describe("a delivered page is pictured (ruling 691)", () => {
     await stopRun(second);
     await withBrowser("", () => ask("post.html"));
     expect(kept(second)).toBeNull();
+  });
+
+  it("makes, shares and removes nothing through a link where a render's scratch would go, and says the scratch could not be made", async () => {
+    // The scratch is in the task's own directory, where no agent can put an
+    // entry, and each folder on the way is still checked as the server's own
+    // directory before anything is made, listed or removed below it. A test
+    // host has no second user to refuse, so the suite plants the links itself.
+    saveFiles("VIB-1", { "post.html": "<p>the page</p>" });
+    const run = await liveRun("editor");
+    // Somewhere else in the store: a folder named like the run's and one
+    // named like an ended run's, each holding what a render would take for
+    // an earlier scratch and remove.
+    const elsewhere = ctx.makeTempDir("viberr-elsewhere-");
+    for (const home of [run, "run_ended"]) {
+      mkdirSync(path.join(elsewhere, home, "cap_earlier", "out"), { recursive: true });
+      writeFileSync(path.join(elsewhere, home, "cap_earlier", "out", "kept.png"), "not a render's");
+    }
+    /** Every entry there with its mode and group: what a create, a share or
+     *  a removal through a link would change. (The group itself moves only
+     *  where the server launches agents, which no test host does.) */
+    const seen = () =>
+      readdirSync(elsewhere, { recursive: true })
+        .map(String)
+        .sort()
+        .map((entry) => {
+          const st = lstatSync(path.join(elsewhere, entry));
+          return `${entry} ${(st.mode & 0o7777).toString(8)} ${st.gid}`;
+        });
+    const before = seen();
+    const refused = "[error] `post.html` could not be captured: the render's scratch folder could not be made.";
+    const runEnds = () =>
+      removeRunPageCaptures(store.db, { dataRoot: store.dataRoot }, { projectSlug: store.slug, taskKey: "VIB-1", runId: run });
+    const stamp = "2026-10-07T12:00:00.000Z";
+    await keptDelivery("VIB-1", stamp, { "post.html": "<p>the page</p>" });
+
+    // A link where `.captures/` itself goes.
+    symlinkSync(elsewhere, scratchRoot());
+    await withBrowser("", async () => {
+      expect((await ask("post.html", { runId: run })).text).toBe(refused);
+      expect((await ask("post.html")).text).toBe(refused);
+      await picture("VIB-1", stamp);
+    });
+    await runEnds();
+    // CANARY: make the folders with shareDirWithAgentsOrWarn alone, as the
+    // first version did under `workspace/`, and drop the own-directory check
+    // from removeCaptureHome and removeRunPageCaptures: `run_ended/` and the
+    // run's `cap_earlier/` are removed from the link's target and a new
+    // `cap_.../tmp` is made there for the renderer to write.
+    expect(seen()).toEqual(before);
+    expect(fake.launches()).toEqual([]);
+    expect(frontmatter().pageCaptures!.pages).toEqual([
+      { file: "post.html", shots: [], error: "the render's scratch folder could not be made" },
+    ]);
+
+    // A link one level down: where the run's own folder goes, and where an
+    // ended run's folder would be cleared before a render.
+    unlinkSync(scratchRoot());
+    mkdirSync(scratchRoot());
+    symlinkSync(path.join(elsewhere, run), path.join(scratchRoot(), run));
+    symlinkSync(path.join(elsewhere, "run_ended"), path.join(scratchRoot(), "run_ended"));
+    await withBrowser("", async () => {
+      expect((await ask("post.html", { runId: run })).text).toBe(refused);
+      // A render for another run goes ahead, past the ended run's link.
+      expect((await ask("post.html")).text).toMatch(/^\[done\] `post\.html` as a reader sees it\./);
+    });
+    await runEnds();
+    expect(seen()).toEqual(before);
+    expect(readdirSync(path.join(scratchRoot(), "no.run"))).toEqual([expect.stringMatching(/^cap_/)]);
+    await stopRun(run);
   });
 });

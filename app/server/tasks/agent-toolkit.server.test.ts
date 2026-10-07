@@ -1145,7 +1145,7 @@ describe("report_outcome's evidence field (P13-D-26)", () => {
             "Phone, 390 px wide: 0 to 2,000 px of 3,412 \\(`nextFrom`: 2000\\)\\. " +
             "It asked the network for 1 thing \\(fonts\\.example\\.com\\), which a capture never loads, " +
             "and for `assets/chart\\.png`, which is not among this task's files \\(the folder is flat\\)\\. " +
-            "Saved at `\\S+/workspace/\\.captures/\\S+/out/1-desktop\\.png` and `\\S+/out/1-phone\\.png`: " +
+            "Saved at `\\S+/\\.captures/no\\.run/cap_\\S+/out/1-desktop\\.png` and `\\S+/out/1-phone\\.png`: " +
             "scratch, and the next capture on this task replaces it\\.$",
         ),
       );

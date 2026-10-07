@@ -453,6 +453,24 @@ export function shareDirWithAgents(dir: string, deps: { gid?: number } = {}): vo
   shareEntry(dir, deps.gid ?? AGENT_GID, () => SHARED_DIR_MODE);
 }
 
+/** True when `dir` is a directory of the server's own: a real directory, not
+ *  a link to one, that the server's uid made. */
+export function isServersOwnDir(dir: string): boolean {
+  try {
+    const st = lstatSync(dir);
+    return st.isDirectory() && st.uid === process.getuid?.();
+  } catch {
+    return false;
+  }
+}
+
+/** Make `dir` when it is missing, private to the server, and throw unless it
+ *  is then the server's own directory ({@link isServersOwnDir}). */
+function makeServersOwnDir(dir: string): void {
+  mkdirSync(dir, { recursive: true, mode: 0o700 });
+  if (!isServersOwnDir(dir)) throw new Error(`${dir} is not a directory of the server's own.`);
+}
+
 /**
  * Ruling 636: make `dir` (created when missing) a directory the agents pass
  * THROUGH and never list: the server's own, in the agent group, 0710. An agent
@@ -463,17 +481,31 @@ export function shareDirWithAgents(dir: string, deps: { gid?: number } = {}): vo
  * when this server launches no agents.
  */
 export function passThroughDirForAgents(dir: string, deps: { gid?: number } = {}): void {
-  mkdirSync(dir, { recursive: true, mode: 0o700 });
-  const st = lstatSync(dir);
-  if (!st.isDirectory() || st.uid !== process.getuid?.()) {
-    throw new Error(`${dir} is not a directory of the server's own.`);
-  }
+  makeServersOwnDir(dir);
   if (deps.gid === undefined && !launchesAgents()) return;
   const gid = deps.gid ?? AGENT_GID;
   shareEntry(dir, gid, () => 0o710);
   const after = lstatSync(dir);
   if (after.gid !== gid || (after.mode & 0o7777) !== 0o710) {
     throw new Error(`${dir} could not be put in the agent group as 0710.`);
+  }
+}
+
+/**
+ * {@link passThroughDirForAgents}, best effort about the group alone. `dir`
+ * must still be the server's own directory: a link, or a directory another
+ * uid made, throws, so nothing is ever made under one. A group or a mode that
+ * did not take is logged instead: the person's own step below it then fails
+ * in its own words, which the caller reports. For a folder that only leads to
+ * what a person's process writes (ruling 691: a page render's scratch), where
+ * the server puts no file of its own.
+ */
+export function passThroughDirForAgentsOrWarn(dir: string): void {
+  try {
+    passThroughDirForAgents(dir);
+  } catch (error) {
+    if (!isServersOwnDir(dir)) throw error;
+    logger.warn("a directory could not be opened for the agent group to pass through", { dir, err: toError(error) });
   }
 }
 
@@ -694,6 +726,21 @@ export interface LayoutReport {
 /** The per-task directories a run writes: shared with the agent group here,
  *  and removed as the task's person wherever they are removed (ruling 485). */
 export const TASK_SHARED_DIRS = ["workspace", "attachments", ".operator-scratch"] as const;
+
+/**
+ * Ruling 691: the folder of a task directory that holds the page renderer's
+ * scratch, beside `deliveries/`. It and each run's folder in it are the
+ * server's own, passed through and never listed or written by an agent
+ * ({@link passThroughDirForAgentsOrWarn}); only one render's own folder, made
+ * new under them, is shared for the renderer to write. Never handed to the
+ * group at boot the way a {@link TASK_SHARED_DIRS} entry is.
+ */
+export const TASK_CAPTURE_SCRATCH_DIR = ".captures";
+
+/** Every per-task directory that can hold what a person's process wrote, so
+ *  is removed as the task's person and never by the server's own recursive
+ *  remove (ruling 485): the shared ones and the page renderer's scratch. */
+export const TASK_PERSON_REMOVED_DIRS = [...TASK_SHARED_DIRS, TASK_CAPTURE_SCRATCH_DIR] as const;
 
 /**
  * Ruling 460's store layout, asserted at every boot. The server owns the tree,

@@ -194,5 +194,40 @@ describe("reclaimTerminalTaskWorkspaces", () => {
       ]);
       expect(existsSync(path.join(unowned, "viberr", "chunk.bin"))).toBe(true);
     });
+
+    it("ruling 691: what a cut render left in a finished task's capture scratch goes the same way, and an in-flight task's stays", () => {
+      // The page renderer's scratch is `.captures/` in the task's own
+      // directory, beside the workspace, and holds a browser profile only its
+      // uid can enter when a restart cut the render. CANARY: reclaim
+      // `workspace/` alone and it stays on the finished task for good: no
+      // later render comes to a closed task to clear it.
+      const store = setupTestStore(ctx);
+      writeTask(store.dataRoot, store.slug, {
+        frontmatter: baseTaskFrontmatter("VIB-1", { stage: "done", ownerUserId: store.users.arda.id }),
+      });
+      task(store, "VIB-2", "impl");
+      rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
+      const leftBy = (key: string): string => {
+        const captures = path.join(taskDir(store.slug, key, store.dataRoot), ".captures");
+        const profile = path.join(captures, "no.run", "cap_cut", "profile");
+        mkdirSync(profile, { recursive: true });
+        writeFileSync(path.join(profile, "Cookies"), "left by a restart");
+        return captures;
+      };
+      const finished = leftBy("VIB-1");
+      const inFlight = leftBy("VIB-2");
+      const launched = standInLauncher();
+
+      const result = reclaimTerminalTaskWorkspaces(store.db, { dataRoot: store.dataRoot });
+
+      // It is no workspace, so it is not counted as one.
+      expect(result.removed).toBe(0);
+      expect(existsSync(finished)).toBe(false);
+      expect(launched()).toEqual([
+        `uid=${AGENT_UID_FLOOR} exec=chmod args=-R u+rwX -- ${finished}`,
+        `uid=${AGENT_UID_FLOOR} exec=rm args=-rf -- ${finished}`,
+      ]);
+      expect(existsSync(path.join(inFlight, "no.run", "cap_cut", "profile", "Cookies"))).toBe(true);
+    });
   });
 });

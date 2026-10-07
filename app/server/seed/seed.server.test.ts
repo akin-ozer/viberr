@@ -1,8 +1,9 @@
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { createTestDbContext } from "../../../test-support/test-db";
 import { runDemoSeed } from "../../../test-support/demo-seed";
+import { baseTaskFrontmatter, setupTestStore, writeTask } from "../../../test-support/test-store";
 import { findUserByEmail, listUsers } from "~/server/auth/user-store.server";
 import {
   credentialPasswordHash,
@@ -11,10 +12,11 @@ import {
 } from "~/server/auth/identity.server";
 import { verifyPassword } from "~/server/auth/password.server";
 import { parseAgentProfileContent } from "~/server/files/agent-profile-file.server";
-import { agentProfileFilePath } from "~/server/files/file-store-root.server";
+import { agentProfileFilePath, taskDir } from "~/server/files/file-store-root.server";
+import { AGENT_UID_FLOOR, resetAgentIsolationForTests } from "~/server/runtimes/agent-isolation.server";
 import { seedDefaultAgentAssets } from "./default-assets.server";
 import { SEED_DEFAULT_PASSWORD } from "./seed-credentials";
-import { runSeed } from "./seed.server";
+import { resetStore, runSeed } from "./seed.server";
 
 /**
  * The PRODUCT seed — a clean sheet (owner ruling 2026-07-24): built-in agent
@@ -236,5 +238,48 @@ describe("runSeed (clean-sheet product seed)", () => {
     expect(existsSync(codexAuth)).toBe(true); // personal sign-in preserved
     expect(existsSync(claudeHome)).toBe(true);
     expect(existsSync(transcript)).toBe(false); // run log wiped
+  });
+
+  it("--reset removes what the page renderer left in a task's .captures as the task's owner, before the server's own remove of projects/ (rulings 485, 691)", () => {
+    // A render a restart cut short leaves a browser profile in the task's
+    // `.captures/`, written as the owner's agent uid. CANARY: remove only
+    // TASK_SHARED_DIRS as the person and nothing is launched for it: the
+    // scratch goes with the server's own `rmSync` of `projects/`, which in
+    // the image stops at a directory only that uid can enter.
+    const store = setupTestStore(ctx);
+    writeTask(store.dataRoot, store.slug, {
+      frontmatter: baseTaskFrontmatter("VIB-1", { ownerUserId: store.users.arda.id }),
+    });
+    const captures = join(taskDir(store.slug, "VIB-1", store.dataRoot), ".captures");
+    mkdirSync(join(captures, "no.run", "cap_cut", "profile"), { recursive: true });
+    writeFileSync(join(captures, "no.run", "cap_cut", "profile", "Cookies"), "left by a restart");
+    // A stand-in `viberr-launch` (isolation `on`) that logs and execs.
+    const dir = ctx.makeTempDir("viberr-launcher-");
+    const log = join(dir, "launch.log");
+    const launcher = join(dir, "viberr-launch");
+    writeFileSync(
+      launcher,
+      [
+        "#!/bin/sh",
+        'if [ "$1" = "--prepare-home" ]; then mkdir -p "$3"; exit 0; fi',
+        `printf 'uid=%s exec=%s args=%s\\n' "$VIBERR_LAUNCH_UID" "$(basename "$VIBERR_LAUNCH_EXEC")" "$*" >> '${log}'`,
+        "target=$VIBERR_LAUNCH_EXEC",
+        "unset VIBERR_LAUNCH_UID VIBERR_LAUNCH_EXEC VIBERR_LAUNCH_HOME",
+        'exec "$target" "$@"',
+        "",
+      ].join("\n"),
+    );
+    chmodSync(launcher, 0o755);
+    resetAgentIsolationForTests({ status: "on", uidFloor: AGENT_UID_FLOOR, reason: null }, { launcher });
+    try {
+      resetStore(store.db, store.dataRoot);
+    } finally {
+      resetAgentIsolationForTests();
+    }
+    expect(existsSync(log) ? readFileSync(log, "utf8").split("\n").filter(Boolean) : []).toEqual([
+      `uid=${AGENT_UID_FLOOR} exec=chmod args=-R u+rwX -- ${captures}`,
+      `uid=${AGENT_UID_FLOOR} exec=rm args=-rf -- ${captures}`,
+    ]);
+    expect(existsSync(captures)).toBe(false);
   });
 });

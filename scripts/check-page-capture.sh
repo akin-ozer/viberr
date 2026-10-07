@@ -20,6 +20,9 @@
 #     a file in it, and it still finds a page and the picture beside it stored
 #     in the other Unicode form (ruling 675), on a disk that holds names byte
 #     for byte;
+#   - the renderer writes in a scratch folder made new under a parent it can
+#     only pass through, the way the server makes one in a task's `.captures/`:
+#     an agent uid cannot list that parent or put a link beside the scratch;
 #   - the image's fonts give `system-ui` a proportional face and draw an emoji
 #     (the Dockerfile's chromium layer);
 #   - nothing of the browser is left running.
@@ -43,9 +46,13 @@ CHILD="$APP/app/server/tasks/page-capture-child.server.ts"
 NODE=$(command -v node)
 UID_C=59992
 TAG="capture-check-$$"
-# A directory shared the way a task's workspace is, outside projects/, which
-# the server's file watcher follows.
+# The stand-in for a run's folder of a task's `.captures/`: the server's own,
+# passed through by the agent group and neither listed nor written by it
+# (0710). Outside projects/, which the server's file watcher follows.
 WORK="$DATA/runtimes/$TAG"
+# One render's scratch in it, made new and shared for the renderer to write
+# (2770), as page-capture.server.ts makes it.
+SCRATCH="$WORK/scratch"
 failures=0
 listener=""
 
@@ -59,7 +66,7 @@ cleanup() {
   [ -n "$listener" ] && kill "$listener" 2>/dev/null
   if [ -d "$WORK" ]; then
     # What the agent wrote is the agent's to remove (ruling 485).
-    VIBERR_LAUNCH_UID=$UID_C VIBERR_LAUNCH_EXEC=/bin/sh "$LAUNCH" -c "rm -rf '$WORK/out' '$WORK/profile' '$WORK/tmp'" >/dev/null 2>&1
+    VIBERR_LAUNCH_UID=$UID_C VIBERR_LAUNCH_EXEC=/bin/sh "$LAUNCH" -c "rm -rf '$SCRATCH/out' '$SCRATCH/profile' '$SCRATCH/tmp' '$SCRATCH'/.[!.]*" >/dev/null 2>&1
     rm -rf "$WORK" 2>/dev/null
   fi
 }
@@ -84,11 +91,12 @@ if [ ! -d "$DATA/runtimes" ]; then
   mkdir -p "$DATA/runtimes" && chgrp viberr-agents "$DATA/runtimes" && chmod 0750 "$DATA/runtimes"
   echo "note  no server has booted on $DATA: created runtimes/ as the boot would"
 fi
-mkdir -p "$WORK" && chgrp viberr-agents "$WORK" && chmod 2770 "$WORK"
+mkdir -p "$WORK" && chgrp viberr-agents "$WORK" && chmod 0710 "$WORK"
 mkdir -p "$WORK/files"
-for dir in out profile tmp; do
-  mkdir -p "$WORK/$dir" && chmod 2770 "$WORK/$dir"
-done
+# The server makes the scratch and the temp folder in it; the renderer makes
+# `out/` and `profile/` itself.
+mkdir "$SCRATCH" && chgrp viberr-agents "$SCRATCH" && chmod 2770 "$SCRATCH"
+mkdir "$SCRATCH/tmp" && chmod 2770 "$SCRATCH/tmp"
 
 # The fixtures, the stand-in for "another port on this host", and the reading
 # of what came back, in one helper: Node is what the image has.
@@ -243,8 +251,8 @@ if (command === "job") {
       // The renderer may pass through this folder and not list it, so it is
       // told what the folder holds, as the server tells it.
       names: readdirSync(path.join(work, "files")),
-      out: path.join(work, "out"),
-      profile: path.join(work, "profile"),
+      out: path.join(work, "scratch", "out"),
+      profile: path.join(work, "scratch", "profile"),
       browser,
       pages: [
         { file: "page.html", kind: "html" },
@@ -270,7 +278,7 @@ if (command === "verify") {
     console.log(`${holds ? "ok   " : "FAIL "} ${what}${holds || seen === "" ? "" : ` (${seen})`}`);
     if (!holds) failures += 1;
   };
-  const out = path.join(work, "out");
+  const out = path.join(work, "scratch", "out");
   const reportFile = path.join(out, "report.json");
   if (!existsSync(reportFile)) {
     check(false, "the renderer wrote its report");
@@ -375,10 +383,32 @@ else
   pass "an agent uid cannot put a file in the input folder"
 fi
 
+# --- the scratch, as the server makes it ---------------------------------------
+# page-capture.server.ts keeps a render's scratch in the task's own directory:
+# `.captures/` and the run's folder in it are the server's own, 0710 in the
+# agent group, and only the one render's folder is the agents' to write. No
+# agent can put an entry, so no link, where the server makes a folder.
+if as_agent "ls '$WORK'"; then
+  fail "an agent uid can list the folder its scratch is in"
+else
+  pass "an agent uid cannot list the folder its scratch is in"
+fi
+as_agent "ln -s /tmp '$WORK/planted'"
+if [ -L "$WORK/planted" ]; then
+  fail "an agent uid put a link beside its scratch"
+else
+  pass "an agent uid cannot put a link beside its scratch"
+fi
+if as_agent "touch '$SCRATCH/probe' && rm '$SCRATCH/probe'"; then
+  pass "an agent uid writes in the scratch it is given"
+else
+  fail "an agent uid cannot write in the scratch it is given"
+fi
+
 started=$(date +%s)
 (
-  cd "$WORK" || exit 1
-  HOME="$WORK" TMPDIR="$WORK/tmp" TMP="$WORK/tmp" TEMP="$WORK/tmp" \
+  cd "$SCRATCH" || exit 1
+  HOME="$SCRATCH" TMPDIR="$SCRATCH/tmp" TMP="$SCRATCH/tmp" TEMP="$SCRATCH/tmp" \
     VIBERR_RUN_ID="$TAG" VIBERR_LAUNCH_UID=$UID_C VIBERR_LAUNCH_EXEC="$NODE" \
     "$LAUNCH" "$CHILD" "$JOB"
 )
@@ -389,7 +419,7 @@ if [ "$code" -eq 0 ]; then
 else
   fail "the renderer exited $code"
 fi
-owner=$(stat -c '%u' "$WORK/out/report.json" 2>/dev/null)
+owner=$(stat -c '%u' "$SCRATCH/out/report.json" 2>/dev/null)
 [ "$owner" = "$UID_C" ] && pass "its report is uid $UID_C's own" || fail "its report is owned by '$owner'"
 
 "$NODE" "$WORK/check.mjs" verify "$WORK" "$PORT" || failures=$((failures + 1))

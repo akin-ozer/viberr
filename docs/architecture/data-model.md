@@ -83,16 +83,25 @@ Created by the code that needs them:
                                                     removed when the run finishes. Each gate's log
                                                     lands in attachments/ as
                                                     `gate-<sha7>-<NN>-<name>-<stamp>.log`
-  projects/<slug>/tasks/<KEY>/workspace/.captures/<captureId>/
+  projects/<slug>/tasks/<KEY>/.captures/<run>/<captureId>/
                                                     one page render's scratch (ruling 691): `out/`
                                                     (the pictures and the report), `tmp/` and
                                                     `profile/` (the browser's), written by the task
-                                                    owner's agent uid; a delivery's is removed when
-                                                    its render finishes. An agent's `capture_page`
-                                                    keeps `<runId>/<captureId>/out/` alone, replaced
-                                                    by that run's next capture and removed when the
-                                                    run ends; whatever a restart left goes before the
-                                                    next render on the task
+                                                    owner's agent uid. `<run>` is the id of the run
+                                                    whose `capture_page` asked, or `no.run` for a
+                                                    delivery's own render. `.captures/` and `<run>/`
+                                                    are the server's own, 0710 in the agent group
+                                                    (passed through, never listed or written by an
+                                                    agent); only `<captureId>/`, made new, is 2770
+                                                    for the renderer. Beside `deliveries/`, never
+                                                    under `workspace/`, which agents write. A
+                                                    delivery's is removed when its render finishes.
+                                                    An agent's `capture_page` keeps `out/` alone,
+                                                    replaced by that run's next capture and removed
+                                                    with `<run>/` when the run ends; whatever a
+                                                    restart left goes before the next render on the
+                                                    task, with a finished task's at boot, and as the
+                                                    task's owner on a seed reset
   projects/<slug>/tasks/<KEY>/.capture-input/<captureId>/
                                                     a kept delivery's files, copied for the one render
                                                     that pictures it and removed with it, or, when a

@@ -707,7 +707,7 @@ describe("ruling 691: the gateway's board server pictures a page for a Codex run
       // file with its own viewer.
       expect(text).toMatchObject({ type: "text" });
       expect(text?.type === "text" ? text.text : "").toMatch(
-        /^\[done\] `post\.html` as a reader sees it\. Desktop, 1280 px wide: 0 to 2,000 px of 2,600 \(`nextFrom`: 2000\)\. Saved for this run at `\S+\/workspace\/\.captures\/\S+\/out\/1-desktop\.png`: scratch/,
+        /^\[done\] `post\.html` as a reader sees it\. Desktop, 1280 px wide: 0 to 2,000 px of 2,600 \(`nextFrom`: 2000\)\. Saved for this run at `\S+\/\.captures\/run_\S+\/cap_\S+\/out\/1-desktop\.png`: scratch/,
       );
       expect(content).toHaveLength(2);
       expect(picture?.type === "image" ? imageHeader(Buffer.from(picture.data, "base64")) : null).toEqual({

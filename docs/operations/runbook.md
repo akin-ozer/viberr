@@ -550,8 +550,12 @@ history opens with "Converted from goal-N …", and the project's Activity colum
   note says so. Renders are one at a time for the whole instance, so a burst of
   deliveries queues; an agent's `capture_page` goes ahead of waiting deliveries and
   answers `[busy]` when it has not started within 15 s. Its pictures stay under
-  `workspace/.captures/<runId>/` until the run ends; a folder there whose run is no
-  longer live is removed before the next render on the task. A restart during a render
+  `<task>/.captures/<runId>/` until the run ends; a folder there whose run is no
+  longer live is removed before the next render on the task, and a finished task's goes
+  at boot with its workspace. "The render's scratch folder could not be made" means
+  `<task>/.captures/` or a folder in it is not a directory the server's own user made
+  (a link, or another user's): the log line `a page render's scratch folder could not be
+  made` carries the path; remove the entry and the next render makes its own. A restart during a render
   loses that delivery's pictures: the next delivery is pictured, and an agent can look
   with `capture_page` meanwhile. `docker compose exec -T app sh
   scripts/check-page-capture.sh` checks the renderer against the image's own browser.
