@@ -334,10 +334,5 @@ table list with retention is in [data-model.md](data-model.md).
 - Binding rulings and conventions: [decisions.md](decisions.md) (numbers are stable;
   code cites "ruling N").
 - Canonical file formats: [file-formats.md](file-formats.md).
-- Product requirements: `planning/planning-artifacts/prd.md` (mirrored byte-for-byte
-  into `design/prd.md` by a test; edit canon only). Status per requirement:
+- Product requirements: [../product/prd.md](../product/prd.md). Status per requirement:
   [../product/requirements-status.md](../product/requirements-status.md).
-- `planning/planning-artifacts/architecture.md` is the original design document. It is
-  useful for intent and history but is stale in places (see
-  [../validation/2026-09-01-doc-validation.md](../validation/2026-09-01-doc-validation.md));
-  when it disagrees with the code, the code and the `docs/` set here win.

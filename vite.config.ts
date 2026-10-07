@@ -18,7 +18,7 @@ try {
 // (app/server/config/env.server.ts). Task workspaces under it are full nested
 // clones of the target repository — each with its own .git and tsconfig.json.
 // Vite's default root watch would treat those as application source, emit HMR /
-// full reloads for planning/design files, and clear its TypeScript cache on the
+// full reloads for files an agent writes there, and clear its TypeScript cache on the
 // nested tsconfig (F10-36). Exclude the whole data root from the dev watcher.
 const dataRoot = path.resolve(process.env.VIBERR_DATA_ROOT ?? "./data");
 

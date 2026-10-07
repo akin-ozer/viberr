@@ -1256,7 +1256,7 @@ describe("ruling 395: a backend that reports no cache write reports no cache wri
 });
 
 /**
- * Ruling 505 — what PLAN.md (`planning/prompt-cache-2026-09-21/`) asked this
+ * Ruling 505 — what the prompt-cache plan asked this
  * page for and it lacked. PR 1's acceptance was "the insights page reproduces
  * the baseline table above from the stored rows", and the table had columns the
  * page never drew: the mean first-call write, reads per run and the peak

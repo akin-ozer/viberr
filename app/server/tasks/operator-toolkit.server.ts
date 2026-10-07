@@ -723,7 +723,7 @@ export function buildOperatorToolkit(deps: ToolkitDeps): OperatorToolkit {
           repoSource: z
             .string()
             .describe(
-              "The repository file that is authoritative, e.g. 'qa/smoke/README.md'.",
+              "The repository file that is authoritative, e.g. 'CONTRIBUTING.md'.",
             ),
           detail: z
             .string()

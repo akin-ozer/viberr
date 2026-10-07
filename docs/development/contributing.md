@@ -126,7 +126,6 @@ into the env schema and `.env.example` (`env.server.test.ts`).
 
 | File | Pinned by | Rule |
 |---|---|---|
-| `design/prd.md` | `prd-sync.test.ts` | byte-identical to `planning/planning-artifacts/prd.md`; edit canon, copy over the mirror |
 | `docs/architecture/file-formats.md` | `file-formats-sync.test.ts` | §2 documents every `TASK_FRONTMATTER_KEYS` entry, §4 every `AGENT_PROFILE_KNOWN_KEYS` entry; the `## Packet` "The N kinds:" enumeration equals `PACKET_OPTION_KINDS` in order, and every stated count equals its length |
 | `docs/architecture/file-formats.md` (append contract) | `task-file.server.test.ts` | never says "display sorts by timestamp"; keeps "it does not undo it" |
 | `docs/architecture/decisions.md` | `rulings-supersession.test.ts` | states its supersession convention, and every ruling a later one changes carries an inline marker (ruling 341) |
@@ -145,7 +144,8 @@ paths stable.
 
 ## 6. UI rules in one place
 
-The mock under `design/html-app/app/*.jsx` is the structural source; `app/app.css`
+The shipped app is the design source (ruling 682): reuse what an existing surface already
+draws, and record a deliberate departure in a comment at its site. `app/app.css`
 `:root` is the only token source (no Tailwind, no inline hex, new CSS only in the marked
 appended sections). One typeface, Inter, for body and display (ruling 365); the faces a
 first paint draws are preloaded from `features/shell/font-preloads.ts`, and a

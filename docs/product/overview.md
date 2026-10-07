@@ -3,7 +3,7 @@
 > What Viberr is, who it is for, what it promises, and where it stands. Distilled
 > from the canonical PRD and checked against the code. Requirement-by-requirement
 > status is in [requirements-status.md](requirements-status.md).
-> Source of truth: `planning/planning-artifacts/prd.md`, [decisions.md](../architecture/decisions.md), `app/`.
+> Source of truth: [prd.md](prd.md), [decisions.md](../architecture/decisions.md), `app/`.
 > Verified against `main` @ `7d9fbf72` (2026-09-23).
 
 ## 1. One paragraph
@@ -101,11 +101,9 @@ skeleton loaders.
 
 ## 8. Where the canon lives
 
-- Requirements: `planning/planning-artifacts/prd.md` (byte-identical mirror at `design/prd.md`, pinned by `app/shared/docs/prd-sync.test.ts`). Its last amendment is dated 2026-09-01; what has been decided since is listed in [requirements-status.md §5](requirements-status.md#5-drift-the-prd-does-not-record).
-- Architecture decision document: `planning/planning-artifacts/architecture.md`.
-- UX specification: `planning/planning-artifacts/ux-design-specification.md`.
+- Requirements: [prd.md](prd.md). Its last amendment is dated 2026-09-01; what has been decided since is listed in [requirements-status.md §5](requirements-status.md#5-drift-the-prd-does-not-record).
 - Binding conventions and numbered rulings: [docs/architecture/decisions.md](../architecture/decisions.md).
-- The design mock that the UI was ported from: `design/html-app/` (prototype only; the app's `:root` tokens in `app/app.css` are the token source, not the mock).
+- The design: the shipped app itself, with `app/app.css`'s `:root` as the one token source. The original architecture and UX specifications and the HTML mock the UI was ported from are in git history (ruling 682).
 
 When the app and a document disagree and the app is right, the document is corrected.
 Read a requirement's amendment notes before treating its head sentence as an instruction.

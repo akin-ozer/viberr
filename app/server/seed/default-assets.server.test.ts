@@ -835,7 +835,7 @@ describe("ruling 437: the app skill says whose packets the operator may resolve"
 });
 
 /**
- * The seeded-prompt sweep (2026-09-23; `docs/validation/2026-09-23-doc-sweep.md`,
+ * The seeded-prompt sweep (2026-09-23, the second documentation sweep's
  * "Seeded agent prompts"). Ten sentences in the shipped prompts said things the
  * code at HEAD does not do, and every run that mounts them read them as fact:
  * the Developer "opens the review pull request" while its own run prompt

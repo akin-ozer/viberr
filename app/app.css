@@ -169,11 +169,6 @@
   --claude-fg: #8a4b22;
   --claude-line: color-mix(in srgb, #c2602e, transparent 74%);
 
-  /* P16-UI-04: this was the Roobert-first stack from design/design-system.html,
-     and a second `:root { --font-display: "Manrope", … }` further down the file
-     silently overrode it — so the token block, the first place anyone looks,
-     gave the wrong answer. Manrope is what ships (bundled @fontsource/manrope
-     500/600/700/800); it is declared here now and nowhere else. */
   /* THE TYPE SCALE (recut 2026-09-08). Six steps, one per ROLE — px in
      parentheses, root is 16px:
        .69  (11)  labels, eyebrows, table headers, avatar initials

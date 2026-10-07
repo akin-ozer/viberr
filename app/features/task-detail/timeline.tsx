@@ -844,8 +844,8 @@ export function Timeline({
                 : "No activity yet. This task hasn't started its operator loop."
               : f === "comment"
                 ? "No comments in the loaded history. Switch to All, or load older events."
-                : // F18-14: "governance" is a banned UI word (design/CONVERSATION-SUMMARY
-                  // line 22); this is the "Important" filter's empty state, so name that tab.
+                : // F18-14: "governance" is a banned UI word (copy-ban.test.ts);
+                  // this is the "Important" filter's empty state, so name that tab.
                   "No important events in the loaded history. Switch to All, or load older events."}
           </div>
         ) : (

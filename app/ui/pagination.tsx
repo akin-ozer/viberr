@@ -3,9 +3,8 @@ import { Icon } from "./icon";
 /**
  * Page controls laid out the way shadcn/ui's Pagination draws them (ruling
  * 618): Previous, the page numbers with a gap where a run is skipped, Next.
- * The registry component is a design reference, read the way
- * `design/html-app` is, never an install (ruling 166): this renders with the
- * sheet's own `.pager*` classes.
+ * The registry component is a design reference, never an install (ruling
+ * 166): this renders with the sheet's own `.pager*` classes.
  *
  * Pages are 1-based. An end with no page past it is `aria-disabled`, not
  * `disabled`: a disabled button drops the focus of a keyboard user whose
