@@ -235,7 +235,7 @@ export const PRIOR_SHIPPED_HASHES: PriorShippedHashes = {
     "86f1e309de8bdb5393156fc6f12bc93a035597c43ae74c02b6b6f2c94c1b488b",
   ],
   [path.join("skills", "controller-guide", "SKILL.md")]: [
-    // Rulings 682 and 683 (owner, 2026-10-07: "why would controller make the
+    // Rulings 683 and 684 (owner, 2026-10-07: "why would controller make the
     // template with data?"): before the guide said a template is made from an
     // example and is never the example, that a flow names no task, and that
     // the controller continues on a task's acceptance. It told the controller

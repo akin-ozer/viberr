@@ -58,7 +58,7 @@ function unfitName(name: string): string | null {
 }
 
 /**
- * Ruling 682: what a file copied into a knowledge base is kept as.
+ * Ruling 683: what a file copied into a knowledge base is kept as.
  *
  * - `template`: later results are filled into it, so it holds none of any
  *   task's content, only `[[what goes here]]` placeholders where content goes.
@@ -71,13 +71,52 @@ export type KeptFileKind = "template" | "sample" | "asset";
 
 /**
  * A placeholder as a template marks one: `[[what goes here]]`, on one line,
- * opening on a letter. That keeps out what only looks like one in a finished
- * result: a numbered citation (`[[1]](https://…)`), an array in a page's
- * script (`[["acme",13381.01]]`, `[[10,20,30]]`), a shell test (`[[ -f x ]]`).
+ * opening on a letter (blanks before it are fine), at most 160 characters
+ * between the brackets, and not the text of a link. That keeps out what only
+ * looks like one in a finished result: a numbered citation (`[[1]]`), a
+ * bracketed link (`[[Gartner 2024]](https://…)`), an array of numbers or of
+ * strings (`[[10,20,30]]`, `[["acme",13381.01]]`), a shell test
+ * (`[[ -f x ]]`).
  */
-const TEMPLATE_PLACEHOLDER = /\[\[\p{L}[^[\]"\r\n]{0,159}\]\](?!\()/gu;
+const TEMPLATE_PLACEHOLDER = /\[\[[ \t]{0,8}\p{L}[^[\]\r\n]{0,159}\]\](?!\()/gu;
 
-/** Ruling 682: the name a sample is kept under: it says what it is and whose. */
+/**
+ * A page's text without what its `<script>` and `<style>` elements hold: a
+ * browser runs or applies those and shows none of it, and a script is where
+ * a finished report keeps `[[a,b]]` (a chart library's arrays, a map's
+ * entries), which no result is filled into. An element left open takes the
+ * rest of the page, as it does in a browser. One pass, whatever the text.
+ */
+function shownText(text: string): string {
+  const opening = /<(script|style)\b/gi;
+  let shown = "";
+  let at = 0;
+  for (let open = opening.exec(text); open; open = opening.exec(text)) {
+    const tagEnd = text.indexOf(">", opening.lastIndex);
+    // No `>` from here on: this is not a tag, and nothing after it is one.
+    if (tagEnd === -1) break;
+    const closing = open[1]!.toLowerCase() === "script" ? /<\/script\s*>/gi : /<\/style\s*>/gi;
+    closing.lastIndex = tagEnd + 1;
+    shown += text.slice(at, open.index);
+    if (!closing.exec(text)) return shown;
+    at = closing.lastIndex;
+    opening.lastIndex = at;
+  }
+  return shown + text.slice(at);
+}
+
+/**
+ * Ruling 683: how many placeholders a template's text holds. A tripwire for
+ * the one mistake it exists for, a finished result copied as it stands, and
+ * no proof that a file is free of a task's content: a result with one
+ * placeholder left unfilled passes it, and so does one whose own text writes
+ * double brackets around a word.
+ */
+function countPlaceholders(text: string): number {
+  return shownText(text).match(TEMPLATE_PLACEHOLDER)?.length ?? 0;
+}
+
+/** Ruling 683: the name a sample is kept under: it says what it is and whose. */
 function sampleName(taskKey: string, name: string): string {
   const prefix = `sample-${taskKey.toLowerCase()}-`;
   return name.toLowerCase().startsWith(prefix) ? name : `${prefix}${name}`;
@@ -86,7 +125,7 @@ function sampleName(taskKey: string, name: string): string {
 export interface CopyTaskFileToKbInput {
   /** The knowledge base's id. */
   kbId: string;
-  /** What the copy is kept as (ruling 682). */
+  /** What the copy is kept as (ruling 683). */
   kind: KeptFileKind;
   projectSlug: string;
   taskKey: string;
@@ -113,7 +152,7 @@ export type CopyTaskFileToKbResult =
       replaced: boolean;
       /** It is a document: indexed with its sections, read with the knowledge tool. */
       document: boolean;
-      /** Ruling 682: a template's placeholders, counted in its text; null for
+      /** Ruling 683: a template's placeholders, counted in its text; null for
        *  any other kind, and for a template no reader takes as text. */
       placeholders: number | null;
     }
@@ -139,7 +178,7 @@ export type CopyTaskFileToKbResult =
  * own doors check what they replace; and a file that is not a document for a
  * private knowledge base, where no run could open it.
  *
- * Ruling 682: the copy says what it is kept as. The first template the
+ * Ruling 683: the copy says what it is kept as. The first template the
  * controller made was the report itself, one customer's figures and sentences
  * in the folder every run reads, and the next customer's proposal came back
  * with one of them. So a `template` whose text holds no `[[placeholder]]` is
@@ -200,24 +239,25 @@ export function copyTaskFileToKnowledgeBase(
         `so no run could open \`${stored}\` there. Copy it into an open knowledge base.`,
     );
   }
-  // Ruling 682: a template is read whole, as a reader takes it (a PDF's text
+  // Ruling 683: a template is read whole, as a reader takes it (a PDF's text
   // layer, a page with its embedded pictures left out). Text with nowhere for
   // content to go is a finished result.
   let placeholders: number | null = null;
   if (input.kind === "template") {
     // Read as the file it is on the task, whatever name the copy takes.
     const text = attachmentWholeText(path.basename(source), read.bytes);
-    placeholders = text === null ? null : (text.match(TEMPLATE_PLACEHOLDER)?.length ?? 0);
+    placeholders = text === null ? null : countPlaceholders(text);
     if (placeholders === 0) {
       return refuse(
-        `\`${wanted}\` holds no \`[[placeholder]]\`. A template marks each place a task's content goes with one ` +
-          `(\`[[what goes here]]\`, on one line), so as it stands this is a finished result with ${input.taskKey}'s content in it, ` +
+        `\`${wanted}\` marks no place for a task's content. A template marks each one with a placeholder, ` +
+          "`[[what goes here]]`: on one line, opening on a letter, in the text a reader sees (what a page's script and style " +
+          `hold is not read for them). So as it stands this is a finished result with ${input.taskKey}'s content in it, ` +
           "or a template that marks those places some other way. A finished result kept as the template puts that content " +
           "where every run reads it, and a result built from it can repeat it. " +
           "Have an agent make the template first: file a task for the agent that makes such results, asking for the same layout " +
-          "with everything that belongs to that task replaced by a `[[what goes here]]` placeholder, and leave yourself " +
-          "`continue_when_done` to copy what it delivers. Only when the person asked to keep a worked example, " +
-          'copy this as `kind: "sample"`.',
+          "with everything that belongs to that task replaced by a `[[what goes here]]` placeholder, and copy what it delivers " +
+          "once that task is accepted (`continue_when_done` leaves you that step, in a turn a person asked for). " +
+          'Only when the person asked to keep a worked example, copy this as `kind: "sample"`.',
       );
     }
   }

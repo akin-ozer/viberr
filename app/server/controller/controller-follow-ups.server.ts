@@ -3,7 +3,7 @@ import { z } from "zod";
 import { newId } from "~/shared/ids/new-id.server";
 
 /**
- * Ruling 683: what a controller conversation left itself to do when a task is
+ * Ruling 684: what a controller conversation left itself to do when a task is
  * accepted.
  *
  * A controller turn cannot wait for a task: it ends, and an agent's work on a
@@ -141,31 +141,40 @@ export function recordFollowUpOutcome(
 }
 
 /**
- * Whether the conversation's newest message from its person is one Viberr
- * sent on a follow-up: the conversation continued on its own, and nobody has
- * written in it since. A turn opened that way leaves no further step, so a
+ * Whether the turn that answers `messageId` was started by a follow-up and has
+ * heard from nobody since: the message is the one Viberr sent to open it, and
+ * no message was steered into the turn. A follow-up's own message is queued,
+ * never steered, so one that was steered in is a person's, or one a person
+ * pressed Send now on. A turn opened that way leaves no further step, so a
  * conversation never continues twice in a row with no person in between.
+ *
+ * It asks about the turn, not the conversation: a follow-up that fires while
+ * a person's own turn is working is queued behind that turn, and is the
+ * conversation's newest message for the rest of it.
  */
-export function continuedOnItsOwnLast(db: DatabaseSync, conversationId: string): boolean {
+export function turnOpenedByFollowUp(db: DatabaseSync, conversationId: string, messageId: string): boolean {
   const opened = db
     .prepare(
       `SELECT 1 FROM controller_follow_ups
-        WHERE conversation_id = ?
-          AND message_id = (SELECT id FROM controller_messages
-                             WHERE conversation_id = ? AND author = 'user'
-                             ORDER BY seq DESC LIMIT 1)
+        WHERE conversation_id = ? AND message_id = ?
+          AND NOT EXISTS (SELECT 1 FROM controller_messages
+                           WHERE conversation_id = ? AND steered_into = ?)
         LIMIT 1`,
     )
-    .get(conversationId, conversationId);
+    .get(conversationId, messageId, conversationId, messageId);
   return opened !== undefined;
 }
 
 /**
- * Drop every follow-up of a project that is being deleted, as its other
+ * Drop the steps left on a project that is being deleted, as its other
  * app-owned rows are (ruling 274): a project of the same name gives the slug
  * and its task keys back, and an acceptance there must not start a step left
- * for the project that is gone. Returns how many were dropped.
+ * for the project that is gone. A step already started stays, with its
+ * conversation: it is the record of which message Viberr sent there, which a
+ * turn still answering that message is known by. Returns how many were dropped.
  */
 export function dropProjectFollowUps(db: DatabaseSync, projectSlug: string): number {
-  return Number(db.prepare(`DELETE FROM controller_follow_ups WHERE project_slug = ?`).run(projectSlug).changes);
+  return Number(
+    db.prepare(`DELETE FROM controller_follow_ups WHERE project_slug = ? AND fired_at IS NULL`).run(projectSlug).changes,
+  );
 }

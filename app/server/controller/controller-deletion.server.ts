@@ -5,6 +5,8 @@ import { assertProjectAction, isOrgAdmin } from "~/server/auth/project-authority
 import { withTransaction } from "~/server/db/transaction.server";
 import { AppError } from "~/server/errors/app-error.server";
 import { findUserById } from "~/server/auth/user-store.server";
+import { readProjectFile } from "~/server/files/project-writer.server";
+import { readTaskFile } from "~/server/files/task-writer.server";
 import { logger } from "~/server/logging/logger.server";
 import { appendPolicyNote } from "~/server/tasks/task-mutation.server";
 import { toError } from "~/shared/errors";
@@ -120,6 +122,13 @@ function requireDeletion(
   throw notFound();
 }
 
+/** Whether a task can still be written a note: it and its project are not archived. */
+function takesNotes(projectSlug: string, taskKey: string, dataRoot?: string): boolean {
+  const project = readProjectFile({ projectSlug, dataRoot });
+  const task = readTaskFile({ projectSlug, taskKey, dataRoot });
+  return !!project && !!task && !project.parsed.frontmatter.archived && !task.parsed.frontmatter.archived;
+}
+
 /** Counts for the audit row. */
 const sizeSchema = z.object({ messages: z.number(), turns: z.number() });
 
@@ -145,21 +154,27 @@ export function deleteControllerConversation(
       )
       .get(conversation.id, conversation.id),
   );
-  // Ruling 683: the steps it left on tasks go with it (their rows follow the
+  // Ruling 684: the steps it left on tasks go with it (their rows follow the
   // conversation's), and each of those tasks still says the controller will
-  // continue on its acceptance, so each is told it will not.
-  const waiting = openFollowUpsOf(db, conversation.id);
+  // continue on its acceptance, so each is told it will not. Not a task that
+  // is archived, or in an archived project: those are read-only, nobody can
+  // accept one as it stands, and a deletion writes nothing into them.
+  const waiting = openFollowUpsOf(db, conversation.id).filter((followUp) =>
+    takesNotes(followUp.projectSlug, followUp.taskKey, input.dataRoot),
+  );
   // No queued message may start a turn in it from here on.
   dropConversationLease(conversation.id);
   withTransaction(db, () => {
     db.prepare(`DELETE FROM controller_messages WHERE conversation_id = ?`).run(conversation.id);
     db.prepare(`DELETE FROM controller_conversations WHERE id = ?`).run(conversation.id);
   });
-  const owner = findUserById(db, conversation.userId)?.name ?? conversation.userLabel;
+  const owner = findUserById(db, conversation.userId)?.name;
   for (const followUp of waiting) {
     void appendPolicyNote(db, input.dataRoot ? { dataRoot: input.dataRoot } : {}, followUp.projectSlug, followUp.taskKey, {
       title: "Controller follow-up dropped",
-      text: `${owner}'s controller conversation was deleted, so it no longer continues when this task is accepted.`,
+      text:
+        `${owner ? `${owner}'s controller conversation` : "A controller conversation"} was deleted, ` +
+        "so it no longer continues when this task is accepted.",
     }).catch((error) => {
       logger.warn("could not note a dropped controller follow-up", { taskKey: followUp.taskKey, err: toError(error) });
     });

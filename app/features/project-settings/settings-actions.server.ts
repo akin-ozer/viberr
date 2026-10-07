@@ -1986,7 +1986,7 @@ export async function deleteProject(
   // creating a project with the same name. The transcript is kept; only the
   // binding is released, with a message on the conversation saying why.
   releaseProjectConversations(db, input.projectSlug, projectName);
-  // Ruling 683: and the steps those conversations left on this project's
+  // Ruling 684: and the steps those conversations left on this project's
   // tasks. A released conversation is kept, so its rows are too, and a
   // project of the same name hands back the slug and the task keys: accepting
   // the new KEY-1 would start a step written for the old one.

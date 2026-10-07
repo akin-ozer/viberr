@@ -663,7 +663,7 @@ const BASELINE_TABLES: readonly string[] = [
      created_at TEXT NOT NULL,
      UNIQUE (conversation_id, name)
    )`,
-  // Ruling 683: what a controller conversation left itself to do when a task
+  // Ruling 684: what a controller conversation left itself to do when a task
   // is accepted. Every acceptance reads it and the controller's tool writes
   // it: on a root that predates it the read would be logged and skipped, and
   // the tool would fail. Same DDL as the baseline.
@@ -706,7 +706,7 @@ const BASELINE_INDEXES: readonly string[] = [
   // table above.
   `CREATE INDEX IF NOT EXISTS idx_controller_message_files__message
      ON controller_message_files (message_id)`,
-  // Ruling 683: a task's open follow-ups, for the acceptance that claims them.
+  // Ruling 684: a task's open follow-ups, for the acceptance that claims them.
   `CREATE INDEX IF NOT EXISTS idx_controller_follow_ups__task
      ON controller_follow_ups (project_slug, task_key, fired_at)`,
 ];

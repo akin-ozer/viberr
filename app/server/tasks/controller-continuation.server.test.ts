@@ -8,25 +8,30 @@ import { listAuditEvents } from "../../../test-support/audit-log";
 import { flush, pollUntil } from "../../../test-support/polling";
 import type { TaskPacket } from "~/schemas/task-file.schema";
 import { disableUser } from "~/server/auth/user-admin.server";
-import { appendMessage, createConversation } from "~/server/controller/controller-conversations.server";
+import {
+  appendMessage,
+  createConversation,
+  getConversation,
+  markSteered,
+} from "~/server/controller/controller-conversations.server";
 import { deleteControllerConversation } from "~/server/controller/controller-deletion.server";
 import {
   claimFollowUp,
-  continuedOnItsOwnLast,
   openFollowUps,
   setFollowUp,
+  turnOpenedByFollowUp,
 } from "~/server/controller/controller-follow-ups.server";
 import { updateProjectFile } from "~/server/files/project-writer.server";
 import { readTaskFile } from "~/server/files/task-writer.server";
 import { rebuildAll } from "~/server/projections/rebuilder.server";
 import type { runOperator } from "~/server/runtimes/operator-run.server";
-import { followUpOpening, maybeContinueController } from "./controller-continuation.server";
+import { maybeContinueController } from "./controller-continuation.server";
 import { resolvePacket } from "./packet-resolution.server";
 import type { TaskActionDeps } from "./task-action-core.server";
 import { transitionStage } from "./task-transitions.server";
 
 /**
- * Ruling 683 (owner, 2026-10-07: the controller continues when the task it
+ * Ruling 684 (owner, 2026-10-07: the controller continues when the task it
  * filed is accepted). Asked for a content-free template, the controller filed
  * the task that makes one and ended with "tell me when it is approved and I'll
  * replace the files": the second half of one request, left for the person to
@@ -84,22 +89,35 @@ function taskAt(stage: string, packet: TaskPacket | null = null): void {
   rebuildAll(store.db, { dataRoot: store.dataRoot });
 }
 
-/** Selin asked the controller on the board, and it left its next step on VIB-1. */
-function selinWaitsOnVib1(): string {
+/** A person asked the controller on the board, and it left its next step on VIB-1. */
+function waitsOnVib1(user: { id: string; email: string }): string {
   const conversation = createConversation(store.db, {
-    userId: store.users.selin.id,
-    userLabel: store.users.selin.email,
+    userId: user.id,
+    userLabel: user.email,
     projectSlug: store.slug,
   });
   setFollowUp(store.db, {
     conversationId: conversation.id,
-    userId: store.users.selin.id,
+    userId: user.id,
     projectSlug: store.slug,
     taskKey: "VIB-1",
     text: STEP,
   });
   return conversation.id;
 }
+const selinWaitsOnVib1 = () => waitsOnVib1(store.users.selin);
+/** Take a person off the project's members. */
+async function leavesTheProject(userId: string): Promise<void> {
+  await updateProjectFile({ projectSlug: store.slug, dataRoot: store.dataRoot }, (project) => {
+    project.frontmatter.members = project.frontmatter.members.filter((m) => m.userId !== userId);
+  });
+  rebuildAll(store.db, { dataRoot: store.dataRoot });
+}
+/** The rows the audited project guard writes in a person's name. */
+const guardRows = () => [
+  ...listAuditEvents(store.db, { action: "project.authority.denied" }),
+  ...listAuditEvents(store.db, { action: "project.org_admin.override" }),
+];
 
 const deps = (): TaskActionDeps => ({ runControllerTurn, runOperator: runOp });
 const hookCtx = () => ({ dataRoot: store.dataRoot, deps: deps() });
@@ -113,7 +131,7 @@ const notStarted = (why: string) =>
   `This task was accepted, and the controller was to continue in Selin Test's conversation with: ${STEP} ` +
   `It was not started. ${why} That step is a person's to ask the controller for now.`;
 
-describe("ruling 683: the controller continues when a task it waits on is accepted", () => {
+describe("ruling 684: the controller continues when a task it waits on is accepted", () => {
   /** The two writers of a board's last stage: every acceptance is one of them. */
   const doors: [string, () => Promise<void>][] = [
     [
@@ -157,10 +175,15 @@ describe("ruling 683: the controller continues when a task it waits on is accept
     // by a message nobody typed.
     // CANARY: give it the task page as its surface and the turn is told a
     // person is looking at that page.
+    // CANARY: leave out who sent the message and the transcript shows the
+    // person saying something they never typed; leave out the project and a
+    // conversation on Home is told a task key with nothing to find it by.
     expect(runControllerTurn).toHaveBeenCalledTimes(1);
     expect(runControllerTurn.mock.calls[0]![1]).toEqual({
       conversationId,
-      text: followUpOpening(store.slug, "VIB-1", STEP),
+      text:
+        "VIB-1 in viberr-core was accepted. This conversation left a follow-up for that moment, and Viberr started it " +
+        `(nobody typed this message):\n\n${STEP}`,
       user: {
         id: store.users.selin.id,
         email: store.users.selin.email,
@@ -188,16 +211,6 @@ describe("ruling 683: the controller continues when a task it waits on is accept
     maybeContinueController(store.db, hookCtx(), store.slug, "VIB-1");
     await flush();
     expect(runControllerTurn).toHaveBeenCalledTimes(1);
-  });
-
-  it("opens the turn with a message that says who sent it and which project the task is in", () => {
-    // CANARY: leave out who sent it and the transcript shows the person
-    // saying something they never typed; leave out the project and a
-    // conversation on Home is told a task key with nothing to find it by.
-    expect(followUpOpening("aws-cost-calculator", "AWSC-119", "Install the template.")).toBe(
-      "AWSC-119 in aws-cost-calculator was accepted. This conversation left a follow-up for that moment, and Viberr started it " +
-        "(nobody typed this message):\n\nInstall the template.",
-    );
   });
 
   it("hands a follow-up to one caller", () => {
@@ -239,16 +252,7 @@ describe("ruling 683: the controller continues when a task it waits on is accept
       },
       "The person who asked for it has no active account.",
     ],
-    [
-      "the asker left the project",
-      async () => {
-        await updateProjectFile({ projectSlug: store.slug, dataRoot: store.dataRoot }, (project) => {
-          project.frontmatter.members = project.frontmatter.members.filter((m) => m.userId !== store.users.selin.id);
-        });
-        rebuildAll(store.db, { dataRoot: store.dataRoot });
-      },
-      "Selin Test is no longer a member of this project.",
-    ],
+    ["the asker left the project", () => leavesTheProject(store.users.selin.id), "Selin Test is no longer a member of this project."],
     [
       "Claude is not connected on the asker's account",
       () => disconnectFakeBackend(store.db, store.users.selin.id, "claude"),
@@ -275,57 +279,101 @@ describe("ruling 683: the controller continues when a task it waits on is accept
       taskKey: "VIB-1",
       details: { conversationId, forUserId: store.users.selin.id, why },
     });
+    // CANARY: check the asker with the guard their own actions go through and
+    // the board's Activity says "Blocked: Selin tried to continue on this
+    // task", at the moment somebody else accepted it.
+    expect(guardRows()).toEqual([]);
     // It is not tried again: the step is a person's now.
     maybeContinueController(store.db, hookCtx(), store.slug, "VIB-1");
     await flush();
     expect(notes()).toHaveLength(1);
   });
 
-  it("quotes the conversation's own refusal, and goes on to the next follow-up", async () => {
-    // Two conversations wait on the task. The first one's queue is full.
-    // CANARY: let one failure end the loop and the second person's step is
-    // never started, with nothing said.
+  it("starts an org admin's step though they are no member of the project, with nothing recorded in their name", async () => {
+    // Every controller tool lets an org admin act in any project, and records
+    // the override when they do. Here they did nothing yet: the turn's own
+    // calls record what it does.
+    // CANARY: ask the member list alone and an org admin is told they left a
+    // project their turn could have worked in.
+    taskAt("done");
+    await connectFakeBackend(store.db, store.users.arda.id, "claude");
+    const conversationId = waitsOnVib1(store.users.arda);
+    await leavesTheProject(store.users.arda.id);
+    maybeContinueController(store.db, hookCtx(), store.slug, "VIB-1");
+    expect(await pollUntil(() => runControllerTurn.mock.calls.length > 0)).toBe(true);
+    await flush();
+    expect(runControllerTurn.mock.calls[0]![1]).toMatchObject({ conversationId, user: { id: store.users.arda.id, orgRole: "admin" } });
+    expect(guardRows()).toEqual([]);
+  });
+
+  /** A start that fails: what the engine did, and what the task is told. */
+  const failures: [string, () => void, string][] = [
+    [
+      "its conversation refuses the message",
+      () => {
+        runControllerTurn.mockResolvedValueOnce({
+          state: "refused",
+          reason: "The controller is still answering and its queue for this conversation is full. Wait for the current reply.",
+        });
+      },
+      // The engine's sentence is written to the asker; here it is quoted.
+      'Selin Test\'s conversation answered: "The controller is still answering and its queue for this conversation is full. Wait for the current reply."',
+    ],
+    [
+      "starting the turn throws",
+      () => {
+        runControllerTurn.mockRejectedValueOnce(new Error("the session could not be resumed"));
+      },
+      "An error stopped it; the server's log has it.",
+    ],
+  ];
+  it.each(failures)("says so on the task when %s, and goes on to the next conversation's step", async (_label, arrange, why) => {
+    // Two of Selin's conversations wait on the task, and the first cannot start.
+    // CANARY: let a refusal read as a start and a step that never ran is
+    // recorded as running, with nothing said on the task.
+    // CANARY: let a throw leave the function and the step is claimed, never
+    // started and said nowhere but the server's log.
     taskAt("done");
     selinWaitsOnVib1();
     const second = selinWaitsOnVib1();
-    runControllerTurn.mockResolvedValueOnce({
-      state: "refused",
-      reason: "The controller is still answering and its queue for this conversation is full. Wait for the current reply.",
-    });
+    arrange();
     maybeContinueController(store.db, hookCtx(), store.slug, "VIB-1");
     expect(await pollUntil(() => runControllerTurn.mock.calls.length === 2)).toBe(true);
     await flush();
-    // The engine's sentence is written to the asker; here it is quoted.
-    expect(notes().map((event) => event.text)).toEqual([
-      notStarted(
-        'Selin Test\'s conversation answered: "The controller is still answering and its queue for this conversation is full. Wait for the current reply."',
-      ),
-    ]);
+    expect(notes().map((event) => event.text)).toEqual([notStarted(why)]);
     expect(runControllerTurn.mock.calls[1]![1]).toMatchObject({ conversationId: second });
   });
 
-  it("knows a turn it opened from one a person asked for", async () => {
-    // CANARY: lose the opening message's id and a conversation that continued
-    // on its own may arrange to do it again, with no person in between.
+  it("knows the turn it opened from one a person asked for", async () => {
     taskAt("done");
     const conversationId = selinWaitsOnVib1();
     const say = (text: string) =>
       appendMessage(store.db, { conversationId, author: "user", userId: store.users.selin.id, text }).id;
-    say("Make the template content-free.");
-    expect(continuedOnItsOwnLast(store.db, conversationId)).toBe(false);
+    const asked = say("Make the template content-free.");
     // The engine records Viberr's message and answers with its id.
-    runControllerTurn.mockImplementation(async (_db, turn) => ({
-      state: "started",
-      runId: "run_ctl",
-      messageId: say(turn.text),
-    }));
+    let opened = "";
+    runControllerTurn.mockImplementation(async (_db, turn) => {
+      opened = say(turn.text);
+      return { state: "queued", messageId: opened };
+    });
     maybeContinueController(store.db, hookCtx(), store.slug, "VIB-1");
     expect(await pollUntil(() => runControllerTurn.mock.calls.length > 0)).toBe(true);
     await flush();
-    expect(continuedOnItsOwnLast(store.db, conversationId)).toBe(true);
-    // A person writes: the next turn is theirs again.
-    say("Thanks. Now do the same for the summary.");
-    expect(continuedOnItsOwnLast(store.db, conversationId)).toBe(false);
+    // CANARY: lose the opening message's id and a conversation that continued
+    // on its own may arrange to do it again, with no person in between.
+    expect(turnOpenedByFollowUp(store.db, conversationId, opened)).toBe(true);
+    // CANARY: ask the conversation's newest message and Selin's own turn,
+    // still working when the task was accepted, is refused a step because of
+    // a message it has not read.
+    expect(turnOpenedByFollowUp(store.db, conversationId, asked)).toBe(false);
+    // A message of hers waiting behind the turn Viberr opened is answered in
+    // its own turn: it does not make this one hers.
+    const later = say("Thanks. Now do the same for the summary.");
+    expect(turnOpenedByFollowUp(store.db, conversationId, opened)).toBe(true);
+    expect(turnOpenedByFollowUp(store.db, conversationId, later)).toBe(false);
+    // Sent into the turn while it works, it does: a person is in it now.
+    markSteered(store.db, getConversation(store.db, conversationId)!, [later], opened);
+    expect(turnOpenedByFollowUp(store.db, conversationId, opened)).toBe(false);
   });
 
   it("goes with its conversation, and the task is told", async () => {
@@ -348,5 +396,24 @@ describe("ruling 683: the controller continues when a task it waits on is accept
         "Selin Test's controller conversation was deleted, so it no longer continues when this task is accepted.",
       ],
     ]);
+  });
+
+  it("writes nothing into an archived task when its conversation is deleted", async () => {
+    // CANARY: note every task and deleting a conversation changes a file a
+    // read-only task holds, which no deletion does.
+    writeTask(store.dataRoot, store.slug, {
+      frontmatter: baseTaskFrontmatter("VIB-1", { stage: "review", ownerUserId: store.users.arda.id, archived: true }),
+      packet: null,
+    });
+    rebuildAll(store.db, { dataRoot: store.dataRoot });
+    const conversationId = selinWaitsOnVib1();
+    deleteControllerConversation(
+      store.db,
+      { conversationId, projectSlug: store.slug, dataRoot: store.dataRoot },
+      { userId: store.users.selin.id, label: store.users.selin.email },
+    );
+    await flush();
+    expect(openFollowUps(store.db, store.slug, "VIB-1")).toEqual([]);
+    expect(notes()).toEqual([]);
   });
 });

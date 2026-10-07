@@ -1446,7 +1446,7 @@ describe("deleteProject releases the conversations bound to it (ruling 274)", ()
       userLabel: "arda@viberr.dev",
       projectSlug: null,
     });
-    // Ruling 683: the bound conversation waits on one of the project's tasks.
+    // Ruling 684: the bound conversation waits on one of the project's tasks.
     const { openFollowUps, setFollowUp } = await import("~/server/controller/controller-follow-ups.server");
     setFollowUp(store.db, {
       conversationId: bound.id,

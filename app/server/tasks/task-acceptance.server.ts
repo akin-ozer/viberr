@@ -2106,7 +2106,7 @@ export async function applyAcceptanceWrite(
     maybeNoteEpicComplete(db, ctx, input.projectSlug, input.taskKey);
     // Ruling 131(e): an acceptance is the usual way a waited-on task is done.
     maybeReleaseDependents(db, ctx, input.projectSlug);
-    // Ruling 683: and the moment a controller conversation that waited for
+    // Ruling 684: and the moment a controller conversation that waited for
     // this task takes its next step. This write is one of the two that set
     // the last stage (a person's Accept or board drag, a recommendation card,
     // a force-accept, the operator's own acceptance); the other is the
