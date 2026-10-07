@@ -644,7 +644,8 @@ describe("ruling 691: the gateway's board server pictures a page for a Codex run
     const mount = resolveBoardMcp({
       backend: "codex",
       collaborates: true,
-      keepsSources: false,
+      // A writer's run holds both: it looks at its page and keeps its sources.
+      keepsSources: true,
       webEgress: true,
       agent: { profileId: "writer", roleHint: "Writer" },
       dataRoot: store.dataRoot,
@@ -679,12 +680,16 @@ describe("ruling 691: the gateway's board server pictures a page for a Codex run
     await withEnv({ VIBERR_BROWSER_EXECUTABLE: fake.executable, ...fake.env() }, async () => {
       const client = await connect();
       // CANARY: leave PAGE_CAPTURE_TOOL out of openBoardSession's list and the
-      // call answers that the server has no such tool.
+      // call answers that the server has no such tool; build the list from
+      // the page capture or the sources alone and the other tool is gone
+      // from a run that holds both.
       expect((await client.listTools()).tools.map((tool) => tool.name)).toEqual([
         "read_board",
         "read_timeline_entry",
         "read_task_attachment",
+        "read_task_source",
         "capture_page",
+        "keep_source",
       ]);
       const result = await client.callTool({ name: "capture_page", arguments: { name: "post.html", view: "desktop" } });
       const content = z
