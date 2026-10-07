@@ -106,8 +106,10 @@ const SOURCE_MAX_BYTES = { html: 10 * 1024 * 1024, markdown: 2 * 1024 * 1024 } s
 const CARRIED_FILE_MAX_BYTES = 25 * 1024 * 1024;
 const CARRIED_TOTAL_MAX_BYTES = 200 * 1024 * 1024;
 const REPORT_MAX_BYTES = 1024 * 1024;
-/** How much of one sentence from the renderer's report is kept. */
+/** How much of one sentence from the renderer's report is kept, and of one
+ *  name (a host, or a file the page asked for). */
 const REPORT_TEXT_MAX_CHARS = 200;
+const REPORT_NAME_MAX_CHARS = 80;
 
 const NO_OWNER = "the task has no owner to render it as";
 
@@ -295,10 +297,13 @@ const reportSchema = z.looseObject({
 
 /** A sentence from the renderer's report, as one bounded line. The report is
  *  written by the person's process, so nothing in it is trusted as markup. */
-function reportText(text: string): string {
+function reportText(text: string, max = REPORT_TEXT_MAX_CHARS): string {
   const line = text.replace(/[\s`]+/g, " ").trim();
-  return line.length > REPORT_TEXT_MAX_CHARS ? `${line.slice(0, REPORT_TEXT_MAX_CHARS - 1)}…` : line;
+  return line.length > max ? `${line.slice(0, max - 1)}…` : line;
 }
+
+/** A name from the report: what a page asked for is the page's own text. */
+const reportName = (name: string): string => reportText(name, REPORT_NAME_MAX_CHARS);
 
 async function removeScratch(dir: string, launch: AgentLaunch | null): Promise<void> {
   try {
@@ -493,9 +498,9 @@ async function render(request: RenderRequest): Promise<Render> {
     return {
       file: page.file,
       shots,
-      asked: said.asked.slice(0, 12).map(reportText),
+      asked: said.asked.slice(0, 12).map(reportName),
       askedCount: said.askedCount,
-      missing: said.missing.slice(0, 12).map(reportText),
+      missing: said.missing.slice(0, 12).map(reportName),
       error: shots.length === 0 && error === null ? unreported : error,
     };
   });
@@ -842,6 +847,23 @@ async function captureDelivery(
   });
 }
 
+/** False only when the job would do nothing: no browser is named, or the
+ *  delivery holds no file that is a page and the task has no record of an
+ *  earlier delivery's pictures to take down. Anything unreadable is the job's
+ *  to find out. */
+function owesCapture(ctx: TaskMutationContext, input: DeliveryCaptureInput): boolean {
+  try {
+    const found = renderer();
+    if ("configured" in found && !found.configured) return false;
+    const file = readTaskFile(taskRef(ctx, input.projectSlug, input.taskKey));
+    if (!file || file.parsed.frontmatter.pageCaptures) return true;
+    const kept = keptDeliveryDir(input.projectSlug, input.taskKey, input.stamp, ctx.dataRoot);
+    return !kept || readdirSync(kept).some((name) => pageKindOf(name) !== null && !isPageCaptureName(name));
+  } catch {
+    return true;
+  }
+}
+
 function childView(view: PageCaptureView): Omit<ChildView, "from"> {
   return { id: view.id, width: view.width, height: view.height, maxHeight: view.maxHeight, mobile: view.mobile };
 }
@@ -857,6 +879,10 @@ export function requestDeliveryCaptures(
   ctx: TaskMutationContext,
   input: DeliveryCaptureInput,
 ): Promise<void> {
+  // Most deliveries hold no page, and a completion waits on this promise: one
+  // with nothing to picture and nothing to take down never joins the queue
+  // behind another task's render.
+  if (!owesCapture(ctx, input)) return Promise.resolve();
   return new Promise((resolve) => {
     enqueue({
       kind: "delivery",

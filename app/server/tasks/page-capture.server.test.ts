@@ -18,9 +18,9 @@ import {
 } from "../../../test-support/test-store";
 import type { Engagement } from "~/schemas/task-file.schema";
 import { taskAttachmentsDir, taskDir } from "~/server/files/file-store-root.server";
-import { listKeptDeliveries } from "~/server/files/kept-deliveries.server";
+import { keepDelivery, listKeptDeliveries } from "~/server/files/kept-deliveries.server";
 import { readProjectFile } from "~/server/files/project-writer.server";
-import { attachmentNamesSince, imageHeader } from "~/server/files/task-attachments.server";
+import { attachmentNamesSince, imageHeader, writeTaskAttachment } from "~/server/files/task-attachments.server";
 import { readTaskFile } from "~/server/files/task-writer.server";
 import { rebuildAll } from "~/server/projections/rebuilder.server";
 import { AGENT_UID_FLOOR, resetAgentIsolationForTests } from "~/server/runtimes/agent-isolation.server";
@@ -29,7 +29,7 @@ import { startRun } from "~/server/runtimes/run-service.server";
 import { getRun } from "~/server/runtimes/run-store.server";
 import { applyAgentCompletionEffects } from "./agent-completion.server";
 import { readAgentTaskAttachment } from "./board-read.server";
-import { PAGE_CAPTURE_WAIT_MS } from "./page-capture.server";
+import { PAGE_CAPTURE_WAIT_MS, requestDeliveryCaptures } from "./page-capture.server";
 import { attachTaskFile } from "./task-edits.server";
 
 /**
@@ -478,6 +478,18 @@ describe("a delivered page is pictured (ruling 691)", () => {
       await vi.waitFor(() => expect(fake.launches()).toHaveLength(1), { timeout: 15_000 });
       expect(frontmatter().deliveredAt).not.toBeNull();
       expect(runOp).not.toHaveBeenCalled();
+      // Another task's delivery with no page in it has nothing to wait for:
+      // it is done at once, while this render still holds the one renderer.
+      // CANARY: queue every delivery and this never settles (the hung render
+      // ends only when this test moves the clock).
+      const other = "2026-10-07T12:00:00.000Z";
+      writeTask(store.dataRoot, store.slug, {
+        frontmatter: baseTaskFrontmatter("VIB-2", { stage: "impl", ownerUserId: store.users.arda.id, deliveredAt: other }),
+      });
+      writeTaskAttachment(store.slug, "VIB-2", "figures.csv", new TextEncoder().encode("a,b\n"), store.dataRoot);
+      keepDelivery(store.slug, "VIB-2", other, ["figures.csv"], store.dataRoot);
+      await requestDeliveryCaptures(store.db, { dataRoot: store.dataRoot }, { projectSlug: store.slug, taskKey: "VIB-2", stamp: other });
+      expect(settled).toBe(false);
       await vi.advanceTimersByTimeAsync(PAGE_CAPTURE_WAIT_MS - 5_000);
       expect(settled).toBe(false);
       // CANARY: await the capture promise without the bound in

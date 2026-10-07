@@ -727,18 +727,20 @@ async function picturePage(job: Job, server: PageServer, page: JobPage, index: n
 
   let url = server.base + encodeURIComponent(page.file);
   let article: string | null = null;
-  if (page.kind === "markdown") {
-    const source = openRegular(job.root, page.file);
-    if (!source) return report("the file is not there to render");
-    try {
+  // Opened here first, the way the page server will open it: a name that is
+  // gone, or a link, would otherwise be pictured as the server's "not found".
+  const source = openRegular(job.root, page.file);
+  if (!source) return report("the file is not there to render");
+  try {
+    if (page.kind === "markdown") {
       if (source.size > MARKDOWN_MAX_BYTES) {
         return report(`the markdown file is ${source.size} bytes; one of up to ${MARKDOWN_MAX_BYTES} is set as a page`);
       }
       article = articlePage(page.file, readFileSync(source.fd, "utf8"));
-    } finally {
-      closeSync(source.fd);
+      url = server.base + ARTICLE_NAME;
     }
-    url = server.base + ARTICLE_NAME;
+  } finally {
+    closeSync(source.fd);
   }
   server.begin(article);
 

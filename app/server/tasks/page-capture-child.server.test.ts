@@ -164,7 +164,12 @@ describe("the page capture's renderer child (ruling 691)", () => {
     mkdirSync(path.join(b.root, "sub"));
     writeFileSync(path.join(b.root, "sub", "inner.png"), "nested");
 
-    const report = await b.run({ pages: ["page.html"], views: [DESKTOP] });
+    // A page that is itself a link is not pictured at all. CANARY: drop the
+    // open before the browser starts and the picture is of the page server's
+    // "not found".
+    symlinkSync(outside, path.join(b.root, "linked.html"));
+    const report = await b.run({ pages: ["page.html", "linked.html"], views: [DESKTOP] });
+    expect(report.pages[1]).toMatchObject({ file: "linked.html", shots: [], error: "the file is not there to render" });
     const [served] = b.browser.pages();
     // CANARY: open files without O_NOFOLLOW and the symlinked file is served.
     expect(served!.resources).toEqual([
@@ -189,6 +194,8 @@ describe("the page capture's renderer child (ruling 691)", () => {
     expect(address.hostname).toBe("127.0.0.1");
     expect(address.pathname).toMatch(/^\/[0-9a-f]{16}\/page\.html$/);
 
+    // One browser, for the one page there was to picture.
+    expect(b.browser.launches()).toHaveLength(1);
     const [launch] = b.browser.launches();
     // CANARY: drop --proxy-server and the browser reaches the network.
     expect(launch!.argv).toEqual(
