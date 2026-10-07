@@ -8342,7 +8342,7 @@ body[data-rail-open="true"] .dock { visibility: hidden; transition: none; }
 
 /* ============================= Ruling 127 hosted sign-in steps =============================
    Profile → Agent accounts while a vendor sign-in is running
-   (agent-accounts-panel.tsx, `SignInSteps`). It used to be three `.kv-row`s,
+   (agent-sign-in-steps.tsx, `SignInSteps`). It used to be three `.kv-row`s,
    a read-out idiom for FACTS, holding a procedure: the vendor's full OAuth
    URL printed inline (a few hundred unbreakable characters) crushed the row
    labels to one word per line and ran off the card, and a bare `<input>`

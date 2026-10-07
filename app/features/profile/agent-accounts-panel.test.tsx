@@ -423,7 +423,7 @@ describe("AgentAccountsPanel", () => {
 
     // Ruling 149: dropping the stored credential is destructive, so the
     // control carries the danger label. Canary: drop `danger` from the
-    // Disconnect className in `agent-accounts-panel.tsx`.
+    // Disconnect className in `ManageButtons` (agent-accounts-regions.tsx).
     const disconnect = Array.from(
       container.querySelectorAll<HTMLButtonElement>(".cred-card .cred-manage button"),
     ).find((button) => button.textContent === "Disconnect")!;
@@ -764,10 +764,10 @@ describe("AgentAccountsPanel", () => {
     await act(async () => {
       await vi.advanceTimersByTimeAsync(4_100);
     });
-    // CANARY: let a refusal past the card's session-id match (its SAFETY cast
-    // then hides it from the type checker) and reading its absent `health`
-    // takes the Profile page down with it; delete the route's `clientLoader`
-    // and the unreachable poll does.
+    // CANARY: let a refusal past the session-id match in `useSignInPoll`
+    // (agent-accounts-actions.ts; its SAFETY cast then hides it from the type
+    // checker) and reading its absent `health` takes the Profile page down
+    // with it; delete the route's `clientLoader` and the unreachable poll does.
     expect(getByText("signing in")).toBeTruthy();
     expect(getByText("Waiting for you to finish in the browser")).toBeTruthy();
     expect(queryByText("Claude connected")).toBeNull();
@@ -967,8 +967,9 @@ describe("ruling 294: copy the sign-in link", () => {
    * stops presenting it as current. It used to keep "92% of five hour" and
    * "The window resets 03:30" in the present tense hours after 03:30.
    *
-   * Canary: drop the `windowReset` branch in `usageText` (the percentage comes
-   * back) or in the note (the present tense comes back).
+   * Canary: drop the `windowReset` branch in `usageText`
+   * (agent-accounts-derive.ts; the percentage comes back) or in `UsageNote`
+   * (agent-account-in-use.tsx; the present tense comes back).
    */
   it("words a reading whose window has reset in the past tense, with no percentage (ruling 481)", () => {
     const { getByText, queryByText, container } = renderPanel([
@@ -1086,7 +1087,8 @@ function accountRow(view: RenderResult, accountName: string): HTMLElement {
  * backend, its method) and shows on the button that sent it; everything else,
  * the other card's controls included, only waits.
  * Canary: drop the `fetcher.formData?.get("backend") === backend` check in
- * `agent-accounts-panel.tsx` and the other card's button claims the work too.
+ * `cardRequest` (agent-accounts-derive.ts) and the other card's button claims
+ * the work too.
  */
 describe("ruling 368: the account request in flight", () => {
   function renderHeld(backends: ProfileBackend[]) {
