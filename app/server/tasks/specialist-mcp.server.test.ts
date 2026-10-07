@@ -655,8 +655,13 @@ describe("resolveSpecialistMcpServersDetailed — marked write tools (ruling 176
 
 /**
  * Ruling 689(b): the run-start stdio pre-flight runs two handshakes at a time
- * instead of one after another, and applies their verdicts in mount order, so
- * what the run, the registry rows and the log say is what the serial check said.
+ * instead of one after another, starts them in mount order and applies their
+ * verdicts in mount order, so the mounted set, the registry rows, the warn
+ * lines and `unresolved` are what the serial check left for the same verdicts.
+ * Two differences remain, stated in the function's comment and not pinned
+ * here: a later mount's failure, taken while an earlier mount was still
+ * probing, can overwrite a Retest pressed meanwhile, and a failed credential
+ * re-seal is logged before the verdicts rather than among them.
  */
 describe("verifyStdioMcpMountsForRun: the bounded pre-flight (ruling 689(b))", () => {
   /** A probe clock no test here reaches: each handshake ends when the test ends it. */
@@ -699,7 +704,7 @@ describe("verifyStdioMcpMountsForRun: the bounded pre-flight (ruling 689(b))", (
         .map(([, fields]) => fields?.mcp);
   }
 
-  it("keeps two handshakes in flight, never more", async () => {
+  it("keeps two handshakes in flight, never more, started in mount order", async () => {
     const names = ["a", "b", "c", "d"];
     const { fake, verify } = mountStdio(names);
     const verifying = verify();
@@ -717,6 +722,8 @@ describe("verifyStdioMcpMountsForRun: the bounded pre-flight (ruling 689(b))", (
 
     const verified = await verifying;
     expect(fake.aliveAtSpawn).toEqual([1, 2, 2, 2]);
+    // CANARY: take the mounts last-first and d and c are spawned before a and b.
+    expect(fake.held.map((h) => h.command)).toEqual(names.map((n) => `npx -y ${n}-mcp`));
     expect(Object.keys(verified.servers)).toEqual(names);
   });
 

@@ -548,9 +548,17 @@ export async function verifyStdioMcpMountsForRun(
   // taken in mount order, and each verdict is applied in mount order as soon
   // as every earlier mount's verdict is in. The mounted set, the health rows,
   // the warn lines and `unresolved` therefore come out as the one-at-a-time
-  // check left them for the same verdicts. A verdict waits only for the mounts
-  // before it, never for the whole batch: held back longer, an old failure
-  // would land on its row after a Retest pressed meanwhile.
+  // check left them for the same verdicts.
+  //
+  // One window remains where a row can end up other than the serial check
+  // left it. A later mount's probe can end while an earlier mount is still
+  // probing; its failure is written only once the earlier verdict is in, so
+  // a Retest pressed in between is overwritten by the older failure, where
+  // the serial check would only then have started that probe and seen what
+  // the Retest saw. Taking the mounts in mount order and applying each verdict
+  // as soon as the earlier ones are in keeps that window to the time the
+  // mounts before it still take; holding every verdict for the whole batch,
+  // or taking the mounts in another order, would widen it.
   //
   // Every credential is read here, in mount order, before any probe starts.
   // The resolver that built `resolution` has just read each one (and re-sealed
