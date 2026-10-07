@@ -515,8 +515,12 @@ function planBoardImport(db: DatabaseSync, file: BoardFileUpload, ctx: OrgSeedCo
   const skillClaims = new NameClaims(skillHere);
   const skills: PlannedSkill[] = [];
   const skillNames = new Set([...bundle.skills.keys(), ...board.skills.map((s) => s.name)]);
+  // board.md's skill rows by name, built once: nothing caps how many rows a
+  // received file lists. The first row of a repeated name wins.
+  const skillMeta = new Map<string, BoardSkill>();
+  for (const s of board.skills) if (!skillMeta.has(s.name)) skillMeta.set(s.name, s);
   for (const name of [...skillNames].sort()) {
-    const meta = board.skills.find((s) => s.name === name) ?? { name, summary: "" };
+    const meta = skillMeta.get(name) ?? { name, summary: "" };
     const files = bundle.skills.get(name) ?? [];
     if (slugify(name).length < 2) {
       problems.push(`The skill \`${name}\` needs a name of two characters or more.`);
