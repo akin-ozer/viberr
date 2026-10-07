@@ -16,7 +16,8 @@ import type { OpenCeremony } from "./task-detail-actions";
  * pilot split of `task-detail-page.tsx`): the viewer's authority on this task,
  * whether it is closed for work, where the completion packet stands and which
  * surface carries the delivered changes, and the GitHub panel's doors. Pure
- * functions of the loader data, no React; the page calls each once per render.
+ * functions of the loader data, no React; the page or one of its regions
+ * calls each at most once per render.
  */
 
 /** Ruling 503: the task's epic, read from the project's list the loader

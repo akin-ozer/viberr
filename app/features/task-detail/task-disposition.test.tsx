@@ -416,8 +416,9 @@ describe("ruling 529: a question asked while an agent works reads as not blockin
   };
 
   it("takes the quiet surface and says so only beside a working agent, and never on a block", () => {
-    // CANARY: drop either half of the page's `aside` condition and a block, or
-    // a question the task does wait on, tells its owner the work goes on.
+    // CANARY: drop either half of the `aside` condition in TaskDecisionRegion
+    // (task-detail-regions.tsx) and a block, or a question the task does wait
+    // on, tells its owner the work goes on.
     const rows: [Partial<TaskDetail>, boolean][] = [
       [{ packet: question, waiting: "agent" }, true],
       [{ packet: question, waiting: "human" }, false],
@@ -644,8 +645,8 @@ describe("P14-LV-06: the acceptance affordance", () => {
       baseBehindBy: 2,
     });
     fireEvent.click(findButton(container, "Accept completion → Done")!);
-    // CANARY: stop passing `onRefreshFirst` from the page and the dialog has
-    // no safe path to offer.
+    // CANARY: stop passing `onRefreshFirst` from TaskAcceptConfirm
+    // (task-detail-regions.tsx) and the dialog has no safe path to offer.
     fireEvent.click(findButton(container, "Update the branch and re-review first")!);
     await waitFor(() => expect(submitted).toHaveLength(1));
     expect(submitted[0]!.intent).toBe("refresh-and-review");
@@ -690,8 +691,9 @@ describe("P14-LV-06: the acceptance affordance", () => {
         ?.textContent ?? "";
 
     it("Accept reads Answers with the plain door's option", () => {
-      // CANARY: stop passing `answersWith` from the page and this reads
-      // "Withdraws … closes unanswered".
+      // CANARY: stop passing `answersWith` from TaskAcceptConfirm
+      // (task-detail-regions.tsx) and this reads "Withdraws … closes
+      // unanswered".
       const { container } = renderPage({
         task: { packet: decision({ acceptAnswersWith: "Accept VIB-151", forceAnswersWith: "Force-accept VIB-151" }) },
       });
@@ -2339,9 +2341,9 @@ describe("V1: the page hands the collision ceremony the unowned PR", () => {
     });
     fireEvent.click(findButton(container, "Confirm decision")!);
     const text = collisionDialog(container)!.textContent!;
-    // Canary: drop `unownedPr: task.unownedPr` from the page's
-    // `archiveDisclosure` literal and both of these go red, which is exactly
-    // the state that shipped.
+    // Canary: drop `unownedPr: task.unownedPr` from `packetArchiveDisclosure`
+    // (task-detail-derive.ts) and both of these go red, which is exactly the
+    // state that shipped.
     expect(text).toContain("closes its pull request");
     expect(text).toContain("#232");
     // The deletes/keeps split it sits inside is still intact.
@@ -2842,9 +2844,9 @@ describe("C3: the collision confirm describes the right branch, and warns before
   });
 
   it("an OPEN pull request of this task's own says what the ceremony really does, read off the task", () => {
-    // Canary: hardcode `openPr: null` in the page's archiveDisclosure literal
-    // (or drop the row) — the person is told nothing about the PR the
-    // ceremony is actually about.
+    // Canary: hardcode `openPr: null` in `packetArchiveDisclosure`
+    // (task-detail-derive.ts) (or drop the row) — the person is told nothing
+    // about the PR the ceremony is actually about.
     // Pass 34 review: the row used to promise a refusal, which ruling 136(b)
     // replaced with a real delivery to that same PR.
     const { container } = renderPage({
@@ -2926,7 +2928,8 @@ describe("C3: the archive dialog's open-PR row tells the truth about what still 
  * started it — the loader spinning where the glyph was, a label naming the
  * work — while the sibling control only waits. The accept confirm has closed
  * by then, and a card that merely dimmed read as refused. Canary: pass
- * `inFlight={null}` from the page and the busy label never appears.
+ * `inFlight={null}` to OperatorRecommendations in task-main-column.tsx and
+ * the busy label never appears.
  */
 describe("ruling 368: a recommendation's request in flight", () => {
   const card = (kind: RecommendationView["kind"]): RecommendationView => {

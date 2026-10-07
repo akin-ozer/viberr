@@ -494,7 +494,8 @@ export function Timeline({
   /** Newest-first bounded slice from the loader. */
   events: TimelineEventRender[];
   /** Ruling 547: a link to a decision or to the recommendations landed here,
-   *  because they are gone from the page (the task page's `regionPlace`). */
+   *  because they are gone from the page (`regionPlace` in
+   *  task-detail-actions.tsx). */
   landed?: boolean;
   /** Rulings 483 and 498: the project's Controller page, which a `proposal` or
    *  `kb_correction` event links. */
