@@ -894,6 +894,26 @@ function AskOperatorButton({ onAsk }: { onAsk: () => void }) {
   );
 }
 
+/**
+ * Ruling 478(e) (F40-31, F40-57): the choice a card opens on. With no authored
+ * option, the composed directive (index 0) is the one choice there is, and it
+ * asks for the words itself. Nothing is preselected on an agent's question,
+ * whose answer only the person can give (WEB-3's "Connected; the first build
+ * succeeded" was one Confirm from telling the agent a build had passed), nor
+ * on a packet that recommends nothing. -1 is "no choice yet"; Confirm then
+ * refuses in place (ruling 147).
+ */
+function initialChoice(p: PacketRender): number {
+  if (p.options.length === 0) return 0;
+  return p.answerTo ? -1 : p.options.findIndex((o) => o.rec);
+}
+
+/** Ruling 672: a `connect_repository` answer's box opens with the repository
+ *  the operator could name. */
+function initialRepository(p: PacketRender): string {
+  return p.options.find((o) => o.kind === "connect_repository")?.repo ?? "";
+}
+
 export function DecisionPacket({
   packet,
   busy,
@@ -1012,21 +1032,11 @@ export function DecisionPacket({
   onAsk: () => void;
 }) {
   const p = packet;
-  /**
-   * Ruling 478(e) (F40-31, F40-57): the agent this card's answer goes back to,
-   * when an agent asked. Its question is one only the person can answer, so
-   * nothing is preselected on it (WEB-3's "Connected; the first build
-   * succeeded" was one Confirm from telling the agent a build had passed), and
-   * nothing is preselected on a packet that recommends nothing. -1 is "no
-   * choice yet"; Confirm then refuses in place (ruling 147).
-   */
+  /** Ruling 478(e) (F40-31, F40-57): the agent this card's answer goes back
+   *  to, when an agent asked. Nothing is preselected on its question
+   *  (`initialChoice`). */
   const answerTo = p.answerTo;
-  const [sel, setSel] = useState(() => {
-    // With no authored option, the composed directive (index 0) is the one
-    // choice there is, and it asks for the words itself.
-    if (p.options.length === 0) return 0;
-    return answerTo ? -1 : p.options.findIndex((o) => o.rec);
-  });
+  const [sel, setSel] = useState(() => initialChoice(p));
   const optionRefs = useRef<(HTMLButtonElement | null)[]>([]);
   const noteRef = useRef<HTMLTextAreaElement>(null);
   // P11-71: optional free-text so a human can supply the input an option asks
@@ -1038,9 +1048,7 @@ export function DecisionPacket({
   // person's typed answer, kept apart from the note so choosing the other
   // answer does not carry a repository name into its record. It opens with
   // the repository the operator could name.
-  const [repository, setRepository] = useState(
-    () => p.options.find((o) => o.kind === "connect_repository")?.repo ?? "",
-  );
+  const [repository, setRepository] = useState(() => initialRepository(p));
   // Questionnaire shape (shadcn base/questionnaire): a free-text input composed
   // WITH the fixed choices, as its own last choice. Selecting it reveals the
   // directive input; the note field steps aside (the directive IS the message).
@@ -1070,6 +1078,24 @@ export function DecisionPacket({
   // (null = none). ONE slot, not one per kind: the open ceremony is chosen by
   // the pending option's own `kind`, so two can never stand at once.
   const [pendingConfirm, setPendingConfirm] = useState<number | null>(null);
+  // F10-09: a packet can be replaced while its card is open, and the
+  // revalidation hands the card the new one in place. Everything above that
+  // the person chose or typed belongs to the packet it was seeded from, so a
+  // new id re-seeds it all (the refusal's shake follows `refused` back to
+  // none). In place, not by a key: a remount would take the `completion`
+  // slot with it, the inline reader and its unsent notes (rulings 484(b),
+  // 521(d)), and drop the person's focus to <body>. A packet written before
+  // ids has none, so it is never re-seeded.
+  const [seededFrom, setSeededFrom] = useState(p.id);
+  if (p.id !== seededFrom) {
+    setSeededFrom(p.id);
+    setSel(initialChoice(p));
+    setNote("");
+    setRepository(initialRepository(p));
+    setCustomText("");
+    setRefused(0);
+    setPendingConfirm(null);
+  }
   const isBlocked = p.type === "blocked";
   // Ruling 625 (B11): a decision that waits on a person is ONE colour, the
   // info blue it wears on Home, Notifications, the board and the queue; the
@@ -1197,8 +1223,9 @@ export function DecisionPacket({
 
   // The open ask-first ceremony, chosen by the pending option's own `kind`. The
   // list is re-read every render rather than captured at click time, so a packet
-  // replaced underneath an open dialog re-derives it (or drops it) instead of
-  // leaving a ceremony describing an option that is gone.
+  // that changes underneath an open dialog with no new id re-derives it (or
+  // drops it) instead of leaving a ceremony describing an option that is gone.
+  // A new id closes it (F10-09, above).
   const pendingOption =
     pendingConfirm === null ? undefined : p.options[pendingConfirm];
   const cancelConfirm = () => setPendingConfirm(null);

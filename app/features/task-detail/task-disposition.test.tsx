@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { act, cleanup, fireEvent, render, waitFor } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, waitFor, within } from "@testing-library/react";
 import { useState } from "react";
 import { createRoutesStub } from "react-router";
 import type {
@@ -18,6 +18,7 @@ import type {
 import type { PacketRender } from "~/shared/mapping/task.server";
 import type { AcceptanceAffordance } from "~/server/tasks/task-acceptance.server";
 import type { CompletionView } from "~/server/tasks/completion-packet.server";
+import type { TaskChangesView } from "~/server/github/task-changes.server";
 import { ToastProvider } from "~/ui/toast";
 import { AcceptConfirm } from "./accept-confirm";
 import { DecisionPacket } from "./decision-packet";
@@ -91,6 +92,8 @@ function renderPage(props: {
   baseBehindBy?: number | null;
   /** Ruling 484: the Changes panel's read. */
   changesUrl?: string | null;
+  /** Ruling 484: what the reader reads at `changesUrl`. */
+  changes?: TaskChangesView;
   /** Ruling 497: where the page opens (a notification's `#decision`). */
   entry?: string;
   /** Ruling 521: the completion packet as the loader read it. */
@@ -152,6 +155,9 @@ function renderPage(props: {
         return { ok: true, intent: row.intent, toast: "done" };
       },
     },
+    ...(props.changesUrl && props.changes
+      ? [{ path: props.changesUrl, loader: () => props.changes }]
+      : []),
   ]);
   const utils = render(<Stub initialEntries={[props.entry ?? "/"]} />);
   const revalidate = (task: Partial<TaskDetail>) => act(() => revalidateWith(task));
@@ -249,6 +255,56 @@ describe("ruling 521: the completion packet stands with the offer to accept", ()
     expect(card.querySelector(".cmp-verdict")?.textContent).toContain("ReviewerApproved");
     expect(findButton(card, "Show the diff")).toBeDefined();
     expect(changesPanel(container)).toBe(false);
+  });
+
+  it("F10-09: keeps its reader, the notes in it and the person's focus when the decision is replaced", async () => {
+    // CANARY: key the page's DecisionPacket on its packet id again, or
+    // re-seed the card by remounting it, and the replacement remounts the
+    // reader closed with the unsent note gone, and focus falls to <body>.
+    const { container, revalidate } = renderPage({
+      task: { pr: openPr, packet: { ...decision, id: "pkt-a" } },
+      workRevisionSha: "5d1f0e2c0ffee",
+      changesUrl: "/projects/viberr-core/tasks/VIB-151/changes",
+      changes: {
+        ok: true,
+        prNumber: 3,
+        repo: "akin-ozer/viberr",
+        headSha: "5d1f0e2c0ffee",
+        files: [
+          {
+            path: "app/timeline.tsx",
+            status: "modified",
+            additions: 1,
+            deletions: 0,
+            patch: "@@ -1 +1,2 @@\n keep\n+fold",
+            patchOmitted: null,
+          },
+        ],
+        moreFiles: false,
+        truncated: false,
+        recipient: { name: "Developer", handle: "developer" },
+      },
+      completion: COMPLETION,
+    });
+    const card = within(container.querySelector<HTMLElement>(".detail-packet .packet")!);
+    fireEvent.click(card.getByRole("button", { name: "Show the diff" }));
+    // The reader's chunk loads, then its read goes through the router and
+    // redraws the whole page, which can outrun the 1 s default wait on a
+    // loaded runner.
+    const line = { name: "Add a note on app/timeline.tsx line 2" };
+    fireEvent.click(await card.findByRole("button", line, { timeout: 5_000 }));
+    fireEvent.change(card.getByRole("textbox", { name: "Note on app/timeline.tsx line 2" }), {
+      target: { value: "Name the quiet stretch." },
+    });
+    fireEvent.click(card.getByRole("button", { name: "Add note" }));
+    const box = container.querySelector<HTMLTextAreaElement>("#pkt-note")!;
+    box.focus();
+
+    revalidate({ pr: openPr, packet: { ...decision, id: "pkt-b", title: "VIB-151 ready to accept again" } });
+    expect(container.textContent).toContain("VIB-151 ready to accept again");
+    expect(findButton(container, "Hide the diff")).toBeDefined();
+    expect(container.querySelector(".chg-note")?.textContent).toContain("Name the quiet stretch.");
+    expect(document.activeElement).toBe(box);
   });
 
   it("stands on its own card beside an acceptance recommendation or at the boundary once written, and nowhere else", () => {
@@ -412,9 +468,10 @@ describe("F10-09: a replacement packet opens as a fresh card", () => {
       .map((o) => o.textContent);
 
   it("keeps nothing the person chose or typed on the packet it replaced", () => {
-    // CANARY: drop the `key` on the page's DecisionPacket and the replacement
-    // opens with the old card's second choice selected (here "Switch to
-    // Codex", which nobody picked) and its note typed.
+    // CANARY: drop the card's re-seed on a new packet id (`seededFrom` in
+    // decision-packet.tsx) and the replacement opens with the old card's
+    // second choice selected (here "Switch to Codex", which nobody picked)
+    // and its note typed.
     const { container, revalidate } = renderPage({ task: { packet: first } });
     fireEvent.click(findButton(container, "Adopt A")!);
     const note = container.querySelector<HTMLTextAreaElement>("#pkt-note")!;
