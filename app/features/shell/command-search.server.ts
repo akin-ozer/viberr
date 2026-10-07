@@ -268,7 +268,7 @@ export function searchWorkspace(
         sub: `${agent.role} · ${project.name}`,
         // F19-16: this used to link to the bare roster, so picking "Reviewer
         // Bot" landed on the Agents page with the OPERATOR's detail pane open
-        // (`sel = searchParams.get("profile") ?? "operator"`, agents-page.tsx)
+        // (`searchParams.get("profile") ?? "operator"`, agents-page-selection.ts)
         // and nothing naming what was searched for — deterministically the
         // wrong agent, on every agent hit. `agent.id` is `resolved.profileId`
         // (`listDeployedSpecialists`, specialist-roster.server.ts), the same key

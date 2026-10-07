@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { useFetcher, useNavigate, useSearchParams } from "react-router";
+import { useFetcher, useNavigate } from "react-router";
 import { roleCan, type ProjectRole } from "~/shared/rbac";
 import { capabilityById, isClaudeOnlyEnforcedLabel } from "~/shared/capabilities";
 import {
@@ -19,7 +19,6 @@ import { GlyphSwap } from "~/ui/copy-glyph";
 import { useCsrfToken } from "~/ui/csrf-input";
 import { Icon, type IconName, storeIcon } from "~/ui/icon";
 import { AgentGlyph } from "~/ui/identity";
-import { inFlightIntent } from "~/ui/in-flight";
 import { Pill } from "~/ui/pill";
 import { useToast } from "~/ui/toast";
 import { useDialog } from "~/ui/use-dialog";
@@ -34,6 +33,16 @@ import {
   type LibraryProfileView,
   type TemplateDrift,
 } from "./agent-types";
+import {
+  deployingProfileId,
+  engagementTallies,
+  primaryBackend,
+  primaryBackendHealth,
+  rosterOf,
+  runningTaskCounts,
+  viewerConnections,
+} from "./agents-page-derive";
+import { useProfileSelection } from "./agents-page-selection";
 import {
   CAP_META,
   GOVERNED_CAP_LABELS,
@@ -57,6 +66,13 @@ import { effortLabel } from "./effort-label";
  *
  * Presentational pieces (ProfileDetail, LiveRoster, …) take props +
  * callbacks so jsdom tests render them without a router.
+ *
+ * Ruling 689(e) split the two large bodies along the task-page recipe:
+ * ProfileDetail and AgentsPage keep their hooks and hand hook-free regions
+ * (ProfileHero, CapabilityPolicyPanel, ContextRuntimePanel with its
+ * RuntimeRow; AgentsHead, ProfilesTab) one slot of their markup each; what the
+ * page reads off its props is in `agents-page-derive.ts`, and its URL-held
+ * selection in `agents-page-selection.ts`.
  */
 
 export interface StageView {
@@ -105,24 +121,6 @@ export interface BackendConnectionSummary {
 export type BackendHealthMap = Partial<
   Record<"codex" | "claude", BackendConnectionSummary>
 >;
-
-/** The backend a run would actually resolve — the profile's FIRST (the
- *  "a run uses the first" rule the runtime row already states). */
-function primaryBackend(a: AgentProfileView): "codex" | "claude" | null {
-  return a.backends[0] ?? null;
-}
-
-/** The health entry for a profile's primary backend, or null when the page has
- *  no health data (or the profile has no backend — the operator's
- *  orchestration runtime). */
-function primaryBackendHealth(
-  a: AgentProfileView,
-  health: BackendHealthMap | undefined,
-): BackendConnectionSummary | null {
-  const backend = primaryBackend(a);
-  if (!backend || !health) return null;
-  return health[backend] ?? null;
-}
 
 function BackendChip({
   b,
@@ -845,48 +843,36 @@ export function LibraryPicker({
 
 // ------------------------------------------------------------------ detail
 
-export function ProfileDetail({
+/**
+ * The open profile's hero (ruling 689(e), the split of `ProfileDetail` along
+ * the task-page recipe): its glyph, name and role, whether it is running,
+ * engaged or idle, where its copy came from, and its Delete and Edit buttons.
+ * Hook-free: the detail owns the delete confirm and hands in its setter.
+ */
+function ProfileHero({
   a,
-  stages,
-  workflow,
-  resourceCatalog,
-  rulingsKb = null,
-  backendHealth,
   insts,
+  activeKeys,
+  backendMissing,
+  backendLabel,
   projectName,
+  canDelete,
   canManage,
-  canSyncTemplate = false,
-  onOpen,
-  onDelete,
+  setConfirm,
   onEdit,
-  onSyncResources = () => {},
 }: {
   a: AgentProfileView;
-  stages: StageView[];
-  /** R14-1: the board's edges — eligibility resolves by structural role too. */
-  workflow: WorkflowEdgeView[];
-  /** F16 + ruling 127: who can run each backend, from the one credential store
-   *  (`connectedUserIds` / `isBackendAvailableFor`). */
-  backendHealth?: BackendHealthMap | undefined;
-  /** P14-KM-11: the live store catalog, so a grant naming a resource the store
-   *  no longer holds renders as missing rather than healthy. */
-  resourceCatalog?: readonly ResCatalogGroup[];
-  /** Ruling 239: the project's rulings knowledge base, which every profile
-   *  reads whether or not it grants one. Without saying so here, this card's
-   *  own `kb` list is WRONG about what the profile actually gets. */
-  rulingsKb?: string | null;
   insts: AgentDeploymentView[];
+  /** The tasks it is engaged on, the count the delete confirm names too. */
+  activeKeys: string[];
+  backendMissing: boolean;
+  backendLabel: string;
   projectName: string;
+  canDelete: boolean;
   canManage: boolean;
-  /** Ruling 156 (owner, Q35-8): org admins only may take the template's
-   *  grants onto this project's copy. */
-  canSyncTemplate?: boolean;
-  onOpen: (taskKey: string) => void;
-  onDelete: (id: string) => void;
+  setConfirm: (open: boolean) => void;
   onEdit: (a: AgentProfileView) => void;
-  onSyncResources?: (a: AgentProfileView) => void;
 }) {
-  const activeKeys = [...new Set(insts.map((d) => d.taskKey))];
   const heroRole = profileRoleLabel(a.name, a.role, a.kind);
   // "running on N" is a claim about LIVE runs, not engagements: an assigned
   // profile sits idle on most of its tasks (the F16 note below). Count only the
@@ -895,23 +881,86 @@ export function ProfileDetail({
   const runningKeys = [
     ...new Set(insts.filter((d) => d.running).map((d) => d.taskKey)),
   ];
-  const [confirm, setConfirm] = useState(false);
-  // Ruling 479(d): "Use the template's grants" asks first, naming what goes.
-  // The drift is held from the press, so the confirm outlives the write that
-  // clears it on the card (its exit plays, ruling 459).
-  const [syncDrift, setSyncDrift] = useState<TemplateDrift | null>(null);
-  // F16: "idle · available" was the page's answer no matter what — live, a
-  // Codex profile whose backend nobody could run read "idle · available" here
-  // while the task-level Execution panel, one click away, disagreed.
-  // Availability is two claims, and only one of them is about engagements:
-  // nothing is running it, AND a run could start. Ruling 127 makes the second
-  // claim person-shaped — a run bills the task owner, and the person reading
-  // this page is who would start one on the tasks they own.
-  const runHealth = primaryBackendHealth(a, backendHealth);
-  // Ruling 127: the second claim is now about the VIEWER's own account — they
-  // are the person who would press Run.
-  const backendMissing = runHealth !== null && !runHealth.viewerConnected;
-  const backendLabel = runHealth ? BACKEND_LABEL[runHealth.backend] : "Codex";
+  return (
+    <div className="ag-hero">
+      <ProfileGlyph a={a} lg />
+      <div className="ag-hero-main">
+        <div className="ag-hero-top">
+          {/* The page's ONE h1 is "Agents" (this is a master-detail layout, and
+              every other surface in the app has exactly one). The selected
+              profile is a section within it. */}
+          <h2 className="ag-hero-name">{a.name}</h2>
+          {/* Quiet: the role describes. The "not connected" pill beside it is
+              the one thing on this line that wants a person. The operator
+              has no role (ruling 518), so its name stands alone. */}
+          {heroRole && (
+            <Pill kind="neutral" sm quiet>
+              {heroRole}
+            </Pill>
+          )}
+          {runningKeys.length > 0 ? (
+            <span className="ag-running">
+              <span className="working" />
+              running on {countLabel(runningKeys.length, "task")}
+            </span>
+          ) : backendMissing ? (
+            <Pill kind="risk" sm>
+              idle · {backendLabel} not connected
+            </Pill>
+          ) : activeKeys.length > 0 ? (
+            // Engaged (assigned) but not executing a run right now — say so
+            // rather than the false "running on N" or the bare "available".
+            <span className="ag-idle">
+              idle · engaged on {countLabel(activeKeys.length, "task")}
+            </span>
+          ) : (
+            <span className="ag-idle">idle · available</span>
+          )}
+        </div>
+        {/* OBS-7: a fork keeps its own copy and stops tracking the global
+            (the edit modal's own warning says so), but the scope line still
+            read "Global base" — the one sentence a reader uses to decide
+            whether editing the org profile would reach this project. Name
+            both facts: where it came from, and that this project's copy has
+            since diverged. */}
+        <div className="ag-scope">
+          {a.scope}
+          {a.customized && (
+            <> · customized for {projectName}</>
+          )}
+          {/* Ruling 156: the grants signal beside the identity one, with the
+              exact difference under each list in the resources panel. */}
+          {a.templateDrift && <> · grants differ from the template</>}
+        </div>
+      </div>
+      <div className="ag-hero-actions">
+        {canDelete && (
+          <button
+            type="button"
+            className="btn ghost sm danger"
+            onClick={() => setConfirm(true)}
+          >
+            <Icon name="x" />
+            Delete
+          </button>
+        )}
+        {canManage && (
+          <button type="button" className="btn sm" onClick={() => onEdit(a)}>
+            <Icon name="user" />
+            Edit profile
+          </button>
+        )}
+      </div>
+    </div>
+  );
+}
+
+/**
+ * "Capability policy" (ruling 689(e), the split of `ProfileDetail`): the three
+ * governed columns, the operator's two qualifying notes, and the advisory
+ * lines collapsed under them. Hook-free; all of it is read off the profile.
+ */
+function CapabilityPolicyPanel({ a }: { a: AgentProfileView }) {
   // F15-05/F15-06: the capability columns show GOVERNED policy only — the same
   // partition the matrix draws between its curated groups and "Other actions".
   // A grant with no runtime consumer (advisory catalog id, bespoke extra) is
@@ -971,6 +1020,110 @@ export function ProfileDetail({
       mode: CAP_META.forbidden.label,
     })),
   ].filter(({ label }) => !isGoverned(label));
+  return (
+    <div className="panel">
+      <div className="panel-head">
+        <Icon name="shield" />
+        <h2>Capability policy</h2>
+      </div>
+      {showDoneException && (
+        <p className="cap-exception">
+          <Icon name="lock" />
+          <span>
+            <strong>{transitionToDoneLabel}</strong> stays reserved for humans{" "}
+            {TRANSITION_TO_DONE_EXCEPTION}.
+          </span>
+        </p>
+      )}
+      {showBoundaryNuance && (
+        /* OBS-4: the boundary the workflow marks "{AUTO_BOUNDARY_LABEL}" has
+           no approval to recommend into, so this operator moves it itself —
+           the label is borrowed from the Policy page's boundary list rather
+           than restated, so the two surfaces name the same thing. */
+        <p className="cap-exception">
+          <Icon name="arrow" />
+          <span>
+            <strong>{stageTransitionsLabel}</strong> is a recommendation at the
+            boundaries this project gates. A boundary set to{" "}
+            <strong>{AUTO_BOUNDARY_LABEL}</strong> is moved directly. The
+            Policy page lists which boundary is which.
+          </span>
+        </p>
+      )}
+      <div className="cap-cols">
+        <CapColumn group="direct" items={governed.direct} codexPrimary={codexPrimary} />
+        <CapColumn group="recommend" items={governed.recommend} codexPrimary={codexPrimary} />
+        <CapColumn
+          group="forbidden"
+          items={governed.forbidden}
+          codexPrimary={codexPrimary}
+          codexCarveOut={codexCarveOut}
+        />
+      </div>
+      {advisory.length > 0 && (
+        /* R15-12: these were disclosed inline, above the fold, next to the
+           grants that actually bind — so a Docs writer's panel led with
+           "Move the task to Review (acts directly)" as advisory, which reads
+           as a contradiction of the policy right above it. Hiding them was
+           the other option and was rejected: an omission the reader cannot
+           see is worse than an awkward truth. Collapsed, not removed — the
+           count is always visible and one click shows every line. */
+        <details className="cap-advisory">
+          <summary>
+            <Icon name="shield" />
+            <span>
+              Advisory only · {countLabel(advisory.length, "line")} the runtime
+              does not read
+            </span>
+            <Icon name="chevron" className="disc-chev" />
+          </summary>
+          <div className="cap-advisory-body">
+            <p>
+              These describe how the profile is meant to work. Nothing in the
+              runtime enforces them, so they never grant or refuse anything.
+              The binding policy is the three columns above.
+            </p>
+            <ul>
+              {advisory.map((x) => (
+                <li key={x.label}>
+                  {x.label} <span className="fhint">({x.mode.toLowerCase()})</span>
+                </li>
+              ))}
+            </ul>
+          </div>
+        </details>
+      )}
+    </div>
+  );
+}
+
+/**
+ * "Context resources & runtime" (ruling 689(e), the split of
+ * `ProfileDetail`): the template-grants button, the granted resources, what a
+ * run starts on, and the viewer's connection note. Hook-free: the detail owns
+ * the grants confirm and hands in its setter.
+ */
+function ContextRuntimePanel({
+  a,
+  resourceCatalog,
+  rulingsKb,
+  backendHealth,
+  runHealth,
+  backendMissing,
+  backendLabel,
+  canSyncTemplate,
+  setSyncDrift,
+}: {
+  a: AgentProfileView;
+  resourceCatalog: readonly ResCatalogGroup[] | undefined;
+  rulingsKb: string | null;
+  backendHealth: BackendHealthMap | undefined;
+  runHealth: BackendConnectionSummary | null;
+  backendMissing: boolean;
+  backendLabel: string;
+  canSyncTemplate: boolean;
+  setSyncDrift: (drift: TemplateDrift | null) => void;
+}) {
   // P14-KM-11: what the store actually holds, per resource kind. Absent catalog
   // ⇒ undefined ⇒ nothing is marked missing (see ResGroup).
   const known = (key: string): ReadonlySet<string> | undefined => {
@@ -985,6 +1138,271 @@ export function ProfileDetail({
     }
     return out;
   };
+  return (
+    <div className="panel">
+      <div className="panel-head">
+        <Icon name="cpu" />
+        <h2>Context resources &amp; runtime</h2>
+        {/* Ruling 156 (owner, Q35-8): only an org admin copies the template's
+            grants onto this project; a project admin sees the difference and
+            asks. The button carries the record the page rendered (B5), so a
+            save landing in between is refused, never reverted. Ruling
+            479(d): it opens a confirm naming what the press removes and
+            adds; the submit is the confirm's. */}
+        {canSyncTemplate && a.templateDrift && (
+          <button
+            type="button"
+            className="btn ghost sm right"
+            aria-haspopup="dialog"
+            onClick={() => setSyncDrift(a.templateDrift)}
+          >
+            <Icon name="cpu" />
+            Use the template&apos;s grants
+          </button>
+        )}
+      </div>
+      <div className="res-groups">
+        <ResGroup
+          label="Skills"
+          icon="bolt"
+          items={a.resources.skills}
+          known={known("skills")}
+          {...(a.templateDrift
+            ? { drift: { missing: a.templateDrift.missing.skills, extra: a.templateDrift.extra.skills } }
+            : {})}
+        />
+        <ResGroup
+          label="MCP servers"
+          icon="cpu"
+          items={a.resources.mcps}
+          known={known("mcps")}
+          warnings={warningsOf("mcps")}
+          {...(a.templateDrift
+            ? { drift: { missing: a.templateDrift.missing.mcps, extra: a.templateDrift.extra.mcps } }
+            : {})}
+        />
+        <ResGroup
+          label="Knowledge bases"
+          icon="file"
+          items={a.resources.kb}
+          known={known("kb")}
+          {...(a.templateDrift
+            ? { drift: { missing: a.templateDrift.missing.kb, extra: a.templateDrift.extra.kb } }
+            : {})}
+        />
+        {rulingsKb && (
+          <p className="muted">
+            Every run on this project reads <code className="mono">{rulingsKb}</code>, the
+            project's rulings, whether or not it is granted above (ruling 239). Removing the
+            grant here would not stop this profile reading it.
+          </p>
+        )}
+      </div>
+      <RuntimeRow
+        a={a}
+        backendHealth={backendHealth}
+        runHealth={runHealth}
+        backendMissing={backendMissing}
+      />
+      {/* Ruling 127: the actionable half, addressed to the person reading
+          it. There is no instance credential to name any more — a run bills
+          the task owner, and this viewer's own account is what decides
+          whether the profile runs on the tasks THEY own. Ruling 625: the
+          members' count is the runtime line's, just above; it is not said
+          twice. */}
+      {backendMissing && (
+        <div className="def-note">
+          <Icon name="alert" />
+          <span>
+            <b>You haven't connected {backendLabel}</b>. Runs use the task
+            owner's account, so a run this profile is given on a task you own
+            refuses before it starts. Connect {backendLabel} on your Profile →
+            Agent accounts.
+          </span>
+        </div>
+      )}
+    </div>
+  );
+}
+
+/** What a run on this profile starts on: its backend, model and effort, the
+ *  operator's autonomy, and its continuity (ruling 689(e), the split of
+ *  `ProfileDetail`; hook-free). */
+function RuntimeRow({
+  a,
+  backendHealth,
+  runHealth,
+  backendMissing,
+}: {
+  a: AgentProfileView;
+  backendHealth: BackendHealthMap | undefined;
+  runHealth: BackendConnectionSummary | null;
+  backendMissing: boolean;
+}) {
+  return (
+    <div className="runtime-row">
+      <div className="rt-cell">
+        <div className="lbl">
+          Execution backend
+          {a.backends.length > 1 && (
+            <span className="fhint">a run uses the first</span>
+          )}
+        </div>
+        <div className="rt-val">
+          {/* P13-UI-52: a multi-backend profile listed both chips as if the
+              agent could run on either at will. A run resolves ONE backend
+              (the deployment's first), so the list is a capability, not a
+              live choice — and the editor writes exactly one. */}
+          <div className="be-list">
+            {a.backends.length ? (
+              a.backends.map((b) => (
+                <BackendChip
+                  key={b}
+                  b={b}
+                  {...(backendHealth?.[b] ? { health: backendHealth[b] } : {})}
+                  noted={backendMissing && b === runHealth?.backend}
+                />
+              ))
+            ) : (
+              <span className="be-chip">
+                <span className="agent-glyph op">
+                  <Icon name="shield" />
+                </span>
+                Orchestration runtime
+              </span>
+            )}
+          </div>
+          {/* Ruling 127: WHOSE account a run on this profile spends. The
+              page cannot answer "is this backend configured" any more (a
+              run bills the task owner, and this page is not on a task), so
+              it states the rule and the one honest instance-level number:
+              how many of this project's members have connected it. */}
+          {runHealth && (
+            <div className="sub fine md dim">
+              {runsUseOwnerNote(runHealth)}
+            </div>
+          )}
+        </div>
+      </div>
+      {/* Ruling 479(e): every kind shows what a run starts on, model AND
+          effort. The operator used to get Autonomy in this cell and no
+          model at all, and no profile showed its effort, so whether an
+          agent ran at Maximum or High was readable only inside the
+          editor. The operator runs on the same two values
+          (`resolveOperatorAuthority`); an empty effort is the backend's
+          own default. */}
+      <div className="rt-cell">
+        <div className="lbl">Model · effort</div>
+        <div className="rt-val model-val">
+          <span>
+            {a.modelLabel} ·{" "}
+            {a.effort ? effortLabel(a.effort) : "default effort"}
+          </span>
+          {!a.modelKnown && (
+            <span
+              className="model-sub"
+              title={`The saved model “${a.model}” isn't a recognized model id, so runs use the default (${a.modelLabel}). Open Edit profile to pick a model.`}
+            >
+              <Icon name="alert" />
+              default
+            </span>
+          )}
+          {/* R20-3/F20-4: a real run proved the provider refuses this model
+              for this account. The badge names the provider's own redacted
+              sentence; a run on it would be refused before it starts. */}
+          {a.modelUnavailable && (
+            <span
+              className="model-sub"
+              title={`${a.modelUnavailable.reason} A run on this model would be refused. Open Edit profile to pick another.`}
+            >
+              <Icon name="alert" />
+              unavailable
+            </span>
+          )}
+        </div>
+      </div>
+      {a.kind === "operator" && (
+        <div className="rt-cell">
+          <div className="lbl">Autonomy</div>
+          <div className="rt-val">
+            <Pill kind={a.autonomy === "full" ? "agent" : "neutral"} sm dot>
+              {a.autonomy === "full" ? "Full autonomy" : "Supervised"}
+            </Pill>
+          </div>
+        </div>
+      )}
+      <div className="rt-cell">
+        <div className="lbl">Continuity</div>
+        <div className="rt-val mem-row">
+          <Icon name="memory" />
+          <span>
+            Re-anchors on <code className="mono">task.md</code>
+          </span>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+export function ProfileDetail({
+  a,
+  stages,
+  workflow,
+  resourceCatalog,
+  rulingsKb = null,
+  backendHealth,
+  insts,
+  projectName,
+  canManage,
+  canSyncTemplate = false,
+  onOpen,
+  onDelete,
+  onEdit,
+  onSyncResources = () => {},
+}: {
+  a: AgentProfileView;
+  stages: StageView[];
+  /** R14-1: the board's edges — eligibility resolves by structural role too. */
+  workflow: WorkflowEdgeView[];
+  /** F16 + ruling 127: who can run each backend, from the one credential store
+   *  (`connectedUserIds` / `isBackendAvailableFor`). */
+  backendHealth?: BackendHealthMap | undefined;
+  /** P14-KM-11: the live store catalog, so a grant naming a resource the store
+   *  no longer holds renders as missing rather than healthy. */
+  resourceCatalog?: readonly ResCatalogGroup[];
+  /** Ruling 239: the project's rulings knowledge base, which every profile
+   *  reads whether or not it grants one. Without saying so here, this card's
+   *  own `kb` list is WRONG about what the profile actually gets. */
+  rulingsKb?: string | null;
+  insts: AgentDeploymentView[];
+  projectName: string;
+  canManage: boolean;
+  /** Ruling 156 (owner, Q35-8): org admins only may take the template's
+   *  grants onto this project's copy. */
+  canSyncTemplate?: boolean;
+  onOpen: (taskKey: string) => void;
+  onDelete: (id: string) => void;
+  onEdit: (a: AgentProfileView) => void;
+  onSyncResources?: (a: AgentProfileView) => void;
+}) {
+  const activeKeys = [...new Set(insts.map((d) => d.taskKey))];
+  const [confirm, setConfirm] = useState(false);
+  // Ruling 479(d): "Use the template's grants" asks first, naming what goes.
+  // The drift is held from the press, so the confirm outlives the write that
+  // clears it on the card (its exit plays, ruling 459).
+  const [syncDrift, setSyncDrift] = useState<TemplateDrift | null>(null);
+  // F16: "idle · available" was the page's answer no matter what — live, a
+  // Codex profile whose backend nobody could run read "idle · available" here
+  // while the task-level Execution panel, one click away, disagreed.
+  // Availability is two claims, and only one of them is about engagements:
+  // nothing is running it, AND a run could start. Ruling 127 makes the second
+  // claim person-shaped — a run bills the task owner, and the person reading
+  // this page is who would start one on the tasks they own.
+  const runHealth = primaryBackendHealth(a, backendHealth);
+  // Ruling 127: the second claim is now about the VIEWER's own account — they
+  // are the person who would press Run.
+  const backendMissing = runHealth !== null && !runHealth.viewerConnected;
+  const backendLabel = runHealth ? BACKEND_LABEL[runHealth.backend] : "Codex";
   const canDelete = a.kind !== "operator" && canManage;
 
   return (
@@ -1007,333 +1425,36 @@ export function ProfileDetail({
           onConfirm={() => onSyncResources(a)}
         />
       )}
-      <div className="ag-hero">
-        <ProfileGlyph a={a} lg />
-        <div className="ag-hero-main">
-          <div className="ag-hero-top">
-            {/* The page's ONE h1 is "Agents" (this is a master-detail layout, and
-                every other surface in the app has exactly one). The selected
-                profile is a section within it. */}
-            <h2 className="ag-hero-name">{a.name}</h2>
-            {/* Quiet: the role describes. The "not connected" pill beside it is
-                the one thing on this line that wants a person. The operator
-                has no role (ruling 518), so its name stands alone. */}
-            {heroRole && (
-              <Pill kind="neutral" sm quiet>
-                {heroRole}
-              </Pill>
-            )}
-            {runningKeys.length > 0 ? (
-              <span className="ag-running">
-                <span className="working" />
-                running on {countLabel(runningKeys.length, "task")}
-              </span>
-            ) : backendMissing ? (
-              <Pill kind="risk" sm>
-                idle · {backendLabel} not connected
-              </Pill>
-            ) : activeKeys.length > 0 ? (
-              // Engaged (assigned) but not executing a run right now — say so
-              // rather than the false "running on N" or the bare "available".
-              <span className="ag-idle">
-                idle · engaged on {countLabel(activeKeys.length, "task")}
-              </span>
-            ) : (
-              <span className="ag-idle">idle · available</span>
-            )}
-          </div>
-          {/* OBS-7: a fork keeps its own copy and stops tracking the global
-              (the edit modal's own warning says so), but the scope line still
-              read "Global base" — the one sentence a reader uses to decide
-              whether editing the org profile would reach this project. Name
-              both facts: where it came from, and that this project's copy has
-              since diverged. */}
-          <div className="ag-scope">
-            {a.scope}
-            {a.customized && (
-              <> · customized for {projectName}</>
-            )}
-            {/* Ruling 156: the grants signal beside the identity one, with the
-                exact difference under each list in the resources panel. */}
-            {a.templateDrift && <> · grants differ from the template</>}
-          </div>
-        </div>
-        <div className="ag-hero-actions">
-          {canDelete && (
-            <button
-              type="button"
-              className="btn ghost sm danger"
-              onClick={() => setConfirm(true)}
-            >
-              <Icon name="x" />
-              Delete
-            </button>
-          )}
-          {canManage && (
-            <button type="button" className="btn sm" onClick={() => onEdit(a)}>
-              <Icon name="user" />
-              Edit profile
-            </button>
-          )}
-        </div>
-      </div>
+      <ProfileHero
+        a={a}
+        insts={insts}
+        activeKeys={activeKeys}
+        backendMissing={backendMissing}
+        backendLabel={backendLabel}
+        projectName={projectName}
+        canDelete={canDelete}
+        canManage={canManage}
+        setConfirm={setConfirm}
+        onEdit={onEdit}
+      />
 
       <p className="ag-desc">{a.desc}</p>
 
       <StageEligibility a={a} stages={stages} workflow={workflow} />
 
-      <div className="panel">
-        <div className="panel-head">
-          <Icon name="shield" />
-          <h2>Capability policy</h2>
-        </div>
-        {showDoneException && (
-          <p className="cap-exception">
-            <Icon name="lock" />
-            <span>
-              <strong>{transitionToDoneLabel}</strong> stays reserved for humans{" "}
-              {TRANSITION_TO_DONE_EXCEPTION}.
-            </span>
-          </p>
-        )}
-        {showBoundaryNuance && (
-          /* OBS-4: the boundary the workflow marks "{AUTO_BOUNDARY_LABEL}" has
-             no approval to recommend into, so this operator moves it itself —
-             the label is borrowed from the Policy page's boundary list rather
-             than restated, so the two surfaces name the same thing. */
-          <p className="cap-exception">
-            <Icon name="arrow" />
-            <span>
-              <strong>{stageTransitionsLabel}</strong> is a recommendation at the
-              boundaries this project gates. A boundary set to{" "}
-              <strong>{AUTO_BOUNDARY_LABEL}</strong> is moved directly. The
-              Policy page lists which boundary is which.
-            </span>
-          </p>
-        )}
-        <div className="cap-cols">
-          <CapColumn group="direct" items={governed.direct} codexPrimary={codexPrimary} />
-          <CapColumn group="recommend" items={governed.recommend} codexPrimary={codexPrimary} />
-          <CapColumn
-            group="forbidden"
-            items={governed.forbidden}
-            codexPrimary={codexPrimary}
-            codexCarveOut={codexCarveOut}
-          />
-        </div>
-        {advisory.length > 0 && (
-          /* R15-12: these were disclosed inline, above the fold, next to the
-             grants that actually bind — so a Docs writer's panel led with
-             "Move the task to Review (acts directly)" as advisory, which reads
-             as a contradiction of the policy right above it. Hiding them was
-             the other option and was rejected: an omission the reader cannot
-             see is worse than an awkward truth. Collapsed, not removed — the
-             count is always visible and one click shows every line. */
-          <details className="cap-advisory">
-            <summary>
-              <Icon name="shield" />
-              <span>
-                Advisory only · {countLabel(advisory.length, "line")} the runtime
-                does not read
-              </span>
-              <Icon name="chevron" className="disc-chev" />
-            </summary>
-            <div className="cap-advisory-body">
-              <p>
-                These describe how the profile is meant to work. Nothing in the
-                runtime enforces them, so they never grant or refuse anything.
-                The binding policy is the three columns above.
-              </p>
-              <ul>
-                {advisory.map((x) => (
-                  <li key={x.label}>
-                    {x.label} <span className="fhint">({x.mode.toLowerCase()})</span>
-                  </li>
-                ))}
-              </ul>
-            </div>
-          </details>
-        )}
-      </div>
+      <CapabilityPolicyPanel a={a} />
 
-      <div className="panel">
-        <div className="panel-head">
-          <Icon name="cpu" />
-          <h2>Context resources &amp; runtime</h2>
-          {/* Ruling 156 (owner, Q35-8): only an org admin copies the template's
-              grants onto this project; a project admin sees the difference and
-              asks. The button carries the record the page rendered (B5), so a
-              save landing in between is refused, never reverted. Ruling
-              479(d): it opens a confirm naming what the press removes and
-              adds; the submit is the confirm's. */}
-          {canSyncTemplate && a.templateDrift && (
-            <button
-              type="button"
-              className="btn ghost sm right"
-              aria-haspopup="dialog"
-              onClick={() => setSyncDrift(a.templateDrift)}
-            >
-              <Icon name="cpu" />
-              Use the template&apos;s grants
-            </button>
-          )}
-        </div>
-        <div className="res-groups">
-          <ResGroup
-            label="Skills"
-            icon="bolt"
-            items={a.resources.skills}
-            known={known("skills")}
-            {...(a.templateDrift
-              ? { drift: { missing: a.templateDrift.missing.skills, extra: a.templateDrift.extra.skills } }
-              : {})}
-          />
-          <ResGroup
-            label="MCP servers"
-            icon="cpu"
-            items={a.resources.mcps}
-            known={known("mcps")}
-            warnings={warningsOf("mcps")}
-            {...(a.templateDrift
-              ? { drift: { missing: a.templateDrift.missing.mcps, extra: a.templateDrift.extra.mcps } }
-              : {})}
-          />
-          <ResGroup
-            label="Knowledge bases"
-            icon="file"
-            items={a.resources.kb}
-            known={known("kb")}
-            {...(a.templateDrift
-              ? { drift: { missing: a.templateDrift.missing.kb, extra: a.templateDrift.extra.kb } }
-              : {})}
-          />
-          {rulingsKb && (
-            <p className="muted">
-              Every run on this project reads <code className="mono">{rulingsKb}</code>, the
-              project's rulings, whether or not it is granted above (ruling 239). Removing the
-              grant here would not stop this profile reading it.
-            </p>
-          )}
-        </div>
-        <div className="runtime-row">
-          <div className="rt-cell">
-            <div className="lbl">
-              Execution backend
-              {a.backends.length > 1 && (
-                <span className="fhint">a run uses the first</span>
-              )}
-            </div>
-            <div className="rt-val">
-              {/* P13-UI-52: a multi-backend profile listed both chips as if the
-                  agent could run on either at will. A run resolves ONE backend
-                  (the deployment's first), so the list is a capability, not a
-                  live choice — and the editor writes exactly one. */}
-              <div className="be-list">
-                {a.backends.length ? (
-                  a.backends.map((b) => (
-                    <BackendChip
-                      key={b}
-                      b={b}
-                      {...(backendHealth?.[b] ? { health: backendHealth[b] } : {})}
-                      noted={backendMissing && b === runHealth?.backend}
-                    />
-                  ))
-                ) : (
-                  <span className="be-chip">
-                    <span className="agent-glyph op">
-                      <Icon name="shield" />
-                    </span>
-                    Orchestration runtime
-                  </span>
-                )}
-              </div>
-              {/* Ruling 127: WHOSE account a run on this profile spends. The
-                  page cannot answer "is this backend configured" any more (a
-                  run bills the task owner, and this page is not on a task), so
-                  it states the rule and the one honest instance-level number:
-                  how many of this project's members have connected it. */}
-              {runHealth && (
-                <div className="sub fine md dim">
-                  {runsUseOwnerNote(runHealth)}
-                </div>
-              )}
-            </div>
-          </div>
-          {/* Ruling 479(e): every kind shows what a run starts on, model AND
-              effort. The operator used to get Autonomy in this cell and no
-              model at all, and no profile showed its effort, so whether an
-              agent ran at Maximum or High was readable only inside the
-              editor. The operator runs on the same two values
-              (`resolveOperatorAuthority`); an empty effort is the backend's
-              own default. */}
-          <div className="rt-cell">
-            <div className="lbl">Model · effort</div>
-            <div className="rt-val model-val">
-              <span>
-                {a.modelLabel} ·{" "}
-                {a.effort ? effortLabel(a.effort) : "default effort"}
-              </span>
-              {!a.modelKnown && (
-                <span
-                  className="model-sub"
-                  title={`The saved model “${a.model}” isn't a recognized model id, so runs use the default (${a.modelLabel}). Open Edit profile to pick a model.`}
-                >
-                  <Icon name="alert" />
-                  default
-                </span>
-              )}
-              {/* R20-3/F20-4: a real run proved the provider refuses this model
-                  for this account. The badge names the provider's own redacted
-                  sentence; a run on it would be refused before it starts. */}
-              {a.modelUnavailable && (
-                <span
-                  className="model-sub"
-                  title={`${a.modelUnavailable.reason} A run on this model would be refused. Open Edit profile to pick another.`}
-                >
-                  <Icon name="alert" />
-                  unavailable
-                </span>
-              )}
-            </div>
-          </div>
-          {a.kind === "operator" && (
-            <div className="rt-cell">
-              <div className="lbl">Autonomy</div>
-              <div className="rt-val">
-                <Pill kind={a.autonomy === "full" ? "agent" : "neutral"} sm dot>
-                  {a.autonomy === "full" ? "Full autonomy" : "Supervised"}
-                </Pill>
-              </div>
-            </div>
-          )}
-          <div className="rt-cell">
-            <div className="lbl">Continuity</div>
-            <div className="rt-val mem-row">
-              <Icon name="memory" />
-              <span>
-                Re-anchors on <code className="mono">task.md</code>
-              </span>
-            </div>
-          </div>
-        </div>
-        {/* Ruling 127: the actionable half, addressed to the person reading
-            it. There is no instance credential to name any more — a run bills
-            the task owner, and this viewer's own account is what decides
-            whether the profile runs on the tasks THEY own. Ruling 625: the
-            members' count is the runtime line's, just above; it is not said
-            twice. */}
-        {backendMissing && (
-          <div className="def-note">
-            <Icon name="alert" />
-            <span>
-              <b>You haven't connected {backendLabel}</b>. Runs use the task
-              owner's account, so a run this profile is given on a task you own
-              refuses before it starts. Connect {backendLabel} on your Profile →
-              Agent accounts.
-            </span>
-          </div>
-        )}
-      </div>
+      <ContextRuntimePanel
+        a={a}
+        resourceCatalog={resourceCatalog}
+        rulingsKb={rulingsKb}
+        backendHealth={backendHealth}
+        runHealth={runHealth}
+        backendMissing={backendMissing}
+        backendLabel={backendLabel}
+        canSyncTemplate={canSyncTemplate}
+        setSyncDrift={setSyncDrift}
+      />
 
       <div className="panel">
         <div className="panel-head">
@@ -1624,6 +1745,233 @@ type ProfileSubmitFields = {
   profileId?: string;
 };
 
+/**
+ * The page head (ruling 689(e), the split of `AgentsPage` along the task-page
+ * recipe): the title and its sentence, the Profiles/Live switch, and the
+ * matrix, library and new-profile buttons. Hook-free: the page owns the tab
+ * and every modal's state and hands in their setters.
+ */
+function AgentsHead({
+  tab,
+  setTab,
+  deployments,
+  libraryProfiles,
+  canManage,
+  setMatrixOpen,
+  setLibraryOpen,
+  setCreating,
+}: {
+  tab: "profiles" | "live";
+  setTab: (next: "profiles" | "live") => void;
+  deployments: AgentDeploymentView[];
+  libraryProfiles: LibraryProfileView[];
+  canManage: boolean;
+  setMatrixOpen: (open: boolean) => void;
+  setLibraryOpen: (open: boolean) => void;
+  setCreating: (open: boolean) => void;
+}) {
+  return (
+    <div className="board-head">
+      <div>
+        <h1>Agents</h1>
+        {/* C11 — record the profile-vs-engagement split the task page settled
+            on (UXA-6 / FR14): these are reusable PROFILES; per task the
+            operator engages one as the DELIVERING agent and others as
+            SUPPORTING agents. The old "specialist" vocabulary is dropped
+            below so one object stops carrying three names one click apart.
+
+            OBS-7 residual: this line ended "· global base, customized for
+            <project>" — a blanket claim over a roster where the answer is
+            per profile, and one each selected profile's own scope line
+            already gives (`.ag-scope`, which composes the template's sentence
+            with the fork). A project-created profile was never a global base,
+            and an untouched deployment was never customized, so the header
+            contradicted the card one click away in both directions. Point at
+            the card instead of asserting for it. */}
+        <div className="sub">
+          Reusable agent profiles, eligible stages, and capability policy. The
+          operator engages one per task as the delivering agent, others as
+          supporting. Each profile names where it came from, and whether this
+          project's copy has since diverged.
+        </div>
+      </div>
+      <div className="board-tools">
+        {/* P13-UI-58 residual: the Profiles/Live seg conveyed its selection
+            with the `on` class alone — the same gap Home's Grid/List seg and
+            the resources Transport seg already closed. */}
+        <div className="seg">
+          <button
+            type="button"
+            className={tab === "profiles" ? "on" : ""}
+            aria-pressed={tab === "profiles"}
+            onClick={() => setTab("profiles")}
+          >
+            <Icon name="agents" />
+            Profiles
+          </button>
+          <button
+            type="button"
+            className={tab === "live" ? "on" : ""}
+            aria-pressed={tab === "live"}
+            onClick={() => setTab("live")}
+          >
+            <Icon name="activity" />
+            Live<span className="tally">· {deployments.length}</span>
+          </button>
+        </div>
+        <button type="button" className="btn ghost sm" onClick={() => setMatrixOpen(true)}>
+          <Icon name="shield" />
+          Capability matrix
+        </button>
+        {canManage && (
+          <button
+            type="button"
+            className="btn ghost sm"
+            onClick={() => setLibraryOpen(true)}
+          >
+            <Icon name="agents" />
+            Add from library
+            {libraryProfiles.length > 0 && (
+              <span className="tally">· {libraryProfiles.length}</span>
+            )}
+          </button>
+        )}
+        {canManage && (
+          <button type="button" className="btn primary sm" onClick={() => setCreating(true)}>
+            <Icon name="plus" />
+            New profile
+          </button>
+        )}
+      </div>
+    </div>
+  );
+}
+
+/**
+ * The Profiles tab (ruling 689(e), the split of `AgentsPage` along the
+ * task-page recipe): the roster, operator first, and the open profile's
+ * detail. Hook-free: the page owns the selection, the fetcher and every
+ * modal, and hands in what the roster and the detail call.
+ */
+function ProfilesTab({
+  operator,
+  specialists,
+  current,
+  libraryProfiles,
+  counts,
+  backendHealth,
+  canManage,
+  setSel,
+  setCreating,
+  setLibraryOpen,
+  stages,
+  workflow,
+  resourceCatalog,
+  rulingsKb,
+  deployments,
+  projectName,
+  viewerIsOrgAdmin,
+  onOpen,
+  deleteProfile,
+  setEditing,
+  syncResources,
+}: {
+  operator: AgentProfileView | null;
+  specialists: AgentProfileView[];
+  current: AgentProfileView | null;
+  libraryProfiles: LibraryProfileView[];
+  /** Per profile, the tasks it has a run in flight on. */
+  counts: Record<string, number>;
+  backendHealth: BackendHealthMap | undefined;
+  canManage: boolean;
+  setSel: (profileId: string) => void;
+  setCreating: (open: boolean) => void;
+  setLibraryOpen: (open: boolean) => void;
+  stages: StageView[];
+  workflow: WorkflowEdgeView[];
+  resourceCatalog: readonly ResCatalogGroup[] | undefined;
+  rulingsKb: string | null;
+  deployments: AgentDeploymentView[];
+  projectName: string;
+  viewerIsOrgAdmin: boolean;
+  onOpen: (taskKey: string) => void;
+  deleteProfile: (profileId: string) => void;
+  setEditing: (a: AgentProfileView) => void;
+  syncResources: (a: AgentProfileView) => void;
+}) {
+  return (
+    <div className="agents-layout">
+      <aside className="profile-list">
+        {/* Ruling 518: the operator is one agent, so it heads the list on
+            its own, with no group label naming a second role for it. */}
+        {operator && (
+          <ProfileItem
+            a={operator}
+            count={counts[operator.id] ?? 0}
+            {...(backendHealth ? { health: backendHealth } : {})}
+            on={current?.id === operator.id}
+            onClick={() => setSel(operator.id)}
+          />
+        )}
+        <div className="ag-group-label">
+          {/* C11: "delivering agent" is the shipped vocabulary (UXA-6);
+              "Specialist" was a third name for the same object. These are
+              the assignable agent profiles (the operator is the one above).
+              Design pass 2026-09-08: no "+" in the label — this view had
+              three controls for one action (the toolbar's New profile, the
+              dashed row under the list, and this); the two that belong to
+              the page and to the list stay. */}
+          Agent profiles
+        </div>
+        {specialists.map((p) => (
+          <ProfileItem
+            key={p.id}
+            a={p}
+            count={counts[p.id] ?? 0}
+            {...(backendHealth ? { health: backendHealth } : {})}
+            on={current?.id === p.id}
+            onClick={() => setSel(p.id)}
+          />
+        ))}
+        {canManage && (
+          <button type="button" className="ag-newbtn" onClick={() => setCreating(true)}>
+            <Icon name="plus" />
+            New agent profile
+          </button>
+        )}
+        {canManage && libraryProfiles.length > 0 && (
+          <button
+            type="button"
+            className="ag-newbtn"
+            onClick={() => setLibraryOpen(true)}
+          >
+            <Icon name="agents" />
+            Add from library · {libraryProfiles.length}
+          </button>
+        )}
+      </aside>
+      {current && (
+        <ProfileDetail
+          a={current}
+          stages={stages}
+          workflow={workflow}
+          {...(resourceCatalog ? { resourceCatalog } : {})}
+          {...(backendHealth ? { backendHealth } : {})}
+          {...(rulingsKb ? { rulingsKb } : {})}
+          insts={deployments.filter((d) => d.profileId === current.id)}
+          projectName={projectName}
+          canManage={canManage}
+          canSyncTemplate={viewerIsOrgAdmin}
+          onOpen={onOpen}
+          onDelete={deleteProfile}
+          onEdit={setEditing}
+          onSyncResources={syncResources}
+        />
+      )}
+    </div>
+  );
+}
+
 export function AgentsPage({
   profiles,
   library,
@@ -1666,67 +2014,11 @@ export function AgentsPage({
   const navigate = useNavigate();
   const push = useToast();
   const csrf = useCsrfToken();
-  const [searchParams, setSearchParams] = useSearchParams();
   const fetcher = useFetcher<ProfileActionResult>();
 
   const canManage = roleCan(myRole, "manage-agents");
-  // Ruling 127: the profile editor's advisory note, from the same probe the
-  // roster reads. Undefined when connections were not probed on this surface,
-  // so the editor claims nothing rather than inventing a second answer.
-  const viewerConnected = backendHealth
-    ? {
-        claude: backendHealth.claude?.viewerConnected === true,
-        codex: backendHealth.codex?.viewerConnected === true,
-      }
-    : undefined;
-  // P13-UI-58 residual: `?profile=`/`?tab=` were READ once at mount and never
-  // written back, so the selection was unlinkable, un-bookmarkable and lost on
-  // reload — and a pasted `?tab=live` did nothing at all. The URL is the state:
-  // selection reads from it and every click replaces it (replace: true keeps
-  // one history entry per visit, the same rule the topbar search follows).
-  const urlSel = searchParams.get("profile") ?? "operator";
-  // U33-5: `setSearchParams` is a NAVIGATION — `useSearchParams` keeps handing
-  // back the COMMITTED location until the router (and this route's
-  // revalidation) lands, so for a beat after a roster click the whole detail
-  // pane — including the profile object "Edit profile" passes to the editor —
-  // was still the PREVIOUS selection. Live, clicking a roster entry and then
-  // Edit without a pause opened the editor for the profile selected before it,
-  // and saving wrote that form's grants onto the wrong profile (confirmed in
-  // project.md). The pick is recorded synchronously here and the URL follows,
-  // so the roster highlight, the detail pane and the editor's binding all
-  // resolve from ONE value in the SAME render. Deliberately not a debounce:
-  // the failure was silent and landed on governance data, so the shape has to
-  // make the stale read impossible rather than unlikely.
-  const [pendingSel, setPendingSel] = useState<string | null>(null);
-  const sel = pendingSel ?? urlSel;
-  const tab = searchParams.get("tab") === "live" ? "live" : "profiles";
-  // A committed URL is the authority again: whatever put it there (this page's
-  // own navigation landing, a Back, a pasted link) supersedes the pending pick.
-  useEffect(() => {
-    setPendingSel(null);
-  }, [urlSel]);
-  const setSel = (profileId: string) => {
-    setPendingSel(profileId);
-    setSearchParams(
-      (prev) => {
-        const next = new URLSearchParams(prev);
-        next.set("profile", profileId);
-        return next;
-      },
-      { replace: true, preventScrollReset: true },
-    );
-  };
-  const setTab = (next: "profiles" | "live") => {
-    setSearchParams(
-      (prev) => {
-        const params = new URLSearchParams(prev);
-        if (next === "live") params.set("tab", "live");
-        else params.delete("tab");
-        return params;
-      },
-      { replace: true, preventScrollReset: true },
-    );
-  };
+  const viewerConnected = viewerConnections(backendHealth);
+  const { sel, tab, setSel, setTab } = useProfileSelection();
   const [creating, setCreating] = useState(false);
   const [libraryOpen, setLibraryOpen] = useState(false);
   const [editing, setEditing] = useState<AgentProfileView | null>(null);
@@ -1736,35 +2028,13 @@ export function AgentsPage({
   const [matrixOpen, setMatrixOpen] = useState(false);
   const [formError, setFormError] = useState<string | null>(null);
 
-  const operator = profiles.find((p) => p.kind === "operator") ?? null;
-  // Ruling 479(e): the backend an operator run starts on, by the rule the run
-  // resolves it with (`resolveOperatorAuthority`): the first backend the
-  // profile names, Claude when it names none or no operator is deployed.
-  const operatorBackend = (operator && primaryBackend(operator)) ?? "claude";
-  const specialists = profiles.filter((p) => p.kind !== "operator");
-  const libraryProfiles = library ?? [];
-  const current = profiles.find((a) => a.id === sel) ?? profiles[0] ?? null;
+  const { operator, operatorBackend, specialists, libraryProfiles, current } = rosterOf(
+    profiles,
+    library,
+    sel,
+  );
 
-  const counts = useMemo(() => {
-    const sets = new Map<string, Set<string>>();
-    for (const d of deployments) {
-      // F26-2: the sidebar's "working" pulse is a claim about LIVE runs, not
-      // engagements — count only tasks with an actual running row (`d.running`),
-      // exactly like the profile hero does (1cd86c8). Without this, a profile
-      // assigned to N tasks it is executing nothing on pulsed "working · N" here
-      // while the hero on the same page said "idle · engaged on N".
-      if (!d.running) continue;
-      let keys = sets.get(d.profileId);
-      if (!keys) {
-        keys = new Set();
-        sets.set(d.profileId, keys);
-      }
-      keys.add(d.taskKey);
-    }
-    const out: Record<string, number> = {};
-    for (const [k, v] of sets) out[k] = v.size;
-    return out;
-  }, [deployments]);
+  const counts = useMemo(() => runningTaskCounts(deployments), [deployments]);
 
   // Live-roster rows carry only a profileId (AgentDeploymentView has no name);
   // resolve a human display name from the profiles the page already holds,
@@ -1778,18 +2048,7 @@ export function AgentsPage({
     [profiles],
   );
 
-  const operators = deployments.filter((d) => d.engagement === "operator").length;
-  // F34-5: runs in flight, the same claim the sidebar pulse and the profile
-  // hero make (`counts` above, F26-2). This counted `status === "working"`
-  // back when the projection derived that word from the task's `waiting`
-  // flag, so the card read "5 agent threads in a working state" with one run
-  // alive; the status is run-derived now, and `running` is the fact itself.
-  const running = deployments.filter((d) => d.running).length;
-  // The waiting count is TASK-level on purpose: an engagement whose run is in
-  // flight on a human-waiting task now says "working" (F34-5), and counting
-  // by status would silently drop it here. `taskWaiting` is the task's own
-  // flag, and the label says whose waiting it is.
-  const waiting = deployments.filter((d) => d.taskWaiting === "human").length;
+  const { operators, running, waiting } = engagementTallies(deployments);
 
   const onOpen = (taskKey: string) =>
     navigate(`/projects/${projectSlug}/tasks/${taskKey}`);
@@ -1868,79 +2127,16 @@ export function AgentsPage({
 
   return (
     <div className="board-wrap" data-screen-label="Agents">
-      <div className="board-head">
-        <div>
-          <h1>Agents</h1>
-          {/* C11 — record the profile-vs-engagement split the task page settled
-              on (UXA-6 / FR14): these are reusable PROFILES; per task the
-              operator engages one as the DELIVERING agent and others as
-              SUPPORTING agents. The old "specialist" vocabulary is dropped
-              below so one object stops carrying three names one click apart.
-
-              OBS-7 residual: this line ended "· global base, customized for
-              <project>" — a blanket claim over a roster where the answer is
-              per profile, and one each selected profile's own scope line
-              already gives (`.ag-scope`, which composes the template's sentence
-              with the fork). A project-created profile was never a global base,
-              and an untouched deployment was never customized, so the header
-              contradicted the card one click away in both directions. Point at
-              the card instead of asserting for it. */}
-          <div className="sub">
-            Reusable agent profiles, eligible stages, and capability policy. The
-            operator engages one per task as the delivering agent, others as
-            supporting. Each profile names where it came from, and whether this
-            project's copy has since diverged.
-          </div>
-        </div>
-        <div className="board-tools">
-          {/* P13-UI-58 residual: the Profiles/Live seg conveyed its selection
-              with the `on` class alone — the same gap Home's Grid/List seg and
-              the resources Transport seg already closed. */}
-          <div className="seg">
-            <button
-              type="button"
-              className={tab === "profiles" ? "on" : ""}
-              aria-pressed={tab === "profiles"}
-              onClick={() => setTab("profiles")}
-            >
-              <Icon name="agents" />
-              Profiles
-            </button>
-            <button
-              type="button"
-              className={tab === "live" ? "on" : ""}
-              aria-pressed={tab === "live"}
-              onClick={() => setTab("live")}
-            >
-              <Icon name="activity" />
-              Live<span className="tally">· {deployments.length}</span>
-            </button>
-          </div>
-          <button type="button" className="btn ghost sm" onClick={() => setMatrixOpen(true)}>
-            <Icon name="shield" />
-            Capability matrix
-          </button>
-          {canManage && (
-            <button
-              type="button"
-              className="btn ghost sm"
-              onClick={() => setLibraryOpen(true)}
-            >
-              <Icon name="agents" />
-              Add from library
-              {libraryProfiles.length > 0 && (
-                <span className="tally">· {libraryProfiles.length}</span>
-              )}
-            </button>
-          )}
-          {canManage && (
-            <button type="button" className="btn primary sm" onClick={() => setCreating(true)}>
-              <Icon name="plus" />
-              New profile
-            </button>
-          )}
-        </div>
-      </div>
+      <AgentsHead
+        tab={tab}
+        setTab={setTab}
+        deployments={deployments}
+        libraryProfiles={libraryProfiles}
+        canManage={canManage}
+        setMatrixOpen={setMatrixOpen}
+        setLibraryOpen={setLibraryOpen}
+        setCreating={setCreating}
+      />
 
       {/* UXA-15: Policy and project Settings both explain their read-only state
           to a role without the grant; Agents — where the New profile, Add from
@@ -1970,75 +2166,29 @@ export function AgentsPage({
       />
 
       {tab === "profiles" ? (
-        <div className="agents-layout">
-          <aside className="profile-list">
-            {/* Ruling 518: the operator is one agent, so it heads the list on
-                its own, with no group label naming a second role for it. */}
-            {operator && (
-              <ProfileItem
-                a={operator}
-                count={counts[operator.id] ?? 0}
-                {...(backendHealth ? { health: backendHealth } : {})}
-                on={current?.id === operator.id}
-                onClick={() => setSel(operator.id)}
-              />
-            )}
-            <div className="ag-group-label">
-              {/* C11: "delivering agent" is the shipped vocabulary (UXA-6);
-                  "Specialist" was a third name for the same object. These are
-                  the assignable agent profiles (the operator is the one above).
-                  Design pass 2026-09-08: no "+" in the label — this view had
-                  three controls for one action (the toolbar's New profile, the
-                  dashed row under the list, and this); the two that belong to
-                  the page and to the list stay. */}
-              Agent profiles
-            </div>
-            {specialists.map((p) => (
-              <ProfileItem
-                key={p.id}
-                a={p}
-                count={counts[p.id] ?? 0}
-                {...(backendHealth ? { health: backendHealth } : {})}
-                on={current?.id === p.id}
-                onClick={() => setSel(p.id)}
-              />
-            ))}
-            {canManage && (
-              <button type="button" className="ag-newbtn" onClick={() => setCreating(true)}>
-                <Icon name="plus" />
-                New agent profile
-              </button>
-            )}
-            {canManage && libraryProfiles.length > 0 && (
-              <button
-                type="button"
-                className="ag-newbtn"
-                onClick={() => setLibraryOpen(true)}
-              >
-                <Icon name="agents" />
-                Add from library · {libraryProfiles.length}
-              </button>
-            )}
-          </aside>
-          {current && (
-            <ProfileDetail
-              a={current}
-              stages={stages}
-              workflow={workflow}
-              {...(resourceCatalog ? { resourceCatalog } : {})}
-              {...(backendHealth ? { backendHealth } : {})}
-              {...(rulingsKb ? { rulingsKb } : {})}
-              insts={deployments.filter((d) => d.profileId === current.id)}
-              projectName={projectName}
-              canManage={canManage}
-              canSyncTemplate={viewerIsOrgAdmin}
-              onOpen={onOpen}
-              onDelete={deleteProfile}
-              onEdit={setEditing}
-              onSyncResources={syncResources}
-            />
-          )}
-        </div>
+        <ProfilesTab
+          operator={operator}
+          specialists={specialists}
+          current={current}
+          libraryProfiles={libraryProfiles}
+          counts={counts}
+          backendHealth={backendHealth}
+          canManage={canManage}
+          setSel={setSel}
+          setCreating={setCreating}
+          setLibraryOpen={setLibraryOpen}
+          stages={stages}
+          workflow={workflow}
+          resourceCatalog={resourceCatalog}
+          rulingsKb={rulingsKb}
+          deployments={deployments}
+          projectName={projectName}
+          viewerIsOrgAdmin={viewerIsOrgAdmin}
+          onOpen={onOpen}
+          deleteProfile={deleteProfile}
+          setEditing={setEditing}
+          syncResources={syncResources}
+        />
       ) : (
         <LiveRoster
           deployments={deployments}
@@ -2076,11 +2226,7 @@ export function AgentsPage({
           workflow={workflow}
           projectName={projectName}
           busy={fetcher.state !== "idle"}
-          adding={
-            inFlightIntent(fetcher) === "deploy-profile"
-              ? String(fetcher.formData?.get("profileId") ?? "")
-              : null
-          }
+          adding={deployingProfileId(fetcher)}
           done={modalDone}
           onClose={() => {
             setLibraryOpen(false);
