@@ -523,6 +523,26 @@ history opens with "Converted from goal-N …", and the project's Activity colum
   `runtimes/users/<userId>/` are theirs: read them as the server (group `node` reads every
   file there once the launcher has handed the home back after a run) or with
   `docker compose exec`, never by changing their owner.
+- **A delivered page has no picture** (ruling 691). The task says why in three places: the
+  "Page captures" note on its timeline ("Viberr could not picture `x.html`: …"), "No
+  picture of this page: …" under that file on the completion or Result card, and
+  `task.md` `pageCaptures.pages[].error`. The server logs `a page could not be captured`
+  with the task, the file and the reason, and `page captures made` with the counts and
+  the wall time; audit `task.pages.captured` carries who it ran as. The reasons: "the
+  render ran past 25 seconds" (a script that never finishes or a page that never finishes
+  loading; the job as a whole is stopped at 10 s plus 25 s a page), "the browser ended
+  before the page was pictured", "the task has no owner to render it as" (isolation is on
+  and the task has no owner: give it one and the next delivery is pictured), "the pinned
+  browser executable (VIBERR_BROWSER_EXECUTABLE) is not on disk" (health's `browser` says
+  the same), and a source over 10 MB (markdown 2 MB). No note at all on a files delivery
+  means the deployment names no browser, or the delivery held no page. A picture that
+  shows boxes where text should be is a script the image has no font for (it ships
+  Liberation and an emoji font). Renders are one at a time for the whole instance, so a
+  burst of deliveries queues; an agent's `capture_page` goes ahead of waiting deliveries
+  and answers `[busy]` when it has not started within 15 s. A restart during a render
+  loses that delivery's pictures: the next delivery is pictured, and an agent can look
+  with `capture_page` meanwhile. `docker compose exec -T app sh
+  scripts/check-page-capture.sh` checks the renderer against the image's own browser.
 
 ## Auth / access
 

@@ -543,9 +543,19 @@ Playwright (`npm run e2e -- e2e/01-home-board.spec.ts`).
    process by marker, and every refusal (a uid below the floor, uid 0, a relative exec, a
    home outside `runtimes/users/`, a `..`, another agent's home, a malformed marker, an
    agent executing the launcher) holds.
-5. `npx playwright test <args>` with `VIBERR_E2E_BASE_URL`; on failure prints the last
+5. Ruling 691: runs `docker compose exec -T app sh scripts/check-page-capture.sh`, failing
+   the run on a non-zero exit. The unit suites drive the page capture's renderer with a
+   stand-in browser (`test-support/fake-browser.ts`), so this is the one place the image's
+   own Chromium is asked: as a throwaway agent uid through the launcher it pictures a
+   fixture page, a markdown file and a page that navigates away, and checks both PNG
+   widths, the sibling picture drawn (by its pixels), a `100vh` section one screen tall in
+   a picture three screens tall, that the page's image, fetch and navigation to another
+   loopback port and to a remote host loaded nothing (a listener on that port records no
+   request of the page), the report naming what the page asked for, no process of the uid
+   left running, and the image's fonts (`system-ui` proportional, an emoji font present).
+6. `npx playwright test <args>` with `VIBERR_E2E_BASE_URL`; on failure prints the last
    100 app log lines.
-6. `down --volumes --remove-orphans` unless `VIBERR_E2E_KEEP=1`. Exit code is
+7. `down --volumes --remove-orphans` unless `VIBERR_E2E_KEEP=1`. Exit code is
    Playwright's (or 1 when step 4 failed).
 
 `playwright.config.ts` throws without `VIBERR_E2E_BASE_URL`; `testDir: "e2e"`,

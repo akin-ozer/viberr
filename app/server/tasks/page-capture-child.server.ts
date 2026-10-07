@@ -134,8 +134,9 @@ const CLOSE_GRACE_MS = 2_000;
 const ARTICLE_CSS = [
   ":root { color-scheme: light; }",
   "html { background: Canvas; color: CanvasText; }",
-  // No `system-ui`: the image's Chromium resolves it to a monospace face
-  // (measured, Debian Chromium 154 with fonts-liberation only).
+  // No `system-ui`: with only fonts-liberation installed, Debian Chromium 154
+  // drew it in a monospace face (measured), and an article must not depend on
+  // the image's font defaults.
   'body { margin: 0; font: 17px/1.6 "Segoe UI", Roboto, "Helvetica Neue", Arial, "Liberation Sans", sans-serif; }',
   "main { max-width: 70ch; margin: 0 auto; padding: 40px 20px 72px; }",
   "h1, h2, h3, h4 { line-height: 1.25; margin: 1.6em 0 0.6em; }",
