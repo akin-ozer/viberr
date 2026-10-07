@@ -123,15 +123,16 @@ function renderEpic(view: EpicPageView, grants: Grants = {}, action?: ActionFunc
   return render(<Stub initialEntries={["/projects/viberr-core/epics/epic-3"]} />);
 }
 
-/** An action that records every POST's fields and answers `reply`. */
-function recorder(reply: EpicActionResult) {
+/** An action that records every POST's fields and answers `replies` in turn,
+ *  the last one from then on. */
+function recorder(...replies: [EpicActionResult, ...EpicActionResult[]]) {
   const posted: Record<string, string>[] = [];
   const action: ActionFunction = async ({ request }) => {
     const fd = await request.formData();
     const row: Record<string, string> = {};
     for (const [k, v] of fd.entries()) if (!(v instanceof File)) row[k] = v;
     posted.push(row);
-    return reply;
+    return replies[Math.min(posted.length, replies.length) - 1];
   };
   return { posted, action };
 }
@@ -233,6 +234,43 @@ describe("ruling 503(e): the epic page's head", () => {
     expect(within(dialog).getByLabelText("Status")).toHaveProperty("value", "in_progress");
     expect(within(dialog).getByLabelText("Lead")).toHaveProperty("value", "u_murat");
     expect(within(dialog).getByRole("button", { name: "Save" })).toBeTruthy();
+  });
+
+  it("Save toasts the answer and leaves through the dialog's exit, posting once, and focus goes back to Edit", async () => {
+    const RENAMED = 'Updated epic-3: renamed it from "Checkout revamp" to "Checkout v2".';
+    const PAUSED = "Updated epic-3: set the status to Paused.";
+    const { posted, action } = recorder({ ok: true, toast: RENAMED }, { ok: true, toast: PAUSED });
+    renderEpic(pageView(), {}, action);
+    const edit = await screen.findByRole("button", { name: "Edit" });
+    edit.focus();
+    fireEvent.click(edit);
+    const dialog = await screen.findByRole("dialog", { name: "Edit epic-3" });
+    // The sheet's `dialog[data-closing]` clock, which jsdom has no stylesheet
+    // to read: the exit plays until its transitionend.
+    dialog.style.transitionDuration = "10s";
+    const name = within(dialog).getByLabelText(/Name/);
+    fireEvent.change(name, { target: { value: "Checkout v2" } });
+    fireEvent.keyDown(name, { key: "Enter" });
+    expect(await screen.findByText(RENAMED)).toBeTruthy();
+    // An edit's answer is the dialog's own (ruling 689(c)). CANARY: drop
+    // `close()` from EpicDialog's own result handler and the dialog stays
+    // open over its toast.
+    expect(dialog.hasAttribute("data-closing")).toBe(true);
+    // Ruling 459: a second Enter on the closing dialog posts nothing. CANARY:
+    // drop `fetcher.data?.ok` from submit's guard and the fade posts
+    // update-epic again.
+    fireEvent.keyDown(name, { key: "Enter" });
+    fireEvent.transitionEnd(dialog);
+    expect(screen.queryByRole("dialog", { name: "Edit epic-3" })).toBeNull();
+    expect(document.activeElement).toBe(edit);
+    // A later post's answer: once it shows, a post the second Enter made
+    // would have reached the action before it.
+    fireEvent.change(screen.getByRole("combobox", { name: "Status" }), { target: { value: "paused" } });
+    expect(await screen.findByText(PAUSED)).toBeTruthy();
+    expect(posted).toEqual([
+      expect.objectContaining({ intent: "update-epic", title: "Checkout v2" }),
+      { _csrf: "tok", intent: "update-epic", status: "paused" },
+    ]);
   });
 });
 
