@@ -1,6 +1,6 @@
 import { writeFileSync } from "node:fs";
 import path from "node:path";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createTestDbContext, type TestDbContext } from "../../../test-support/test-db";
 import {
   baseTaskFrontmatter,
@@ -13,6 +13,7 @@ import { taskAttachmentsDir } from "~/server/files/file-store-root.server";
 import { keepDelivery } from "~/server/files/kept-deliveries.server";
 import { readProjectFile } from "~/server/files/project-writer.server";
 import { writeTaskAttachment } from "~/server/files/task-attachments.server";
+import { readTaskSources, recordDeliverySources, writeTaskSource } from "~/server/files/task-sources.server";
 import { readTaskFile } from "~/server/files/task-writer.server";
 import { rebuildAll } from "~/server/projections/rebuilder.server";
 import type { TaskFrontmatter } from "~/schemas/task-file.schema";
@@ -22,6 +23,7 @@ import {
   completionPacketFact,
   completionPacketText,
   completionView,
+  sourcesRestedOn,
 } from "./completion-packet.server";
 
 /**
@@ -508,5 +510,104 @@ describe("ruling 668: the packet names the result of a task delivered as files",
     });
     const code = completionView(parsed().frontmatter, { canSee: null, nameOf, ruleReviewers: [] })!;
     expect(code.paths).toEqual({ shown: changed.slice(0, 40), more: 2, truncated: false });
+  });
+});
+
+describe("ruling 690: what the work under review rests on", () => {
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  /** Keep one source on VIB-1 at `at`, by the store's own writer. */
+  function keepAt(at: string, name: string): void {
+    vi.setSystemTime(new Date(at));
+    writeTaskSource(
+      store.slug,
+      "VIB-1",
+      {
+        name,
+        data: Buffer.from(`the page ${name}`),
+        title: `The page ${name}`,
+        from: `https://aws.amazon.com/${name}`,
+        by: { backend: "claude", profileId: "researcher", roleHint: "Researcher" },
+        runId: "run_abc",
+      },
+      store.dataRoot,
+    );
+  }
+
+  it("counts a task's sources for the operator and, for the page, the ones its delivery recorded or the ones kept by then, and never one kept afterwards", async () => {
+    // A source a reviewer keeps while checking the work is on the task and
+    // was not under what it checks. CANARY: count every kept source as rested
+    // on and the snapshot says a result stood on a page nobody had read yet.
+    vi.useFakeTimers({ toFake: ["Date"] });
+    const fact = () =>
+      completionPacketFact(parsed().frontmatter, {
+        projectSlug: store.slug,
+        taskKey: "VIB-1",
+        dataRoot: store.dataRoot,
+      }).sources;
+    const rested = () =>
+      sourcesRestedOn(readTaskSources(store.slug, "VIB-1", store.dataRoot), parsed().frontmatter).map((s) => s.id);
+    const files = (deliveredAt: string | null) => seed({ workRevision: null, branch: null, github: null, deliveredAt });
+
+    // Nothing is delivered yet: the task keeps a source, and no result rests on it.
+    files(null);
+    keepAt("2026-10-07T12:00:00.000Z", "ec2.html");
+    expect(fact()).toEqual({ kept: 1, restedOn: 0 });
+
+    // A files delivery whose line was never written rests on what was kept by its stamp.
+    files("2026-10-07T13:00:00.000Z");
+    keepAt("2026-10-07T14:00:00.000Z", "rds.html");
+    expect(rested()).toEqual(["S1"]);
+    expect(fact()).toEqual({ kept: 2, restedOn: 1 });
+
+    // A delivery that recorded its sources rests on those, whatever the clock said.
+    files("2026-10-07T15:00:00.000Z");
+    recordDeliverySources(store.slug, "VIB-1", "2026-10-07T15:00:00.000Z", store.dataRoot);
+    keepAt("2026-10-07T14:59:00.000Z", "s3.html");
+    expect(rested()).toEqual(["S1", "S2"]);
+    expect(fact()).toEqual({ kept: 3, restedOn: 2 });
+
+    // A revision nobody has summarized rests on everything kept so far; once
+    // the operator has, on what was kept by then.
+    seed();
+    expect(rested()).toEqual(["S1", "S2", "S3"]);
+    vi.setSystemTime(new Date("2026-10-07T14:30:00.000Z"));
+    expect((await write({})).outcome).toBe("done");
+    expect(rested()).toEqual(["S1", "S2"]);
+    expect(fact()).toEqual({ kept: 3, restedOn: 2 });
+  });
+
+  it("the page's card carries the count and the first twelve, says zero for a files result, and nothing for a revision that rests on none or a viewer who may not see", () => {
+    // CANARY: carry `sources` on every view and the task page's payload grows
+    // on every task that keeps none (ruling 457's console budget measures it);
+    // drop it at zero for a files result and the card cannot say the result
+    // rests on no kept source.
+    vi.useFakeTimers({ toFake: ["Date"] });
+    const nameOf = (id: string) => id;
+    seed({ workRevision: null, branch: null, github: null, deliveredAt: "2026-10-07T13:00:00.000Z" });
+    const filesFm = parsed().frontmatter;
+    const view = (fm: TaskFrontmatter, sources: ReturnType<typeof sourcesRestedOn> | null) =>
+      completionView(fm, { canSee: null, nameOf, ruleReviewers: [], sources })!;
+    expect(view(filesFm, []).sources).toEqual({ count: 0, shown: [] });
+    expect("sources" in view(filesFm, null)).toBe(false);
+
+    for (let n = 1; n <= 14; n += 1) keepAt("2026-10-07T12:00:00.000Z", `page-${n}.html`);
+    const kept = readTaskSources(store.slug, "VIB-1", store.dataRoot).sources;
+    const listed = view(filesFm, kept).sources!;
+    expect(listed.count).toBe(14);
+    expect(listed.shown.map((s) => s.id)).toEqual(kept.slice(0, 12).map((s) => s.id));
+    expect(listed.shown[0]).toEqual({
+      id: "S1",
+      name: "page-1.html",
+      title: "The page page-1.html",
+      from: "https://aws.amazon.com/page-1.html",
+    });
+
+    seed();
+    const revisionFm = parsed().frontmatter;
+    expect("sources" in view(revisionFm, [])).toBe(false);
+    expect(view(revisionFm, kept.slice(0, 1)).sources).toMatchObject({ count: 1 });
   });
 });

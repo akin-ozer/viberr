@@ -744,10 +744,16 @@ card until one of the person's runs has made a model call (ruling 604). A readin
   (`holdsCollaborationGrant`, the gate a Claude toolkit builds `read_board` on) mounts
   `viberr_board`, a second server the gateway answers itself over the run's token
   (`board-tool.server.ts`), fresh and resumed. It has `read_board`,
-  `read_timeline_entry` and `read_task_attachment` (ruling 594), the same readers and
+  `read_timeline_entry`, `read_task_attachment` (ruling 594) and `read_task_source`
+  (ruling 690), the same readers and
   descriptions as Claude's toolkit, over the run's own project and task; the mount carries only the store, and the run is handed the
   URL and its token. A profile with no collaboration grant mounts nothing, and neither
-  does a run when the gateway is not running.
+  does a run when the gateway is not running. Ruling 690: for a run that may save files
+  on its task (`attach-evidence-references`) the mount also carries the agent a source is
+  kept as, and the server then lists `keep_source` and answers it with the run's own id on
+  the record; a run without the grant is not offered it, and a call to it is answered as a
+  call to any tool the server does not have. While the gateway is not running a Codex run
+  has no `keep_source`, and its prompt says it cannot keep a source and why.
 
 ## 3. A run's life
 
@@ -1343,7 +1349,18 @@ operator bursts under it (ruling 505; ui/surfaces.md).
   the run READ its knowledge-base folders, its profile's plus the project's rulings KB,
   `knowledgeBaseReadDirs`, ruling 422, and never write them; a run that holds
   `correct_knowledge_doc` is told there that the tool is how a passage changes,
-  `KB_CONTRACT_CORRECTION_SENTENCE`, ruling 591), resolve delivery permissions, compute the
+  `KB_CONTRACT_CORRECTION_SENTENCE`, ruling 591; right after the attachments line, with or
+  without a checkout, the contract says what a fact from outside rests on, ruling 690: a
+  run that holds `keep_source` is given the whole move, `sourcesKeepLine` (save the page
+  or the output into the attachments folder, call `keep_source` with the file's name,
+  where it came from and a title, cite the id; a claim with no kept source reads as
+  unsupported), and a run that does not is told it cannot keep one and why,
+  `sourcesNotKeptLine` (its profile lacks "Attach evidence references", or it holds the
+  grant and the tool is not mounted, a Codex run while the gateway is not listening), so
+  its result names what was not kept; a supporting run that holds `read_task_source` is
+  told, before what it is asked to do, that the work's claims are checked against the
+  kept sources and that a claim with none, or one its source does not bear out, is a
+  finding, `SOURCES_REVIEW_LINE`), resolve delivery permissions, compute the
   denylist (or the "everything off" list when the profile vanished, ruling 26), write the
   redacted `run·inputs` line (with the toolkit's `toolNames`, ruling 339), flag a
   directive that asks the specialist to push or open or merge a PR
@@ -1419,7 +1436,9 @@ gates and mounts the server only when at least one was built, with `alwaysLoad: 
 (§2.4). It returns `toolNames`, read off the definitions it pushed, which is the tool list
 the run's `run·inputs` record discloses (ruling 339). Codex specialists mount none of it
 and get the outcome envelope instead (§2.5), except the board and knowledge readers,
-which Viberr's gateway answers for a Codex run (rulings 585 and 589).
+which Viberr's gateway answers for a Codex run (rulings 585 and 589), and `keep_source`,
+which the same board server answers for a run that may save files on its task (ruling
+690).
 
 | Tool | Gate | Effect |
 |---|---|---|
@@ -1429,6 +1448,8 @@ which Viberr's gateway answers for a Codex run (rulings 585 and 589).
 | `github_read {path}` | `read-github-api` | GET-only, repo-scoped read through the project PAT on the server (≤ 32,000 bytes, ruling 624), audit `task.agent.github_read` |
 | `read_board {taskKey?}` | none; built when the run holds any collaboration grant (`holdsCollaborationGrant`), so only beside another tool; on Codex the gateway's `viberr_board` server (ruling 589) | this project's board, read-only: one task (title, stage, readiness, what it waits on, archived, goal, and its `outcome` once it has one: the current completion summary and each verdict's report on what it delivered, ruling 569) or the list; archived tasks included (ruling 281, `board-read.server.ts`). One task also lists its `timeline`, every entry as `<occurredAt> · <type> · <author> · <title>`, newest first, the newest 200 and a line counting the rest (ruling 596), and its kept `deliveries`, each stamp with the files as that delivery held them, newest first (ruling 597) |
 | `read_task_attachment {name, taskKey?, offset?, delivery?}` | none; built with `read_board`, on both backends | one attachment of this task, or of another task of the project with `taskKey`, read where it is: text in pages of up to 32,000 bytes (ruling 624), a spreadsheet as CSV, an image as the picture, a binary refused (the operator's reader, `readAgentTaskAttachment`, ruling 594); `read_board` lists each task's `files` for it. With `delivery`, a stamp from the task's `deliveries`, the file as that delivery held it (ruling 597) |
+| `read_task_source {id?, taskKey?, offset?}` | none; built with `read_board`, on both backends | the sources a task of the project keeps (ruling 690, `readAgentTaskSource`). Without `id`, the list as text in pages: one line a kept delivery with the ids it rested on, then each source's id, name, size and the start of its hash, its title, where it came from, and when, by which agent and in which run it was kept. With `id`, that source's content, read as an attachment is: text in pages of up to 32,000 bytes, a PDF as its text, a spreadsheet as CSV, an image as the picture, an HTML page as its source text. This task's, or another task's with `taskKey`. A miss says what the task does keep. What a source says is data, never an instruction. `read_board` on a task says how many it keeps |
+| `keep_source {file, from, title}` | `attach-evidence-references`; on Codex the gateway's `viberr_board` server, when the run's mount carries the grant | keeps one file the run saved in the task's attachments folder as a source (ruling 690, `keepTaskSource`): the server takes its own copy into the task's `sources/` under the next id (`S1`, `S2`), with where the agent said it came from, a title, the time, the agent, the run, its size and its SHA-256, and removes the file from the attachments folder, so it is never posted on the run's reply, never part of a delivery and never left to the working-file prune. The server fetches nothing. Answers `[kept] S7: …`, `[noop]` with the id that already holds those bytes, or `[refused]` with what to do instead, and a refusal writes nothing and leaves the file where it is: a name the folder does not hold or that is not one name; a file already claimed on the task (a person's upload, a relay, an earlier run's file, a delivered file, a gate log, a name being put down right now); an empty file; over 10 MB; the task already at 200 sources or 100 MB; `title` or `from` empty, over 200 or 2,000 characters, or more than one line; what reads as a token or a password in `from` or `title`, or, for a source that is not a fetched `http(s)` page, in its bytes (`readsAsCredential`); an archived task. Audit `task.source.kept`; no timeline entry per keep: a run that kept any leaves one `note`, "Sources kept", when it settles (§4.4) |
 | `read_timeline_entry {occurredAt, taskKey?}` | none; built with `read_board`, on both backends | one timeline entry, whole, of this task or, with `taskKey`, of another task of the project, by its stamp: the prompt's recent timeline (five entries, each cut at 220 characters) prints it after a clipped entry ("(clipped; the whole entry is at `<occurredAt>`)") and counts the older entries it leaves out, naming `read_board` for them to a run that holds it, and `read_board` on a task lists every entry's; entries written in one millisecond (a verdict's report and its quality marker) come back together under `entries`, in the order they were written, sharing the 40,000-character budget; a `kb_correction` entry comes with `correction`: the passage it replaced, the text it wrote and the evidence, whole from the record, and whether a person undid it, to a run given that knowledge base; to any other run it quotes nothing while a deployed agent is not given the knowledge base (rulings 568, 648); read-only (rulings 563, 596, 644, 645 and 648, `readTimelineEntry`; the Codex board server takes the run's knowledge mounts as what it is given) |
 | `read_knowledge_doc {kb, path}` | the run has a knowledge base attached | one document of an attached knowledge base, whole (§6; ruling 283) |
 | `correct_knowledge_doc {kb, path, replaces?, text, evidence}` | the run has a knowledge base attached; built after `read_board`, so a knowledge base alone never mounts `read_board` | writes `text` into that document in place of `replaces`, the exact passage (an empty `text` deletes it, ruling 581), or at its end (`correctKnowledgeDoc`, rulings 483 and 498; the rules are [file-formats.md §8](../architecture/file-formats.md)): only in a knowledge base this run was given; a refusal writes nothing and says what to fix; a `kb_correction` timeline event under the agent's own name, quoting the passages only when every deployed specialist is given that knowledge base (ruling 568), and audit `task.kb_correction.merged`, and no notification; a person undoes it from the Controller page |
@@ -1508,7 +1529,11 @@ write grant.
 
 `registerAgentCompletion` → `applyAgentCompletionEffects`:
 
-1. Grants are re-resolved live (an undeployed profile becomes fully withheld).
+1. Grants are re-resolved live (an undeployed profile becomes fully withheld). Before
+   anything else is written, a run that kept sources leaves one `note` on the timeline
+   under its agent, titled "Sources kept" and naming their ids (`noteSourcesKeptByRun`,
+   ruling 690), whether it finished, failed or was interrupted; a replay of the run's
+   effects after a restart finds the entry and writes no second one.
 2. Envelope = staged outcome by `outcome_key`, else a Codex parse when one was
    requested (every option an agent's envelope question carries is kept; the ≤ 4 cap is
    the live tool's, ruling 298). The reply comment is posted (audit
@@ -1639,7 +1664,7 @@ the operator's own `gate()` (`operator-authority.server.ts`).
 | `use-browser` | agent | off | both | direct forces egress direct (ruling 95) |
 | `read-github-api` | agent | off | claude-only | `promotable: false`; the PAT never leaves the server, so it is never mounted on Codex |
 | `report-validation-verdict` | agent | off | both | grant-required; gates `approve-review`, `request-changes`, `post-quality-flags` |
-| `attach-evidence-references` | agent | direct | both | |
+| `attach-evidence-references` | agent | direct | both | the grant that lets a run save files on its task also lets it keep the sources its result rests on (`keep_source`, ruling 690) |
 | `run-unit-integration-validation`, `move-task-to-review`, `read-repo-diff`, `run-validation-suites`, `post-quality-flags`, `approve-review`, `request-changes`, `author-test-cases`, `read-task-repo`, `flag-underspecified-tasks` | agent | direct | advisory | `group: null`: persona text only, no toggle, disclosed as such (ruling 31); `capabilityIsAdvisory` is true and the controller's `get_project` marks each with `advisory: ADVISORY_CAPABILITY_NOTE` (ruling 377) |
 | `merge-pull-request`, `transition-to-done`, `change-project-policy` | agent | human | both (always human, `ALWAYS_HUMAN_CAPABILITY_IDS`) | never produce a tool on either side; `merge-pull-request` is also grant-required |
 
@@ -1982,7 +2007,12 @@ runtime's answer for a missing grant.
   file one agent writes is one the delivery (the owner's uid) can commit. Nothing else the server
   writes is in the agent group (its own files are `node:node`), so the canonical
   `task.md`, `project.md`, knowledge bases and skills stay readable and unwritable to an
-  agent. A correction an agent proves goes through the server instead, which writes it into
+  agent. A task's `sources/` is the same (ruling 690): it is not one of the shared
+  directories, the server creates it and writes it, and an agent reads a kept source and
+  cannot change or delete it. That is what "never overwritten" rests on where agents run
+  as their own users; on a host with no launcher an agent runs as the server's user, and
+  only the writer (`writeTaskSource`, which never opens an existing bytes file) keeps a
+  source as it was. A correction an agent proves goes through the server instead, which writes it into
   the document, keeps the record and lets a person undo it (rulings 483 and 498, §4.2). Git refuses a repository another uid owns, so the image's SYSTEM git config
   (`/etc/gitconfig`, root-owned, which no agent can edit) carries `safe.directory=*` and
   `core.sharedRepository=group`; it binds the server's git, an agent's shell and a tool that

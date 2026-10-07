@@ -117,6 +117,7 @@ function VerdictRow({ row, subject }: { row: CompletionVerdictRow; subject: stri
 export function CompletionPacket({
   view,
   attachmentsBase,
+  sourcesBase = null,
   verdictSatisfiedBy = null,
   diff = null,
   standalone = false,
@@ -126,6 +127,9 @@ export function CompletionPacket({
   view: CompletionView;
   /** The attachments serving route's base, or null where there is none. */
   attachmentsBase: string | null;
+  /** Ruling 690: the route that serves a kept source by its id, or null
+   *  where there is none: the card then says how many and lists none. */
+  sourcesBase?: string | null;
   /** R19-B: a person's GitHub approval that carries the verdict gate. */
   verdictSatisfiedBy?: string | null;
   /** The diff reader's read, while the review PR is open on the delivered
@@ -149,6 +153,9 @@ export function CompletionPacket({
   const href = (name: string) => `${attachmentsBase}/${encodeURIComponent(name)}`;
   const shots = attachmentsBase && packet ? packet.screenshots : [];
   const files = attachmentsBase && packet ? packet.files : [];
+  const sources = view.sources ?? null;
+  // Listed where there is a route to open one by, as the files are.
+  const sourceRows = sourcesBase && sources ? sources.shown : [];
   const small = change?.small ?? false;
   // On an accepted task nobody is still owed a verdict.
   const verdicts = result ? view.verdicts.filter((v) => v.result !== "pending") : view.verdicts;
@@ -237,6 +244,49 @@ export function CompletionPacket({
           {packet.hiddenFiles === 1 ? "is" : "are"} not shown: attachments are for project
           members, and a file removed since is gone.
         </p>
+      ) : null}
+
+      {/* Ruling 690: what the result rests on. A fact it states from outside
+          is checked against these, kept as the run read them; a result that
+          is files says so when it rests on none. */}
+      {sources ? (
+        <>
+          <Label className="cmp-k">Sources</Label>
+          <p className="cmp-none">
+            {sources.count === 0
+              ? "This result rests on no kept source."
+              : `This result rests on ${plural(sources.count, "kept source", "kept sources")}.`}
+          </p>
+          {sourceRows.length > 0 ? (
+            <ul className="cmp-files">
+              {sourceRows.map((source) => {
+                const url = `${sourcesBase}/${encodeURIComponent(source.id)}`;
+                return (
+                  <li key={source.id}>
+                    <a
+                      className="attach-file cmp-file"
+                      href={url}
+                      target="_blank"
+                      rel="noreferrer"
+                      onClick={lightbox({ name: source.name, url })}
+                    >
+                      <span className="cmp-file-ext">{source.id}</span>
+                      <span className="cmp-file-main">
+                        <span className="cmp-file-name">{source.title}</span>
+                        <span className="cmp-file-what">{source.from}</span>
+                      </span>
+                    </a>
+                  </li>
+                );
+              })}
+            </ul>
+          ) : null}
+          {sourceRows.length > 0 && sources.count > sourceRows.length ? (
+            <p className="cmp-none">
+              and {sources.count - sourceRows.length} more, listed under Sources.
+            </p>
+          ) : null}
+        </>
       ) : null}
 
       {notes.map((note) => (

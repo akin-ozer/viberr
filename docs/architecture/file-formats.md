@@ -3,14 +3,16 @@
 The markdown files under `${VIBERR_DATA_ROOT}` that Viberr treats as canonical business truth,
 field by field: `project.md`, `task.md` (frontmatter, packet and timeline grammar), epic
 files, agent profile templates and the smaller files beside them, and the board file that
-carries a board's workflow between instances (§9). SQLite holds projections of
+carries a board's workflow between instances (§9), and the index of a task's kept sources
+(§10). SQLite holds projections of
 them; [data-model.md](data-model.md) has the tables and the full data-root layout.
 Source of truth: `app/schemas/project-file.schema.ts`, `app/schemas/task-file.schema.ts`,
 `app/schemas/epic-file.schema.ts`, `app/server/files/agent-profile-file.server.ts` (schemas);
 `app/shared/task-refs.ts` (the `blockedBy` and epic id spellings the schemas validate);
 `app/server/files/task-file.server.ts`, `frontmatter.server.ts`, `project-writer.server.ts`,
 `task-writer.server.ts`, `epic-writer.server.ts`, `actor-ref.server.ts` (parsers and writers);
-`app/server/org/board-file.server.ts` and `app/server/files/zip.server.ts` (the board file, §9).
+`app/server/org/board-file.server.ts` and `app/server/files/zip.server.ts` (the board file, §9);
+`app/server/files/task-sources.server.ts` (a task's kept sources, §10).
 Verified against `main` @ `7d9fbf72` (2026-09-23); the epic sections against ruling 503
 (2026-09-26).
 
@@ -34,6 +36,11 @@ ${VIBERR_DATA_ROOT}/
                                              colons as dashes (a record, not projected; ruling 597):
                                              every file on the task then, whichever agent saved
                                              it, the browser's working files aside (ruling 610)
+  projects/<slug>/tasks/<KEY>/sources/    ← the sources the task's result rests on, kept apart
+                                             from its files: `index.jsonl` and one bytes file a
+                                             source (§10). The server's own folder: an agent
+                                             reads it and cannot write it (a record, not
+                                             projected; ruling 690)
   projects/<slug>/tasks/<KEY>/workspace/  ← git clones (deliverer + operator share
                                              <repo-name>/; each supporting run gets
                                              support/<profileId>/<repo-name>/). NOT canonical,
@@ -1123,3 +1130,58 @@ How an import reads one (`readBoardFile`, `parseBoardFile`):
 - A knowledge base or skill is the SAME as the instance's of that name when every file has
   the same path and bytes; an MCP server when its transport and target are; a template when
   its parsed frontmatter and body are. A different one is never overwritten.
+
+## 10. A task's kept sources (ruling 690)
+
+A task keeps, apart from its files, the sources its result rests on: a page as an agent
+fetched it, a repository file at a commit, an API answer, a command's output. They live in
+`projects/<slug>/tasks/<KEY>/sources/`, created by the first keep:
+
+```
+sources/index.jsonl   one JSON object per line, appended only
+sources/S1.html       the bytes of source S1 exactly as they were handed over
+sources/S2            the id alone when the handed file had no extension to keep
+```
+
+The folder is the server's own. It is not one of the directories a run writes
+(`TASK_SHARED_DIRS` names `workspace/`, `attachments/` and `.operator-scratch/`) and is
+never handed to the agent group, so where agents run as their own users (ruling 460) an
+agent reads a kept source and cannot change or delete it. `writeTaskSource`
+(`app/server/files/task-sources.server.ts`) is its only writer: it opens a bytes file with
+`O_CREAT | O_EXCL | O_NOFOLLOW`, never an existing one, and only appends to the index. On a
+host with no launcher an agent runs as the server's user, and the writer alone keeps a
+source as it was.
+
+`index.jsonl` holds two kinds of line. Each line is parsed on its own (`readTaskSources`):
+a line that is not JSON, or does not match either kind, is skipped and the lines around it
+still read.
+
+```json
+{"kind":"source","id":"S7","file":"S7.html","name":"aws-pricing.html","title":"AWS EC2 on-demand pricing, eu-central-1","from":"https://aws.amazon.com/ec2/pricing/on-demand/","keptAt":"2026-10-07T12:03:11.482Z","by":{"backend":"claude","profileId":"researcher","roleHint":"Researcher"},"runId":"run_abc","bytes":48213,"sha256":"<64 hex>"}
+{"kind":"delivery","deliveredAt":"2026-10-07T13:00:00.000Z","sources":["S1","S2","S7"]}
+```
+
+A `source` line is one kept source:
+
+| Key | Meaning |
+|---|---|
+| `id` | `S` and a number counted from 1 on the task. It is the number after the highest one the index or the folder holds, so an id is never given twice and a bytes file a crash left without its line is stepped over, never replaced |
+| `file` | The bytes file in the folder: the id, then the handed file's extension in lower case when it matches `.[a-z0-9]{1,10}`, else the id alone |
+| `name` | The name the agent saved the file under (stored composed, NFC). It decides how the source is read and served, as an attachment's name does |
+| `title` | One line, at most 200 characters, saying what the source is |
+| `from` | One line, at most 2,000 characters: where the bytes came from, **as the agent that kept them stated it** (a URL, a command, `owner/repo@<commit>:path`). The server fetches nothing and cannot confirm it |
+| `keptAt` | The server's clock when it kept the bytes |
+| `by` | The agent: `backend`, `profileId`, `roleHint` |
+| `runId` | The run that called `keep_source`, or `null` when the caller could not name it |
+| `bytes`, `sha256` | The size and the SHA-256 of the bytes file |
+
+A `delivery` line records the ids of the sources the task held when a files delivery was
+stamped (`recordDeliverySources`, written with the kept delivery of ruling 597). A task
+that keeps no source gets no line, and a stamp already recorded keeps its line. A delivery
+that is a revision has no line: what it rests on is read from `keptAt`
+(`sourcesRestedOn`).
+
+Limits (`SOURCE_MAX_BYTES`, `SOURCES_PER_TASK_MAX`, `SOURCES_TASK_MAX_BYTES`): 10 MB a
+source, 200 sources and 100 MB a task. Bytes a task already keeps are not kept twice: the
+keep answers with the id that holds them. Nothing prunes the folder, and nothing in the app
+removes a source ([../operations/runbook.md](../operations/runbook.md) §Retention).

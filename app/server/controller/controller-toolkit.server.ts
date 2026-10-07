@@ -18,7 +18,7 @@ import {
 } from "~/server/files/skill-body.server";
 import { resolveControllerConfig } from "./controller-profile.server";
 import { sortedNames } from "~/server/runtimes/prompt-prefix.server";
-import { readTimelineEntry } from "~/server/tasks/board-read.server";
+import { readAgentTaskSource, readTimelineEntry } from "~/server/tasks/board-read.server";
 import {
   attachmentImageHeader,
   listTaskAttachments,
@@ -26,7 +26,11 @@ import {
   readTaskAttachment,
 } from "~/server/files/task-attachments.server";
 import { keptDeliveryMiss, listKeptDeliveries } from "~/server/files/kept-deliveries.server";
-import { READ_TASK_ATTACHMENT_FIELDS } from "~/server/mcp-proxy/board-tool.server";
+import {
+  READ_TASK_ATTACHMENT_FIELDS,
+  READ_TASK_SOURCE_DESCRIPTION,
+  READ_TASK_SOURCE_FIELDS,
+} from "~/server/mcp-proxy/board-tool.server";
 import { findMessageFile, listConversationFileNames } from "./controller-conversations.server";
 import { BACKEND_LABEL } from "~/shared/text/backend-label";
 import { countLabel } from "~/shared/text/plural";
@@ -2677,6 +2681,32 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
       }),
     ),
     "read_task_attachment",
+  );
+
+  // Ruling 690: the sources a task keeps. The controller is the actor a
+  // person asks "where does that figure come from?", and a result's claims
+  // are checked against what its runs kept, not against the page today. The
+  // reader every agent's `read_task_source` calls, behind this toolkit's own
+  // membership gate.
+  add(
+    tool(
+      "read_task_source",
+      `${READ_TASK_SOURCE_DESCRIPTION} Membership gated.`,
+      {
+        projectSlug: z.string().optional(),
+        taskKey: z.string().optional().describe("Defaults to this conversation's task."),
+        id: z.string().optional().describe(READ_TASK_SOURCE_FIELDS.id),
+        offset: z.number().int().min(0).optional().describe(READ_TASK_SOURCE_FIELDS.offset),
+      },
+      runWith((args: { projectSlug?: string; taskKey?: string; id?: string; offset?: number }) => {
+        const slug = slugOf(args.projectSlug);
+        const key = keyOf(args.taskKey, slug);
+        requireVisible(slug, "read this task");
+        const read = readAgentTaskSource({ db, ctx: { dataRoot }, projectSlug: slug }, key, args.id, args.offset ?? 0);
+        return "text" in read ? read.text : imageResult(read.header, read.image);
+      }),
+    ),
+    "read_task_source",
   );
 
   // Ruling 573: the files a person sends with a message, read the way a

@@ -19,7 +19,13 @@ import {
 import { recordAudit, type AuditActor } from "~/server/audit/audit-recorder.server";
 import { runAgentGithubRead } from "~/server/github/agent-github-read.server";
 import { encodeActorRef, agentRoleDisplay } from "~/server/files/actor-ref.server";
-import { readAgentTaskAttachment, readBoardList, readBoardTask, readTimelineEntry } from "./board-read.server";
+import {
+  readAgentTaskAttachment,
+  readAgentTaskSource,
+  readBoardList,
+  readBoardTask,
+  readTimelineEntry,
+} from "./board-read.server";
 import {
   KB_DOC_KB_DESCRIPTION,
   KB_DOC_OFFSET_DESCRIPTION,
@@ -29,10 +35,14 @@ import {
 } from "~/server/files/kb-injection.server";
 import { KB_CORRECTION_FIELDS, KB_CORRECTION_SPECIALIST_DESCRIPTION } from "~/server/mcp-proxy/knowledge-tool.server";
 import {
+  KEEP_SOURCE_DESCRIPTION,
+  KEEP_SOURCE_FIELDS,
   READ_BOARD_DESCRIPTION,
   READ_BOARD_TASK_KEY_DESCRIPTION,
   READ_TASK_ATTACHMENT_DESCRIPTION,
   READ_TASK_ATTACHMENT_FIELDS,
+  READ_TASK_SOURCE_DESCRIPTION,
+  READ_TASK_SOURCE_FIELDS,
   READ_TIMELINE_ENTRY_AT_DESCRIPTION,
   READ_TIMELINE_ENTRY_DESCRIPTION,
   READ_TIMELINE_ENTRY_TASK_KEY_DESCRIPTION,
@@ -60,6 +70,7 @@ import {
 } from "./agent-outcome.server";
 import { normalizeEscapedNewlines } from "./model-prose.server";
 import { correctKnowledgeDoc } from "./kb-correction-actions.server";
+import { keepTaskSource } from "./task-sources.server";
 import { RELAY_MAX_ENTRIES, type RelayEntry } from "./task-relay.server";
 import {
   notifyMentionedUsers,
@@ -103,6 +114,9 @@ import { pageEnd } from "~/server/runtimes/read-page-budget.server";
  *                    recorded ATOMICALLY with the reply at completion); its
  *                    optional `evidence` field is separately gated on
  *                    attach-evidence-references (P13-D-26)
+ *   keep_source    → attach-evidence-references (ruling 690: the grant that
+ *                    lets a run save files on its task lets it keep the
+ *                    sources its result rests on)
  *
  * Codex runs cannot mount these (the codex SDK ignores tool policy and its
  * MCP config leaks credentials into argv) — they get the same envelope through
@@ -709,6 +723,46 @@ export function buildAgentToolkit(deps: AgentToolkitDeps): AgentToolkit | null {
     );
   }
 
+  // Ruling 690: a run that may save files on its task keeps the sources its
+  // result rests on. Gated on `attach-evidence-references` and on nothing
+  // wider: that grant is what makes the attachments folder the run's to write,
+  // and the keep takes a file from there. The Codex twin is the gateway's
+  // board server, whose mount carries the same grant.
+  if (collab.evidence) {
+    tools.push(
+      tool(
+        "keep_source",
+        KEEP_SOURCE_DESCRIPTION,
+        {
+          file: z.string().describe(KEEP_SOURCE_FIELDS.file),
+          from: z.string().describe(KEEP_SOURCE_FIELDS.from),
+          title: z.string().describe(KEEP_SOURCE_FIELDS.title),
+        },
+        // eslint-disable-next-line @typescript-eslint/require-await
+        async (args) => {
+          try {
+            return textResult(
+              keepTaskSource(db, ctx, {
+                projectSlug,
+                taskKey,
+                file: args.file,
+                from: args.from,
+                title: args.title,
+                actorRef,
+                // The run's row carries this toolkit's staging key, so the
+                // record names the run that called.
+                runId: runIdForOutcomeKey(db, outcomeKey),
+              }),
+            );
+          } catch (error) {
+            logger.warn("agent keep_source failed", { taskKey, err: toError(error) });
+            return textResult("[error] The source could not be kept.");
+          }
+        },
+      ),
+    );
+  }
+
   // Ruling 281 (pass 37, F37-114): an agent can read its repository and not the
   // board it works on. Its whole Viberr toolkit was post_comment, ask_human,
   // report_outcome and (with a grant) github_read — so a task key it is TOLD
@@ -804,6 +858,33 @@ export function buildAgentToolkit(deps: AgentToolkitDeps): AgentToolkit | null {
           } catch (error) {
             logger.warn("agent read_task_attachment failed", { taskKey, err: toError(error) });
             return textResult("[error] The attachment could not be read.");
+          }
+        },
+      ),
+      // Ruling 690: the sources a task of this project keeps, listed or
+      // opened by id. Same gate, read-only: a reviewer that holds no file
+      // grant still checks a claim against the source it cites.
+      tool(
+        "read_task_source",
+        READ_TASK_SOURCE_DESCRIPTION,
+        {
+          id: z.string().optional().describe(READ_TASK_SOURCE_FIELDS.id),
+          taskKey: z.string().optional().describe(READ_TASK_SOURCE_FIELDS.taskKey),
+          offset: z.number().int().min(0).optional().describe(READ_TASK_SOURCE_FIELDS.offset),
+        },
+        // eslint-disable-next-line @typescript-eslint/require-await
+        async (args) => {
+          try {
+            const read = readAgentTaskSource(
+              { db, ctx, projectSlug },
+              args.taskKey?.trim() || taskKey,
+              args.id,
+              args.offset ?? 0,
+            );
+            return "text" in read ? textResult(read.text) : imageResult(read.header, read.image);
+          } catch (error) {
+            logger.warn("agent read_task_source failed", { taskKey, err: toError(error) });
+            return textResult("[error] The sources could not be read.");
           }
         },
       ),

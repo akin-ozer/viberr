@@ -181,6 +181,8 @@ describe("buildOperatorToolkit ↔ operatorPlanToolsFor governed-action parity (
     "read_timeline_entry",
     // Ruling 293: the evidence a report only claims. A read like its siblings.
     "read_task_attachment",
+    // Ruling 690: the sources a result's claims are checked against. A read.
+    "read_task_source",
   ]);
   const RENAME = new Map([
     ["open_decision_packet", "open_packet"],
@@ -454,10 +456,13 @@ describe("buildOperatorToolkit — no operator deployed (A4)", () => {
     // whole comment this returns, so withholding it from the coordinator
     // withholds nothing from anyone. (`read_knowledge_doc` is NOT here: it is
     // gated on the run's own KB grants, and this authority holds none.)
+    // Ruling 690: `read_task_source` joins the floor as `read_task_attachment`
+    // did: what a task keeps is on its page for every member to open.
     expect(toolkit.allowedTools).toEqual([
       "mcp__viberr__get_task",
       "mcp__viberr__read_board",
       "mcp__viberr__read_task_attachment",
+      "mcp__viberr__read_task_source",
       "mcp__viberr__read_timeline_entry",
     ]);
     for (const write of [

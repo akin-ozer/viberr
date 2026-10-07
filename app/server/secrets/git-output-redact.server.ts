@@ -49,6 +49,26 @@ export const TOKEN_PATTERN_SOURCE = [
 /** `scheme://user:secret@host` — git echoes remote URLs verbatim. */
 const URL_USERINFO_RE = /([a-z][a-z0-9+.-]*:\/\/)[^\s/@]*:[^\s/@]*@/gi;
 
+/**
+ * Ruling 690: whether a text holds what reads as a credential, by the two
+ * shapes the scrub below removes on sight: a token by its prefix, and a
+ * password in a URL's userinfo. A kept source is stored as it is and every
+ * project member can open it, so the keep refuses on these rather than
+ * rewriting what it was handed.
+ *
+ * A token is taken only where it starts a word. The scrub can afford to
+ * redact the tail of `task-management-best-practices` in a line of git
+ * output; a refusal cannot, because that is an ordinary page address and the
+ * agent has no other one to give.
+ */
+export function readsAsCredential(text: string): boolean {
+  return (
+    new RegExp(`(?<![A-Za-z0-9_-])(?:${TOKEN_PATTERN_SOURCE})`).test(text) ||
+    // A copy without the global flag: `.test` on the shared one keeps state.
+    new RegExp(URL_USERINFO_RE.source, "i").test(text)
+  );
+}
+
 /** ANSI CSI escape sequences (`ESC [ … m` and friends): git colourises
  *  `error:`/`hint:` when it thinks it has a TTY, and so do the vendor CLIs'
  *  sign-in prompts (`backend-login.server.ts` strips them with this too).

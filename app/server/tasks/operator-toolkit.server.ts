@@ -1,5 +1,5 @@
 import type { DatabaseSync } from "node:sqlite";
-import { readBoardList, readBoardTask, readTimelineEntry } from "./board-read.server";
+import { readAgentTaskSource, readBoardList, readBoardTask, readTimelineEntry } from "./board-read.server";
 import { KB_DOC_OFFSET_DESCRIPTION, readKbDocForRun } from "~/server/files/kb-injection.server";
 import {
   attachmentImageHeader,
@@ -7,7 +7,11 @@ import {
   readTaskAttachment,
 } from "~/server/files/task-attachments.server";
 import { keptDeliveryMiss } from "~/server/files/kept-deliveries.server";
-import { READ_TASK_ATTACHMENT_FIELDS } from "~/server/mcp-proxy/board-tool.server";
+import {
+  READ_TASK_ATTACHMENT_FIELDS,
+  READ_TASK_SOURCE_DESCRIPTION,
+  READ_TASK_SOURCE_FIELDS,
+} from "~/server/mcp-proxy/board-tool.server";
 import { z } from "zod";
 import {
   createSdkMcpServer,
@@ -455,6 +459,32 @@ export function buildOperatorToolkit(deps: ToolkitDeps): OperatorToolkit {
       },
     ),
     "read_task_attachment",
+  );
+
+  // Ruling 690: the sources a task keeps, which a result's claims are checked
+  // against. `completionPacket.sources` in the snapshot counts them; this
+  // lists and opens them, with the reader every agent's tool calls.
+  add(
+    tool(
+      "read_task_source",
+      READ_TASK_SOURCE_DESCRIPTION,
+      {
+        id: z.string().optional().describe(READ_TASK_SOURCE_FIELDS.id),
+        taskKey: z.string().optional().describe(READ_TASK_SOURCE_FIELDS.taskKey),
+        offset: z.number().int().min(0).optional().describe(READ_TASK_SOURCE_FIELDS.offset),
+      },
+      // eslint-disable-next-line @typescript-eslint/require-await
+      async (args: { id?: string; taskKey?: string; offset?: number }) => {
+        const read = readAgentTaskSource(
+          { db, ctx, projectSlug },
+          args.taskKey?.trim() || taskKey,
+          args.id,
+          args.offset ?? 0,
+        );
+        return "text" in read ? textResult(read.text) : imageResult(read.header, read.image);
+      },
+    ),
+    "read_task_source",
   );
 
   // Ruling 285 (F37-120): the coordinator could not read a report it was handed

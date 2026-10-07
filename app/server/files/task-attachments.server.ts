@@ -440,6 +440,33 @@ export function attachmentDisposition(name: string, inline: boolean): string {
 }
 
 /**
+ * Ruling 690: a stored file as the response that serves it, for every route
+ * that serves one: a task's attachment, a file sent with a controller
+ * message, a kept source. One home for the headers ruling 363 turns on. Only
+ * the whitelisted kinds render inline and everything else, a stored HTML page
+ * above all, is a download of a generic type; `nosniff` and a sandbox ride
+ * every response, so even an inline kind runs no script and loads no plugin
+ * on the app's origin (a browser that will not show a sandboxed PDF inline
+ * downloads it, which is acceptable); and `?download=1` asks for the save
+ * dialog on an inline kind (ruling 105).
+ */
+export function servedFileResponse(request: Request, name: string, bytes: Uint8Array): Response {
+  const { type, inline } = attachmentContentType(name);
+  const forceDownload = new URL(request.url).searchParams.get("download") === "1";
+  return new Response(new Uint8Array(bytes), {
+    headers: {
+      "content-type": type,
+      "content-length": String(bytes.length),
+      // Ruling 675: a name outside Latin-1 cannot stand in a header as it is.
+      "content-disposition": attachmentDisposition(name, inline && !forceDownload),
+      "x-content-type-options": "nosniff",
+      "content-security-policy": "sandbox; default-src 'none'",
+      "cache-control": "private, max-age=300",
+    },
+  });
+}
+
+/**
  * The refusals every person's upload meets, before anything is written: an
  * empty or dot-prefixed name the store scanner would then hide, a name that
  * is not one path segment, and anything over {@link MAX_UPLOAD_BYTES}. Ruling
