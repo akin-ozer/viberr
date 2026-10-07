@@ -484,9 +484,10 @@ function keptAs(kind: KeptFileKind, taskKey: string, placeholders: number | null
   if (kind === "template") {
     return placeholders === null
       ? "It is kept as a template, and nothing here read its text (a picture or another kind no reader here takes as text, " +
-          "a PDF whose text could not be read, or a file past a reader's size), " +
+          "or a PDF whose text could not be read), " +
           "so nothing checked it for placeholders or for a task's content: if it is a result a task delivered and not a template made from one, replace it. "
-      : `It is kept as a template: its text holds ${placeholders.toLocaleString("en-US")} \`[[placeholder]]\`${placeholders === 1 ? "" : "s"}, which a result built from it fills, leaving none. ` +
+      : `It is kept as a template: ${placeholders.toLocaleString("en-US")} \`[[placeholder]]\`${placeholders === 1 ? " was" : "s were"} counted in its text ` +
+          "(what a page does not show, its code, style and comments, is not read for them), which a result built from it fills, leaving none. " +
           "Whether anything of a task's own content is left beside them is a reviewer's check: nothing here tells a customer's sentence from the organisation's own. ";
   }
   if (kind === "sample") {
@@ -2700,7 +2701,9 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
           ),
       },
       runWith(async (args: { projectSlug?: string; taskKey?: string; next: string }) => {
-        if (!deps.conversationId) {
+        // Both or neither: a turn that could not say which message it answers
+        // could not be told from one a follow-up started.
+        if (!deps.conversationId || !deps.answering) {
           return "[unavailable] This turn answers no conversation, so there is nothing for an acceptance to continue.";
         }
         const slug = slugOf(args.projectSlug);
@@ -2713,12 +2716,25 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
         if (!summary) throw AppError.notFound(`No task ${key} in ${slug}.`);
         const next = prose(args.next).trim();
         const where = { conversationId: deps.conversationId, projectSlug: slug, taskKey: key };
+        // The step this conversation has on the task now. What the task says
+        // and what the store holds change together: when the note cannot be
+        // written, the store is put back as it was.
+        const before = openFollowUpsOf(db, deps.conversationId).find((f) => f.projectSlug === slug && f.taskKey === key);
+        const putBack = () => {
+          clearFollowUp(db, where);
+          if (before) setFollowUp(db, { ...where, userId: before.userId, text: before.text });
+        };
         if (!next) {
           if (!clearFollowUp(db, where)) return `[noop] This conversation left no step on ${key}.`;
-          await appendPolicyNote(db, { dataRoot }, slug, key, {
-            title: "Controller follow-up dropped",
-            text: `${user.name}'s controller conversation no longer continues when this task is accepted.`,
-          });
+          try {
+            await appendPolicyNote(db, { dataRoot }, slug, key, {
+              title: "Controller follow-up dropped",
+              text: `${user.name}'s controller conversation no longer continues when this task is accepted.`,
+            });
+          } catch (error) {
+            putBack();
+            throw error;
+          }
           recordAudit(db, {
             action: "controller.follow_up.dropped",
             actor,
@@ -2746,13 +2762,12 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
         // into, does not arrange another. On a board whose operator accepts
         // by itself that would be work with no person in it, for as long as
         // each turn left the next.
-        if (deps.answering && turnOpenedByFollowUp(db, deps.conversationId, deps.answering)) {
+        if (turnOpenedByFollowUp(db, deps.conversationId, deps.answering)) {
           return (
-            `[noop] This turn was itself started by a follow-up, and a conversation continues on its own once. ` +
+            `[noop] This turn was itself started by a follow-up, and a turn started that way leaves no further step. ` +
             `Say what is left to do and why, and ${user.name} asks for it. Nothing was left on ${key}.`
           );
         }
-        const before = openFollowUpsOf(db, deps.conversationId).find((f) => f.projectSlug === slug && f.taskKey === key);
         const replaced = setFollowUp(db, { ...where, userId: user.id, text: next });
         // On the task, where whoever accepts it reads what accepting starts.
         // A step the task does not show is not left: an acceptance would start
@@ -2763,8 +2778,7 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
             text: `When this task is accepted, the controller continues in ${user.name}'s conversation: ${endSentence(next)}`,
           });
         } catch (error) {
-          clearFollowUp(db, where);
-          if (before) setFollowUp(db, { ...where, userId: before.userId, text: before.text });
+          putBack();
           throw error;
         }
         recordAudit(db, {

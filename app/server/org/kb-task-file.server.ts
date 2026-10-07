@@ -75,51 +75,62 @@ export type KeptFileKind = "template" | "sample" | "asset";
  * between the brackets, and not the text of a link. That keeps out what only
  * looks like one in a finished result: a numbered citation (`[[1]]`), a
  * bracketed link (`[[Gartner 2024]](https://…)`), an array of numbers, of
- * strings or of JSON's own words (`[[10,20,30]]`, `[["acme",13381.01]]`,
- * `[[true,false]]`), a shell test (`[[ -f x ]]`).
+ * strings or of a data format's own words (`[[10,20,30]]`,
+ * `[["acme",13381.01]]`, `[[true,false]]`, `[[NaN, 1]]`), a shell test
+ * (`[[ -f x ]]`).
  */
 const TEMPLATE_PLACEHOLDER =
-  /\[\[[ \t]{0,8}(?!(?:null|true|false)[ \t]*[,\]])\p{L}[^[\]\r\n]{0,159}\]\](?!\()/gu;
+  /\[\[[ \t]{0,8}(?!(?:null|true|false|NaN|Infinity|None|True|False)[ \t]*[,\]])\p{L}[^[\]\r\n]{0,159}\]\](?!\()/gu;
 
 /**
- * A `<script>` whose `type` names something a browser runs. One with any other
- * type is a data block (`application/json`, `text/template`): the page reads
- * its content from it, and a template marks that content like any other.
+ * A `<script>` whose `type` says it holds data and not code
+ * (`application/json`, `text/template`, `text/x-handlebars-template`): the
+ * page reads its content from it, and a template marks that content like any
+ * other. Every other script is code, whatever it is typed as.
  */
-const RUNS_AS_CODE = /script|module|importmap|speculationrules|babel|jsx/i;
+const HOLDS_DATA = /json|template|handlebars|mustache|^text\/(?:plain|html)$/i;
 
 /** The most of an opening tag read for its `type`. */
 const TAG_READ_CHARS = 512;
 
+/** The names a browser opens as a page. */
+const PAGE_EXTENSIONS = new Set([".html", ".htm", ".xhtml"]);
+
 /**
- * A page's text without the code it runs and the style it applies: a browser
- * shows none of either, and a script is where a finished report keeps
- * `[[a,b]]` (a chart library's arrays, a map's entries), which no result is
- * filled into. An element left open takes the rest of the page, as it does
- * in a browser. One pass, whatever the text.
+ * A page's text without what a browser does not show: the code it runs, its
+ * style and its comments. A script is where a finished report keeps `[[a,b]]`
+ * (a chart library's arrays, a map's entries), which no result is filled
+ * into. An element or a comment left open takes the rest of the page, as it
+ * does in a browser. One pass, whatever the text.
  */
 function shownText(text: string): string {
-  const opening = /<(script|style)\b/gi;
+  const opening = /<!--|<(script|style)\b/gi;
   let shown = "";
   let at = 0;
   for (let open = opening.exec(text); open; open = opening.exec(text)) {
-    const tagEnd = text.indexOf(">", opening.lastIndex);
-    // No `>` from here on: this is not a tag, and nothing after it is one.
-    if (tagEnd === -1) break;
-    const script = open[1]!.toLowerCase() === "script";
-    if (script) {
-      const attributes = text.slice(opening.lastIndex, Math.min(tagEnd, opening.lastIndex + TAG_READ_CHARS));
-      const type = /\stype\s*=\s*["']?([^"'\s>]*)/i.exec(attributes)?.[1];
-      if (type && !RUNS_AS_CODE.test(type)) {
-        opening.lastIndex = tagEnd + 1;
-        continue;
+    let end: number;
+    if (!open[1]) {
+      const close = text.indexOf("-->", opening.lastIndex);
+      end = close === -1 ? text.length : close + 3;
+    } else {
+      const tagEnd = text.indexOf(">", opening.lastIndex);
+      // No `>` from here on: this is not a tag, and nothing after it is one.
+      if (tagEnd === -1) break;
+      const script = open[1].toLowerCase() === "script";
+      if (script) {
+        const attributes = text.slice(opening.lastIndex, Math.min(tagEnd, opening.lastIndex + TAG_READ_CHARS));
+        const type = /\stype\s*=\s*["']?([^"'\s>]*)/i.exec(attributes)?.[1];
+        if (type && HOLDS_DATA.test(type)) {
+          opening.lastIndex = tagEnd + 1;
+          continue;
+        }
       }
+      const closing = script ? /<\/script\s*>/gi : /<\/style\s*>/gi;
+      closing.lastIndex = tagEnd + 1;
+      end = closing.exec(text) ? closing.lastIndex : text.length;
     }
-    const closing = script ? /<\/script\s*>/gi : /<\/style\s*>/gi;
-    closing.lastIndex = tagEnd + 1;
     shown += text.slice(at, open.index);
-    if (!closing.exec(text)) return shown;
-    at = closing.lastIndex;
+    at = end;
     opening.lastIndex = at;
   }
   return shown + text.slice(at);
@@ -130,10 +141,12 @@ function shownText(text: string): string {
  * the one mistake it exists for, a finished result copied as it stands, and
  * no proof that a file is free of a task's content: a result with one
  * placeholder left unfilled passes it, and so does one whose own text writes
- * double brackets around a word.
+ * double brackets around a word. Only a page is read as markup: a `<script>`
+ * named in a document's prose, or in a PDF's text, opens nothing.
  */
-function countPlaceholders(text: string): number {
-  return shownText(text).match(TEMPLATE_PLACEHOLDER)?.length ?? 0;
+function countPlaceholders(name: string, text: string): number {
+  const read = PAGE_EXTENSIONS.has(path.extname(name).toLowerCase()) ? shownText(text) : text;
+  return read.match(TEMPLATE_PLACEHOLDER)?.length ?? 0;
 }
 
 /** Ruling 683: the name a sample is kept under: it says what it is and whose. */
@@ -265,12 +278,14 @@ export function copyTaskFileToKnowledgeBase(
   let placeholders: number | null = null;
   if (input.kind === "template") {
     // Read as the file it is on the task, whatever name the copy takes.
-    const text = attachmentWholeText(path.basename(source), read.bytes);
-    placeholders = text === null ? null : countPlaceholders(text);
+    const onTask = path.basename(source);
+    const text = attachmentWholeText(onTask, read.bytes);
+    placeholders = text === null ? null : countPlaceholders(onTask, text);
     if (placeholders === 0) {
       return refuse(
         `\`${wanted}\` marks no place for a task's content. A template marks each one with a placeholder, ` +
-          "`[[what goes here]]`: on one line, opening on a letter. The code a page runs and its style are not read for them. " +
+          "`[[what goes here]]`: on one line, opening on a letter. What a page does not show (the code it runs, its style, " +
+          "its comments) is not read for them. " +
           `So as it stands this is a finished result with ${input.taskKey}'s content in it, ` +
           "or a template that marks those places some other way. A finished result kept as the template puts that content " +
           "where every run reads it, and a result built from it can repeat it. " +

@@ -1447,7 +1447,16 @@ describe("deleteProject releases the conversations bound to it (ruling 274)", ()
       projectSlug: null,
     });
     // Ruling 684: the bound conversation waits on one of the project's tasks.
-    const { openFollowUps, setFollowUp } = await import("~/server/controller/controller-follow-ups.server");
+    const { claimFollowUp, openFollowUps, setFollowUp } = await import("~/server/controller/controller-follow-ups.server");
+    // A step the instance conversation left on the same task, already started.
+    setFollowUp(store.db, {
+      conversationId: instance.id,
+      userId: store.users.arda.id,
+      projectSlug: store.slug,
+      taskKey: "VIB-1",
+      text: "Tell me it is done.",
+    });
+    claimFollowUp(store.db, openFollowUps(store.db, store.slug, "VIB-1")[0]!.id);
     setFollowUp(store.db, {
       conversationId: bound.id,
       userId: store.users.arda.id,
@@ -1488,6 +1497,11 @@ describe("deleteProject releases the conversations bound to it (ruling 274)", ()
     // outlives the project with its released conversation: a project created
     // under the same name gets VIB-1 back, and accepting it starts this step.
     expect(openFollowUps(store.db, store.slug, "VIB-1")).toEqual([]);
+    // CANARY: drop the started one too and the turn it opened, if it is still
+    // working, is no longer known as one a follow-up started.
+    expect(
+      store.db.prepare(`SELECT conversation_id, text FROM controller_follow_ups`).all(),
+    ).toEqual([{ conversation_id: instance.id, text: "Tell me it is done." }]);
   });
 });
 

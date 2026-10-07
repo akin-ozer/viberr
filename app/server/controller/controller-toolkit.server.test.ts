@@ -4444,7 +4444,8 @@ describe("save_knowledge_base's reply carries the id the next call needs (U36-4)
     // kept as one, with its customer's name and figures in every run's reach.
     const refused =
       "[noop] `report.html` marks no place for a task's content. A template marks each one with a placeholder, " +
-      "`[[what goes here]]`: on one line, opening on a letter. The code a page runs and its style are not read for them. " +
+      "`[[what goes here]]`: on one line, opening on a letter. What a page does not show (the code it runs, its style, " +
+      "its comments) is not read for them. " +
       "So as it stands this is a finished result with VIB-142's content in it, " +
       "or a template that marks those places some other way. A finished result kept as the template puts that content " +
       "where every run reads it, and a result built from it can repeat it. " +
@@ -4465,8 +4466,11 @@ describe("save_knowledge_base's reply carries the id the next call needs (U36-4)
     // chart library's arrays, which open on a name as often as on a number.
     // CANARY: count a link's bracketed text and it passes on a cited source.
     // CANARY: let a placeholder run on and it passes on a bracketed paragraph.
-    // CANARY: count JSON's own words and it passes on a table of flags in
-    // the data a page was drawn from.
+    // CANARY: count a data format's own words and it passes on a table of
+    // flags in the data a page was drawn from.
+    // CANARY: read every script with a type as data and it passes on code in
+    // a language the list of script types never named.
+    // CANARY: read a page's comments and it passes on a note its author left.
     const finished = [
       "<p>See [[1]](https://example.test) and [[2]].</p><pre>if [[ -f x ]]; then</pre>",
       '<script>new Map([[key,value]]);const s=[[a,b]];const t=[["acme",13381.01]]</script><STYLE media="print">.a{content:"[[x]]"}</STYLE >',
@@ -4474,7 +4478,10 @@ describe("save_knowledge_base's reply carries the id the next call needs (U36-4)
       "<p>Source: [[Gartner 2024]](https://example.test).</p>",
       `<p>[[${"Aidea ".repeat(27)}]]</p>`,
       "<p>Unclosed</p><script>const rows=[[a,b]];",
-      '<script type="application/json">{"visible":[[true,false]],"rows":[[null,1],["acme",2]],"on":[[ false ]]}</script>',
+      '<script type="application/json">{"visible":[[true,false]],"rows":[[null,1]],"on":[[ false ]],"names":[["acme",2]]}</script>',
+      '<script type="application/json">{"gaps":[[NaN, 1]],"none":[[None, 2]],"most":[[Infinity]],"flags":[[True, False]]}</script>',
+      '<script type="text/python">rows = [[a, b]]</script><script type="py">more = [[c, d]]</script>',
+      "<!-- [[left by its author]] --><p>Aidea</p><!-- and an open one [[to the end]]",
     ];
     for (const [at, body] of finished.entries()) {
       writeTaskAttachment(SLUG, "VIB-142", `finished-${at}.html`, page(body), app.dataRoot);
@@ -4493,7 +4500,29 @@ describe("save_knowledge_base's reply carries the id the next call needs (U36-4)
       page("<script>const s=[[a,b]]</script><h1>[[ Müşteri adı ]]</h1><p>[[3-year total]] [[Aylık toplam]](USD)</p>"),
       app.dataRoot,
     );
-    expect(await copy({ kind: "template", name: "spaced.html" })).toContain("its text holds 1 `[[placeholder]]`, which");
+    expect(await copy({ kind: "template", name: "spaced.html" })).toContain("1 `[[placeholder]]` was counted in its text (");
+    // A script tag inside a comment opens nothing, as in a browser.
+    // CANARY: read a commented-out tag as a tag and the page after it is
+    // taken for a script that never closed.
+    writeTaskAttachment(
+      SLUG,
+      "VIB-142",
+      "commented.html",
+      page("<!-- <script src=old.js> --><h1>[[Müşteri adı]]</h1>"),
+      app.dataRoot,
+    );
+    expect(await copy({ kind: "template", name: "commented.html" })).toContain("1 `[[placeholder]]` was counted in its text (");
+    // Only a page is read as markup: a tag named in a document's prose opens nothing.
+    // CANARY: read every file as a page and a brief that says "do not paste
+    // a <script> tag" loses every placeholder after that sentence.
+    writeTaskAttachment(
+      SLUG,
+      "VIB-142",
+      "brief-template.md",
+      new TextEncoder().encode("Do not paste a <script> tag here.\n\nCustomer: [[customer name]]\n"),
+      app.dataRoot,
+    );
+    expect(await copy({ kind: "template", name: "brief-template.md" })).toContain("1 `[[placeholder]]` was counted in its text (");
     // A page drawn from a block of data is marked in that block.
     // CANARY: leave every script unread and a template that keeps its
     // content in a data block is called a finished result, with no way to
@@ -4508,13 +4537,14 @@ describe("save_knowledge_base's reply carries the id the next call needs (U36-4)
       ),
       app.dataRoot,
     );
-    expect(await copy({ kind: "template", name: "drawn.html" })).toContain("its text holds 2 `[[placeholder]]`s, which");
+    expect(await copy({ kind: "template", name: "drawn.html" })).toContain("2 `[[placeholder]]`s were counted in its text (");
 
     // The one an agent made is a template, and the reply says what was found.
     // CANARY: say it holds no task's content and the reply vouches for what
     // nothing here can tell.
     expect(await copy({ kind: "template", name: "skeleton.html", as: "proposal-template.html" })).toContain(
-      "It is kept as a template: its text holds 3 `[[placeholder]]`s, which a result built from it fills, leaving none. " +
+      "It is kept as a template: 3 `[[placeholder]]`s were counted in its text " +
+        "(what a page does not show, its code, style and comments, is not read for them), which a result built from it fills, leaving none. " +
         "Whether anything of a task's own content is left beside them is a reviewer's check: nothing here tells a customer's sentence from the organisation's own. ",
     );
     expect(existsSync(path.join(folder, "proposal-template.html"))).toBe(true);
@@ -4538,6 +4568,8 @@ describe("save_knowledge_base's reply carries the id the next call needs (U36-4)
         "say in the rule that it shows what a good result looks like and that nothing in it carries over to another task. ",
     );
     expect(readdirSync(folder).sort()).toEqual([
+      "brief-template.md",
+      "commented.html",
       "drawn.html",
       "proposal-template.html",
       "rulings.md",
@@ -4550,7 +4582,7 @@ describe("save_knowledge_base's reply carries the id the next call needs (U36-4)
     // A picture has no text to hold a placeholder: kept, and said unchecked.
     expect(await copy({ kind: "template", name: "logo.png" })).toContain(
       "It is kept as a template, and nothing here read its text (a picture or another kind no reader here takes as text, " +
-        "a PDF whose text could not be read, or a file past a reader's size), " +
+        "or a PDF whose text could not be read), " +
         "so nothing checked it for placeholders or for a task's content: if it is a result a task delivered and not a template made from one, replace it. ",
     );
     // An asset is copied as it is, with nothing said about its kind.
@@ -5510,8 +5542,8 @@ describe("ruling 684: continue_when_done", () => {
     userId: string,
     conversationId: string | null,
     args: Record<string, JsonValue>,
-    /** The user message the calling turn answers. */
-    answering: string | null = null,
+    /** The user message the calling turn answers: one a person wrote, unless a test says otherwise. */
+    answering: string | null = "cmsg_a_person_wrote",
   ): Promise<string> {
     const { buildControllerToolkit } = await import("./controller-toolkit.server");
     const { findUserById } = await import("~/server/auth/user-store.server");
@@ -5596,6 +5628,9 @@ describe("ruling 684: continue_when_done", () => {
     expect(await callAs(ids.contributor, null, { taskKey: "VIB-142", next: STEP })).toBe(
       "[unavailable] This turn answers no conversation, so there is nothing for an acceptance to continue.",
     );
+    // CANARY: take a turn that cannot say which message it answers and it is
+    // never known as one a follow-up started: each such turn may leave the next.
+    expect(await callAs(ids.contributor, conversationId, { taskKey: "VIB-142", next: STEP }, null)).toContain("[unavailable]");
     // CANARY: leave a step on a task that is already accepted and it waits
     // for an acceptance that has happened.
     expect(await callAs(ids.contributor, conversationId, { taskKey: "VIB-139", next: STEP })).toBe(
@@ -5651,7 +5686,7 @@ describe("ruling 684: continue_when_done", () => {
     // CANARY: drop the check and a conversation continues on its own again
     // and again.
     expect(await callAs(ids.contributor, conversationId, { taskKey: "VIB-142", next: "And then the next thing." }, opened)).toBe(
-      "[noop] This turn was itself started by a follow-up, and a conversation continues on its own once. " +
+      "[noop] This turn was itself started by a follow-up, and a turn started that way leaves no further step. " +
         "Say what is left to do and why, and Selin Aksoy asks for it. Nothing was left on VIB-142.",
     );
     // The step her own turn left stands.
@@ -5687,6 +5722,10 @@ describe("ruling 684: continue_when_done", () => {
     expect(await callAs(ids.contributor, conversationId, { taskKey: key, next: STEP })).toContain("[done]");
     expect(await withoutItsFile("Only tell me it is done.")).toContain("[error]");
     // The step the task does say is the one still left.
+    expect(steps()).toEqual([STEP]);
+    // CANARY: drop a step whose "dropped" note failed and the task goes on
+    // saying the controller continues, with nothing left to start.
+    expect(await withoutItsFile("")).toContain("[error]");
     expect(steps()).toEqual([STEP]);
   });
 

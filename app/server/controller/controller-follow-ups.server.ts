@@ -145,8 +145,10 @@ export function recordFollowUpOutcome(
  * heard from nobody since: the message is the one Viberr sent to open it, and
  * no message was steered into the turn. A follow-up's own message is queued,
  * never steered, so one that was steered in is a person's, or one a person
- * pressed Send now on. A turn opened that way leaves no further step, so a
- * conversation never continues twice in a row with no person in between.
+ * pressed Send now on. A turn opened that way leaves no further step, so no
+ * step is ever left by a turn nobody asked for or wrote into. (A person's own
+ * turn may leave a step on each of several tasks; each acceptance then starts
+ * its own turn, and none of those leaves another.)
  *
  * It asks about the turn, not the conversation: a follow-up that fires while
  * a person's own turn is working is queued behind that turn, and is the

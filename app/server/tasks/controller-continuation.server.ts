@@ -105,8 +105,11 @@ async function continueWith(db: DatabaseSync, ctx: TaskActionContext, followUp: 
     });
     start = { started: false, why: "An error stopped it; the server's log has it." };
   }
-  // What became of it, for the record. A failure here must not cost the task
-  // its note below, which is where a person learns the step is theirs.
+  // What became of it: the outcome, the audit row, and the id of the message
+  // that opened the turn, which is what the one-hop rule knows such a turn by
+  // (a turn whose id could not be written here may leave a further step). A
+  // failure must not cost the task its note below, which is where a person
+  // learns the step is theirs.
   try {
     recordFollowUpOutcome(
       db,

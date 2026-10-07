@@ -121,10 +121,11 @@ const guardRows = () => [
 
 const deps = (): TaskActionDeps => ({ runControllerTurn, runOperator: runOp });
 const hookCtx = () => ({ dataRoot: store.dataRoot, deps: deps() });
-const notes = () =>
-  readTaskFile({ projectSlug: store.slug, taskKey: "VIB-1", dataRoot: store.dataRoot })!.parsed.timeline.filter(
-    (event) => event.title?.startsWith("Controller follow-up"),
+const notesOn = (taskKey: string) =>
+  readTaskFile({ projectSlug: store.slug, taskKey, dataRoot: store.dataRoot })!.parsed.timeline.filter((event) =>
+    event.title?.startsWith("Controller follow-up"),
   );
+const notes = () => notesOn("VIB-1");
 const row = () =>
   store.db.prepare(`SELECT fired_at, outcome, message_id FROM controller_follow_ups WHERE task_key = 'VIB-1'`).get();
 const notStarted = (why: string) =>
@@ -401,19 +402,67 @@ describe("ruling 684: the controller continues when a task it waits on is accept
   it("writes nothing into an archived task when its conversation is deleted", async () => {
     // CANARY: note every task and deleting a conversation changes a file a
     // read-only task holds, which no deletion does.
-    writeTask(store.dataRoot, store.slug, {
-      frontmatter: baseTaskFrontmatter("VIB-1", { stage: "review", ownerUserId: store.users.arda.id, archived: true }),
-      packet: null,
+    for (const [key, archived] of [["VIB-1", true], ["VIB-2", false]] as const) {
+      writeTask(store.dataRoot, store.slug, {
+        frontmatter: baseTaskFrontmatter(key, { stage: "review", ownerUserId: store.users.arda.id, archived }),
+        packet: null,
+      });
+    }
+    rebuildAll(store.db, { dataRoot: store.dataRoot });
+    // One conversation waits on both: the archived task, then the open one.
+    const conversationId = selinWaitsOnVib1();
+    setFollowUp(store.db, {
+      conversationId,
+      userId: store.users.selin.id,
+      projectSlug: store.slug,
+      taskKey: "VIB-2",
+      text: STEP,
+    });
+    deleteControllerConversation(
+      store.db,
+      { conversationId, projectSlug: store.slug, dataRoot: store.dataRoot },
+      { userId: store.users.selin.id, label: store.users.selin.email },
+    );
+    // The open task is told, and by then the archived one would have been.
+    expect(await pollUntil(() => notesOn("VIB-2").length > 0)).toBe(true);
+    await flush();
+    expect(notesOn("VIB-1")).toEqual([]);
+    expect(openFollowUps(store.db, store.slug, "VIB-1")).toEqual([]);
+  });
+
+  it("writes nothing into an archived project when a conversation there is deleted", async () => {
+    // CANARY: ask the task alone and a frozen project's task takes a note.
+    taskAt("review");
+    const conversationId = selinWaitsOnVib1();
+    await updateProjectFile({ projectSlug: store.slug, dataRoot: store.dataRoot }, (project) => {
+      project.frontmatter.archived = true;
     });
     rebuildAll(store.db, { dataRoot: store.dataRoot });
-    const conversationId = selinWaitsOnVib1();
     deleteControllerConversation(
       store.db,
       { conversationId, projectSlug: store.slug, dataRoot: store.dataRoot },
       { userId: store.users.selin.id, label: store.users.selin.email },
     );
     await flush();
-    expect(openFollowUps(store.db, store.slug, "VIB-1")).toEqual([]);
+    await flush();
     expect(notes()).toEqual([]);
+    expect(openFollowUps(store.db, store.slug, "VIB-1")).toEqual([]);
+  });
+
+  it("still tells the task when what became of the step cannot be recorded", async () => {
+    // The write of the outcome fails, as it would on a full disk.
+    // CANARY: let that failure leave the function and a step that could not
+    // start is claimed and said nowhere: the task is Done and nothing came of it.
+    taskAt("done");
+    selinWaitsOnVib1();
+    disableUser(store.db, store.users.selin.id, { userId: store.users.arda.id, label: "arda" });
+    store.db.exec(
+      `CREATE TRIGGER outcome_cannot_be_written BEFORE UPDATE OF outcome ON controller_follow_ups
+       BEGIN SELECT RAISE(ABORT, 'the disk is full'); END`,
+    );
+    maybeContinueController(store.db, hookCtx(), store.slug, "VIB-1");
+    expect(await pollUntil(() => notes().length > 0)).toBe(true);
+    expect(notes().map((event) => event.text)).toEqual([notStarted("The person who asked for it has no active account.")]);
+    expect(row()).toMatchObject({ outcome: null });
   });
 });
