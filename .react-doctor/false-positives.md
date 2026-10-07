@@ -123,6 +123,8 @@ scan run from inside an agent worktree under `.claude/` sees no files at all.
   `pendingSkillBrowse` / `pendingKbBrowse`: "pending until the revalidated list has it"
   state that sits in an effect's dependency array (`[skills, pendingSkillBrowse]`), so
   setting it is what wakes the effect; a ref would not. Verify the dependency array.
+  0.9.17 stopped reporting it once ruling 689(e) moved the state from ResourcesPanel
+  into this hook; kept for a scan that reports it there.
 
 - `react-doctor/rerender-lazy-ref-init` — use-live-updates.ts `useRef(Symbol("live-stream"))`:
   a constant-cost identity token, the rule's own cheap-call exception. Verify the argument
@@ -519,17 +521,11 @@ design-system or cross-file decision — revisit deliberately, not per lint run.
   with whether a hostile board file is in the threat model. Exports carry a handful of
   each.
 
-- `react-doctor/no-high-complexity-react-function` / `no-giant-component` — the large
-  surfaces (DecisionPacket, Timeline, the agents and
-  org-settings modals, and their siblings). Splitting them is a structural refactor per
-  surface, best done with the e2e suite and the bundle ratchet beside it, not as a lint
-  sweep. Ruling 689(d) piloted the recipe on TaskDetailPage, which no longer carries
-  either finding: its posts became hooks that each own their fetcher, toast and confirm
-  (`task-detail-actions.tsx`), what it reads off its props became pure functions
-  (`task-detail-derive.ts`), and its regions became hook-free components that each take
-  one slot of its markup (`task-detail-regions.tsx`, `task-main-column.tsx`), with the
-  DOM, the hydration ids and the memoised children's props unchanged. Ruling 689(e) split
-  BoardPage the same way (`board-page-actions.tsx`, `board-page-derive.ts`,
-  `board-accept-confirm.tsx`, and the hook-free EmptyLane, NewTaskFoot and EpicFilter),
-  and it no longer carries either finding. The rest wait on
-  the owner's sign-off on that recipe.
+- `react-doctor/no-high-complexity-react-function` / `no-giant-component` — none left.
+  Ruling 689(d) piloted the split on TaskDetailPage and ruling 689(e) rolled it out to
+  every other surface these two rules flagged (85 findings in 42 files): each surface's
+  posts became hooks its component still calls in the order its fetchers registered
+  (`*-actions`), what it reads off its props became pure functions (`*-derive.ts`), and
+  its regions became hook-free components in sibling modules, with the server and
+  hydrated DOM byte-identical. A new finding of either rule is real, not a deferral:
+  split it the same way and record its measured cost under ruling 689(e).
