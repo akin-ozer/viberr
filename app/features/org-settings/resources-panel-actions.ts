@@ -20,16 +20,20 @@ import { useOrgAction } from "./use-org-action";
  *  it once the revalidated list delivers the new row. */
 export function useResourceBrowsing(kbs: KbView[], skills: SkillView[]) {
   // Ruling 483: `?kb=<dir>&doc=<path>` arrives from a knowledge-base proposal's
-  // "Open document" and opens that base's browser on that document.
+  // "Open document" and opens that base's browser on that document. Read on
+  // arrival, like the page's other arrival links (`?update=`, `?add`, rulings
+  // 480 and 532): the document rides on the browse the link opened, so the
+  // base reopened from its row starts at its root while the link is still in
+  // the URL.
   const [searchParams] = useSearchParams();
-  const linkedKb = kbs.find((k) => k.dir === searchParams.get("kb")) ?? null;
-  const [browsing, setBrowsing] = useState<{ kind: "kb" | "skill"; id: string } | null>(
-    () => (linkedKb ? { kind: "kb", id: linkedKb.id } : null),
+  const [browsing, setBrowsing] = useState<{ kind: "kb" | "skill"; id: string; doc?: string } | null>(
+    () => {
+      const linkedKb = kbs.find((k) => k.dir === searchParams.get("kb"));
+      const doc = searchParams.get("doc") ?? undefined;
+      return linkedKb ? { kind: "kb", id: linkedKb.id, doc } : null;
+    },
   );
-  const linkedDoc =
-    linkedKb && browsing?.kind === "kb" && browsing.id === linkedKb.id
-      ? (searchParams.get("doc") ?? undefined)
-      : undefined;
+  const linkedDoc = browsing?.kind === "kb" ? browsing.doc : undefined;
   // A files-mode skill create hands straight off to the store browser: the
   // action only returns a toast, so we wait for the revalidated skills list
   // to deliver the new row and open its browser then.

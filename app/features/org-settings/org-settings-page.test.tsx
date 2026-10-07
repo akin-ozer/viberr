@@ -2414,7 +2414,8 @@ describe("McpModal — write tools (ruling 176)", () => {
  * document, the way a click on its row would.
  */
 describe("ResourcesPanel: the link a knowledge-base proposal carries (ruling 483)", () => {
-  it("opens the named knowledge base on the named document", async () => {
+  /** The panel at the proposal's link, with every form the browser posts. */
+  function renderLinked() {
     const reads: Record<string, string>[] = [];
     const Stub = createRoutesStub([
       {
@@ -2441,7 +2442,11 @@ describe("ResourcesPanel: the link a knowledge-base proposal carries (ruling 483
       kb: "architecture-notes",
       doc: "decisions/adr-001.md",
     });
-    render(<Stub initialEntries={[`/org/settings?${params.toString()}`]} />);
+    return { reads, ...render(<Stub initialEntries={[`/org/settings?${params.toString()}`]} />) };
+  }
+
+  it("opens the named knowledge base on the named document", async () => {
+    const { reads } = renderLinked();
     // CANARY: drop the `kb` search-param read and the panel opens on the list,
     // with no browser and no document.
     await waitFor(() =>
@@ -2454,5 +2459,18 @@ describe("ResourcesPanel: the link a knowledge-base proposal carries (ruling 483
         }),
       ),
     );
+  });
+
+  it("opens the document once: the base reopened from its row starts at its root", async () => {
+    const { reads, getByRole, getByText } = renderLinked();
+    const browser = () => getByRole("dialog", { name: "Files · Architecture notes" });
+    await waitFor(() => expect(reads).toHaveLength(1));
+    expect(within(browser()).getByRole("region", { name: "adr-001.md" })).toBeTruthy();
+    fireEvent.click(within(browser()).getByRole("button", { name: "Done" }));
+    fireEvent.click(getByText("Architecture notes", { selector: "button.linkish" }));
+    // CANARY: hand the browser the URL's `doc` whenever the linked base is
+    // open, and the reopened browser opens adr-001.md again.
+    expect(within(browser()).queryByRole("region", { name: "adr-001.md" })).toBeNull();
+    expect(within(browser()).getByText("overview.md")).toBeTruthy();
   });
 });
