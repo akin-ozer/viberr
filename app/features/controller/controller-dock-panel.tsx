@@ -7,13 +7,7 @@ import type {
   SendMode,
 } from "~/server/controller/controller-run.server";
 import type { UnseenReplyView } from "~/routes/resources.controller-unseen";
-import {
-  DockComposer,
-  DockThreadList,
-  DockTranscript,
-  DockUnavailable,
-  DockUnseenLine,
-} from "./controller-dock-panel-regions";
+import { DockBodyBox, DockComposer, DockUnseenLine } from "./controller-dock-panel-regions";
 import { useModifierHint } from "~/ui/use-shortcut-hint";
 import { useFileDrop } from "~/ui/attach-files";
 import { addPickedFiles } from "~/ui/picked-files";
@@ -135,28 +129,26 @@ export function DockPanelBody({
       {unseen.length > 0 && (
         <DockUnseenLine unseen={unseen} threads={threads} onPick={onPick} onLeave={onLeave} />
       )}
-      {unavailable ? (
-        <DockUnavailable signedOut={current?.signedOut} />
-      ) : threadsOpen ? (
-        <DockThreadList threads={threads} conversationId={conversationId} onPick={onPick} />
-      ) : (
-        <DockTranscript
-          current={current}
-          turn={turn}
-          messages={messages}
-          fresh={fresh}
-          conversationId={conversationId}
-          csrf={csrf}
-          text={text}
-          onText={onText}
-          onFiles={onFiles}
-          busy={busy}
-          disabled={disabled}
-          onSubmit={onSubmit}
-          scrollRef={scrollRef}
-          jump={jump}
-        />
-      )}
+      <DockBodyBox
+        current={current}
+        turn={turn}
+        unavailable={unavailable}
+        threadsOpen={threadsOpen}
+        threads={threads}
+        messages={messages}
+        fresh={fresh}
+        conversationId={conversationId}
+        csrf={csrf}
+        text={text}
+        onText={onText}
+        onFiles={onFiles}
+        busy={busy}
+        disabled={disabled}
+        onSubmit={onSubmit}
+        onPick={onPick}
+        scrollRef={scrollRef}
+        jump={jump}
+      />
       <DockComposer
         current={current}
         turn={turn}

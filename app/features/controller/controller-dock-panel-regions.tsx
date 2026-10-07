@@ -23,12 +23,13 @@ import { MESSAGE_BATCH } from "~/shared/attachment-kinds";
 /**
  * The OPEN controller dock's regions (ruling 689(e), the large-component split
  * on the task page's recipe, applied to `controller-dock-panel.tsx`): the
- * replies waiting elsewhere, the note where the controller cannot work, the
- * thread list, the transcript and the composer. Each takes the slot its markup
- * held in `DockPanelBody` and calls no hook: the body keeps every hook (the
- * transcript's follow and announcer, the file drop, the shortcut hints) and
- * hands their results down, so the markup and every id React derives from the
- * tree are what they were. Loaded with the body, on demand (ruling 457, FL-1).
+ * replies waiting elsewhere, the body's one box (the note where the controller
+ * cannot work, the thread list or the transcript) and the composer. Each takes
+ * the slot its markup held in `DockPanelBody` and calls no hook: the body keeps
+ * every hook (the transcript's follow and announcer, the file drop, the
+ * shortcut hints) and hands their results down, so the markup and every id
+ * React derives from the tree are what they were. Loaded with the body, on
+ * demand (ruling 457, FL-1).
  */
 
 /** Ruling 314's examples for the scope the dock is open on (shared with the
@@ -109,75 +110,23 @@ export function DockUnseenLine({
   );
 }
 
-/** The scope is not this person's to talk in, or they are signed out. */
-export function DockUnavailable({ signedOut }: { signedOut: boolean | undefined }) {
-  return (
-    <section className="dock-body" aria-label="Controller unavailable here">
-      <p className="empty sm">
-        {signedOut ? (
-          // Ruling 457: the dock's loads answer a signed-out tab 401, never
-          // a login redirect; the page's own navigation asks for the sign-in.
-          <>
-            You're signed out, so the controller can't answer here. Reload
-            the page to sign in again.
-          </>
-        ) : (
-          <>
-            The controller has nothing to work with here: this project or
-            task is not open to you, or it no longer exists. Everything else
-            on the page still works.
-          </>
-        )}
-      </p>
-    </section>
-  );
-}
-
-/** The threads of this scope, the one on screen marked. */
-export function DockThreadList({
-  threads,
-  conversationId,
-  onPick,
-}: {
-  threads: readonly ControllerDockThread[];
-  conversationId: string | null;
-  onPick: (id: string) => void;
-}) {
-  return (
-    <section className="dock-body dock-threads" aria-label="Threads here">
-      {threads.length === 0 ? (
-        <p className="empty sm">No threads here yet.</p>
-      ) : (
-        <ul className="ctl-conv-list">
-          {threads.map((t) => (
-            <li key={t.id}>
-              <button
-                type="button"
-                className={`ctl-conv${t.id === conversationId ? " on" : ""}${t.unread ? " unread" : ""}`}
-                aria-current={t.id === conversationId ? "true" : undefined}
-                onClick={() => onPick(t.id)}
-              >
-                <span className="ctl-conv-title">
-                  {t.unread && <span className="unseen-dot" aria-hidden="true" />}
-                  {t.title}
-                  {t.unread && <span className="vh">, new reply</span>}
-                </span>
-                <span className="fine xs dim">
-                  {t.lastMessageAt ? <LocalDayDotTime iso={t.lastMessageAt} /> : "empty"}
-                </span>
-              </button>
-            </li>
-          ))}
-        </ul>
-      )}
-    </section>
-  );
-}
-
-/** The transcript's box: loading, the scope's examples, or the thread. */
-export function DockTranscript({
+/**
+ * The body's box: the note where the controller cannot work, the thread list,
+ * or the transcript. One component draws all three because to React they are
+ * ONE `<section>` in one unkeyed slot of `DockPanelBody`: a Threads toggle, or
+ * a view that turns unavailable, updates that element in place, so its node,
+ * its scroll offset and the transcript's ref carry over. A component per box
+ * would put three types in the slot and mount a fresh box on every toggle
+ * (review of the ruling 689(e) split). The first child each box draws straight
+ * into it stays inline for the same reason: the loading, no-threads and
+ * unavailable notes are one `<p>` React keeps across those changes.
+ */
+export function DockBodyBox({
   current,
   turn,
+  unavailable,
+  threadsOpen,
+  threads,
   messages,
   fresh,
   conversationId,
@@ -188,11 +137,16 @@ export function DockTranscript({
   busy,
   disabled,
   onSubmit,
+  onPick,
   scrollRef,
   jump,
 }: {
   current: ControllerDockView | null;
   turn: ConversationTurnState | null;
+  /** The scope is not this person's to talk in, or they are signed out. */
+  unavailable: boolean;
+  threadsOpen: boolean;
+  threads: readonly ControllerDockThread[];
   messages: readonly ControllerMessage[];
   fresh: ReadonlySet<string>;
   conversationId: string | null;
@@ -203,9 +157,65 @@ export function DockTranscript({
   busy: boolean;
   disabled: boolean;
   onSubmit: (override?: string, mode?: SendMode) => void;
+  onPick: (id: string) => void;
   scrollRef: RefObject<HTMLDivElement | null>;
   jump: TranscriptJump | null;
 }) {
+  if (unavailable) {
+    return (
+      <section className="dock-body" aria-label="Controller unavailable here">
+        <p className="empty sm">
+          {current?.signedOut ? (
+            // Ruling 457: the dock's loads answer a signed-out tab 401, never
+            // a login redirect; the page's own navigation asks for the sign-in.
+            <>
+              You're signed out, so the controller can't answer here. Reload
+              the page to sign in again.
+            </>
+          ) : (
+            <>
+              The controller has nothing to work with here: this project or
+              task is not open to you, or it no longer exists. Everything else
+              on the page still works.
+            </>
+          )}
+        </p>
+      </section>
+    );
+  }
+  if (threadsOpen) {
+    // The threads of this scope, the one on screen marked.
+    return (
+      <section className="dock-body dock-threads" aria-label="Threads here">
+        {threads.length === 0 ? (
+          <p className="empty sm">No threads here yet.</p>
+        ) : (
+          <ul className="ctl-conv-list">
+            {threads.map((t) => (
+              <li key={t.id}>
+                <button
+                  type="button"
+                  className={`ctl-conv${t.id === conversationId ? " on" : ""}${t.unread ? " unread" : ""}`}
+                  aria-current={t.id === conversationId ? "true" : undefined}
+                  onClick={() => onPick(t.id)}
+                >
+                  <span className="ctl-conv-title">
+                    {t.unread && <span className="unseen-dot" aria-hidden="true" />}
+                    {t.title}
+                    {t.unread && <span className="vh">, new reply</span>}
+                  </span>
+                  <span className="fine xs dim">
+                    {t.lastMessageAt ? <LocalDayDotTime iso={t.lastMessageAt} /> : "empty"}
+                  </span>
+                </button>
+              </li>
+            ))}
+          </ul>
+        )}
+      </section>
+    );
+  }
+  // The transcript's box: loading, the scope's examples, or the thread.
   return (
     <section
       className="dock-body dock-transcript"
@@ -217,19 +227,7 @@ export function DockTranscript({
       {!current ? (
         <p className="empty sm">Loading…</p>
       ) : !current.conversation ? (
-        <div className="ctl-empty">
-          <p className="empty sm">{emptyCopy(current)}</p>
-          {/* Ruling 625: as on the page, no examples a viewer whose
-              Claude is not connected could not send; the note says what
-              to do instead. */}
-          {current.available && (
-            <ControllerExampleList
-              examples={emptyExamples(current)}
-              disabled={busy || disabled}
-              onSend={onSubmit}
-            />
-          )}
-        </div>
+        <DockEmptyScope view={current} busy={busy} disabled={disabled} onSubmit={onSubmit} />
       ) : (
         <MessageList
           inDock
@@ -257,6 +255,35 @@ export function DockTranscript({
       )}
       <TranscriptJumpButton jump={jump} />
     </section>
+  );
+}
+
+/** A scope with no thread yet: what to ask here, and ruling 314's examples. */
+function DockEmptyScope({
+  view,
+  busy,
+  disabled,
+  onSubmit,
+}: {
+  view: ControllerDockView;
+  busy: boolean;
+  disabled: boolean;
+  onSubmit: (override?: string, mode?: SendMode) => void;
+}) {
+  return (
+    <div className="ctl-empty">
+      <p className="empty sm">{emptyCopy(view)}</p>
+      {/* Ruling 625: as on the page, no examples a viewer whose
+          Claude is not connected could not send; the note says what
+          to do instead. */}
+      {view.available && (
+        <ControllerExampleList
+          examples={emptyExamples(view)}
+          disabled={busy || disabled}
+          onSend={onSubmit}
+        />
+      )}
+    </div>
   );
 }
 
