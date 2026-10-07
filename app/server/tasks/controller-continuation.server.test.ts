@@ -31,7 +31,7 @@ import type { TaskActionDeps } from "./task-action-core.server";
 import { transitionStage } from "./task-transitions.server";
 
 /**
- * Ruling 684 (owner, 2026-10-07: the controller continues when the task it
+ * Ruling 685 (owner, 2026-10-07: the controller continues when the task it
  * filed is accepted). Asked for a content-free template, the controller filed
  * the task that makes one and ended with "tell me when it is approved and I'll
  * replace the files": the second half of one request, left for the person to
@@ -132,7 +132,7 @@ const notStarted = (why: string) =>
   `This task was accepted, and the controller was to continue in Selin Test's conversation with: ${STEP} ` +
   `It was not started. ${why} That step is a person's to ask the controller for now.`;
 
-describe("ruling 684: the controller continues when a task it waits on is accepted", () => {
+describe("ruling 685: the controller continues when a task it waits on is accepted", () => {
   /** The two writers of a board's last stage: every acceptance is one of them. */
   const doors: [string, () => Promise<void>][] = [
     [

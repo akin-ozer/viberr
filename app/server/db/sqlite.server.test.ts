@@ -695,7 +695,7 @@ describe("ensureBaselineColumns — baseline TABLES a pre-existing root lacks", 
     }
   });
 
-  it("creates controller_follow_ups on a root that predates ruling 684", () => {
+  it("creates controller_follow_ups on a root that predates ruling 685", () => {
     // 0001 never re-runs, so a root created before the ruling boots without
     // the table: the controller's `continue_when_done` would fail on its
     // insert, and every acceptance would log a failed read and continue

@@ -4267,7 +4267,7 @@ describe("save_knowledge_base's reply carries the id the next call needs (U36-4)
     const kbId = /id (kb_[A-Za-z0-9_-]+)/.exec(made)![1]!;
     const folder = path.join(app.dataRoot, "kb", "template-home");
     // An asset: what this test is about is the copy, not what it is kept as
-    // (ruling 683's kinds have their own test below).
+    // (ruling 684's kinds have their own test below).
     const copy = { kbId, kind: "asset", taskKey: "VIB-142", name: "Teklif Şablonu.pdf", as: "proposal-template.pdf" };
 
     // CANARY: drop `requireOrgAdmin` and a project member writes into a folder
@@ -4416,13 +4416,13 @@ describe("save_knowledge_base's reply carries the id the next call needs (U36-4)
   });
 
   /**
-   * Ruling 683 (owner, 2026-10-07: "why would controller make the template
+   * Ruling 684 (owner, 2026-10-07: "why would controller make the template
    * with data? ... Even if we manually fix Aidea, controller will still create
    * wrong templates in the future"). The first template the controller made
    * was the report itself: one customer's figures and sentences in the folder
    * every run reads, and the next customer's proposal came back with one.
    */
-  it("ruling 683: a copy says what it keeps: a template holds placeholders, a sample is named for its task, an asset is neither", async () => {
+  it("ruling 684: a copy says what it keeps: a template holds placeholders, a sample is named for its task, an asset is neither", async () => {
     const { writeTaskAttachment } = await import("~/server/files/task-attachments.server");
     const page = (body: string) => new TextEncoder().encode(`<!doctype html><html><body>${body}</body></html>`);
     writeTaskAttachment(SLUG, "VIB-142", "report.html", page("<h1>Aidea | AWS Maliyet Teklifi</h1><p>13.381,01 USD</p>"), app.dataRoot);
@@ -5531,13 +5531,13 @@ describe("ruling 296: every published controller schema refuses unknown keys", (
 });
 
 /**
- * Ruling 684 (owner, 2026-10-07): the controller leaves itself the next step
+ * Ruling 685 (owner, 2026-10-07): the controller leaves itself the next step
  * for when a task is accepted. Asked for a content-free template, it filed the
  * task that makes one and ended with "tell me when it is approved": the second
  * half of one request, left for the person to remember. What an acceptance
  * does with the step is `controller-continuation.server.test.ts`'s.
  */
-describe("ruling 684: continue_when_done", () => {
+describe("ruling 685: continue_when_done", () => {
   async function callAs(
     userId: string,
     conversationId: string | null,

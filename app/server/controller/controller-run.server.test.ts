@@ -1118,13 +1118,13 @@ describe("ruling 476(h): an epic a turn creates records the conversation it was 
 });
 
 /**
- * Ruling 684(d): a turn that a follow-up started leaves no further step. The
+ * Ruling 685(d): a turn that a follow-up started leaves no further step. The
  * rule is about the turn, so the tools a turn is handed are told which message
  * it answers. The first writing judged by the conversation's newest message,
  * and a person's own turn, still working when the task was accepted, was
  * refused a step over a message it had not read.
  */
-describe("ruling 684: a turn's tools know which message the turn answers", () => {
+describe("ruling 685: a turn's tools know which message the turn answers", () => {
   it("the turn a follow-up opened is refused a further step by its own continue_when_done", async () => {
     const { connectFakeBackend, disconnectFakeBackend } = await import(
       "../../../test-support/backend-credentials"
@@ -1175,7 +1175,7 @@ describe("ruling 684: a turn's tools know which message the turn answers", () =>
     const { InMemoryTransport } = await import("@modelcontextprotocol/sdk/inMemory.js");
     const [clientEnd, serverEnd] = InMemoryTransport.createLinkedPair();
     await server.instance.connect(serverEnd);
-    const client = new Client({ name: "ruling-684", version: "1" }, { capabilities: {} });
+    const client = new Client({ name: "ruling-685", version: "1" }, { capabilities: {} });
     await client.connect(clientEnd);
     const reply = JSON.stringify(
       (

@@ -1129,13 +1129,13 @@ describe("the seeded-prompt sweep: the shipped prompts say what the code does", 
   });
 
   /**
-   * Rulings 683 and 684 (owner, 2026-10-07: "why would controller make the
+   * Rulings 684 and 685 (owner, 2026-10-07: "why would controller make the
    * template with data? ... Even if we manually fix Aidea, controller will
    * still create wrong templates in the future"). The guide itself told the
    * controller to copy the report a person liked into the knowledge base and
    * to write beside it that its content was not to be used.
    */
-  it("rulings 683 and 684: the guide has a template made from an example, a flow that names no task, and the controller continue on acceptance", async () => {
+  it("rulings 684 and 685: the guide has a template made from an example, a flow that names no task, and the controller continue on acceptance", async () => {
     // CANARY: put back "copy it out of the task that holds it" as the whole
     // of the rule, or drop the flow bullet, the continuation bullet, either
     // tool's name or the outgoing hash.
@@ -1144,7 +1144,7 @@ describe("the seeded-prompt sweep: the shipped prompts say what the code does", 
     // Read as sentences: where a line wraps is not what the guide says.
     const said = (section: string) => markdownSection(guide, section).replace(/\s+/g, " ");
     const results = said("A board that delivers results");
-    expect(results).toContain("**A template is made from an example. It is never the example** (ruling 683).");
+    expect(results).toContain("**A template is made from an example. It is never the example** (ruling 684).");
     expect(results).toContain("with a `[[what goes here]]` placeholder wherever that task's content stood");
     expect(results).toContain("You cannot write files, so an agent makes it.");
     expect(results).toContain("Leave yourself `continue_when_done` on that task");
@@ -1158,7 +1158,7 @@ describe("the seeded-prompt sweep: the shipped prompts say what the code does", 
     expect(guide).not.toContain("copy it out of the task that holds it");
     const agents = said("Working with operators and agents");
     expect(agents).toContain(
-      "**When a request needs a task's work before you can finish it, continue on its acceptance** (ruling 684).",
+      "**When a request needs a task's work before you can finish it, continue on its acceptance** (ruling 685).",
     );
     expect(agents).toContain("When the task is accepted (by a person, or by the operator on a board that lets it accept)");
     expect(agents).toContain("A turn started that way finishes the request and leaves no further step");

@@ -638,7 +638,7 @@ CREATE TABLE controller_message_files (
 CREATE INDEX idx_controller_message_files__message
   ON controller_message_files (message_id);
 -- What a controller conversation left itself to do when a task is accepted
--- (ruling 684). The controller cannot wait for a task: its turn ends. It writes
+-- (ruling 685). The controller cannot wait for a task: its turn ends. It writes
 -- the next step here, and the acceptance that moves the task to its last stage
 -- starts the conversation's next turn with it, as the person who asked.
 -- `fired_at` is set once, by the acceptance that claims the row, so two

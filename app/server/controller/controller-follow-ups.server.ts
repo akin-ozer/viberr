@@ -3,7 +3,7 @@ import { z } from "zod";
 import { newId } from "~/shared/ids/new-id.server";
 
 /**
- * Ruling 684: what a controller conversation left itself to do when a task is
+ * Ruling 685: what a controller conversation left itself to do when a task is
  * accepted.
  *
  * A controller turn cannot wait for a task: it ends, and an agent's work on a

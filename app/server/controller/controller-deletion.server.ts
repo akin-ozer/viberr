@@ -154,7 +154,7 @@ export function deleteControllerConversation(
       )
       .get(conversation.id, conversation.id),
   );
-  // Ruling 684: the steps it left on tasks go with it (their rows follow the
+  // Ruling 685: the steps it left on tasks go with it (their rows follow the
   // conversation's), and each of those tasks still says the controller will
   // continue on its acceptance, so each is told it will not. Not a task that
   // is archived, or in an archived project: those are read-only, nobody can

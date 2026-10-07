@@ -1658,7 +1658,7 @@ export async function resolvePacket(
     throw error;
   }
   reprojectTask(db, ctx, input.projectSlug, input.taskKey);
-  // Ruling 684: the `accept_completion` arm writes the last stage itself, so
+  // Ruling 685: the `accept_completion` arm writes the last stage itself, so
   // this door starts a waiting controller conversation's turn itself too. The
   // hook reads the stage, so every answer may ask: only an acceptance finds
   // the task there.

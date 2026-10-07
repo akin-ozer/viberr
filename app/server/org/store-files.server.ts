@@ -381,7 +381,7 @@ export function writeStoreFiles(
   files: UploadFileInput[],
   actor: AuditActor,
   /** Ruling 678: the task whose file this is a copy of, the name it took here
-   *  and whether it took a file's place, for the audit row; and (ruling 683)
+   *  and whether it took a file's place, for the audit row; and (ruling 684)
    *  what it is kept as. */
   copiedFrom?: { projectSlug: string; taskKey: string; name: string; as: string; replaced: boolean; kind: string },
 ): UploadResult {

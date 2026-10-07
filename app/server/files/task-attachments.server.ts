@@ -1001,7 +1001,7 @@ function wholeText(name: string, ext: string, bytes: Buffer, where: string): Who
 }
 
 /**
- * Ruling 683: the whole text of a file as a reader takes it, for a check that
+ * Ruling 684: the whole text of a file as a reader takes it, for a check that
  * must see all of it and not a page. Null for a file no reader takes as text:
  * a picture, a binary kind, a PDF with no text layer, one over its reader's
  * cap.
