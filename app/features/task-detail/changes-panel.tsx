@@ -38,9 +38,9 @@ import { useFetcherResult } from "~/ui/use-fetcher-result";
  * opens it.
  *
  * Ruling 689(e) split the body and a file along the task page's recipe, a pure
- * structural refactor: the body's read failure, stale notice and foot, and a
- * file's left-out patch, are hook-free components below the one that draws
- * them, and a file's own read is its hook `useFilePatch`.
+ * structural refactor: the body's stale notice and foot, and a file's left-out
+ * patch, are hook-free components below the one that draws them, and a file's
+ * own read is its hook `useFilePatch`. The read's failure stays in the body.
  */
 
 export interface ChangesBodyProps {
@@ -178,8 +178,23 @@ export function ChangesBody({ url, revisionSha, githubHost }: ChangesBodyProps) 
     );
   }
   if (!view.ok) {
+    // Drawn here, not in a component of its own: this `div` sits in the slot
+    // the body's `div` fills, so a read that fails and then succeeds (or the
+    // reverse) keeps the same node, as before ruling 689(e).
     return (
-      <ChangesReadFailure reason={view.reason} reading={reading} onRetry={() => void loadRead(url)} />
+      <div className="chg-fail" role="alert">
+        <p>{view.reason}</p>
+        <button
+          type="button"
+          className="btn sm"
+          disabled={reading}
+          aria-busy={reading || undefined}
+          onClick={() => void loadRead(url)}
+        >
+          <GlyphSwap rest="refresh" alt="loader" on={reading} spinAlt />
+          {reading ? "Reading…" : "Try again"}
+        </button>
+      </div>
     );
   }
 
@@ -275,33 +290,6 @@ export function ChangesBody({ url, revisionSha, githubHost }: ChangesBodyProps) 
           onSend={submit}
         />
       ) : null}
-    </div>
-  );
-}
-
-/** The read failed: why, and Try again. */
-function ChangesReadFailure({
-  reason,
-  reading,
-  onRetry,
-}: {
-  reason: string;
-  reading: boolean;
-  onRetry: () => void;
-}) {
-  return (
-    <div className="chg-fail" role="alert">
-      <p>{reason}</p>
-      <button
-        type="button"
-        className="btn sm"
-        disabled={reading}
-        aria-busy={reading || undefined}
-        onClick={onRetry}
-      >
-        <GlyphSwap rest="refresh" alt="loader" on={reading} spinAlt />
-        {reading ? "Reading…" : "Try again"}
-      </button>
     </div>
   );
 }
