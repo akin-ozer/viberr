@@ -1,6 +1,7 @@
 import type { TaskDetail } from "~/server/projections/task-query.server";
 import type { AcceptanceAffordance } from "~/server/tasks/task-acceptance.server";
 import type { CompletionView } from "~/server/tasks/completion-packet.server";
+import type { TaskSummary } from "~/shared/mapping/task.server";
 import { asProjectRole, roleCan } from "~/shared/rbac";
 import { isRepositoryOptionKind } from "~/shared/repository-ask";
 import type { EpicOption } from "~/ui/epic-chip";
@@ -33,8 +34,9 @@ export function lastStageId(task: TaskDetail): string | null {
 }
 
 /** Terminal-stage OR archived task — closed for new work (comments stay open,
- *  R7-6). F15-11: archived tasks used to keep every live control. */
-export function isClosedForWork(task: TaskDetail, archived: boolean): boolean {
+ *  R7-6). F15-11: archived tasks used to keep every live control. The task
+ *  page and the execution profile's controls (G9) both read it. */
+export function isClosedForWork(task: TaskSummary, archived: boolean): boolean {
   return (
     task.displayReadiness === "accepted" ||
     task.displayReadiness === "merged" ||

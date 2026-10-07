@@ -14,11 +14,11 @@ import { AgentSelect } from "./agent-select";
 import {
   agentDispatch,
   humanOwner,
-  isTaskClosed,
   operatorRunHold,
   operatorRunTitle,
   runButtonLabel,
 } from "./execution-profile-derive";
+import { isClosedForWork } from "./task-detail-derive";
 import {
   backendLabelOf,
   backendRunRefusal,
@@ -143,7 +143,7 @@ function OwnerControl({
   busy: boolean;
   onOwner: (action: OwnerAction, member?: TaskMemberView) => void;
 }) {
-  const o = task.owner && task.owner.kind === "human" ? task.owner : null;
+  const o = humanOwner(task);
   // Q5 tiering (XS-12): only contributor+ may take ownership — a viewer is
   // read + comment only, so its take button would just 403. Gate the control
   // the same way the server does rather than render a button that fails.
@@ -156,10 +156,7 @@ function OwnerControl({
     // D32-16: an archived task's owner seat is frozen (setOwner refuses), so
     // the control is withheld like every other runtime action on it. E32-9:
     // a CLOSED task's seat is frozen the same way.
-    const closed =
-      task.displayReadiness === "accepted" ||
-      task.displayReadiness === "merged" ||
-      task.archived;
+    const closed = isClosedForWork(task, task.archived);
     // Ruling 118: an admin may still reassign a CLOSED (not archived) seat for
     // the record — the same tier that releases any owner.
     const adminSeat = !task.archived && roleCan(asProjectRole(myRole), "release-any-ownership");
@@ -1014,8 +1011,10 @@ export function ExecutionProfile({
   const activeAgentProfileIds = liveAgentRuns.map((r) => r.profileId);
   const o = humanOwner(task);
   const mine = !!(o && o.userId === meId);
-  // G9 / F15-11: closed at the terminal stage or archived (`isTaskClosed`).
-  const closed = isTaskClosed(task);
+  // G9: a task at the terminal (Done) stage is closed — its runtime action
+  // controls are disabled so a closed task doesn't advertise live controls.
+  // F15-11: an ARCHIVED task is out of the flow too.
+  const closed = isClosedForWork(task, task.archived);
   // F20-5 / ruling 131(d): an open packet refuses the operator's manual run, a
   // hold only notes it (`operatorRunHold`).
   const operatorHold = operatorRunHold(task, closed);

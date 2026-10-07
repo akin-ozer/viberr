@@ -13,11 +13,11 @@ import { backendRunRefusal, type TaskRunPrincipalView } from "./run-principal-vi
 /**
  * What the execution profile reads off its props before it draws (ruling
  * 689(e), the split of `execution-profile.tsx` along the task page's recipe):
- * whether the task is closed and who owns it, what holds the operator's manual
- * run, what a pick on the run-an-agent control would meet (its refusal, its
- * posture, its button's title) and the words on both run buttons. Pure
- * functions of the panel's props and the controls' state, no React; each
- * component calls them at most once per render.
+ * who owns the task, what holds the operator's manual run, what a pick on the
+ * run-an-agent control would meet (its refusal, its posture, its button's
+ * title) and the words on both run buttons. Pure functions of the panel's
+ * props and the controls' state, no React; each component calls them at most
+ * once per render.
  */
 
 /**
@@ -40,17 +40,6 @@ export function runButtonLabel(inFlight: RunInFlight, delay: RunDelay, runNow: s
  *  a person's). */
 export function humanOwner(task: TaskSummary): Extract<ActorRender, { kind: "human" }> | null {
   return task.owner && task.owner.kind === "human" ? task.owner : null;
-}
-
-/** G9: a task at the terminal (Done) stage is closed — its runtime action
- *  controls are disabled so a closed task doesn't advertise live controls.
- *  F15-11: an ARCHIVED task is out of the flow too. */
-export function isTaskClosed(task: TaskSummary): boolean {
-  return (
-    task.displayReadiness === "accepted" ||
-    task.displayReadiness === "merged" ||
-    task.archived
-  );
 }
 
 /** Ruling 131(d): the run control's hold copy. */
