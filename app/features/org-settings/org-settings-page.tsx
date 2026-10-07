@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useMemo, useRef, useState } from "react";
 import { useLiveUpdates } from "~/features/live-updates/use-live-updates";
 import { sseScopes } from "~/features/live-updates/event-types";
 import { useSearchParams } from "react-router";
@@ -741,10 +741,13 @@ function RunConcurrencyControl({
   const capRef = useRef<HTMLInputElement>(null);
   // Re-seed the field when the server value changes (a save round-trips a fresh
   // loader value through this prop), and drop any standing refusal with it.
-  useEffect(() => {
+  // During render, so the field never paints the old value against the new cap.
+  const [seededCap, setSeededCap] = useState(runConcurrency.cap);
+  if (seededCap !== runConcurrency.cap) {
+    setSeededCap(runConcurrency.cap);
     setValue(String(runConcurrency.cap));
     setRefused(0);
-  }, [runConcurrency.cap]);
+  }
   // Ruling 147(d): nothing-changed is the ONLY gate that keeps Save disabled.
   // Validity used to be folded into `dirty`, so a typed "-1", "1.5" or an
   // emptied box was a changed value that left Save dead with no explanation.
@@ -853,10 +856,12 @@ function RunSpendCapControl({ spendCapUsd }: { spendCapUsd: number | null }) {
   // Ruling 451(g): the box shakes once per refusal, not on each mount.
   const refusalShake = useRefusalShake(refused);
   const capRef = useRef<HTMLInputElement>(null);
-  useEffect(() => {
+  const [seeded, setSeeded] = useState(current);
+  if (seeded !== current) {
+    setSeeded(current);
     setValue(current);
     setRefused(0);
-  }, [current]);
+  }
   const trimmed = value.trim();
   const valid = spendCapEntryValid(trimmed);
   const changed = trimmed !== current;

@@ -1,5 +1,6 @@
 import {
   Fragment,
+  useCallback,
   useEffect,
   useReducer,
   useRef,
@@ -1205,12 +1206,17 @@ export function StoreBrowser({
       else n.add(key);
       return n;
     });
-  const expand = (path: string[]) =>
-    setExpanded((s) => {
-      const n = new Set(s);
-      for (let i = 1; i <= path.length; i++) n.add(path.slice(0, i).join("/"));
-      return n;
-    });
+  // Stable, as the arrival effect below lists it: a fresh one each render was
+  // a dependency that never held still.
+  const expand = useCallback(
+    (path: string[]) =>
+      setExpanded((s) => {
+        const n = new Set(s);
+        for (let i = 1; i <= path.length; i++) n.add(path.slice(0, i).join("/"));
+        return n;
+      }),
+    [],
+  );
 
   const ops = useStoreOps(resource, expand);
   const push = useToast();

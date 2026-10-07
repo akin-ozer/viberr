@@ -27,7 +27,7 @@ import { useModifierHint } from "~/ui/use-shortcut-hint";
 import { useToast } from "~/ui/toast";
 import { useFetcherResult } from "~/ui/use-fetcher-result";
 import { AttachButton, AttachTray, useFileDrop } from "~/ui/attach-files";
-import { addPickedFiles, filesFromPaste, IMAGE_RE } from "~/ui/picked-files";
+import { addPickedFiles, filesFromPaste, IMAGE_RE, type PickedFiles } from "~/ui/picked-files";
 import { MESSAGE_BATCH } from "~/shared/attachment-kinds";
 import { useStableRows, useStableValue } from "~/ui/use-stable-rows";
 import type { VerdictNoteView } from "~/shared/verdict-note";
@@ -584,21 +584,16 @@ export function Timeline({
   // Comment result: success clears the draft + toasts (server copy);
   // failure keeps the draft and shows the inline error below.
   // Ruling 573: the files going with the comment, and the first refused.
-  const [files, setFiles] = useState<File[]>([]);
-  const [fileProblem, setFileProblem] = useState<string | null>(null);
+  // One state, so an add builds on the picks before it through the updater.
+  const [tray, setTray] = useState<PickedFiles>({ files: [], problem: null });
+  const { files, problem: fileProblem } = tray;
   // Stable, so the memoised paperclip and tray skip a revalidation's render
-  // (ruling 457); the ref holds the picks the next add builds on.
-  const filesNow = useRef<File[]>(files);
-  filesNow.current = files;
+  // (ruling 457).
   const addFiles = useCallback((incoming: File[]) => {
-    const next = addPickedFiles(filesNow.current, incoming, MESSAGE_BATCH);
-    filesNow.current = next.files;
-    setFiles(next.files);
-    setFileProblem(next.problem);
+    setTray((cur) => addPickedFiles(cur.files, incoming, MESSAGE_BATCH));
   }, []);
   const removeFile = useCallback((name: string) => {
-    setFiles((cur) => cur.filter((file) => file.name !== name));
-    setFileProblem(null);
+    setTray((cur) => ({ files: cur.files.filter((file) => file.name !== name), problem: null }));
   }, []);
   const { dropping, dropProps } = useFileDrop(addFiles, !canAttach);
   const pendingFiles = useRef<readonly File[]>([]);
@@ -607,8 +602,10 @@ export function Timeline({
     pendingFiles.current = [];
     if (data.ok) {
       // Ruling 573: the files that went out leave the tray; a failure keeps them.
-      setFiles((cur) => cur.filter((file) => !sentFiles.includes(file)));
-      setFileProblem(null);
+      setTray((cur) => ({
+        files: cur.files.filter((file) => !sentFiles.includes(file)),
+        problem: null,
+      }));
       draftRef.current = "";
       // Clear the editor AND its undo history — ⌘Z must not resurrect a
       // posted comment. A failure runs neither: the draft stays as typed.
