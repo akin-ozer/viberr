@@ -25,7 +25,7 @@ These are findings even when every fact is right. A piece that a reader picks ou
 
 ### 2. Facts against kept sources
 
-List every outside fact: numbers, quotes, versions, dates, names, statements about how something behaves. For each, open the source the writer kept (`list_sources`, `read_source`) and find the words.
+List every outside fact: numbers, quotes, versions, dates, names, statements about how something behaves. For each, open the source the writer kept (`read_task_source` lists them and opens one by its id) and find the words.
 
 - No kept source: blocking, however plausible the fact.
 - The source says something narrower, older or different: blocking, and quote both.
