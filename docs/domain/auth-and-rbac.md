@@ -518,8 +518,8 @@ Instance analytics stay with org admins: this page and the controller's
 the dollars its runs reported among it, is read by the task's project: a project member
 or an org admin sees it on the task's completion and Result card, the bar the run console
 already has, and any member may ask the controller for it (`get_task`'s `whatItTook`, and
-the run part for every task of a project on `list_tasks`). The operator reads the same
-figure in its snapshot.
+the run part for every task of a project on `list_tasks` with `withWhatItTook`). The
+operator reads the same figure in its snapshot.
 
 - **Oversight** (`oversightSummary`, every backend): owner clarity (active tasks with a
   definite next actor), branch and PR traceability, packet resolution times from audit

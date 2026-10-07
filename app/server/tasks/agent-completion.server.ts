@@ -487,6 +487,9 @@ export async function recordAgentCompletion(
   let verdictBound = false;
   /** Ruling 556: the verdict came from the agent that made what it judged. */
   let ownWork = false;
+  /** Ruling 693: this objection repeats the reviewer's last one on a delivery
+   *  nobody has reworked since, so it sends nothing back a second time. */
+  let unfoughtRepeat = false;
   if (verdict === "approve" && actorRef.kind === "agent") {
     const preFile = readTaskFile(taskRef(ctx, projectSlug, taskKey))?.parsed;
     const pre = preFile?.frontmatter;
@@ -534,6 +537,7 @@ export async function recordAgentCompletion(
         // Decided afresh on every pass of this mutator.
         verdictBound = false;
         ownWork = false;
+        unfoughtRepeat = false;
         // In-lock re-check: a delivery could have landed during the probe above.
         if (
           noChangeMint &&
@@ -632,6 +636,11 @@ export async function recordAgentCompletion(
           // that has not moved, and the packet below must not recommend asking
           // for it a second time.
           const noReworkBehind = prior !== undefined && !reworked;
+          // Ruling 693: the same objection again with no round fought (the
+          // case `rounds` above keeps its count for) is titled apart, so what
+          // a task took counts the work as sent back once, not twice.
+          unfoughtRepeat =
+            verdict === "request_changes" && prior?.result === "request_changes" && !reworked;
           // Ruling 416(b): every same-result verdict on this revision, fought
           // or not, so a later packet can tell the question was answered here.
           const reviews = prior?.result === verdict ? (prior.reviews ?? prior.rounds) + 1 : 1;
@@ -761,9 +770,12 @@ export async function recordAgentCompletion(
           // recorded in words; the task's review waits for a run on what is
           // delivered now. A question this run was asked is answered all the
           // same (ruling 421), so it does not wait on a later run.
+          // Ruling 693: an objection that binds to nothing sends nothing back,
+          // and its title says so (as an approval's does), here and in the
+          // two arms below.
           title =
             verdict === "request_changes"
-              ? VERDICT_NOTE_TITLE.changesRequested
+              ? VERDICT_NOTE_TITLE.changesNotCounted
               : VERDICT_NOTE_TITLE.noted;
           summary =
             `${roleDisplay} ${verdict === "request_changes" ? "requested changes" : "approved"}, ` +
@@ -777,14 +789,18 @@ export async function recordAgentCompletion(
           // Ruling 556: recorded in words, bound to nothing.
           title =
             verdict === "request_changes"
-              ? VERDICT_NOTE_TITLE.changesRequested
+              ? VERDICT_NOTE_TITLE.changesNotCounted
               : VERDICT_NOTE_TITLE.noted;
           summary =
             `${roleDisplay} ${verdict === "request_changes" ? "requested changes" : "approved"}, ` +
             "but it made what is delivered, so its verdict does not count. Have another agent " +
             "deliver the work, or another reviewer judge it.";
         } else if (verdict === "request_changes") {
-          title = VERDICT_NOTE_TITLE.changesRequested;
+          title = !verdictBound
+            ? VERDICT_NOTE_TITLE.changesNotCounted
+            : unfoughtRepeat
+              ? VERDICT_NOTE_TITLE.changesOnUnchangedWork
+              : VERDICT_NOTE_TITLE.changesRequested;
           // Ruling 583: with nothing delivered, the objection binds to nothing
           // and says so, as an approval with nothing to bind to does below.
           // On AWSC-19 the event read "Validation: none. Estimate Judge

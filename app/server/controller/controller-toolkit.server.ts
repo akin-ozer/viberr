@@ -277,7 +277,7 @@ import {
 import { errorMessage, toError } from "~/shared/errors";
 import { logger } from "~/server/logging/logger.server";
 import { listTookRowsForProject, type ProjectTookRunRow } from "~/server/runtimes/run-store.server";
-import { runTotals, type TaskTook, whatItTookFor } from "~/server/tasks/what-it-took.server";
+import { runTotalsLine, type TaskTook, whatItTookFor } from "~/server/tasks/what-it-took.server";
 
 /**
  * The controller's in-process toolkit (ruling 99) — a Claude Agent SDK MCP
@@ -481,6 +481,32 @@ interface TimelineWindowNote {
  *  its read failed. */
 interface TookNote {
   whatItTook?: TaskTook;
+}
+
+/** What `list_tasks` takes. */
+interface ListTasksArgs {
+  projectSlug?: string;
+  stageId?: string;
+  epicId?: string;
+  includeArchived?: boolean;
+  withWhatItTook?: boolean;
+}
+
+/** One row of `list_tasks`. */
+interface ListedTask {
+  key: string;
+  title: string;
+  stage: string;
+  readiness: string;
+  waiting: string;
+  owner: string | null;
+  priority: string;
+  archived: boolean;
+  epic: string | null;
+  waitsOn: string[];
+  /** Ruling 693: the run part on one line (`runTotalsLine`), only when the
+   *  call asked for it and a run started on the task. */
+  whatItTook?: string;
 }
 
 /**
@@ -2432,7 +2458,7 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
   add(
     tool(
       "list_tasks",
-      "A project's tasks: key, title, stage, readiness, waiting, owner, priority, the epic each is in (ruling 503), and what each waits on (`waitsOn`, ruling 131). Membership gated. Includes Done; archived only when asked. `whatItTook` per task: runs started, agent minutes and reported dollars (null when no run reported one), so a board can be ranked by cost in one call; `get_task` has the questions, send-backs and wall time of one task.",
+      "A project's tasks: key, title, stage, readiness, waiting, owner, priority, the epic each is in (ruling 503), and what each waits on (`waitsOn`, ruling 131). Membership gated. Includes Done; archived only when asked. Pass `withWhatItTook: true` to rank a board by what its tasks cost (ruling 693): each task a run started on then carries `whatItTook`, one line with the runs that started, their agent minutes and the dollars they reported (`cost not reported` when no run reported one, which is unknown and never zero), and a task without the key had no run start. `get_task` has one task's whole figure: its questions, send-backs and wall time. The listing has no pages: a reply too long for a turn is cut and its first line says so, and `stageId` or `epicId` narrows it.",
       {
         projectSlug: z.string().optional(),
         stageId: z.string().optional().describe("Filter to one stage."),
@@ -2441,8 +2467,12 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
           .optional()
           .describe('Filter to one epic (epic-3), or "none" for the tasks in no epic.'),
         includeArchived: z.boolean().optional(),
+        withWhatItTook: z
+          .boolean()
+          .optional()
+          .describe("Add each task's runs, agent minutes and reported dollars, on one line."),
       },
-      runWith((args: { projectSlug?: string; stageId?: string; epicId?: string; includeArchived?: boolean }) => {
+      runWith((args: ListTasksArgs) => {
         const slug = slugOf(args.projectSlug);
         requireVisible(slug, "read this project's tasks");
         const listOpts: NonNullable<Parameters<typeof listProjectTasks>[2]> = {
@@ -2454,30 +2484,38 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
         const rows = listProjectTasks(db, slug, listOpts).filter(
           (t) => !args.stageId || t.stage === args.stageId,
         );
-        // Ruling 693: the run part of what each task took, from one read of
-        // the project's run rows grouped by task. A task nobody ran reads
-        // null dollars (unknown), never zero.
+        // Ruling 693: the run part of what each task took, when it is asked
+        // for, from one read of the project's run rows grouped by task. The
+        // whole board answers in one reply with no pages, so the figure is
+        // one line and only on a task a run started on: as an object on
+        // every row it cut the reply a quarter sooner (ruling 677).
         const runsByTask = new Map<string, ProjectTookRunRow[]>();
-        for (const run of listTookRowsForProject(db, slug)) {
-          const ofTask = runsByTask.get(run.task_key);
-          if (ofTask) ofTask.push(run);
-          else runsByTask.set(run.task_key, [run]);
+        if (args.withWhatItTook) {
+          for (const run of listTookRowsForProject(db, slug)) {
+            const ofTask = runsByTask.get(run.task_key);
+            if (ofTask) ofTask.push(run);
+            else runsByTask.set(run.task_key, [run]);
+          }
         }
         return json(
-          rows.map((t) => ({
-            key: t.key,
-            title: t.title,
-            stage: t.stage,
-            readiness: t.readiness,
-            waiting: t.waiting,
-            owner: t.owner?.name ?? null,
-            priority: t.priority,
-            archived: t.archived,
-            epic: t.epicId ?? null,
-            // Ruling 131: what the task waits on, each entry with its live state.
-            waitsOn: t.blockedBy.map((e) => `${e.label} (${e.state})`),
-            whatItTook: runTotals(runsByTask.get(t.key) ?? []),
-          })),
+          rows.map((t) => {
+            const row: ListedTask = {
+              key: t.key,
+              title: t.title,
+              stage: t.stage,
+              readiness: t.readiness,
+              waiting: t.waiting,
+              owner: t.owner?.name ?? null,
+              priority: t.priority,
+              archived: t.archived,
+              epic: t.epicId ?? null,
+              // Ruling 131: what the task waits on, each entry with its live state.
+              waitsOn: t.blockedBy.map((e) => `${e.label} (${e.state})`),
+            };
+            const took = runTotalsLine(runsByTask.get(t.key) ?? []);
+            if (took !== null) row.whatItTook = took;
+            return row;
+          }),
         );
       }),
     ),
