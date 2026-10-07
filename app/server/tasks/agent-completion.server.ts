@@ -347,7 +347,7 @@ function clipVerdictReason(text: string): string {
 interface AgentCompletionRecord {
   escalated: boolean;
   verdictBound: boolean;
-  captures: Promise<void> | null;
+  delivered: string | null;
 }
 
 /** Atomically record a finished run's reply, verdict, and human question. */
@@ -380,8 +380,10 @@ export async function recordAgentCompletion(
    *  operator — see the escalation arm in `applyAgentCompletionEffects`.
    *  Ruling 544: and whether the verdict BOUND to a subject, which is what makes
    *  an approval a boundary (ruling 362).
-   *  Ruling 691: and the render of the delivery this completion stamped, which
-   *  settles once its pages are pictured; null when it stamped none. */
+   *  Ruling 691: and the `deliveredAt` stamp of the delivery this completion
+   *  stamped and kept, null when it stamped none. Its pages are not asked to
+   *  be pictured here: whether the delivery is files or a revision is known
+   *  only once the caller's delivery reconcile has run. */
 ): Promise<AgentCompletionRecord> {
   const { actorRef, runId, replyText, verdict, question } = input;
   const evidence = normalizeEvidenceRows(input.evidence);
@@ -437,7 +439,7 @@ export async function recordAgentCompletion(
     if (suppressedReason) {
       recordAgentRepliedAudit(db, projectSlug, taskKey, runId, suppressedReason);
     }
-    return { escalated: false, verdictBound: false, captures: null };
+    return { escalated: false, verdictBound: false, delivered: null };
   }
   const roleDisplay =
     actorRef.kind === "agent" ? agentRoleDisplay(actorRef) : "Agent";
@@ -501,8 +503,8 @@ export async function recordAgentCompletion(
   // `reviewSubjectAtDispatch`), which binds to the subject at completion.
   const dispatchedOn = verdict ? reviewSubjectAtDispatch(getRun(db, runId)) : undefined;
   let verdictBound = false;
-  /** Ruling 691: the render of the files delivery this completion stamps. */
-  let captures: Promise<void> | null = null;
+  /** Ruling 691: the stamp of the delivery this completion stamps and keeps. */
+  let delivered: string | null = null;
   /** Ruling 556: the verdict came from the agent that made what it judged. */
   let ownWork = false;
   /** Ruling 693: this objection repeats the reviewer's last one on a delivery
@@ -1061,12 +1063,8 @@ export async function recordAgentCompletion(
         });
       }
     });
-    const stamped = keepStampedDelivery(ctx, projectSlug, taskKey, stampBefore, written);
+    delivered = keepStampedDelivery(ctx, projectSlug, taskKey, stampBefore, written);
     reprojectTask(db, ctx, projectSlug, taskKey);
-    // Ruling 691: the delivery is written and kept, so its pages can be
-    // pictured. Asked here and never awaited here: the caller decides how
-    // long its own next step waits for the pictures.
-    if (stamped) captures = requestDeliveryCaptures(db, ctx, { projectSlug, taskKey, stamp: stamped });
     // Ruling 237 (F37-57): the packet itself was written inside the verdict's
     // own lock above, so the objection and the escalation it raised can never
     // land apart. What is left is telling people — a decision nobody is
@@ -1255,7 +1253,7 @@ export async function recordAgentCompletion(
   }
   // Ruling 237: when the write above threw, nothing was escalated and the
   // caller reacts exactly as it always did.
-  return { escalated: deadlockEscalation.packet !== null, verdictBound, captures };
+  return { escalated: deadlockEscalation.packet !== null, verdictBound, delivered };
 }
 
 /**
@@ -1606,8 +1604,8 @@ export async function applyAgentCompletionEffects(
    *  packet, so the operator react at the end of this function is suppressed —
    *  see the arm that reads it. */
   let raisedDeadlockPacket = false;
-  /** Ruling 691: the render of the files delivery this completion stamped. */
-  let deliveryCaptures: Promise<void> | null = null;
+  /** Ruling 691: the stamp of the delivery this completion stamped and kept. */
+  let stampedDelivery: string | null = null;
   // Ruling 691: the run has ended, so the pictures `capture_page` kept for it
   // go with it. Never awaited and never a reason for the effects to fail.
   void removeRunPageCaptures(db, ctx, {
@@ -2079,7 +2077,7 @@ export async function applyAgentCompletionEffects(
       delivers: input.delivers,
     });
     if (recorded.escalated) raisedDeadlockPacket = true;
-    deliveryCaptures = recorded.captures;
+    stampedDelivery = recorded.delivered;
     // Ruling 544: an approval that bound to nothing opened no gate.
     approvedThisReply = verdict === "approve" && recorded.verdictBound;
     await warnStrayAttachmentsFolder(db, ctx, input, finished.id);
@@ -2525,9 +2523,20 @@ export async function applyAgentCompletionEffects(
   }
   // 3. (The verdict/question are recorded ATOMICALLY with the reply in step 1
   //    — there is no separate verdict write to race anything.)
-  // Ruling 691: the delivery, its kept copy and the reply are written by now.
-  // Only the react waits for the delivered pages' pictures, and only so long,
-  // so the operator and the reviewers it dispatches start with them there.
+  // Ruling 691: the delivery, its kept copy and the reply are written by now,
+  // and the reconcile above has minted the work revision if this run
+  // committed. So the pictures are asked for here and not where the delivery
+  // was stamped: on a board with a repository a first delivery is stamped
+  // before its revision exists, and a revision is never pictured. Only the
+  // react waits for the pictures, and only so long, so the operator and the
+  // reviewers it dispatches start with them there.
+  const deliveryCaptures = stampedDelivery
+    ? requestDeliveryCaptures(db, ctx, {
+        projectSlug: input.projectSlug,
+        taskKey: input.taskKey,
+        stamp: stampedDelivery,
+      })
+    : null;
   await deliveryCapturesSettled(deliveryCaptures);
   // 4. React: continue an operator chain, or start a fresh one against the
   //    deployed operator. Resolve the effective react context.

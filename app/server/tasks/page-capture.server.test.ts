@@ -16,6 +16,7 @@ import { connectFakeBackend } from "../../../test-support/backend-credentials";
 import { withEnv } from "../../../test-support/env";
 import { writeFakeBrowser, type FakeBrowser } from "../../../test-support/fake-browser";
 import { installFakeRuntime, queueFakeRun } from "../../../test-support/fake-runtime";
+import { gitOutSync } from "../../../test-support/git-origin";
 import { pollUntil } from "../../../test-support/polling";
 import { createTestDbContext, type TestDbContext } from "../../../test-support/test-db";
 import {
@@ -44,9 +45,10 @@ import { attachTaskFile } from "./task-edits.server";
 
 /**
  * Ruling 691 at the boundary that owns it: a files delivery stamped by the
- * real completion pipeline (`applyAgentCompletionEffects`, so the hook in
- * `recordAgentCompletion` and the bounded wait before the react are both on
- * the path), on a `setupTestStore` root, with the renderer child run for real
+ * real completion pipeline (`applyAgentCompletionEffects`, so the stamp in
+ * `recordAgentCompletion`, the delivery reconcile, the ask after it and the
+ * bounded wait before the react are all on the path), on a `setupTestStore`
+ * root, with the renderer child run for real
  * against the stand-in browser (`test-support/fake-browser.ts`). The seam is
  * production configuration: `VIBERR_BROWSER_EXECUTABLE`, set the way a
  * deployment sets it. The cases about the render's own rules (what it reads,
@@ -67,13 +69,13 @@ const WRITER: Engagement = {
   verdictCapable: false,
 };
 
-/** A board that delivers files: no repository, one deliverer, and (when the
- *  case is about the react) an operator. */
-function deployBoard(opts: { operator?: boolean } = {}): void {
+/** A board that delivers files: no repository (unless the case names one),
+ *  one deliverer, and (when the case is about the react) an operator. */
+function deployBoard(opts: { operator?: boolean; repo?: string } = {}): void {
   const file = readProjectFile({ projectSlug: store.slug, dataRoot: store.dataRoot })!;
   writeProject(store.dataRoot, {
     ...file.parsed.frontmatter,
-    repo: null,
+    repo: opts.repo ?? null,
     agents: [
       {
         profileId: "writer",
@@ -331,8 +333,8 @@ describe("a delivered page is pictured (ruling 691)", () => {
       "figures.csv": "a,b\n1,2\n",
     });
     const stamp = frontmatter().deliveredAt!;
-    // CANARY: delete the requestDeliveryCaptures call after
-    // keepStampedDelivery in recordAgentCompletion and no picture, record or
+    // CANARY: delete the requestDeliveryCaptures call after the delivery
+    // reconcile in applyAgentCompletionEffects and no picture, record or
     // note appears.
     const pictures = [
       "notes.md.capture-desktop.png",
@@ -864,11 +866,77 @@ describe("a delivered page is pictured (ruling 691)", () => {
     });
   });
 
-  it("does not picture a delivery that is a revision, and takes down the pictures of an earlier files delivery", async () => {
+  it("on a board with a repository a delivery is a revision and is never pictured: not the first, which the pipeline learns is one only after it stamped it, and not a later one", async () => {
+    // The deliverer's run commits on its branch and saves a report beside
+    // the commit. Its first completion stamps `deliveredAt` in the reply's
+    // own write, and only the delivery reconcile, a step later, mints the
+    // work revision that makes the delivery a revision.
+    deployBoard({ repo: "akin-ozer/viberr" });
+    const checkout = path.join(taskDir(store.slug, "VIB-1", store.dataRoot), "workspace", "viberr");
+    mkdirSync(checkout, { recursive: true });
+    gitOutSync(checkout, ["init", "-q", "-b", "main"]);
+    gitOutSync(checkout, ["config", "user.email", "t@viberr.local"]);
+    gitOutSync(checkout, ["config", "user.name", "Test"]);
+    gitOutSync(checkout, ["commit", "-q", "--allow-empty", "-m", "init"]);
+    gitOutSync(checkout, ["checkout", "-q", "-b", "vib-1"]);
+    gitOutSync(checkout, ["commit", "-q", "--allow-empty", "-m", "[VIB-1] the work"]);
+    // The reconcile also asks `gh` for the branch's pull request: a stand-in
+    // first on PATH answers that there is none, so no test reaches GitHub.
+    const bin = ctx.makeTempDir("viberr-gh-");
+    writeFileSync(path.join(bin, "gh"), "#!/bin/sh\necho 'no pull requests found' >&2\nexit 1\n");
+    chmodSync(path.join(bin, "gh"), 0o755);
+    const complete = (runId: string) =>
+      withEnv(
+        {
+          VIBERR_BROWSER_EXECUTABLE: fake.executable,
+          ...fake.env(""),
+          PATH: `${bin}${path.delimiter}${process.env.PATH ?? ""}`,
+        },
+        () => completeDelivery(runId),
+      );
+    // A render makes its scratch folder before it starts anything, so a task
+    // with none never had a render started for it, whenever its browser
+    // would have come up.
+    const pictured = () => ({
+      scratch: existsSync(scratchRoot()),
+      launches: fake.launches().length,
+      onTask: onTask(),
+      record: frontmatter().pageCaptures,
+      notes: timeline().filter((event) => event.title === "Page captures").length,
+      audits: captureAudits().length,
+    });
+    const nothing = {
+      scratch: false,
+      launches: 0,
+      onTask: ["playwright-report.html"],
+      record: undefined,
+      notes: 0,
+      audits: 0,
+    };
+
+    await complete(await finishedRunSaving({ "playwright-report.html": "<p>the run's own evidence</p>" }));
+    // The pipeline itself made it a revision, after it stamped the delivery.
+    expect(frontmatter().deliveredAt).toBeTruthy();
+    expect(frontmatter().workRevision).toMatchObject({ branch: "vib-1", sourceProfileId: "writer" });
+    // CANARY: ask for the pictures where the delivery is stamped (in
+    // recordAgentCompletion, before the reconcile) and a render is started
+    // for a delivery whose result shows no files.
+    expect(pictured()).toEqual(nothing);
+
+    // A rework on the same branch stamps again, on a task that is already a
+    // revision.
+    const first = frontmatter().deliveredAt;
+    gitOutSync(checkout, ["commit", "-q", "--allow-empty", "-m", "[VIB-1] the rework"]);
+    await complete(await finishedRunSaving({ "playwright-report.html": "<p>the rework's evidence</p>" }));
+    expect(frontmatter().deliveredAt).not.toBe(first);
+    // CANARY: drop the revision check from owesCapture and from the head of
+    // captureDelivery and a render is started here too.
+    expect(pictured()).toEqual(nothing);
+  });
+
+  it("a delivery that becomes a revision after its pictures were asked for gets no picture, record or note, with the renderer idle or busy, and the pictures of the files delivery before it go", async () => {
     await deliver({ "notes.md": "# Notes\n" });
     expect(onTask()).toEqual(["notes.md", "notes.md.capture-desktop.png", "notes.md.capture-phone.png"]);
-    // The task's work becomes a revision: its pages live in the pull request,
-    // and the Result card of such a task shows no files to put a picture by.
     const revision: WorkRevision = {
       id: "rev_1",
       headSha: "9".repeat(40),
@@ -877,22 +945,41 @@ describe("a delivered page is pictured (ruling 691)", () => {
       createdAt: "2026-10-07T12:00:00.000Z",
       sourceProfileId: "writer",
     };
-    await updateTaskFile({ projectSlug: store.slug, taskKey: "VIB-1", dataRoot: store.dataRoot }, (parsed) => {
-      parsed.frontmatter.workRevision = revision;
+    const mint = (key: string) =>
+      updateTaskFile({ projectSlug: store.slug, taskKey: key, dataRoot: store.dataRoot }, (parsed) => {
+        parsed.frontmatter.workRevision = revision;
+      });
+    const stamp = "2026-10-07T12:00:00.000Z";
+    await keptDelivery("VIB-1", stamp, { "playwright-report.html": "<p>the run's own evidence</p>" });
+    await keptDelivery("VIB-3", stamp, { "report.html": "<p>another task's evidence</p>" });
+    const launched = fake.launches().length;
+    await withBrowser("hold:evidence", async () => {
+      // The order a caller may ask in: the delivery is stamped and kept, its
+      // pictures are asked for, and the task's work becomes a revision
+      // afterwards. The renderer is idle, so VIB-1's render starts at once.
+      const idle = picture("VIB-1", stamp);
+      expect(await pollUntil(() => fake.launches().length === launched + 1)).toBe(true);
+      // It is busy now, so VIB-3's render waits its turn.
+      const busy = picture("VIB-3", stamp);
+      await mint("VIB-1");
+      await mint("VIB-3");
+      fake.release();
+      await Promise.all([idle, busy]);
     });
-    const before = fake.launches().length;
-    const earlier = frontmatter().deliveredAt;
-    // The deliverer's run saves a report beside its commit, which stamps
-    // `deliveredAt` on a revision task too.
-    await deliver({ "playwright-report.html": "<p>the run's own evidence</p>" });
-    expect(frontmatter().deliveredAt).not.toBe(earlier);
-    // CANARY: picture every stamped delivery, as the first version did: four
-    // pictures land, the completion waits on the render, and the note says
-    // they "show beside each file on the result", where no file shows.
-    expect(fake.launches()).toHaveLength(before);
+    // CANARY: drop the deliveredAsFiles check under the lock in
+    // captureDelivery and the render that was already running writes two
+    // pictures, a record and a note that says they "show beside each file on
+    // the result", on a task whose result shows no files.
     expect(onTask()).toEqual(["notes.md", "playwright-report.html"]);
     expect(frontmatter().pageCaptures).toBeUndefined();
     expect(timeline().filter((event) => event.title === "Page captures")).toHaveLength(1);
+    expect(captureAudits()).toHaveLength(1);
+    const kept = listKeptDeliveries(store.slug, "VIB-1", store.dataRoot).find((held) => held.deliveredAt === stamp);
+    expect(kept?.files).toEqual(["playwright-report.html"]);
+    // The one that waited found a revision when its turn came: no browser.
+    expect(opened()).not.toContain("report.html");
+    expect(frontmatter("VIB-3").pageCaptures).toBeUndefined();
+    expect(readdirSync(attachments("VIB-3"))).toEqual(["report.html"]);
   });
 
   it("the note says what a picture cannot show by itself: a page cut short, one a phone shrinks, one wider than its screen, one that opens a dialog, and one pictured at one width only", async () => {

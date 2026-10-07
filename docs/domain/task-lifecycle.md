@@ -658,7 +658,8 @@ reviews. The reviewers check the work's claims against these with `read_task_sou
 a claim with no kept source behind it reads as unsupported.
 
 **A delivered page is pictured (ruling 691).** Once a files delivery is stamped and kept
-(ruling 597), Viberr renders each page in it, a `.html`, `.htm`, `.md` or `.markdown` file,
+(ruling 597) and the completion's delivery reconcile has run, Viberr renders each page in
+it, a `.html`, `.htm`, `.md` or `.markdown` file,
 in a headless browser at a desktop width (1280 px) and a phone width (390 px), and keeps
 the pictures: `<file>.capture-desktop.png` and `<file>.capture-phone.png` in the task's
 attachments, a copy in the kept delivery they picture, the `pageCaptures` record bound to
@@ -682,7 +683,11 @@ in the note and in the record, and the delivery stands without it; the note name
 owner it runs as and the source's size limit with this render). A delivery that is a
 revision is not pictured, whatever files its run saved beside the commit: its pages live
 in the pull request, and the pictures and record of an earlier files delivery are taken
-down. With no browser named (`VIBERR_BROWSER_EXECUTABLE` unset) nothing is pictured and
+down. On a board with a repository a first delivery is stamped before the reconcile mints
+its revision, so the completion asks for the pictures only after the reconcile
+(`applyAgentCompletionEffects`), and the render puts its pictures, record and note down
+inside the task file's lock, only while the task still names that delivery and it is
+still files. With no browser named (`VIBERR_BROWSER_EXECUTABLE` unset) nothing is pictured and
 nothing is said on the task. Only the picture of a page the task holds, or one the record
 names, is Viberr's own (`pageCapturesAmong`): an agent's own file that merely ends
 `.capture-desktop.png` is claimed by its run, kept with the delivery and offered as a
