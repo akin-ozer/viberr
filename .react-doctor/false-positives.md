@@ -1,7 +1,7 @@
 # react-doctor false positives & deliberate suppressions
 
-Consumed by the /doctor triage loop (step 2): diagnostics matching a pattern here are
-dropped before fixing. Patterns that say "verify" require an actual Read/grep of the
+Read when triaging a react-doctor scan (`npx react-doctor`, configured by
+`doctor.config.ts`): diagnostics matching a pattern here are dropped before fixing. Patterns that say "verify" require an actual Read/grep of the
 flagged site before suppressing — never suppress on filename alone.
 
 Scope note: `doctor.config.ts` excludes `**/.claude/**`, `**/data/**`,
