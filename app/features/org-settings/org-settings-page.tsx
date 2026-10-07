@@ -398,6 +398,21 @@ const S3_UNMET = {
   secret: "Enter the secret access key.",
 } satisfies Record<S3Field, string>;
 
+/** Ruling 147: the first field a save still lacks, in the form's order (the
+ *  secret only until one is on file), or null once the target is complete.
+ *  Ruling 689(e): read off the modal's fields as a pure function, so the
+ *  modal itself holds no chain of conditions. */
+function missingS3Field(
+  fields: Record<S3Field, string>,
+  configured: boolean,
+): S3Field | null {
+  if (!fields.bucket.trim()) return "bucket";
+  if (!fields.region.trim()) return "region";
+  if (!fields.accessKeyId.trim()) return "accessKeyId";
+  if (!configured && !fields.secret.trim()) return "secret";
+  return null;
+}
+
 /**
  * Ruling 148(b): the S3 target is a button that opens a modal, never a form
  * served inline. Six fields (one of them a secret) for a target set once per
@@ -432,15 +447,7 @@ function S3TargetModal({
   // changes no summary field, so the card's remount key cannot see it.
   const [done, setDone] = useState(false);
   const { action: { submit, busy }, err, setErr } = useModalAction(() => setDone(true));
-  const missing: S3Field | null = !bucket.trim()
-    ? "bucket"
-    : !region.trim()
-      ? "region"
-      : !accessKeyId.trim()
-        ? "accessKeyId"
-        : !configured && !secret.trim()
-          ? "secret"
-          : null;
+  const missing = missingS3Field({ bucket, region, accessKeyId, secret }, configured);
   const refs = {
     bucket: useRef<HTMLInputElement>(null),
     region: useRef<HTMLInputElement>(null),

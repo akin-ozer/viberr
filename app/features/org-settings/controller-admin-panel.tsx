@@ -79,6 +79,22 @@ export interface PinnedChip {
   title: string;
 }
 
+/** Which "none" line a grant group closes on, if any (ruling 689(e): read off
+ *  the group as a pure function). A group with a pinned or a missing chip
+ *  shows something already; otherwise a locked group with nothing granted
+ *  says "none granted", and an open group with nothing to offer "none
+ *  defined". `shown` is the chips the group draws: the granted ones under a
+ *  lock, every option otherwise. */
+function emptyGrantNote(
+  locked: boolean | undefined,
+  shown: number,
+  missing: number,
+  pinned: boolean,
+): "granted" | "defined" | null {
+  if (shown > 0 || missing > 0 || pinned) return null;
+  return locked ? "granted" : "defined";
+}
+
 /** One grant chip-group (Skills / MCP servers / Knowledge bases): a pinned
  *  built-in first when the group has one, then live catalog entries as toggle
  *  chips, then any granted id the store no longer holds as a removable red
@@ -115,6 +131,7 @@ function GrantChips({
   const grantedOptions = locked
     ? options.filter((o) => granted.has(o.id))
     : options;
+  const empty = emptyGrantNote(locked, grantedOptions.length, missing.length, Boolean(pinned));
   return (
     // D04-U9 (pass 32): a locked group rendered its granted chips as bare
     // spans — nothing told a screen reader these are not toggles, or why.
@@ -188,12 +205,8 @@ function GrantChips({
         ) : (
           <MissingChips ids={missing} {...(mono ? { mono } : {})} onDrop={onToggle} />
         )}
-        {locked && grantedOptions.length === 0 && missing.length === 0 && !pinned && (
-          <span className="ctx-none">none granted</span>
-        )}
-        {!locked && options.length === 0 && missing.length === 0 && !pinned && (
-          <span className="ctx-none">none defined</span>
-        )}
+        {empty === "granted" && <span className="ctx-none">none granted</span>}
+        {empty === "defined" && <span className="ctx-none">none defined</span>}
       </div>
     </div>
   );
