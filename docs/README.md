@@ -104,7 +104,8 @@ what V1 covers, [product/glossary.md](product/glossary.md) for the vocabulary, t
   schema's keys and the code's raw `VIBERR_*` reads by `env.server.test.ts`;
   [operations/configuration.md](operations/configuration.md) is the superset.
 - [`LICENSE`](../LICENSE): Viberr's licence, MIT.
-  [`THIRD_PARTY_NOTICES.md`](../THIRD_PARTY_NOTICES.md): the licences of vendored code.
+- [`THIRD_PARTY_NOTICES.md`](../THIRD_PARTY_NOTICES.md): the licences of code adapted from other
+  projects.
 - `app/server/seed/assets/*.md`: the seeded agents' definitions, profiles and skills. They
   are product prompts, not documentation, and are pinned by the seed tests.
 - History: the original architecture and UX specifications, the HTML mock the UI was ported

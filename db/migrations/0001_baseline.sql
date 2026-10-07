@@ -13,11 +13,15 @@
 -- kept. The runner records this filename in schema_migrations and skips by
 -- FILENAME alone, so editing this file reaches FRESH databases only. An
 -- existing DB gains what `ensureBaselineColumns` (app/server/db/sqlite.server.ts)
--- adds at open: the added columns, tables and indexes it lists. Boot names any
--- other drift as a `projection schema drift` WARN with its remedy: a manual
--- `ALTER TABLE … ADD COLUMN`, or for a CHECK no ALTER can widen, a re-baseline
--- as docs/operations/deployment.md "Re-baselining the projection database"
--- describes. Users/auth live in this file, so back it up first.
+-- adds at open: the columns, tables and indexes its lists name. Boot's
+-- `projection schema drift` WARN names two more shapes with their remedy: a
+-- task_projections / task_events column an existing DB lacks (a manual
+-- `ALTER TABLE … ADD COLUMN`) and a value a CHECK in `projectionCheckGaps`
+-- (app/server/boot.server.ts) refuses (a re-baseline, as
+-- docs/operations/deployment.md "Re-baselining the projection database"
+-- describes). Other drift is neither healed nor named, so a column added here
+-- to an app-owned table goes into `BASELINE_COLUMNS` in the same change.
+-- Users/auth live in this file, so back it up before a re-baseline.
 
 -- ============================ tables ============================
 
@@ -811,8 +815,10 @@ CREATE TABLE run_log_lines (
 --      `user.additionalFields` in buildAuthOptions and the GitHub provider's
 --      `mapProfileToUser`. Keep it through any regeneration; the CLI emits it
 --      only if it reads the config successfully.
---   4. Re-baseline (`npm run seed -- --reset`) — see the convention note at the
---      top of this file. There is no ALTER path.
+--   4. Re-baseline the projection database (docs/operations/deployment.md
+--      "Re-baselining the projection database"; `npm run seed -- --reset` only
+--      empties derived tables and changes no schema) — see the convention note
+--      at the top of this file. There is no ALTER path.
 CREATE TABLE "user" ("id" text not null primary key, "name" text not null, "email" text not null unique, "emailVerified" integer not null, "image" text, "createdAt" date not null, "updatedAt" date not null, "githubHandle" text);
 CREATE TABLE "session" ("id" text not null primary key, "expiresAt" date not null, "token" text not null unique, "createdAt" date not null, "updatedAt" date not null, "ipAddress" text, "userAgent" text, "userId" text not null references "user" ("id") on delete cascade);
 CREATE TABLE "account" ("id" text not null primary key, "accountId" text not null, "providerId" text not null, "userId" text not null references "user" ("id") on delete cascade, "accessToken" text, "refreshToken" text, "idToken" text, "accessTokenExpiresAt" date, "refreshTokenExpiresAt" date, "scope" text, "password" text, "createdAt" date not null, "updatedAt" date not null);
