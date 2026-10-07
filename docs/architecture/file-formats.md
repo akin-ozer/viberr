@@ -1228,12 +1228,14 @@ source, 200 sources and 100 MB a task; the refusal for the last says how much th
 keeps and how much is left. Bytes a task already keeps are not kept twice: the keep answers
 with the id that holds them. Bytes whose record stands while its bytes file is gone (a
 source a person took out of the store) are not kept again either: the keep refuses them
-and says the source was removed. Nothing prunes the folder, and nothing in the app removes
-a source ([../operations/runbook.md](../operations/runbook.md) §Retention).
+and says the source was removed, and the staged copy is removed with that refusal. Nothing
+prunes the folder, and nothing in the app removes a source ([../operations/runbook.md](../operations/runbook.md) §Retention).
 
-The keep refuses a `from` or a `title` that reads as holding a credential, and the bytes
-of a source whose `from` is not an `http(s)` URL (a command's output can print this
-instance's own credentials); such a staged file is removed from `attachments/` by the
-refusal itself. The shapes are a token by its prefix where it starts a word, an `sk-` one
-only when it reads as a key and not as a slug or a class name, and a password in a URL's
-userinfo (`readsAsCredential`, `app/server/secrets/git-output-redact.server.ts`).
+The keep refuses a `from` or a `title` that reads as holding a credential, a staged name
+that does (`wget` names a download after its URL, query included), and the bytes of a
+source whose `from` is not an `http(s)` URL (a command's output can print this instance's
+own credentials); a staged file refused for its name or its bytes is removed from
+`attachments/` by the refusal itself. The shapes are a token by its prefix where it starts
+a word, an `sk-` one only when it reads as a key and not as a slug or a class name, and a
+password in a URL's userinfo, read up to the first quote, comma, semicolon or bracket
+(`readsAsCredential`, `app/server/secrets/git-output-redact.server.ts`).
