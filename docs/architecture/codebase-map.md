@@ -219,7 +219,7 @@ shape, its constructors and the per-row tolerance helper `tolerantRowsOf`).
 | `typecheck` | route typegen + `tsc` |
 | `test` | vitest over `app/**/*.test.{ts,tsx}` |
 | `e2e` | `scripts/e2e.ts`: build the production image, seed the demo fixture on a named volume, run Playwright, tear down |
-| `seed` | product baseline: agent templates, KBs, skills, domain allowlist, bootstrap admin; `-- --reset` wipes board and derived state (takes the writer lock) |
+| `seed` | product baseline: agent templates, KBs, skills, domain allowlist, bootstrap admin; `-- --reset` deletes the board, its run history and agent profiles, then the org resources (knowledge bases, skills, MCP servers with their credentials, the domain allowlist), and reseeds; users, auth, GitHub connections and PATs and backend credentials survive (takes the writer lock) |
 | `seed:demo` | the test/dev mock board (arda & co) the route and e2e suites use |
 | `rescan` | reconcile projections with the file store; `-- --force` reprojects every file (takes the writer lock) |
 | `store:check` | read-only store doctor: which canonical files the app cannot trust and why |

@@ -11,16 +11,33 @@
 -- Convention (owner ruling, pass 11; kept at launch by ruling 683): schema
 -- changes are squashed INTO this baseline — no incremental migration chain is
 -- kept. The runner records this filename in schema_migrations and skips by
--- FILENAME alone, so editing this file reaches FRESH databases only. An
--- existing DB gains what `ensureBaselineColumns` (app/server/db/sqlite.server.ts)
--- adds at open: the columns, tables and indexes its lists name. Boot's
--- `projection schema drift` WARN names two more shapes with their remedy: a
--- task_projections / task_events column an existing DB lacks (a manual
--- `ALTER TABLE … ADD COLUMN`) and a value a CHECK in `projectionCheckGaps`
--- (app/server/boot.server.ts) refuses (a re-baseline, as
+-- FILENAME alone, so editing this file reaches FRESH databases only. Every
+-- read-write open of an existing DB through `getDb`
+-- (app/server/db/sqlite.server.ts: the server, and the seed, seed:demo,
+-- rescan and `keys -- reseal` CLIs; `npm run backup`, `npm run keys --
+-- status` and a whole-root restore do not) runs
+-- `ensureSingleFlightIndexes` and `ensureBaselineColumns`: the columns, tables
+-- and indexes in `BASELINE_COLUMNS` / `BASELINE_TABLES` / `BASELINE_INDEXES`,
+-- and `user_backend_credentials` rebuilt to its several-accounts shape
+-- (`ensureBackendAccountsTable`, ruling 507). Server boot also widens a lagging
+-- `notifications.kind` CHECK in place (`widenNotificationKindCheck`, ruling
+-- 481) and logs a `projection schema drift` WARN, with the remedy, for two more
+-- shapes: a task_projections / task_events column the DB lacks
+-- (`projectionMissingColumns`; a manual `ALTER TABLE … ADD COLUMN`) and a value
+-- one of the four CHECKs `projectionCheckGaps` reads refuses (a re-baseline, as
 -- docs/operations/deployment.md "Re-baselining the projection database"
--- describes). Other drift is neither healed nor named, so a column added here
--- to an app-owned table goes into `BASELINE_COLUMNS` in the same change.
+-- describes). Other drift is neither healed nor named, so in the same change a new column
+-- goes into `BASELINE_COLUMNS` in a form `ALTER TABLE … ADD COLUMN` accepts on
+-- a table that has rows (a UNIQUE one as a plain column plus a unique index),
+-- a new table into `BASELINE_TABLES` and a new index into `BASELINE_INDEXES`,
+-- or existing DBs never get it. A column added to a table `BASELINE_TABLES`
+-- creates also goes into that entry's DDL, which is a hand-kept copy of the
+-- table here: a root older than the table gets it from that copy. A changed constraint needs an in-place change
+-- (an `ALTER TABLE` the bundled SQLite accepts, or a rebuild of its table as
+-- `widenNotificationKindCheck` and `ensureBackendAccountsTable` do; a table
+-- others reference must be rebuilt with `PRAGMA foreign_keys = OFF` set before
+-- the transaction, or `DROP TABLE` first deletes its rows, which cascades into
+-- or is refused by the tables that reference it) or a re-baseline.
 -- Users/auth live in this file, so back it up before a re-baseline.
 
 -- ============================ tables ============================
@@ -842,10 +859,28 @@ CREATE TABLE run_log_lines (
 --      `user.additionalFields` in buildAuthOptions and the GitHub provider's
 --      `mapProfileToUser`. Keep it through any regeneration; the CLI emits it
 --      only if it reads the config successfully.
---   4. Re-baseline the projection database (docs/operations/deployment.md
---      "Re-baselining the projection database"; `npm run seed -- --reset` only
---      empties derived tables and changes no schema) — see the convention note
---      at the top of this file. There is no ALTER path.
+--   4. Reach existing databases as the convention note at the top of this file
+--      says: a new column goes into `BASELINE_COLUMNS` in a form
+--      `ALTER TABLE … ADD COLUMN` accepts on a table that has rows (with foreign
+--      keys on, a REFERENCES column goes in nullable; a UNIQUE one as a plain
+--      column plus a unique index), a new table into `BASELINE_TABLES` and a new
+--      index (the CLI emits some) into `BASELINE_INDEXES`
+--      (app/server/db/sqlite.server.ts), all applied at open; a column on a
+--      table `BASELINE_TABLES` creates also goes into that entry's DDL. A changed
+--      constraint needs an in-place change (an `ALTER TABLE` the bundled SQLite
+--      accepts, or a rebuild of the table with `PRAGMA foreign_keys = OFF` set
+--      before its transaction: "session" and "account" reference "user" ON
+--      DELETE CASCADE, so a rebuild of "user" with foreign keys on deletes them)
+--      or a re-baseline, the last resort. Its lossy form deletes the user,
+--      session and account rows this block holds, and its preserve-copy form
+--      (docs/operations/deployment.md "Re-baselining the projection database")
+--      copies the columns both files share with INSERT OR IGNORE, so it
+--      silently skips every row the new schema refuses: all rows of a table that
+--      gained a NOT NULL column without a DEFAULT, unless the copy supplies it,
+--      and each row that fails a new or narrowed CHECK, UNIQUE or NOT NULL.
+--      `npm run seed -- --reset` is no re-baseline: it deletes the board,
+--      its run history and the org resources (docs/development/scripts.md §3
+--      lists everything) and makes no schema change of its own.
 CREATE TABLE "user" ("id" text not null primary key, "name" text not null, "email" text not null unique, "emailVerified" integer not null, "image" text, "createdAt" date not null, "updatedAt" date not null, "githubHandle" text);
 CREATE TABLE "session" ("id" text not null primary key, "expiresAt" date not null, "token" text not null unique, "createdAt" date not null, "updatedAt" date not null, "ipAddress" text, "userAgent" text, "userId" text not null references "user" ("id") on delete cascade);
 CREATE TABLE "account" ("id" text not null primary key, "accountId" text not null, "providerId" text not null, "userId" text not null references "user" ("id") on delete cascade, "accessToken" text, "refreshToken" text, "idToken" text, "accessTokenExpiresAt" date, "refreshTokenExpiresAt" date, "scope" text, "password" text, "createdAt" date not null, "updatedAt" date not null);

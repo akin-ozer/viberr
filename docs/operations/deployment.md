@@ -584,7 +584,8 @@ database's rebuilder tables lag the running build (`logBootIntegrity` in
 
 - `refuses`: CHECK values the running build produces that this root's stored CHECK does not
   admit (`projectionCheckGaps`): `task_projections.validation` (F21-1),
-  `task_projections.waiting` (ruling 225) and `notifications.kind` (ruling 140). A task
+  `task_projections.waiting` (ruling 225), `notifications.kind` (ruling 140) and
+  `epic_projections.status` (ruling 503). A task
   whose derived value lands on a refused member stops projecting behind a generic
   `projection rebuild failed`; a notification of a refused kind is refused at its insert.
   Boot widens `notifications.kind` itself before this check (`widenNotificationKindCheck`,
@@ -597,19 +598,19 @@ database's rebuilder tables lag the running build (`logBootIntegrity` in
 
 Migrations are squashed into `0001_baseline.sql` and forward-only, so a baseline change
 reaches a **fresh** `projection.sqlite` and nothing else — a root opened by an older build
-keeps the schema it was created with.
+keeps the schema it was created with, apart from what the open-time healer below adds or
+rebuilds and the in-place widening of `notifications.kind` above.
 
-**First, check whether you need a remedy at all.** Most additive drift repairs itself: a
-baseline column or table added after this root was created is applied at open by
-`ensureBaselineColumns` (`app/server/db/sqlite.server.ts`), which `ALTER TABLE … ADD
-COLUMN`s each missing entry of `BASELINE_COLUMNS` — on `agent_runs`
-`dispatched_by_name`, `dispatched_by_user_id`, `credential_user_id`,
-`interrupted_reason`, `usage_final`, `no_checkout`, `verdict_withheld`, `review_subject` and
-the eleven prompt-cache columns of ruling 369; `controller_conversations.task_key` and `seen_seq`;
-`controller_messages.surface`, `reply_to` and `unlinked_history`; `org_mcp_servers.tool_policy_json` and `tool_names_json`;
-`projects.required_reviewers_json`; `task_projections.recommendation_kinds` — creates the
-`BASELINE_TABLES` (`project_github_health`, `user_backend_credentials`) and indexes it
-lacks, and logs `added a baseline column this data root predated`. A column whose DEFAULT
+**First, check whether you need a remedy at all.** Most additive drift repairs itself.
+Every read-write open of the database through `getDb` (the server, and the CLIs that write
+through it, such as `npm run seed` and `npm run rescan`) runs `ensureSingleFlightIndexes` and
+`ensureBaselineColumns`
+(`app/server/db/sqlite.server.ts`). The second `ALTER TABLE … ADD COLUMN`s each missing
+entry of `BASELINE_COLUMNS`, creates the `BASELINE_TABLES` and `BASELINE_INDEXES` this
+root lacks, brings `user_backend_credentials` to its several-accounts shape
+(`ensureBackendAccountsTable`, ruling 507), and logs `added a baseline column this data
+root predated` for each column it adds. The lists, table by table, are in
+[data-model.md §6](../architecture/data-model.md#6-schema-changes). A column whose DEFAULT
 would be WRONG for the rows that predate it carries a one-time backfill run in the same
 step (`usage_final = 1` on the `finished` runs, whose token columns held the provider's own
 figures; `seen_seq` set to each conversation's newest message so a deploy does not mark
@@ -620,7 +621,7 @@ linked is walked again when it gains the column); a backfill that cannot run is
 logged as a warn. A failure to
 ALTER is warned, not fatal, and retried next boot.
 
-A `missingColumns` entry that is NOT in that list (for example
+A `missingColumns` entry that is NOT in `BASELINE_COLUMNS` (for example
 `task_projections.blocked_by_json` on a root older than ruling 131) is still additive:
 with the app stopped, the WARN's own remedy is `ALTER TABLE <table> ADD COLUMN <column>`
 with the column's definition from `0001_baseline.sql`, which keeps every non-derived row.
@@ -639,7 +640,11 @@ rescan rebuilds from files (`REBUILT_FROM_FILES`: `provenance`, `schema_migratio
 those EMPTY is what makes the boot rescan re-project every file rather than trust a stale
 content hash). Move the old file aside rather than deleting it, then start the app: the
 rescan refills the projection tables from `projects/`. Users, sessions, sealed PATs,
-audit, notifications, org resources and run history survive. There is no CLI for this —
+audit, notifications, org resources and run history survive, but only as rows the new schema accepts: `INSERT OR IGNORE` silently
+skips every row of a table that gained a NOT NULL column without a DEFAULT (unless the copy
+supplies that column's value) and each row that fails a new or narrowed CHECK, UNIQUE or NOT
+NULL. Read the diff of `0001_baseline.sql` for all of these first, and compare each table's
+row count in the old and new files before you discard the old one. There is no CLI for this —
 the self-heal path runs it only for a corrupt file — so it is a scripted one-off; write it
 against that module's table list rather than inventing one, and take a backup first
 either way (the in-container form under *Persistence, backup & restore*, or from the host

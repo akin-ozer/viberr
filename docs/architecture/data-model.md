@@ -344,7 +344,8 @@ how an operator confirms the timer is alive; `/resources/health` reports
 The baseline is the schema. A change to `0001_baseline.sql` reaches fresh databases only; an
 existing root keeps its old DDL. Two mechanisms cover the gap.
 
-**Healed at open.** `getDb` runs `ensureSingleFlightIndexes` and `ensureBaselineColumns`
+**Healed at open.** `getDb` runs `ensureSingleFlightIndexes` (the single-flight index on
+`agent_runs`, `idx_agent_runs__one_live_per_support`) and `ensureBaselineColumns`
 (`app/server/db/sqlite.server.ts`) after the migrations, idempotently on every open. The
 second adds each missing `BASELINE_COLUMNS` entry with `ALTER TABLE … ADD COLUMN`:
 
@@ -363,9 +364,14 @@ second adds each missing `BASELINE_COLUMNS` entry with `ALTER TABLE … ADD COLU
   earlier history that boot recovery does not note; a root the first `reply_to` backfill
   already linked is walked again when it gains `unlinked_history`, ruling 465's dated note),
   and `steered_into` (ruling 527; no backfill, nothing before it could steer a turn);
+- `github_connections`: `reach_json` (ruling 463; no backfill, NULL says "not read yet");
+- `github_pats`: `repo_scopes_json` (ruling 480; no backfill, NULL is "nothing stored yet");
 - `projects`: `required_reviewers_json`, `gates_json` (ruling 482; `'[]'` is the truth for
   every project that predates it);
-- `task_projections`: `recommendation_kinds`.
+- `task_projections`: `recommendation_kinds`, `epic_id` (ruling 503; no backfill, NULL says
+  "in no epic");
+- `notifications`: `href` (ruling 497; no backfill, NULL opens the task or the board, where
+  every older row opened).
 
 It also creates the `BASELINE_TABLES` (`project_github_health`, `agent_os_users`,
 `epic_projections`, `controller_message_files`, `controller_follow_ups`), brings `user_backend_credentials` to the baseline's shape
@@ -373,15 +379,16 @@ It also creates the `BASELINE_TABLES` (`project_github_health`, `agent_os_users`
 that still has `UNIQUE (user_id, backend)` rebuilds it once from the baseline DDL in one
 transaction, carrying every row as its person's active account with `legacy_home = 1`) and
 `BASELINE_INDEXES` (`idx_controller_conversations__scope`, `idx_audit_events__task_action`,
-`idx_provenance__path_action`, `idx_controller_message_files__message`, `idx_controller_follow_ups__task`) with `IF NOT EXISTS`. A CHECK
-cannot be added by ALTER, so an upgraded root lacks the CHECKs on the added columns and the
-conversation-scope CHECK; the writers enforce those values instead.
+`idx_provenance__path_action`, `idx_task_projections__epic`, `idx_controller_message_files__message`,
+`idx_controller_follow_ups__task`) with `IF NOT EXISTS`. The healer adds neither the baseline's column CHECKs (its `ADD COLUMN` definitions leave
+them out) nor the table-level conversation-scope CHECK, so an upgraded root lacks both; the
+writers enforce those values instead.
 
 **Reported at boot.** `logBootIntegrity` (`app/server/boot.server.ts`) compares the live
 root with the shipped baseline and logs a `projection schema drift` WARN naming the remedy for
 two shapes: a CHECK that refuses a value the build now produces
-(`task_projections.validation`, `task_projections.waiting`, `notifications.kind`; boot
-widens the last one in place first, ruling 481), and a
+(`task_projections.validation`, `task_projections.waiting`, `notifications.kind`,
+`epic_projections.status`; boot widens `notifications.kind` in place first, ruling 481), and a
 column the rebuilder INSERTs that the live `task_projections` / `task_events` lacks (for
 example `blocked_by_json` or `board_rank`, which the open-time healer does not add). The
 second shape is additive, and the WARN prescribes `ALTER TABLE <table> ADD COLUMN <column>`.
@@ -396,9 +403,12 @@ start) regenerates user ids and destroys every primary row in the file. Both are
 `runtimes/<backend>/` transcripts, and empties `staged_outcomes`, `run_log_lines`,
 `agent_runs`, `notifications`, `provenance`, `diagnostics`, `scope_violations`, `user_prefs`,
 `task_events`, `task_projections`, `project_members` and `projects` (the full rescan that
-follows prunes the orphaned `epic_projections` rows). It keeps users and
-better-auth tables, GitHub and backend credentials, org resources, audit rows, controller
-transcripts and the per-person runtime homes. The owner kept this convention at launch
+follows prunes the orphaned `epic_projections` rows). The same command then deletes `kb/` and `skills/` and empties
+`org_knowledge_bases`, `org_mcp_servers`, `org_skills` and `google_domain_allowlist` before
+reseeding the example knowledge bases, skills and allowlist row (`seedOrgResources`). It
+keeps users and better-auth tables, GitHub connections and PATs, backend credentials, audit
+rows, controller transcripts and the per-person runtime homes
+([../development/scripts.md](../development/scripts.md) §3 lists both sides). The owner kept this convention at launch
 (ruling 683).
 
 ## 7. Identity and ids
