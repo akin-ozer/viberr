@@ -290,6 +290,17 @@ function taskFileNames(deps: BoardReadContext, taskKey: string): string[] {
     .filter((name) => !isBrowserWorkingArtifact(name));
 }
 
+/** What a reader answers for a name the task does not hold: the names it
+ *  does. One sentence for every tool that takes a file of the task by name
+ *  (`read_task_attachment`, and `capture_page`, ruling 691). */
+export function noSuchAttachment(deps: BoardReadContext, taskKey: string, name: string): string {
+  const have = taskFileNames(deps, taskKey);
+  return (
+    `[noop] ${taskKey} has no attachment \`${name.trim()}\`. ` +
+    (have.length ? `It holds: ${have.join(", ")}.` : "It has no attachments.")
+  );
+}
+
 /** Ruling 594: what an agent's attachment reader answers: text, or a line and
  *  the picture. */
 export type AgentAttachmentRead =
@@ -318,14 +329,7 @@ export function readAgentTaskAttachment(
   }
   const read = readTaskAttachment(deps.projectSlug, key, name, deps.ctx.dataRoot, offset, delivery);
   if (!read && delivery) return { text: keptDeliveryMiss(deps.projectSlug, key, delivery, name, deps.ctx.dataRoot) };
-  if (!read) {
-    const have = taskFileNames(deps, key);
-    return {
-      text:
-        `[noop] ${key} has no attachment \`${name.trim()}\`. ` +
-        (have.length ? `It holds: ${have.join(", ")}.` : "It has no attachments."),
-    };
-  }
+  if (!read) return { text: noSuchAttachment(deps, key, name) };
   if ("unreadable" in read) return { text: `[noop] ${read.unreadable}` };
   if (read.kind === "image") {
     return { header: attachmentImageHeader(key, read), image: { data: read.data, mimeType: read.mimeType } };

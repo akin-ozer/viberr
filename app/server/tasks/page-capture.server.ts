@@ -11,8 +11,6 @@ import { keepDelivery, keptDeliveryDir } from "~/server/files/kept-deliveries.se
 import {
   IMAGE_READ_MAX_BYTES,
   imageHeader,
-  isBrowserWorkingArtifact,
-  listTaskAttachments,
   readAttachmentBytes,
   resolveTaskAttachment,
   writeTaskAttachment,
@@ -46,6 +44,7 @@ import {
   type PageCaptureViewId,
   type PageKind,
 } from "~/shared/page-capture";
+import { noSuchAttachment } from "./board-read.server";
 import { reprojectTask, taskRef, type TaskMutationContext } from "./task-mutation.server";
 import { deliveredFileNames } from "./task-replies.server";
 import { isRelayComment } from "./task-relay.server";
@@ -946,14 +945,6 @@ export interface PageCaptureAsk {
 
 const said = (text: string): PageCaptureReply => ({ text, images: [] });
 
-/** The files a reader is told a task holds, the browser's working files and
- *  Viberr's own pictures left out. */
-function taskPageNames(ctx: TaskMutationContext, slug: string, key: string): string[] {
-  return listTaskAttachments(slug, key, ctx.dataRoot)
-    .map((entry) => entry.name)
-    .filter((name) => !isBrowserWorkingArtifact(name) && !isPageCaptureName(name));
-}
-
 /** One view's stretch, in the reply's words. */
 function stretchSentence(shot: RenderedShot): string {
   const view = pageCaptureView(shot.view);
@@ -1075,14 +1066,8 @@ export function captureTaskPage(
     size = null;
   }
   if (size === null) {
-    // The reader's own sentence (`readAgentTaskAttachment`).
-    const have = taskPageNames(ctx, projectSlug, taskKey);
-    return Promise.resolve(
-      said(
-        `[noop] ${taskKey} has no attachment ${code(name)}. ` +
-          (have.length ? `It holds: ${have.join(", ")}.` : "It has no attachments."),
-      ),
-    );
+    // The reader's own sentence.
+    return Promise.resolve(said(noSuchAttachment({ db, ctx, projectSlug }, taskKey, name)));
   }
   const kind = pageKindOf(name);
   if (!kind) {
