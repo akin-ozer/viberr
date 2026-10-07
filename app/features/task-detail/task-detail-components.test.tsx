@@ -3732,7 +3732,7 @@ describe("DecisionPacket — pass-20 governance", () => {
   // Ruling 368: the escalation in flight shows itself on its button. It was
   // never even disabled for its own request (only the resolve fetcher's), so a
   // second click re-posted it and nothing said it was on its way.
-  // Canary: stop passing `escalating: escalateBusy` in task-detail-page.tsx
+  // Canary: stop passing `escalating: escalateBusy` in task-detail-regions.tsx
   // (this renders the card directly, so drop `aria-busy` on the button instead).
   it("ruling 368: an escalation in flight reads Sending…, busy, the loader spinning", () => {
     const { container } = render(

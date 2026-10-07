@@ -912,9 +912,9 @@ describe("app.css breakpoints (P16-F8)", () => {
   /**
    * U7 / U35-2 — the task detail's three regions are ordered in the MARKUP
    * (task-detail-page.tsx: `.detail-head`, then `.detail-side`, then
-   * `.detail-main`, asserted in task-disposition.test.tsx) and placed by grid
-   * cell here, so the sighted stack and the screen-reader/focus order are the
-   * same order at every width.
+   * `TaskMainColumn`'s `.detail-main`, asserted in task-disposition.test.tsx)
+   * and placed by grid cell here, so the sighted stack and the
+   * screen-reader/focus order are the same order at every width.
    *
    * Pass 20 did it with `order: -1` in the 1100px block instead, which fixed the
    * paint and left a keyboard user tabbing to "Accept completion → Done" LAST,

@@ -1128,8 +1128,9 @@ export function DecisionPacket({
    *    and disables it with the same refusal while the closure is unanswered;
    *  - authority is `run-agents` OR this task's own owner
    *    (`manualDeliverForReview`), which is exactly the set `canResolve`
-   *    carries here (`task-detail-page.tsx`: `canRunAgents || isOwner`), so the
-   *    note is shown only to a viewer who has the button;
+   *    carries here (`taskPermissions` in `task-detail-derive.ts`:
+   *    `canRunAgents || isOwner`), so the note is shown only to a viewer who
+   *    has the button;
    *  - resolving this packet is therefore the precondition, not an aside: a
    *    person's answer stamps `closure.answered`, and the NEXT delivery opens a
    *    fresh review pull request (Viberr never reopens a closed one).

@@ -41,8 +41,10 @@ import { useFetcherResult } from "~/ui/use-fetcher-result";
  * click merged an unreviewed head into main) moved the apply path up into
  * `task-detail-page.tsx`, because the click has to reach the page's confirm
  * state — a section that owns its own fetcher structurally CANNOT ask first.
- * The page renders `OperatorRecommendations` directly and routes Apply through
- * `AcceptConfirm` (mode `apply-recommendation`). Do not re-add a local wrapper
+ * The page owns the fetcher (`useRecommendationActions`, ruling 684(d)) and
+ * the ceremony, and routes Apply through `AcceptConfirm` (mode
+ * `apply-recommendation`); `TaskMainColumn` renders `OperatorRecommendations`
+ * with the page's handlers and owns nothing. Do not re-add a local wrapper
  * here: the ceremony lives at the page, and a wrapper is how it gets skipped.
  */
 
@@ -184,8 +186,8 @@ export function TaskHero({
   // an accepted/merged completion owes nobody one either, and a force-accepted
   // one would otherwise read "accepted · awaiting verdict". Extend the archived
   // predicate to the same accepted/merged pair the rest of the app treats as
-  // terminal (task-side-panels.tsx `isTerminal`, task-detail-page.tsx
-  // `taskClosed`). The readiness pill stays for a terminal task: its value is
+  // terminal (task-side-panels.tsx `isTerminal`, task-detail-derive.ts
+  // `isClosedForWork`). The readiness pill stays for a terminal task: its value is
   // "accepted"/"merged", a terminal STATUS, not a live claim.
   const terminal =
     archived ||
