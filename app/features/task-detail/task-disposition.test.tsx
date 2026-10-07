@@ -504,7 +504,8 @@ describe("F10-09: a replacement packet opens as a fresh card", () => {
   const asking = (packet: PacketRender): PacketRender => ({ ...packet, answerTo: "Workflow Researcher" });
 
   // What the person leaves standing on the old card, then what the
-  // replacement shows instead: a row per piece the re-seed covers.
+  // replacement shows instead: a row per piece the re-seed covers, and one
+  // for the focus a re-seed can take away.
   it.each<[string, PacketRender, PacketRender, (c: HTMLElement) => void, (c: HTMLElement) => void]>([
     [
       // CANARY: drop `setPendingConfirm(null)` from the re-seed and the
@@ -561,6 +562,20 @@ describe("F10-09: a replacement packet opens as a fresh card", () => {
         expect(box(c, "pkt-note").value).toBe("acme/checkout");
       },
       (c) => expect(box(c, "pkt-note").value).toBe("acme/storefront"),
+    ],
+    [
+      // CANARY: drop the focus hand-back after a re-seed (`focusSeed` in
+      // decision-packet.tsx), or key the card on its packet again, and focus
+      // falls to <body> with the directive box that held it.
+      "hands the focus to its choices when the re-seed takes the focused box away",
+      first,
+      replacement,
+      (c) => {
+        fireEvent.click(findButton(c, "Write your own directive")!);
+        box(c, "pkt-custom").focus();
+        expect(document.activeElement).toBe(box(c, "pkt-custom"));
+      },
+      (c) => expect(document.activeElement).toBe(findButton(c, "Keep Claude")),
     ],
   ])("%s", (_, old, next, leave, check) => {
     const { container, revalidate } = renderPage({ task: { packet: old } });

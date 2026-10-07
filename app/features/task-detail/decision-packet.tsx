@@ -1,4 +1,4 @@
-import { useRef, useState, type ReactNode } from "react";
+import { useLayoutEffect, useRef, useState, type ReactNode } from "react";
 import { PACKET_NOTE_MAX, type PacketOptionKind } from "~/schemas/task-file.schema";
 import { isRepositoryOptionKind } from "~/shared/repository-ask";
 import type { PacketRender } from "~/shared/mapping/task.server";
@@ -1201,6 +1201,19 @@ export function DecisionPacket({
   // Roving tabindex: with nothing chosen yet, the first choice is the group's
   // one tab stop (APG radio group).
   const tabStop = noChoice ? 0 : sel;
+  // F10-09: a re-seed can itself take away the control that held focus (the
+  // directive box, an option past the replacement's last), and focus then
+  // falls to <body>, where keys neither reach the card nor scroll `.detail`
+  // (G7). Hand it to the replacement's tab stop before paint: only after a
+  // re-seed, and only from <body>, so focus the re-seed kept stays put.
+  const focusSeed = useRef(seededFrom);
+  useLayoutEffect(() => {
+    if (focusSeed.current === seededFrom) return;
+    focusSeed.current = seededFrom;
+    if (document.activeElement === document.body) {
+      optionRefs.current[tabStop]?.focus({ preventScroll: true });
+    }
+  }, [seededFrom, tabStop]);
   // F20-17/F20-18: is EVERY option above this viewer's tier? Only meaningful
   // when they can resolve at all (a contributor-OWNER — the owner exception let
   // them open the card, but each option re-checks a higher tier). A single
