@@ -2131,10 +2131,16 @@ export function RepoPanel({
   // unmounts it.
   const [changeDone, setChangeDone] = useState(false);
   const settled = useRef<unknown>(changeResult);
+  // repoFetcher also carries branch cleanup, the scope re-check and Remove,
+  // and their ok must not close a dialog opened while they ran. The dialog's
+  // primary is disabled while busy, so its change goes out on an idle fetcher
+  // and the next new result is that change's answer.
+  const changeSent = useRef(false);
   useEffect(() => {
     if (!changeResult || settled.current === changeResult) return;
     settled.current = changeResult;
-    if (changeResult.ok) setChangeDone(true);
+    if (changeResult.ok && changeSent.current) setChangeDone(true);
+    changeSent.current = false;
   }, [changeResult]);
   return (
     <div className="panel">
@@ -2238,7 +2244,10 @@ export function RepoPanel({
             setChanging(false);
             setChangeDone(false);
           }}
-          onSubmit={onChangeRepo}
+          onSubmit={(next, confirmFootprint) => {
+            changeSent.current = true;
+            onChangeRepo(next, confirmFootprint);
+          }}
         />
       )}
       {removing && repo && (

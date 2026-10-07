@@ -1122,6 +1122,32 @@ describe("RepoPanel", () => {
     expect(unbound).toContain("binds that connection to this project");
   });
 
+  it("the Change dialog closes on its own change's ok, not on another answer of the repository fetcher", () => {
+    // CANARY: drop the changeSent check and the branch cleanup's ok closes the
+    // dialog the admin is typing in, and the typed repository is gone.
+    const onChangeRepo = vi.fn();
+    const { getByText, rerender } = render(
+      repoPanel({ repoBusy: true, inFlight: "set-branch-cleanup", onChangeRepo }),
+    );
+    fireEvent.click(getByText("Change…"));
+    const field = () =>
+      document.querySelector<HTMLInputElement>('input[aria-label="New repository, owner/name"]');
+    fireEvent.change(field()!, { target: { value: "akin-ozer/other" } });
+    const cleanupOk = { ok: true, toast: "Merged task branches will be kept on GitHub" };
+    rerender(repoPanel({ changeResult: cleanupOk, onChangeRepo }));
+    expect(field()?.value).toBe("akin-ozer/other");
+
+    fireEvent.click(getByText("Change repository", { selector: ".confirm-actions button" }));
+    expect(onChangeRepo).toHaveBeenCalledWith("akin-ozer/other", false);
+    rerender(
+      repoPanel({ repoBusy: true, inFlight: "change-repo", changeResult: cleanupOk, onChangeRepo }),
+    );
+    rerender(
+      repoPanel({ changeResult: { ok: true, toast: "Repository changed" }, onChangeRepo }),
+    );
+    expect(field()).toBeNull();
+  });
+
   it("a configured credential offers Rotate + a confirmed Remove (finding #13)", () => {
     const onSet = vi.fn();
     const onClear = vi.fn();
