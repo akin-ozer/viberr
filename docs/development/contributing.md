@@ -117,9 +117,9 @@ goes into that entry's DDL, a hand-kept copy that a root older than the table is
 `widenNotificationKindCheck` and `ensureBackendAccountsTable` do) or a re-baseline. Those two
 rebuilds are safe because no other table references theirs; a table others reference must
 be rebuilt with `PRAGMA foreign_keys = OFF` set before its transaction, or `DROP TABLE` first
-deletes its rows, which cascades into or is refused by the tables that reference it; listing a CHECK over an enum the build
-derives into in `projectionCheckGaps` (`app/server/boot.server.ts`) only makes boot name the
-gap. Recreating your local `state/projection.sqlite` hides a missing entry. The boot WARN `projection schema drift` names only a column
+deletes its rows, which cascades into or is refused by the tables that reference it; listing a CHECK over an enum the build derives into in `projectionCheckGaps`
+(`app/server/boot.server.ts`) only makes boot name the gap, and only for a CHECK written as
+`<col> TEXT NOT NULL CHECK (<col> IN (...))`, the one shape its `checkListGaps` reads. Recreating your local `state/projection.sqlite` hides a missing entry. The boot WARN `projection schema drift` names only a column
 `task_projections` / `task_events` lacks and a value one of the four CHECKs
 `projectionCheckGaps` reads refuses, and any other lag is silent; a missing column can be
 closed with `ALTER TABLE <table> ADD COLUMN <column>`. Recreating the file also drops the
