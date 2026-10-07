@@ -7,7 +7,7 @@ import {
   SYSTEM_ACTOR,
   type AuditActor,
 } from "~/server/audit/audit-recorder.server";
-import { appOrigin } from "~/server/config/env.server";
+import { publicOrigin } from "~/server/auth/csrf.server";
 import { AppError } from "~/server/errors/app-error.server";
 import { logger } from "~/server/logging/logger.server";
 import {
@@ -88,11 +88,12 @@ export const MCP_OAUTH_CALLBACK_PATH = "/resources/mcp-oauth/callback";
  * The redirect URI this instance registers and sends: its public origin as
  * better-auth derives its own OAuth callbacks — `BETTER_AUTH_URL` when set
  * (required behind a reverse proxy, where the request's own origin is the
- * proxy's upstream), else the origin the request arrived on, which is also
- * how the Sign-in & SSO card computes the callback it shows (R19-16).
+ * proxy's upstream), else the origin the request arrived on. `publicOrigin`
+ * is the one definition; the Sign-in & SSO card's callback uses it too
+ * (R19-16, ruling 683).
  */
 export function mcpOAuthRedirectUri(request: Request): string {
-  return `${appOrigin() ?? new URL(request.url).origin}${MCP_OAUTH_CALLBACK_PATH}`;
+  return `${publicOrigin(request)}${MCP_OAUTH_CALLBACK_PATH}`;
 }
 
 /** A token this close to its expiry is renewed before it is sent. */

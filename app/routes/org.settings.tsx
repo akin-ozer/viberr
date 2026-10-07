@@ -5,7 +5,7 @@ import { countLabel } from "~/shared/text/plural";
 import { z } from "zod";
 import type { Route } from "./+types/org.settings";
 import { OrgSettingsPage } from "~/features/org-settings/org-settings-page";
-import { assertCsrf } from "~/server/auth/csrf.server";
+import { assertCsrf, publicOrigin } from "~/server/auth/csrf.server";
 import { appErrorResponse } from "~/server/auth/form-action.server";
 import { AppError } from "~/server/errors/app-error.server";
 import {
@@ -142,10 +142,12 @@ export async function loader({ request }: Route.LoaderArgs) {
   return {
     view: getOrgSettingsView(getDb()),
     meId: user.id,
-    // R19-16: computed server-side from the request rather than
-    // `window.location`, so the callback URL the card tells an admin to
-    // register is identical in the SSR markup and after hydration.
-    callbackOrigin: new URL(request.url).origin,
+    // R19-16: computed server-side rather than from `window.location`, so the
+    // callback URL the card tells an admin to register is identical in the SSR
+    // markup and after hydration. It is BETTER_AUTH_URL's origin when set,
+    // the one better-auth sends; behind the TLS proxy the request's own origin
+    // is the proxy's plain-HTTP upstream (ruling 683).
+    callbackOrigin: publicOrigin(request),
     // Instance run-concurrency: the configured cap and the live/queued counts,
     // for the admin control below StorageLine.
     runConcurrency: runConcurrencySnapshot(getDb()),
@@ -687,10 +689,7 @@ export async function action({ request }: Route.ActionArgs) {
             // the card tells the admin to register. Google echoes
             // `redirect_uri` back during the probe, so sending the real one
             // keeps the test honest.
-            redirectUri: oauthCallbackUrl(
-              new URL(request.url).origin,
-              provider,
-            ),
+            redirectUri: oauthCallbackUrl(publicOrigin(request), provider),
           },
         );
         recordOAuthVerification(

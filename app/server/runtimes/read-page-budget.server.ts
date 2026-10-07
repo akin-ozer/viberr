@@ -3,20 +3,23 @@
  * whichever backend the run is on.
  *
  * A Codex model in code mode (`tool_mode: code_mode_only` in the CLI's model
- * catalog; gpt-6-luna is one) reaches every tool through one JavaScript `exec`
+ * catalog; in 0.160.1's, every model Viberr offers but gpt-5.5, the default
+ * gpt-6.1-sol among them) reaches every tool through one JavaScript `exec`
  * call, and codex-cli 0.156 cuts what that call prints to the model's
  * `truncation_policy`: 10,000 tokens, counted as UTF-8 bytes / 4, cut from the
- * middle ("…9723 tokens truncated…"). The `tool_output_token_limit` key does
- * not lift it: measured 2026-10-01, a 79 KB print came back cut to 10,000 with
- * the key at 40,000 as without it. So a 48,000-character knowledge-base page
- * arrived with its middle gone and its closing "read on with offset" note
- * intact. Live on aws-cost-calculator AWSC-77 the Cloud Solutions Architect
- * read `mapping.md`'s two pages nine times in fifteen minutes and never saw the
- * rows in the middle of either.
+ * middle ("…9723 tokens truncated…"); 0.160.1's catalog sets the same limit on
+ * every model. The `tool_output_token_limit` key does not lift it: measured
+ * 2026-10-01, a 79 KB print came back cut to 10,000 with the key at 40,000 as
+ * without it. So a 48,000-character knowledge-base page arrived with its
+ * middle gone and its closing "read on with offset" note intact. Live on
+ * aws-cost-calculator AWSC-77 the Cloud Solutions Architect read `mapping.md`'s
+ * two pages nine times in fifteen minutes and never saw the rows in the middle
+ * of either.
  *
  * 32,000 bytes is 8,000 of those tokens, which leaves room for a page's own
  * note and for a print that JSON-escapes it. The Claude CLI refuses an MCP
- * result over 25,000 real tokens (ruling 436), far above this.
+ * result over 25,000 real tokens (ruling 436), far above this. The budget is
+ * not keyed on a model, so a new code-mode model needs no entry here.
  */
 export const READ_PAGE_BYTES = 32_000;
 

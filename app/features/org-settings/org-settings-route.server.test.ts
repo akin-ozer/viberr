@@ -974,6 +974,47 @@ describe("R19-16 sign-in providers, configured in the app", () => {
     expect(login.providers.github).toBe(true);
   });
 
+  // CANARY: build callbackOrigin or the probe's redirectUri from request.url
+  // again and, behind the TLS proxy, the card tells an admin to register, and
+  // Google's probe sends, an http:// callback better-auth never sends; it
+  // sends BETTER_AUTH_URL's (ruling 683).
+  it("shows and probes the callback under BETTER_AUTH_URL's origin, not the request's", async () => {
+    const saved = await postAction(ids.arda, {
+      intent: "oauth-save",
+      provider: "google",
+      clientId: "probe.apps.googleusercontent.com",
+      clientSecret: "google-secret-value",
+    });
+    expect(saved).toMatchObject({ ok: true });
+    // Sign in after the save and before the env changes, so better-auth's
+    // instance, rebuilt for the new provider, keeps the harness's plain cookie
+    // names; only the route sees the public origin. The loader runs first:
+    // the probe's verdict changes the provider row, which rebuilds it again.
+    await app.cookieFor(ids.arda);
+    const probes: { url: string; body: URLSearchParams }[] = [];
+    vi.stubGlobal("fetch", async (url: string | URL, init?: RequestInit) => {
+      probes.push({ url: String(url), body: new URLSearchParams(String(init?.body)) });
+      // Google's answer to a good client pair and a nonsense code.
+      return Response.json({ error: "invalid_grant" }, { status: 400 });
+    });
+    try {
+      const { loaded, tested } = await withEnv(
+        { BETTER_AUTH_URL: "https://viberr.example.com" },
+        async () => ({
+          loaded: await runLoader(ids.arda),
+          tested: await postAction(ids.arda, { intent: "oauth-test", provider: "google" }),
+        }),
+      );
+      expect(loaded.callbackOrigin).toBe("https://viberr.example.com");
+      expect(tested).toMatchObject({ ok: true });
+    } finally {
+      vi.unstubAllGlobals();
+    }
+    expect(probes.map((p) => p.url)).toEqual(["https://oauth2.googleapis.com/token"]);
+    expect(probes[0]!.body.get("redirect_uri")).toBe(
+      "https://viberr.example.com/api/auth/callback/google",
+    );
+  });
 });
 
 

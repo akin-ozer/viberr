@@ -39,6 +39,10 @@ export { BROWSER_MCP_NAME };
  * Containment the server config keeps (deliberate, tested):
  *   - `--isolated`: profile in memory — no cookies/storage surviving a run or
  *     leaking across tasks.
+ *   - `--no-webmcp`: the agent's tool list is the browser's own. Since 0.0.82
+ *     a page's WebMCP registrations are otherwise listed as `webmcp_<tool>`
+ *     tools, and the page writes their names, descriptions and schemas — page
+ *     content in the one place the injection stance below does not reach.
  *   - no `--allow-unrestricted-file-access`: Playwright MCP blocks `file://`
  *     navigation and confines file access to the child's cwd (the run
  *     workspace) by default, so the browser cannot read the data root.
@@ -227,6 +231,9 @@ export function resolveBrowserMcp(input: {
     entry.cli,
     "--headless",
     "--isolated",
+    // 0.0.82 turned WebMCP on by default: tools a page registers become MCP
+    // tools whose names, descriptions and schemas the page writes.
+    "--no-webmcp",
     "--output-dir",
     input.attachmentsDir,
     ...(input.backend === "codex" ? ["--image-responses", "omit"] : []),

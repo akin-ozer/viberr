@@ -123,48 +123,62 @@ const CLAUDE_CURATED: ModelCatalog = {
 
 /** Codex has no account-scoped list endpoint in the TypeScript SDK, so this is
  *  a hand-maintained snapshot of the models the PINNED CLI can run
- *  (`CODEX_SDK_VERIFIED_VERSION`, codex-runtime.server.ts): the catalog JSON
- *  embedded in the `codex` binary (read off 0.153.4), plus the models the
- *  account's server sends only to a new enough client (GPT-6 Sol and Luna,
- *  added with 0.156.0; the CLI caches that list as `models_cache.json` in the
- *  principal's CODEX_HOME, with the `client_version` it was fetched for). Effort values
- *  stay inside the SDK's `ModelReasoningEffort` union, which gained `max`,
- *  `ultra` and `persistent` in 0.149–0.153. `max` is offered per model exactly
- *  where the catalog lists it. `ultra` is NOT offered: the catalog describes it
- *  as "maximum reasoning with automatic task delegation", i.e. the model
- *  spawning its own sub-agents, the orchestration Viberr reserves for the
- *  operator (Claude denies the whole Task family for the same reason).
+ *  (`CODEX_SDK_VERIFIED_VERSION`, codex-runtime.server.ts): every model the
+ *  catalog JSON embedded in the 0.160.1 `codex` binary lists as visible, in its
+ *  priority order. That bundled catalog now carries GPT-6 Sol and Luna, which
+ *  0.156.0 only received from the account's server (they declare
+ *  `minimal_client_version` 0.155.0; the CLI caches the server's list as
+ *  `models_cache.json` in the principal's CODEX_HOME, with the
+ *  `client_version` it was fetched for), and adds GPT-6.1 Sol, the CLI's own
+ *  default since 0.159.1. Its hidden entries (the Daybreak models and
+ *  `codex-auto-review`) are not offered. Effort values stay inside the SDK's
+ *  `ModelReasoningEffort` union, which gained `max`, `ultra` and `persistent`
+ *  in 0.149–0.153. `max` is offered per model exactly where the catalog lists
+ *  it. `ultra` is NOT offered: the catalog describes it as "maximum reasoning
+ *  with automatic task delegation", i.e. the model spawning its own
+ *  sub-agents, the orchestration Viberr reserves for the operator (Claude
+ *  denies the whole Task family for the same reason).
  *  `persistent` is supported by no bundled model. The union's `minimal` is
- *  deliberately not OFFERED either; `resolveCodexReasoningEffort` still accepts
- *  it so a profile that already stored it keeps running on its tier. */
+ *  deliberately not OFFERED either; a profile that already stored it runs on
+ *  `low`, the nearest listed tier (`resolveRunEffort` at run start). */
 const CODEX_EFFORTS = ["low", "medium", "high", "xhigh", "max"] as const;
 /** GPT-5.5's catalog entry stops at `xhigh`. */
 const CODEX_EFFORTS_TO_XHIGH = ["low", "medium", "high", "xhigh"] as const;
 
-// F20-33: Terra is listed FIRST, so it is the fallback default
-// (`defaultModelFor("codex")` = `CODEX_MODELS[0]` — the "default is the first
-// model" invariant). Sol is the flagship, but a ChatGPT-plan Codex account 400s
-// on it ("The 'gpt-5.6-sol' model is not supported when using Codex with a
-// ChatGPT account."), and this fallback is what an operator (or any profile)
-// with no concrete Codex model resolves to — so a fresh operator-on-Codex must
-// land on Terra, the CLI default that actually runs, not Sol. Sol stays offered
-// (a profile can still pick it; F20-4 then marks it unavailable from a real
-// failure) — it is just no longer the default.
+// Ruling 683 (owner, 2026-10-07): GPT-6.1 Sol is listed FIRST, so it is the
+// fallback default (`defaultModelFor("codex")` = `CODEX_MODELS[0]`, the
+// "default is the first model" invariant), which is what an operator, or any
+// profile, with no concrete Codex model resolves to. F20-33 had put Terra
+// there because a ChatGPT-plan Codex account 400'd on the flagship ("The
+// 'gpt-5.6-sol' model is not supported when using Codex with a ChatGPT
+// account."), and a fresh operator on Codex had to land on a model that
+// account actually ran. Whether a ChatGPT-plan account runs gpt-6.1-sol is not
+// verified here. The CLI ships it as its own default, and the bundled
+// catalog's `available_in_plans` names the ChatGPT plans for it, but it names
+// them for gpt-5.6-sol as well. F20-4 still marks a model unavailable from a
+// real failure, so the picker disables it with the provider's reason; the mark
+// does not move this fallback, so a model-less profile on an account that
+// refuses gpt-6.1-sol keeps failing until someone picks a model it runs.
+// The fallback is read at each run start, so a run with no Codex model of its
+// own moves to it at its next run, a resumed thread included: a placeholder (the
+// seed operator's "orchestration runtime"), the other backend's id on a
+// cross-backend retry or pin, an undeployed agent, and an operator run on the
+// backend it is not deployed on. A profile that stores a Codex model keeps it.
+// With no effort stored the run is sent the catalog's `medium` (`startRun`),
+// not the CLI's own default for this model, which is `low`.
 const CODEX_MODELS: CatalogModel[] = [
   {
-    value: "gpt-5.6-terra",
-    displayName: "GPT-5.6 Terra",
-    description:
-      "Balanced everyday workhorse with strong reasoning and tool use.",
+    value: "gpt-6.1-sol",
+    displayName: "GPT-6.1 Sol",
+    description: "Latest workhorse model for coding and everyday work.",
     supportsEffort: true,
     efforts: [...CODEX_EFFORTS],
   },
-  // Codex CLI 0.153 (the SDK 0.153.4 upgrade, 2026-09-06): the catalog's new
-  // headline model — listed first in the CLI's own picker and its bundled
-  // default when no model is configured (0.153.4 hotfix). Offered, NOT the
-  // default: Terra keeps F20-33's reason (a ChatGPT-plan account 400s on
-  // Sol, and Astra's plan availability is unverified here), and F20-4 marks
-  // it unavailable from a real failure exactly as it does Sol.
+  // Codex CLI 0.153 (the SDK 0.153.4 upgrade, 2026-09-06): the catalog's
+  // headline model then, and the CLI's own default from the 0.153.4 hotfix
+  // until 0.159.1 gave that to GPT-6.1 Sol. Offered, never Viberr's default;
+  // its plan availability is unverified here, and F20-4 marks it unavailable
+  // from a real failure as it does any model.
   {
     value: "gpt-6-astra",
     displayName: "GPT-6 Astra",
@@ -173,15 +187,16 @@ const CODEX_MODELS: CatalogModel[] = [
     efforts: [...CODEX_EFFORTS],
   },
   // Codex CLI 0.156.0 (2026-09-23, owner's request): GPT-6 Sol and GPT-6 Luna
-  // are NOT in the binary's bundled catalog. The account's server sends them,
-  // and only to a client at `minimal_client_version` 0.155.0 or later, so
-  // 0.153.4 could never run them. Their levels are the server's: both stop at
-  // `max` here, since `ultra` (Sol's) is the sub-agent tier Viberr never
-  // offers. Offered, NOT the default (F20-33 still holds for the fallback).
+  // declare `minimal_client_version` 0.155.0, so 0.153.4 could never run them.
+  // 0.156.0 got them from the account's server; 0.160.1 bundles them. Both
+  // stop at `max` here: Luna's entry ends there, and Sol's `ultra` is the
+  // sub-agent tier Viberr never offers. GPT-6 Sol's description names its
+  // successor instead of calling it the previous generation, which in this
+  // list already means GPT-5.6.
   {
     value: "gpt-6-sol",
     displayName: "GPT-6 Sol",
-    description: "Workhorse model for coding and everyday work.",
+    description: "Workhorse model for coding and everyday work; GPT-6.1 Sol supersedes it.",
     supportsEffort: true,
     efforts: [...CODEX_EFFORTS],
   },
@@ -197,6 +212,14 @@ const CODEX_MODELS: CatalogModel[] = [
     displayName: "GPT-5.6 Sol",
     description:
       "Previous-generation flagship for complex coding, research, and high-value work.",
+    supportsEffort: true,
+    efforts: [...CODEX_EFFORTS],
+  },
+  // Terra sits at its catalog priority now that F20-33 no longer puts it first.
+  {
+    value: "gpt-5.6-terra",
+    displayName: "GPT-5.6 Terra",
+    description: "Previous-generation balanced model for straightforward work.",
     supportsEffort: true,
     efforts: [...CODEX_EFFORTS],
   },
@@ -219,8 +242,8 @@ const CODEX_MODELS: CatalogModel[] = [
 const CODEX_CURATED: ModelCatalog = {
   models: CODEX_MODELS,
   efforts: [...CODEX_EFFORTS],
-  // Default = the first available model (a changeable starting point). F20-33
-  // put Terra first because Sol 400s on a ChatGPT-plan Codex account.
+  // Default = the first available model (a changeable starting point): GPT-6.1
+  // Sol since ruling 683, see `CODEX_MODELS`.
   defaultModel: CODEX_MODELS[0]!.value,
   defaultEffort: "medium",
 };

@@ -207,8 +207,10 @@ Records from boot, the watchers and the timers, and from a run they started, car
 `requestId`: they name their own ids.
 
 A few answers carry no header: static assets (served before the app sees the request),
-a document form post React Router refuses as cross-origin (a plain `400 Bad Request`,
-whose log record does carry an id), the route manifest, and React Router's last-resort
+a document form post whose `Origin` header is not a URL, which React Router refuses
+before routing (a plain `400 Bad Request`, whose log record does carry an id; a
+cross-origin post gets the app's own 403, which carries the header, ruling 683), the route
+manifest, and React Router's last-resort
 answers (a document it could not render at all). Match those by time, method and path.
 
 ## A task waits on other work (ruling 131)
