@@ -1,4 +1,4 @@
-import { existsSync, readdirSync, statSync } from "node:fs";
+import { existsSync, readdirSync, rmSync, statSync } from "node:fs";
 import path from "node:path";
 import type { DatabaseSync } from "node:sqlite";
 import { taskDir } from "~/server/files/file-store-root.server";
@@ -8,6 +8,7 @@ import {
   listProjects,
   listProjectTasks,
 } from "~/server/projections/board-query.server";
+import { TASK_CAPTURE_INPUT_DIR, TASK_CAPTURE_SCRATCH_DIR } from "~/server/runtimes/agent-isolation.server";
 import { removeAgentTreeSync } from "~/server/runtimes/agent-trees.server";
 import { toError } from "~/shared/errors";
 import { taskWorkspaceLaunch } from "./workspace-git.server";
@@ -102,29 +103,52 @@ export function reclaimTerminalTaskWorkspaces(
 
     for (const task of listProjectTasks(db, project.slug)) {
       if (task.stage !== terminalStageId) continue;
-      const workspace = path.join(
-        taskDir(project.slug, task.key, options.dataRoot),
-        "workspace",
-      );
-      if (!existsSync(workspace)) continue;
-      const size = dirSize(workspace);
-      try {
-        // Ruling 485: the workspace is the agents' — a tool they ran can leave
-        // directories only its uid can enter — so it goes as the task's person
-        // (synchronously: nothing may start in it while it is going). With
-        // isolation on and no owner this refuses and the workspace stays.
-        removeAgentTreeSync(
-          workspace,
-          taskWorkspaceLaunch(db, { projectSlug: project.slug, taskKey: task.key, dataRoot: options.dataRoot }),
-        );
-        removed += 1;
-        bytes += size;
-      } catch (error) {
-        logger.warn("could not reclaim a finished task's workspace", {
-          projectSlug: project.slug,
-          taskKey: task.key,
-          err: toError(error),
-        });
+      const dir = taskDir(project.slug, task.key, options.dataRoot);
+      const workspace = path.join(dir, "workspace");
+      // Ruling 691: the page renderer's scratch is beside the workspace, in
+      // the task's own directory. What a render or a run that a restart cut
+      // short left there is reclaimed the same way; it is no workspace and is
+      // not counted as one.
+      for (const tree of [workspace, path.join(dir, TASK_CAPTURE_SCRATCH_DIR)]) {
+        if (!existsSync(tree)) continue;
+        const size = dirSize(tree);
+        try {
+          // Ruling 485: the tree is the agents' (a tool they ran can leave
+          // directories only its uid can enter), so it goes as the task's
+          // person (synchronously: nothing may start in it while it is
+          // going). With isolation on and no owner this refuses and it stays.
+          removeAgentTreeSync(
+            tree,
+            taskWorkspaceLaunch(db, { projectSlug: project.slug, taskKey: task.key, dataRoot: options.dataRoot }),
+          );
+          if (tree === workspace) removed += 1;
+          bytes += size;
+        } catch (error) {
+          logger.warn("could not reclaim a finished task's workspace", {
+            projectSlug: project.slug,
+            taskKey: task.key,
+            tree: path.basename(tree),
+            err: toError(error),
+          });
+        }
+      }
+      // Ruling 691: the copy of a kept delivery a cut render was reading is
+      // the server's own folder (no agent can write in it), so the server
+      // removes it itself. Nothing else comes to a closed task to do it.
+      const carried = path.join(dir, TASK_CAPTURE_INPUT_DIR);
+      if (existsSync(carried)) {
+        const size = dirSize(carried);
+        try {
+          rmSync(carried, { recursive: true, force: true });
+          bytes += size;
+        } catch (error) {
+          logger.warn("could not reclaim a finished task's workspace", {
+            projectSlug: project.slug,
+            taskKey: task.key,
+            tree: TASK_CAPTURE_INPUT_DIR,
+            err: toError(error),
+          });
+        }
       }
     }
   }

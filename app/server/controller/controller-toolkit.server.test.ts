@@ -398,6 +398,55 @@ describe("list_decisions briefs the person and decides nothing (ruling 251)", ()
     }
   });
 
+  it("ruling 690: read_task_source lists and opens a task's kept sources for a member, and tells a non-member the project is not visible", async () => {
+    // The controller is who a person asks where a figure came from, and it
+    // answers under that person's membership. CANARY: drop `requireVisible`
+    // from the tool and a signed-in person who is no member of the project
+    // reads the titles, origins and bytes of what its agents kept; drop
+    // `args.id` on the way to the reader and an id is answered with the list.
+    const { taskSourcesDir, writeTaskSource } = await import("~/server/files/task-sources.server");
+    try {
+      writeTaskSource(
+        SLUG,
+        "VIB-148",
+        {
+          name: "ec2-pricing.html",
+          data: Buffer.from("<html>t3.medium $0.0416 per hour</html>"),
+          title: "AWS EC2 on-demand pricing",
+          from: "https://aws.amazon.com/ec2/pricing/on-demand/",
+          by: { backend: "claude", profileId: "developer", roleHint: "Implementation" },
+          runId: "run_build",
+        },
+        app.dataRoot,
+      );
+      const list = z
+        .object({ task: z.string(), kept: z.number(), text: z.string() })
+        .parse(JSON.parse(await call(ids.viewer, "read_task_source", { taskKey: "VIB-148" })));
+      expect(list).toMatchObject({ task: "VIB-148", kept: 1 });
+      expect(list.text).toContain("S1 · ec2-pricing.html · 39 bytes");
+      expect(list.text).toContain("from: https://aws.amazon.com/ec2/pricing/on-demand/");
+      const one = z
+        .object({ id: z.string(), title: z.string(), text: z.string() })
+        .parse(JSON.parse(await call(ids.viewer, "read_task_source", { taskKey: "VIB-148", id: "S1" })));
+      expect(one).toEqual({
+        id: "S1",
+        title: "AWS EC2 on-demand pricing",
+        text: "<html>t3.medium $0.0416 per hour</html>",
+      });
+
+      // R15-4: the same sentence an unknown slug gets, before the task is read.
+      const asks: Record<string, JsonValue>[] = [{ taskKey: "VIB-148" }, { taskKey: "VIB-148", id: "S1" }];
+      for (const args of asks) {
+        const denied = await call(ids.nonMember, "read_task_source", args);
+        expect(denied).toContain(`No project "${SLUG}" is visible to you`);
+        expect(denied).not.toContain("ec2-pricing");
+        expect(denied).not.toContain("t3.medium");
+      }
+    } finally {
+      rmSync(taskSourcesDir(SLUG, "VIB-148", app.dataRoot), { recursive: true, force: true });
+    }
+  });
+
   /**
    * Ruling 300 (pass 37, F37-135). The controller read three cards and worked
    * out by hand, across two turns, that five tasks sat behind them: "the one
@@ -5825,5 +5874,161 @@ describe("ruling 573: read_message_file", () => {
     // sent now under the composed name sits beside the old one as its twin.
     const second = send(composed, "host,cpu\nvm-2,8\n");
     expect((second.files ?? []).map((f) => f.name)).toEqual(["Müşteri Envanteri-2.csv"]);
+  });
+});
+
+/**
+ * Ruling 693: the controller reads what a task took on `get_task`, with who
+ * spent it, and asks `list_tasks` for the run part of every task of a board
+ * when it wants to rank one. What the figure counts is
+ * `what-it-took.server.test.ts`'s; this owns the two replies.
+ */
+describe("ruling 693: the controller's read of what a task took", () => {
+  async function ran(
+    id: string,
+    projectSlug: string,
+    taskKey: string,
+    agent: { kind: "primary" | "reviewer"; profile: string; name: string; backend: "claude" | "codex" },
+    minutes: number,
+    totalCostUsd: number | null,
+  ): Promise<void> {
+    const { upsertRun } = await import("~/server/runtimes/run-store.server");
+    upsertRun(app.db, {
+      id,
+      projectSlug,
+      taskKey,
+      threadId: `th-${id}`,
+      role: agent.name,
+      kind: agent.kind,
+      backend: agent.backend,
+      model: "sonnet",
+      sdk: "test",
+      agentName: agent.name,
+      agentProfileId: agent.profile,
+      state: "finished",
+      startedAt: "2026-09-27T09:00:00.000Z",
+      finishedAt: `2026-09-27T09:${String(minutes).padStart(2, "0")}:00.000Z`,
+      totalCostUsd,
+    });
+  }
+  const DEVELOPER = { kind: "primary", profile: "developer", name: "Developer", backend: "claude" } as const;
+  const REVIEWER = { kind: "reviewer", profile: "reviewer", name: "Reviewer", backend: "claude" } as const;
+
+  it("ruling 693: get_task says what a task took and who spent it, and list_tasks carries the run part for every task when it is asked for", async () => {
+    // CANARY: (a) hand `runTotalsLine` every run of the project instead of
+    // the task's own and each row reads the board's total; (b) print an
+    // unreported cost as `$0.00` in `runTotalsLine` and a task only Codex ran
+    // reads as free, not unknown; (c) drop `...took` from the `get_task`
+    // reply and the controller is told nothing; (d) read the run rows and
+    // set the key whether or not the call asked (drop the `withWhatItTook`
+    // condition) and every listing pays for a figure most turns never read.
+    // VIB-153: the developer ran twice and a reviewer once. VIB-166: Codex
+    // ran once. VIB-168: nobody ran.
+    await ran("run_took_ctl_1", SLUG, "VIB-153", DEVELOPER, 20, 1);
+    await ran("run_took_ctl_2", SLUG, "VIB-153", DEVELOPER, 5, 0.25);
+    await ran("run_took_ctl_3", SLUG, "VIB-153", REVIEWER, 10, 0.5);
+    await ran("run_took_ctl_4", SLUG, "VIB-166", { ...DEVELOPER, backend: "codex" }, 10, null);
+
+    // SAFETY: `get_task` answers `json({ ..., whatItTook })`; the fields read
+    // here are the ones `TaskTook` declares, and a reply without the key fails
+    // the first assertion.
+    const read = JSON.parse(await call(ids.contributor, "get_task", { taskKey: "VIB-153" })) as {
+      whatItTook?: {
+        runs: { total: number; agentMinutes: number };
+        cost: { usd: number | null };
+        byAgent: { agent: string; profileId: string; role: string; runs: number; agentMinutes: number; costUsd: number | null }[];
+        moreAgents: number;
+      };
+    };
+    expect(read.whatItTook?.runs).toMatchObject({ total: 3, agentMinutes: 35 });
+    expect(read.whatItTook?.cost.usd).toBe(1.75);
+    expect(read.whatItTook?.byAgent).toEqual([
+      { agent: "Developer", profileId: "developer", role: "delivering", runs: 2, agentMinutes: 25, costUsd: 1.25 },
+      { agent: "Reviewer", profileId: "reviewer", role: "supporting", runs: 1, agentMinutes: 10, costUsd: 0.5 },
+    ]);
+    expect(read.whatItTook?.moreAgents).toBe(0);
+
+    type Listed = { key: string; whatItTook?: string }[];
+    // SAFETY: `list_tasks` answers `json(rows.map(...))`, each row with its
+    // key and, when asked for, the run part on one line (the tool's own
+    // mapping).
+    const ranked = JSON.parse(await call(ids.contributor, "list_tasks", { withWhatItTook: true })) as Listed;
+    const row = (key: string) => ranked.find((t) => t.key === key)!;
+    expect(row("VIB-153").whatItTook).toBe("3 runs, 35 min, $1.75");
+    expect(row("VIB-166").whatItTook).toBe("1 run, 10 min, cost not reported");
+    // A task no run started on carries nothing: no key, not a line of zeros.
+    expect("whatItTook" in row("VIB-168")).toBe(false);
+    // And a listing that did not ask carries the figure on no row.
+    // SAFETY: the same tool's reply, in the same shape.
+    const plain = JSON.parse(await call(ids.contributor, "list_tasks", {})) as Listed;
+    expect(plain.map((t) => t.key)).toEqual(ranked.map((t) => t.key));
+    expect(plain.filter((t) => "whatItTook" in t)).toEqual([]);
+
+    // A run still going adds no minutes and may yet report a cost, and the
+    // line says so. CANARY: print the three numbers alone and a task three
+    // hours into its only run reads "1 run, 0 min, cost not reported", the
+    // cheapest on the board.
+    const { upsertRun } = await import("~/server/runtimes/run-store.server");
+    upsertRun(app.db, {
+      id: "run_took_ctl_live",
+      projectSlug: SLUG,
+      taskKey: "VIB-168",
+      threadId: "th-run_took_ctl_live",
+      role: DEVELOPER.name,
+      kind: DEVELOPER.kind,
+      backend: DEVELOPER.backend,
+      model: "sonnet",
+      sdk: "test",
+      agentName: DEVELOPER.name,
+      agentProfileId: DEVELOPER.profile,
+      state: "running",
+      startedAt: "2026-09-27T09:00:00.000Z",
+    });
+    // SAFETY: the same tool's reply, in the same shape.
+    const going = JSON.parse(await call(ids.contributor, "list_tasks", { withWhatItTook: true })) as Listed;
+    expect(going.find((t) => t.key === "VIB-168")?.whatItTook).toBe(
+      "1 run, 0 min, cost not reported (1 still going: not in the minutes)",
+    );
+  });
+
+  it("ruling 693: a board of 150 tasks is listed whole with what each task took", async () => {
+    // CANARY: carry the run part as the three-number object it first was
+    // (`{ runs, agentMinutes, costUsd }`, five lines a row at the reply's
+    // indent) and this board's listing passes what a turn carries: its first
+    // line reads "[cut] This reply is ..." and its last tasks are missing
+    // (ruling 677). The board is the shape of the one that showed it: 150
+    // tasks with titles of 57 characters, an epic and an owner each.
+    const { readProjectFile } = await import("~/server/files/project-writer.server");
+    const { rebuildProject } = await import("~/server/projections/rebuilder.server");
+    const { baseTaskFrontmatter, writeProject, writeTask } = await import("../../../test-support/test-store");
+    const core = readProjectFile({ projectSlug: SLUG, dataRoot: app.dataRoot })!.parsed.frontmatter;
+    const board = "cloud-estimates";
+    writeProject(app.dataRoot, { ...core, name: "Cloud Estimates", slug: board, taskPrefix: "EST", repo: null });
+    const keys = Array.from({ length: 150 }, (_, i) => `EST-${i + 1}`);
+    for (const [i, key] of keys.entries()) {
+      writeTask(app.dataRoot, board, {
+        frontmatter: baseTaskFrontmatter(key, {
+          title: `Estimate the monthly cost of workload ${String(i + 1).padStart(3, "0")} in eu-central-1`,
+          stage: core.stages[core.stages.length - 1]!.id,
+          readiness: "ready",
+          waiting: "none",
+          epic: "epic-10",
+          ownerUserId: ids.contributor,
+        }),
+      });
+    }
+    rebuildProject(app.db, board, { dataRoot: app.dataRoot });
+    for (const [i, key] of keys.entries()) {
+      await ran(`run_took_est_${i}`, board, key, DEVELOPER, 12 + (i % 40), 1.25 + i / 100);
+    }
+
+    const reply = await call(ids.contributor, "list_tasks", { withWhatItTook: true }, board);
+    expect(reply.startsWith("[cut]")).toBe(false);
+    // SAFETY: an uncut reply is the tool's own JSON array, as above.
+    const listed = JSON.parse(reply) as { key: string; title: string; whatItTook?: string }[];
+    expect(listed).toHaveLength(150);
+    expect(listed.every((t) => t.title.length === 57)).toBe(true);
+    const last = listed.find((t) => t.key === "EST-150")!;
+    expect(last.whatItTook).toBe("1 run, 41 min, $2.74");
   });
 });

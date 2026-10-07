@@ -6,7 +6,7 @@ import {
   getConversation,
   getMessageFile,
 } from "~/server/controller/controller-conversations.server";
-import { attachmentContentType, attachmentDisposition } from "~/server/files/task-attachments.server";
+import { servedFileResponse } from "~/server/files/task-attachments.server";
 
 /**
  * GET /resources/controller-file/:id — one file a person sent with a controller
@@ -16,7 +16,7 @@ import { attachmentContentType, attachmentDisposition } from "~/server/files/tas
  * who may read the transcript (`canAccessConversation`). Anyone else, and a
  * file that does not exist, gets the same 404, as a conversation does.
  *
- * Served the way a task attachment is (`task-attachment.ts`): `nosniff`, a
+ * Served the way a task attachment is (`servedFileResponse`): `nosniff`, a
  * sandbox CSP, only the whitelisted kinds inline, and `?download=1` for the
  * save dialog. The name rides the header twice: an ASCII fallback, and the
  * whole name in RFC 5987's `filename*`, since a header refuses characters past
@@ -30,16 +30,5 @@ export async function loader({ request, params }: Route.LoaderArgs) {
   if (!file || !conversation || !canAccessConversation(db, conversation, { userId: user.id, orgRole: user.role })) {
     return new Response("Not found", { status: 404 });
   }
-  const { type, inline } = attachmentContentType(file.name);
-  const forceDownload = new URL(request.url).searchParams.get("download") === "1";
-  return new Response(new Uint8Array(file.data), {
-    headers: {
-      "content-type": type,
-      "content-length": String(file.data.length),
-      "content-disposition": attachmentDisposition(file.name, inline && !forceDownload),
-      "x-content-type-options": "nosniff",
-      "content-security-policy": "sandbox; default-src 'none'",
-      "cache-control": "private, max-age=300",
-    },
-  });
+  return servedFileResponse(request, file.name, file.data);
 }

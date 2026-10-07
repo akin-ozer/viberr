@@ -487,6 +487,46 @@ describe("attachment lightbox (image evidence opens a popup, not a tab)", () => 
     expect(original.getAttribute("href")).toBe(`${BASE}/shot.png`);
   });
 
+  it("a page capture opens at the page's width in a scroller the keyboard reaches", () => {
+    // Ruling 691: Viberr's picture of a delivered page is the whole page, up
+    // to six screens tall; fitted to the popup's height it cannot be read.
+    // CANARY: render a capture through the plain image branch and there is no
+    // region to focus, so a keyboard cannot scroll the page.
+    const capture: TimelineEventRender = {
+      ...ev("Viberr rendered `post.html` as a reader sees it."),
+      attachments: ["post.html.capture-phone.png", "shot.png", "post.html.capture-desktop.png"],
+    };
+    const { container, baseElement } = render(
+      <AttachmentLightboxProvider>
+        <TimelineItem ev={capture} attachmentsBase={BASE} />
+      </AttachmentLightboxProvider>,
+    );
+    const [captureTile, plainTile, desktopTile] = container.querySelectorAll(".tl-attach-thumb");
+    fireEvent.click(captureTile!);
+    const scroller = within(baseElement.querySelector<HTMLElement>(DIALOG)!).getByRole("region", {
+      name: "Picture of post.html",
+    });
+    expect(scroller.className).toBe("lightbox-shot");
+    expect(scroller.tabIndex).toBe(0);
+    expect(scroller.querySelector("img.lightbox-img")!.getAttribute("src")).toBe(
+      `${BASE}/post.html.capture-phone.png`,
+    );
+    // Any other picture is fitted to the popup, as before.
+    fireEvent.click(baseElement.querySelector(`${DIALOG} button[aria-label="Close"]`)!);
+    fireEvent.click(plainTile!);
+    const dialog = baseElement.querySelector<HTMLElement>(DIALOG)!;
+    expect(dialog.querySelector("img.lightbox-img")!.getAttribute("src")).toBe(`${BASE}/shot.png`);
+    expect(within(dialog).queryByRole("region")).toBeNull();
+    expect(dialog.classList.contains("page")).toBe(false);
+    // The desktop picture's card takes the page's width; left to its content,
+    // the card is never wider than half the window.
+    fireEvent.click(baseElement.querySelector(`${DIALOG} button[aria-label="Close"]`)!);
+    fireEvent.click(desktopTile!);
+    const wide = baseElement.querySelector<HTMLElement>(DIALOG)!;
+    expect(within(wide).getByRole("region", { name: "Picture of post.html" })).toBeTruthy();
+    expect(wide.classList.contains("page")).toBe(true);
+  });
+
   it("a modified click (new-tab intent) does NOT intercept", () => {
     const { container, baseElement } = render(
       <AttachmentLightboxProvider>

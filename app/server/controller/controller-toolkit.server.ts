@@ -18,7 +18,7 @@ import {
 } from "~/server/files/skill-body.server";
 import { resolveControllerConfig } from "./controller-profile.server";
 import { sortedNames } from "~/server/runtimes/prompt-prefix.server";
-import { readTimelineEntry } from "~/server/tasks/board-read.server";
+import { readAgentTaskSource, readTimelineEntry } from "~/server/tasks/board-read.server";
 import {
   attachmentImageHeader,
   listTaskAttachments,
@@ -26,7 +26,11 @@ import {
   readTaskAttachment,
 } from "~/server/files/task-attachments.server";
 import { keptDeliveryMiss, listKeptDeliveries } from "~/server/files/kept-deliveries.server";
-import { READ_TASK_ATTACHMENT_FIELDS } from "~/server/mcp-proxy/board-tool.server";
+import {
+  READ_TASK_ATTACHMENT_FIELDS,
+  READ_TASK_SOURCE_DESCRIPTION,
+  READ_TASK_SOURCE_FIELDS,
+} from "~/server/mcp-proxy/board-tool.server";
 import { findMessageFile, listConversationFileNames } from "./controller-conversations.server";
 import { BACKEND_LABEL } from "~/shared/text/backend-label";
 import { countLabel } from "~/shared/text/plural";
@@ -274,7 +278,10 @@ import {
   NotVisibleError,
   notVisible,
 } from "./controller-tool-guards.server";
-import { errorMessage } from "~/shared/errors";
+import { errorMessage, toError } from "~/shared/errors";
+import { logger } from "~/server/logging/logger.server";
+import { listTookRowsForProject, type ProjectTookRunRow } from "~/server/runtimes/run-store.server";
+import { runTotalsLine, type TaskTook, whatItTookFor } from "~/server/tasks/what-it-took.server";
 
 /**
  * The controller's in-process toolkit (ruling 99) — a Claude Agent SDK MCP
@@ -472,6 +479,38 @@ interface SkillSizeAsHeld extends SkillBodySize {
  *  naming the count and both ways to reach them. */
 interface TimelineWindowNote {
   timelineOlder?: string;
+}
+
+/** Ruling 693: what the task took on a `get_task` reply, left out only when
+ *  its read failed. */
+interface TookNote {
+  whatItTook?: TaskTook;
+}
+
+/** What `list_tasks` takes. */
+interface ListTasksArgs {
+  projectSlug?: string;
+  stageId?: string;
+  epicId?: string;
+  includeArchived?: boolean;
+  withWhatItTook?: boolean;
+}
+
+/** One row of `list_tasks`. */
+interface ListedTask {
+  key: string;
+  title: string;
+  stage: string;
+  readiness: string;
+  waiting: string;
+  owner: string | null;
+  priority: string;
+  archived: boolean;
+  epic: string | null;
+  waitsOn: string[];
+  /** Ruling 693: the run part on one line (`runTotalsLine`), only when the
+   *  call asked for it and a run started on the task. */
+  whatItTook?: string;
 }
 
 /**
@@ -2011,7 +2050,7 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
   add(
     tool(
       "inspect_run_analytics",
-      "Agent-run analytics. Org admins only, optionally scoped to one project. Ruling 635: run figures are PER BACKEND and never summed across backends, because Claude and Codex do not measure alike: only Claude reports a cost, a Codex token and a Claude token are different models' tokens, and Codex reports no cache write. `runs.<backend>` holds each backend's totals, outcomes, coordination share and breakdowns by run kind, project, model, agent PROFILE and TASK; pass `backend` for one. Each is weighed in its `measure`: `cost` where the backend reported one, else `tokens`. `byProfile` answers which reviewer earns its runs, which `byKind` cannot because every reviewer is one kind; `byTask` answers what one task cost across its rework rounds, labelled `project/task` unless you scope to a project. Every breakdown is a WINDOW: `hidden`, `hiddenRuns`, `hiddenCost` and `hiddenTokens` give the groups the cap dropped, so eight of thirty never reads as thirty. A null cost or token figure means UNKNOWN, never zero. `oversight` (owner clarity, branch and PR traceability, decision waits, time to review, long timelines) is the instance's own record and covers every backend.",
+      "Agent-run analytics. Org admins only, optionally scoped to one project. Ruling 635: run figures are PER BACKEND and never summed across backends, because Claude and Codex do not measure alike: only Claude reports a cost, a Codex token and a Claude token are different models' tokens, and Codex reports no cache write. `runs.<backend>` holds each backend's totals, outcomes, coordination share and breakdowns by run kind, project, model, agent PROFILE and TASK; pass `backend` for one. Each is weighed in its `measure`: `cost` where the backend reported one, else `tokens`. `byProfile` answers which reviewer earns its runs, which `byKind` cannot because every reviewer is one kind; `byTask` answers what one task cost across its rework rounds, labelled `project/task` unless you scope to a project. Every breakdown is a WINDOW: `hidden`, `hiddenRuns`, `hiddenCost` and `hiddenTokens` give the groups the cap dropped, so eight of thirty never reads as thirty. A null cost or token figure means UNKNOWN, never zero. `oversight` (owner clarity, branch and PR traceability, decision waits, time to review, long timelines) is the instance's own record and covers every backend. For ONE task's whole figure across backends, read `get_task`'s `whatItTook`; `list_tasks` with `withWhatItTook: true` carries the run part for each task a run started on, and needs no org admin.",
       {
         projectSlug: z.string().optional(),
         backend: z.enum(["claude", "codex"]).optional(),
@@ -2423,7 +2462,7 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
   add(
     tool(
       "list_tasks",
-      "A project's tasks: key, title, stage, readiness, waiting, owner, priority, the epic each is in (ruling 503), and what each waits on (`waitsOn`, ruling 131). Membership gated. Includes Done; archived only when asked.",
+      "A project's tasks: key, title, stage, readiness, waiting, owner, priority, the epic each is in (ruling 503), and what each waits on (`waitsOn`, ruling 131). Membership gated. Includes Done; archived only when asked. Pass `withWhatItTook: true` to rank a board by what its tasks cost (ruling 693): each task a run started on then carries `whatItTook`, one line with the runs that started, their agent minutes and the dollars they reported (`cost not reported` when no run reported one, which is unknown and never zero), a run still going or cut by a restart is named and adds no minutes, and a task without the key has no run on record. `get_task` has one task's whole figure: its questions, send-backs and wall time. The listing has no pages: a reply too long for a turn is cut and its first line says so, and `stageId` or `epicId` narrows it.",
       {
         projectSlug: z.string().optional(),
         stageId: z.string().optional().describe("Filter to one stage."),
@@ -2432,8 +2471,12 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
           .optional()
           .describe('Filter to one epic (epic-3), or "none" for the tasks in no epic.'),
         includeArchived: z.boolean().optional(),
+        withWhatItTook: z
+          .boolean()
+          .optional()
+          .describe("Add each task's runs, agent minutes and reported dollars, on one line."),
       },
-      runWith((args: { projectSlug?: string; stageId?: string; epicId?: string; includeArchived?: boolean }) => {
+      runWith((args: ListTasksArgs) => {
         const slug = slugOf(args.projectSlug);
         requireVisible(slug, "read this project's tasks");
         const listOpts: NonNullable<Parameters<typeof listProjectTasks>[2]> = {
@@ -2445,20 +2488,38 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
         const rows = listProjectTasks(db, slug, listOpts).filter(
           (t) => !args.stageId || t.stage === args.stageId,
         );
+        // Ruling 693: the run part of what each task took, when it is asked
+        // for, from one read of the project's run rows grouped by task. The
+        // whole board answers in one reply with no pages, so the figure is
+        // one line and only on a task a run started on: as an object on
+        // every row it cut the reply a quarter sooner (ruling 677).
+        const runsByTask = new Map<string, ProjectTookRunRow[]>();
+        if (args.withWhatItTook) {
+          for (const run of listTookRowsForProject(db, slug)) {
+            const ofTask = runsByTask.get(run.task_key);
+            if (ofTask) ofTask.push(run);
+            else runsByTask.set(run.task_key, [run]);
+          }
+        }
         return json(
-          rows.map((t) => ({
-            key: t.key,
-            title: t.title,
-            stage: t.stage,
-            readiness: t.readiness,
-            waiting: t.waiting,
-            owner: t.owner?.name ?? null,
-            priority: t.priority,
-            archived: t.archived,
-            epic: t.epicId ?? null,
-            // Ruling 131: what the task waits on, each entry with its live state.
-            waitsOn: t.blockedBy.map((e) => `${e.label} (${e.state})`),
-          })),
+          rows.map((t) => {
+            const row: ListedTask = {
+              key: t.key,
+              title: t.title,
+              stage: t.stage,
+              readiness: t.readiness,
+              waiting: t.waiting,
+              owner: t.owner?.name ?? null,
+              priority: t.priority,
+              archived: t.archived,
+              epic: t.epicId ?? null,
+              // Ruling 131: what the task waits on, each entry with its live state.
+              waitsOn: t.blockedBy.map((e) => `${e.label} (${e.state})`),
+            };
+            const took = runTotalsLine(runsByTask.get(t.key) ?? []);
+            if (took !== null) row.whatItTook = took;
+            return row;
+          }),
         );
       }),
     ),
@@ -2468,7 +2529,7 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
   add(
     tool(
       "get_task",
-      "One task's live state: stage, readiness, goal text, engaged agents, PR state, open packet, its pending schedules (`schedules`, ruling 153), the files deliveries it kept as each was delivered (`deliveries`, ruling 597), plus the newest timeline events. Membership gated. Historical (Done, archived) tasks read the same way.",
+      "One task's live state: stage, readiness, goal text, engaged agents, PR state, open packet, its pending schedules (`schedules`, ruling 153), the files deliveries it kept as each was delivered (`deliveries`, ruling 597), plus the newest timeline events. Membership gated. Historical (Done, archived) tasks read the same way. `whatItTook` (ruling 693): what the task cost, derived when read: runs that started and their agent minutes, dollars where runs reported a cost (null means none reported, never zero), rounds a person was asked, times the work was sent back by reviewers and by people, wall time to first delivery and to acceptance with the share agents ran and the share it waited on a person, `byAgent` for who spent it, and `notes` for what the figure misses. The task's Result card prints the same `facts`.",
       {
         projectSlug: z.string().optional(),
         taskKey: z.string().optional().describe("Defaults to this conversation's task."),
@@ -2557,6 +2618,19 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
             workRevision: null,
           },
         );
+        // Ruling 693: what the task took. A read of what a task cost never
+        // fails the read of the task, so a throw leaves the key out.
+        const took: TookNote = {};
+        try {
+          const figure = whatItTookFor(db, { projectSlug: slug, taskKey: key, dataRoot });
+          if (figure) took.whatItTook = figure;
+        } catch (error) {
+          logger.warn("ruling 693 what-it-took read failed", {
+            projectSlug: slug,
+            taskKey: key,
+            err: toError(error),
+          });
+        }
         return json({
           task: {
             ...task,
@@ -2581,6 +2655,7 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
           // Ruling 597: the files deliveries, as each was delivered, which
           // `read_task_attachment` opens with `delivery`.
           deliveries: listKeptDeliveries(slug, key, dataRoot),
+          ...took,
           // Ruling 302, extended to the sibling it was first written without.
           // It fixed the OPERATOR's window and left this one, which is the
           // defect shape ruling 292's own comment had already named inside
@@ -2644,6 +2719,32 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
       }),
     ),
     "read_task_attachment",
+  );
+
+  // Ruling 690: the sources a task keeps. The controller is the actor a
+  // person asks "where does that figure come from?", and a result's claims
+  // are checked against what its runs kept, not against the page today. The
+  // reader every agent's `read_task_source` calls, behind this toolkit's own
+  // membership gate.
+  add(
+    tool(
+      "read_task_source",
+      `${READ_TASK_SOURCE_DESCRIPTION} Membership gated.`,
+      {
+        projectSlug: z.string().optional(),
+        taskKey: z.string().optional().describe("Defaults to this conversation's task."),
+        id: z.string().optional().describe(READ_TASK_SOURCE_FIELDS.id),
+        offset: z.number().int().min(0).optional().describe(READ_TASK_SOURCE_FIELDS.offset),
+      },
+      runWith((args: { projectSlug?: string; taskKey?: string; id?: string; offset?: number }) => {
+        const slug = slugOf(args.projectSlug);
+        const key = keyOf(args.taskKey, slug);
+        requireVisible(slug, "read this task");
+        const read = readAgentTaskSource({ db, ctx: { dataRoot }, projectSlug: slug }, key, args.id, args.offset ?? 0);
+        return "text" in read ? read.text : imageResult(read.header, read.image);
+      }),
+    ),
+    "read_task_source",
   );
 
   // Ruling 573: the files a person sends with a message, read the way a

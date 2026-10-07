@@ -25,6 +25,7 @@ import {
   READABLE_TEXT_EXTENSIONS,
 } from "~/shared/attachment-kinds";
 import path from "node:path";
+import { pageCapturesAmong } from "~/shared/page-capture";
 import { isGateLogName } from "~/shared/project-gates";
 import {
   resolveStoredSegment,
@@ -161,6 +162,8 @@ export function attachmentNamesSince(
   } catch {
     return []; // no attachments dir yet — the common case
   }
+  // Ruling 691: Viberr's own pictures of the pages this folder holds.
+  const pagePictures = pageCapturesAmong(names);
   const inWindow: { name: string; at: string }[] = [];
   for (const name of names) {
     if (name.startsWith(".")) continue;
@@ -168,6 +171,11 @@ export function attachmentNamesSince(
     // runner while any run may be in flight. Claiming it for that run would
     // name the run as its author and, for a deliverer, move `deliveredAt`.
     if (isGateLogName(name)) continue;
+    // Ruling 691: so is a page capture, written by the renderer's job after
+    // a delivery is stamped. No run made it, and a reviewer's window that
+    // held it would move `deliveredAt` by "re-saving" it (ruling 587). A
+    // screenshot an agent named like one, of no page here, is that run's.
+    if (pagePictures.has(name)) continue;
     try {
       const st = statSync(path.join(dir, name));
       if (!st.isFile()) continue;
@@ -437,6 +445,33 @@ export function attachmentDisposition(name: string, inline: boolean): string {
   const ascii = name.replace(/[^\x20-\x7e]/g, "_").replace(/["\\]/g, "_");
   const encoded = encodeURIComponent(name).replace(/['()*]/g, (c) => `%${c.charCodeAt(0).toString(16).toUpperCase()}`);
   return `${inline ? "inline" : "attachment"}; filename="${ascii}"; filename*=UTF-8''${encoded}`;
+}
+
+/**
+ * Ruling 690: a stored file as the response that serves it, for every route
+ * that serves one: a task's attachment, a file sent with a controller
+ * message, a kept source. One home for the headers ruling 363 turns on. Only
+ * the whitelisted kinds render inline and everything else, a stored HTML page
+ * above all, is a download of a generic type; `nosniff` and a sandbox ride
+ * every response, so even an inline kind runs no script and loads no plugin
+ * on the app's origin (a browser that will not show a sandboxed PDF inline
+ * downloads it, which is acceptable); and `?download=1` asks for the save
+ * dialog on an inline kind (ruling 105).
+ */
+export function servedFileResponse(request: Request, name: string, bytes: Uint8Array): Response {
+  const { type, inline } = attachmentContentType(name);
+  const forceDownload = new URL(request.url).searchParams.get("download") === "1";
+  return new Response(new Uint8Array(bytes), {
+    headers: {
+      "content-type": type,
+      "content-length": String(bytes.length),
+      // Ruling 675: a name outside Latin-1 cannot stand in a header as it is.
+      "content-disposition": attachmentDisposition(name, inline && !forceDownload),
+      "x-content-type-options": "nosniff",
+      "content-security-policy": "sandbox; default-src 'none'",
+      "cache-control": "private, max-age=300",
+    },
+  });
 }
 
 /**
@@ -813,7 +848,7 @@ const IMAGE_READ_TYPES = new Map<string, string>([
   [".webp", "image/webp"],
   [".gif", "image/gif"],
 ]);
-const IMAGE_READ_MAX_BYTES = 3_750_000;
+export const IMAGE_READ_MAX_BYTES = 3_750_000;
 /** The model API refuses a picture wider or taller than this, and refuses the
  *  whole request with it, so a larger one is named instead of sent. */
 const IMAGE_READ_MAX_SIDE = 8000;

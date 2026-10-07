@@ -523,6 +523,44 @@ history opens with "Converted from goal-N …", and the project's Activity colum
   `runtimes/users/<userId>/` are theirs: read them as the server (group `node` reads every
   file there once the launcher has handed the home back after a run) or with
   `docker compose exec`, never by changing their owner.
+- **A delivered page has no picture** (ruling 691). The task says why in three places: the
+  "Page captures" note on its timeline ("Viberr could not picture `x.html`: …"), "No
+  picture of this page: …" under that file on the completion or Result card, and
+  `task.md` `pageCaptures.pages[].error`. The server logs `a page could not be captured`
+  with the task, the file and the reason, and `page captures made` with the counts and
+  the wall time; audit `task.pages.captured` carries who it ran as. The reasons: "the
+  render ran past 25 seconds" (a script that never finishes or a page that never finishes
+  loading; the job as a whole is stopped at 10 s plus 25 s a page), "the browser ended
+  before the page was pictured", "the task has no owner to render it as" (isolation is on
+  and the task has no owner: give it one and the next delivery is pictured), "the pinned
+  browser executable (VIBERR_BROWSER_EXECUTABLE) is not on disk" (health's `browser` says
+  the same), a source over 10 MB (markdown 2 MB), "a delivery is pictured up to 8 pages"
+  for a page past the eighth, "its pictures would be kept under the same names as the
+  pictures of …" (two pages whose names differ only by what the store trims or composes:
+  rename one), and "the delivered files could not be handed to the
+  renderer": the server could not make `<task>/.capture-input/` its own folder in the
+  agent group (the log line `a delivery's files could not be handed to the page renderer`
+  carries the cause; check the store layout and that the server's user is in the agent
+  group), and it copies a delivery nowhere else. The note ends by naming `capture_page`
+  only when that tool can still show the page. A result file that is a page with no row
+  at all under it was not this render's to picture: a person's own upload, a relayed
+  file, or a page past the 40 one record names. No note at all on a files delivery means
+  the deployment names no browser, the delivery held no page, or the task's delivery is
+  a revision. A picture that shows boxes where text should be is a script the image has
+  no font for (it ships Liberation and an emoji font). A page that opens `alert()`,
+  `confirm()` or `prompt()` as it loads is pictured with the dialog dismissed, and the
+  note says so. Renders are one at a time for the whole instance, so a burst of
+  deliveries queues; an agent's `capture_page` goes ahead of waiting deliveries and
+  answers `[busy]` when it has not started within 15 s. Its pictures stay under
+  `<task>/.captures/<runId>/` until the run ends; a folder there whose run is no
+  longer live is removed before the next render on the task, and a finished task's goes
+  at boot with its workspace. "The render's scratch folder could not be made" means
+  `<task>/.captures/` or a folder in it is not a directory the server's own user made
+  (a link, or another user's): the log line `a page render's scratch folder could not be
+  made` carries the path; remove the entry and the next render makes its own. A restart during a render
+  loses that delivery's pictures: the next delivery is pictured, and an agent can look
+  with `capture_page` meanwhile. `docker compose exec -T app sh
+  scripts/check-page-capture.sh` checks the renderer against the image's own browser.
 
 ## Auth / access
 
@@ -572,6 +610,26 @@ sessionFiles, workspaces, freed, …}` and is reported on `/resources/health` un
 | run transcripts `runtimes/<backend>/*.jsonl` | mtime older than **30 days** | `VIBERR_TRANSCRIPT_RETENTION_DAYS` (0 = forever) |
 | per-person provider session homes `runtimes/users/*/claude-home/projects/**/*.jsonl` and `runtimes/users/*/codex-home/sessions/**/*.jsonl` | mtime older than **30 days**. `*.jsonl` ONLY: `auth.json`, `.credentials.json` and `.claude.json` are the vendor-held sign-ins and are never touched, so retention can never sign anybody out (ruling 127) | `VIBERR_SESSION_HOME_RETENTION_DAYS` (0 = forever) |
 | task `workspace/` directories | removed for tasks in the terminal stage, only when no run is queued or running | no |
+| a task's kept sources, `projects/<slug>/tasks/<KEY>/sources/` | **never pruned and never overwritten** (ruling 690). They go with the task's directory, so with the project when it is deleted. Past 30 days a kept source is the only copy of what a run read: its log lines and transcript are gone by then | no |
+
+**Nothing in the app removes a kept source.** A task holds at most 200 of them and 100 MB
+(10 MB each), and a backup copies them with `projects/`. To take one out (a page that holds
+personal data, a takedown), stop the app, then delete that source's bytes file,
+`sources/S<n>` with its extension, from the volume and leave `sources/index.jsonl` alone:
+the record stays, a delivery that rested on the id still names it, the id is never given
+to another source, the task page's link answers 404 and `read_task_source` says the bytes
+are not in the store. The removal holds: an agent that fetches the same bytes again and
+hands them to `keep_source` is refused and told that source was removed, and the staged
+copy is removed with the refusal, so they do not come back under a new id or under a
+hidden name (a page that has changed by one byte is a different source, and
+is kept). When the record's own `title` or `from` must go too, blank those two
+values in its line and keep the line. Never edit the folder while the app runs: one
+process writes a data root.
+
+A file an agent staged for a keep and never kept (a refused keep it gave up on, a run that
+stopped between saving and keeping) stays in the task's `attachments/` under its
+`.source-…` name. Nothing lists, posts or delivers a dot-name there, nothing prunes it,
+and it goes with the task's directory; it may be deleted by hand at any time.
 
 **Two audit actions are exempt from the 90-day delete** because boot recovery uses them
 as idempotency keys: `task.agent.replied` (read by `recoverUnreactedAgentRuns`) and
@@ -738,7 +796,8 @@ page, `deployment.md` and `scripts.md` to:
 
 `npm run backup [-- --out <dir>]` writes a consistent point-in-time artefact (`VACUUM
 INTO` plus the store tree — `projects/`, `agents/`, `kb/`, `skills/` and
-`audit-exports/`, without task `workspace/` checkouts and `.repo-mirror/` mirrors — and a
+`audit-exports/`, without task `workspace/` checkouts, `.repo-mirror/` mirrors and the page
+renderer's `.captures/` and `.capture-input/` — and a
 manifest) **without** taking the lock, so it works on a live instance, and without opening
 the live database: with a `state/writer.lock` present at all it copies
 `projection.sqlite` and its `-wal` to `state/tmp/reader-<pid>/`, runs the `VACUUM INTO` on

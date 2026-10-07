@@ -77,7 +77,9 @@ import {
   taskAttachmentExists,
   MAX_UPLOAD_BYTES,
 } from "~/server/files/task-attachments.server";
-import { completionView } from "~/server/tasks/completion-packet.server";
+import { completionView, sourcesRestedOn } from "~/server/tasks/completion-packet.server";
+import { readTaskSources } from "~/server/files/task-sources.server";
+import { taskSourceRows } from "~/server/tasks/task-sources.server";
 import {
   directiveDeferredNote,
   isAgentBusy,
@@ -97,7 +99,8 @@ import { latestTaskReconcileCheckAt } from "~/server/audit/audit-query.server";
 import { taskMergeCollisions } from "~/server/projections/pr-collisions.server";
 import type { PrOverlap } from "~/shared/pr-overlaps";
 import { interruptRun, listRunsForTask } from "~/server/runtimes/run-service.server";
-import { liveRunStateByTask } from "~/server/runtimes/run-store.server";
+import { listRunsForTaskRows, liveRunStateByTask } from "~/server/runtimes/run-store.server";
+import { type TookShipped, whatItTook } from "~/server/tasks/what-it-took.server";
 import { withLiveRun } from "~/shared/mapping/task.server";
 import {
   runOperator,
@@ -293,11 +296,17 @@ export async function loader({ request, params }: Route.LoaderArgs) {
   //
   // A non-member's withheld projection bounds no window at all and reports an
   // empty one, so nothing tries to page it.
+  //
+  // Ruling 693: the task's run rows are read once here, for the projection
+  // below and for what the task took, so the figure costs this loader no
+  // statement of its own (ruling 457's SQL budget has no room for one).
+  const runRows = listRunsForTaskRows(db, params.slug, params.key);
   const runtime = runsVisible
     ? listRunsForTask(db, params.slug, params.key, {
         console: isDocumentNavigation(request) ? "shown" : "none",
+        rows: runRows,
       })
-    : listRunsForTask(db, params.slug, params.key, { console: "withheld" }).map((r) => ({
+    : listRunsForTask(db, params.slug, params.key, { console: "withheld", rows: runRows }).map((r) => ({
         ...r,
         sid: null,
         exportable: false,
@@ -474,6 +483,23 @@ export async function loader({ request, params }: Route.LoaderArgs) {
     ? countTaskAttachments(params.slug, params.key)
     : 0;
 
+  // Ruling 690: the sources the task keeps, apart from its files and behind
+  // the same bar: a kept page shows whatever the agent read. One read of
+  // their index whatever the count, and none on a task that keeps no sources;
+  // sent only for a task that keeps some, so every other task's payload
+  // stays as it was (ruling 457). The serving route re-checks membership.
+  const keptSources = runsVisible ? readTaskSources(params.slug, params.key) : null;
+  const sourcesShown =
+    keptSources && keptSources.sources.length > 0
+      ? {
+          sources: taskSourceRows(
+            keptSources.sources,
+            (by) => deployedSpecialists.find((s) => s.id === by.profileId)?.name ?? by.roleHint ?? by.profileId,
+          ),
+          sourcesTotal: keptSources.sources.length,
+        }
+      : {};
+
   // P14-LV-06: the acceptance affordance, with the project's required-reviewer
   // rules from the same read of project.md (the completion packet below).
   const standing = acceptanceStanding({
@@ -508,8 +534,38 @@ export async function loader({ request, params }: Route.LoaderArgs) {
             );
           },
           ruleReviewers: standing.requiredReviewers.map((r) => r.profileId),
+          // Ruling 690: what the work under review rests on, from the read
+          // above; null for a viewer who may not see the task's files.
+          sources: keptSources ? sourcesRestedOn(keptSources, taskFile.parsed.frontmatter) : null,
         })
       : null;
+
+  // Ruling 693: what the task took, as the card prints it: its facts and what
+  // they miss, from the run rows and the task file this loader has already
+  // read. It rides the card (no completion view, no figure) and the run
+  // console's bar: dollars and run counts are for a viewer who may see the
+  // runs. Sent only then, so no other task's payload grows (ruling 457).
+  // Guarded like the disclosures above: a read of what a task cost must not
+  // 500 the task page.
+  const tookShipped: TookShipped = {};
+  if (completion && runsVisible && taskFile) {
+    try {
+      const took = whatItTook({
+        taskKey: params.key,
+        rows: runRows,
+        file: taskFile.parsed,
+        stages: detail.stages,
+        terminalStageId: detail.stages[detail.stages.length - 1]?.id ?? null,
+      });
+      tookShipped.whatItTook = { facts: took.facts, notes: took.notes };
+    } catch (error) {
+      logger.warn("ruling 693 what-it-took read failed", {
+        projectSlug: params.slug,
+        taskKey: params.key,
+        error: toError(error),
+      });
+    }
+  }
 
   return {
     // Ruling 349: the hero and the rail read the run row, like the board card.
@@ -525,8 +581,11 @@ export async function loader({ request, params }: Route.LoaderArgs) {
     epics: listEpicChips(db, params.slug),
     attachments,
     attachmentsTotal,
+    /** Ruling 690: the task's kept sources, when it keeps any. */
+    ...sourcesShown,
     /** Ruling 521: the operator's completion packet as the page shows it. */
     completion,
+    ...tookShipped,
     // Who saved each attachment and when, from the events that claim names —
     // same visibility bar as the list itself.
     attachmentProducers: runsVisible
@@ -1638,7 +1697,14 @@ export default function TaskDetailRoute({
       attachmentProducers={loaderData.attachmentProducers}
       // Ruling 521: the completion packet the acceptance decision shows.
       completion={loaderData.completion}
+      // Ruling 693: what the task took, on the same card.
+      whatItTook={loaderData.whatItTook ?? null}
       attachmentsBase={`/projects/${params.slug}/tasks/${loaderData.task.key}/attachments`}
+      // Ruling 690: the task's kept sources, when it keeps any, and the
+      // route that serves one by its id.
+      sources={loaderData.sources}
+      sourcesTotal={loaderData.sourcesTotal}
+      sourcesBase={`/projects/${params.slug}/tasks/${loaderData.task.key}/sources`}
       // Ruling 484: the Changes panel's read, beside the page it posts notes to.
       changesUrl={`/projects/${params.slug}/tasks/${loaderData.task.key}/changes`}
       // Ruling 548: the Blocked by picker's list of the project's tasks.

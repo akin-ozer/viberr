@@ -10,6 +10,7 @@ import { z } from "zod";
 import { recordAudit, SYSTEM_ACTOR } from "~/server/audit/audit-recorder.server";
 import { logger } from "~/server/logging/logger.server";
 import { readTaskFile, updateTaskFile } from "~/server/files/task-writer.server";
+import { PAGE_PICTURES_PLAN_SENTENCE } from "~/server/tasks/completion-packet.server";
 import {
   operatorUpdateBranchFromBase,
   updateBranchGate,
@@ -372,7 +373,9 @@ function buildOperatorPlanSchema(tools: readonly OperatorPlanTool[]) {
           // Ruling 521: the images write_completion_packet puts on the packet.
           screenshots: {
             type: ["array", "null"],
-            description: "For write_completion_packet ONLY (ruling 521): up to 6 image attachments of this task that show the result, by exact file name from the snapshot's `completionPacket.screenshotCandidates`, each with a one-line caption of what it shows. Null when nothing visible changed, and for every other tool.",
+            description: "For write_completion_packet ONLY (ruling 521): up to 6 image attachments of this task that show the result, by exact file name from the snapshot's `completionPacket.screenshotCandidates`, each with a one-line caption of what it shows. " +
+              PAGE_PICTURES_PLAN_SENTENCE +
+              " Null when nothing visible changed, and for every other tool.",
             items: {
               type: "object",
               additionalProperties: false,

@@ -9,6 +9,7 @@ import { type RbacAction, roleCan } from "~/shared/rbac";
 import { recordAudit } from "~/server/audit/audit-recorder.server";
 import { AppError } from "~/server/errors/app-error.server";
 import type { AcceptanceDisclosure } from "~/shared/acceptance-disclosure";
+import { DECISION_LEAD, RECOMMENDATION_DECLINED_TITLE } from "~/shared/timeline-leads";
 import {
   loadProjectContext,
   reprojectTask,
@@ -240,14 +241,6 @@ export async function applyRecommendation(
 }
 
 /**
- * The stable timeline title every DECLINED operator recommendation carries.
- * Exported because the record is READ BACK: `operatorSnapshot` shows a
- * re-invoked coordinator what a human already refused, and the task file is
- * what every future agent and reviewer re-anchors on.
- */
-export const RECOMMENDATION_DECLINED_TITLE = "Recommendation declined";
-
-/**
  * The audit action a dismissal records. Exported so the snapshot's
  * "already declined" reader (operator-snapshot.server.ts) cannot drift from the
  * writer here.
@@ -322,7 +315,7 @@ export async function dismissRecommendation(
       actor: humanActorRef(db, actor),
       title: RECOMMENDATION_DECLINED_TITLE,
       text:
-        `**Decision:** "${rec.label}" was declined. The operator's recommendation was not applied; ` +
+        `${DECISION_LEAD} "${rec.label}" was declined. The operator's recommendation was not applied; ` +
         `do not re-propose it unless something material about the task changes.`,
       toAgent: false,
       evidence: null,

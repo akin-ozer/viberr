@@ -4744,8 +4744,13 @@ describe("app.css ruling 459: the better-ui pass — surfaces, shadows and image
 
   it("(b) no other rule targets an image without the edge", () => {
     // `.md-img-btn` is only ever emitted inside a `.md-body`, so `.md-body img`
-    // reaches its picture. Anything else aimed at an <img> must be listed.
-    const COVERED_BY = { ".md-img-btn > img": ".md-body img" } satisfies Record<string, string>;
+    // reaches its picture. Ruling 691: a page capture's picture is the
+    // lightbox's own `.lightbox-img` inside a scroller, where a second rule
+    // only lifts its height cap. Anything else aimed at an <img> must be listed.
+    const COVERED_BY = {
+      ".md-img-btn > img": ".md-body img",
+      ".lightbox-card .lightbox-shot > .lightbox-img": ".lightbox-card .lightbox-img",
+    } satisfies Record<string, string>;
     const aimed = [...new Set(plain.flatMap(selectorParts).filter((s) => /(?:^|[\s>])img$|\.lightbox-img$/.test(s)))];
     expect(aimed.filter((s) => !IMAGES.includes(s) && !(s in COVERED_BY))).toEqual([]);
     for (const [s, by] of Object.entries(COVERED_BY)) {

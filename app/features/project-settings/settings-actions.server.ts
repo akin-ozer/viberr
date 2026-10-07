@@ -1246,7 +1246,7 @@ export async function removeProjectRepo(
     .map((agent) => agent.name);
   if (writers.length > 0) {
     throw AppError.validation(
-      `${list.format(writers)} may write ${from}, so this board delivers through it. Withhold "Execute code or write to the repo" from ${writers.length === 1 ? "that agent" : "those agents"} on the Agents page first, or change the repository instead. Nothing was changed.`,
+      `${list.format(writers)} may write ${from}, so this board delivers through it. Withhold "Write to the repository" from ${writers.length === 1 ? "that agent" : "those agents"} on the Agents page first, or change the repository instead. Nothing was changed.`,
     );
   }
   const stages = current.parsed.frontmatter.stages;

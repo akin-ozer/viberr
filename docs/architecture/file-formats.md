@@ -3,14 +3,16 @@
 The markdown files under `${VIBERR_DATA_ROOT}` that Viberr treats as canonical business truth,
 field by field: `project.md`, `task.md` (frontmatter, packet and timeline grammar), epic
 files, agent profile templates and the smaller files beside them, and the board file that
-carries a board's workflow between instances (§9). SQLite holds projections of
+carries a board's workflow between instances (§9), and the index of a task's kept sources
+(§10). SQLite holds projections of
 them; [data-model.md](data-model.md) has the tables and the full data-root layout.
 Source of truth: `app/schemas/project-file.schema.ts`, `app/schemas/task-file.schema.ts`,
 `app/schemas/epic-file.schema.ts`, `app/server/files/agent-profile-file.server.ts` (schemas);
 `app/shared/task-refs.ts` (the `blockedBy` and epic id spellings the schemas validate);
 `app/server/files/task-file.server.ts`, `frontmatter.server.ts`, `project-writer.server.ts`,
 `task-writer.server.ts`, `epic-writer.server.ts`, `actor-ref.server.ts` (parsers and writers);
-`app/server/org/board-file.server.ts` and `app/server/files/zip.server.ts` (the board file, §9).
+`app/server/org/board-file.server.ts` and `app/server/files/zip.server.ts` (the board file, §9);
+`app/server/files/task-sources.server.ts` (a task's kept sources, §10).
 Verified against `main` @ `7d9fbf72` (2026-09-23); the epic sections against ruling 503
 (2026-09-26).
 
@@ -28,12 +30,22 @@ ${VIBERR_DATA_ROOT}/
   projects/<slug>/tasks/<KEY>/task.md     ← task truth
   projects/<slug>/tasks/<KEY>/attachments/ ← files agents save and people upload on the task
                                              (canonical bytes, served member-only, not
-                                             projected; ruling 96, ruling 379)
+                                             projected; ruling 96, ruling 379), and Viberr's
+                                             own pictures of the delivered pages,
+                                             `<file>.capture-desktop.png` and
+                                             `<file>.capture-phone.png` (ruling 691)
   projects/<slug>/tasks/<KEY>/deliveries/<stamp>/ ← each files delivery as it was delivered,
                                              copied when `deliveredAt` is stamped, the stamp's
                                              colons as dashes (a record, not projected; ruling 597):
                                              every file on the task then, whichever agent saved
-                                             it, the browser's working files aside (ruling 610)
+                                             it, the browser's working files aside (ruling 610),
+                                             then that delivery's own page pictures, added
+                                             when its render finishes (ruling 691)
+  projects/<slug>/tasks/<KEY>/sources/    ← the sources the task's result rests on, kept apart
+                                             from its files: `index.jsonl` and one bytes file a
+                                             source (§10). The server's own folder: an agent
+                                             reads it and cannot write it (a record, not
+                                             projected; ruling 690)
   projects/<slug>/tasks/<KEY>/workspace/  ← git clones (deliverer + operator share
                                              <repo-name>/; each supporting run gets
                                              support/<profileId>/<repo-name>/). NOT canonical,
@@ -486,6 +498,24 @@ gateRun:                          # optional; ruling 482 — the project's gates
       wallMs: 41230
       log: gate-a91f7c2-02-build-20260925T101512Z.log  # the task attachment holding
                                   # the combined output (null when it could not be saved)
+pageCaptures:                     # optional; ruling 691 — Viberr's own pictures of the
+  deliveredAt: 2026-10-07T12:00:00.000Z  # pages of one files delivery, bound to that
+  at: 2026-10-07T12:00:09.412Z    # delivery's `deliveredAt` like a verdict; `at` is when
+  pages:                          # the render finished. One entry per delivered page
+    - file: post.html             # (.html, .htm, .md, .markdown): its shots, each a
+      shots:                      # view (desktop | phone), the picture's name in the
+        - view: desktop           # attachments store and whether the page runs on
+          name: post.html.capture-desktop.png   # below it (`cut`), and `error`, why it
+          cut: false              # could not be pictured (null when it was). The first
+        - view: phone             # 8 pages are pictured; the next ones, up to 40 entries
+          name: post.html.capture-phone.png     # in all, are named with `error` "a
+          cut: true               # delivery is pictured up to 8 pages". Written by the
+      error: null                 # server alone, once the render of a stamped files
+    - file: notes.md              # delivery finishes; the latest delivery only. A reader
+      shots: []                   # pairs a picture with a file only while this stamp is
+      error: the render ran past 25 seconds   # the task's own. A malformed record reads
+                                  # as absent (no picture is drawn; the next delivery's
+                                  # render rewrites it)
 completionPacket:                 # optional; ruling 521 — what Operator hands over at
   subject: rev_9f2c               # the acceptance boundary, bound like a verdict to the
   headSha: a91f7c2e…              # review subject it describes (the workRevision.id, or
@@ -1134,3 +1164,89 @@ How an import reads one (`readBoardFile`, `parseBoardFile`):
 - A knowledge base or skill is the SAME as the instance's of that name when every file has
   the same path and bytes; an MCP server when its transport and target are; a template when
   its parsed frontmatter and body are. A different one is never overwritten.
+
+## 10. A task's kept sources (ruling 690)
+
+A task keeps, apart from its files, the sources its result rests on: a page as an agent
+fetched it, a repository file at a commit, an API answer, a command's output. They live in
+`projects/<slug>/tasks/<KEY>/sources/`, created by the first keep:
+
+```
+sources/index.jsonl   one JSON object per line, appended only
+sources/S1.html       the bytes of source S1 exactly as they were handed over
+sources/S2            the id alone when the handed file had no extension to keep
+```
+
+The folder is the server's own. It is not one of the directories a run writes
+(`TASK_SHARED_DIRS` names `workspace/`, `attachments/` and `.operator-scratch/`) and is
+never handed to the agent group, so where agents run as their own users (ruling 460) an
+agent reads a kept source and cannot change or delete it. `writeTaskSource`
+(`app/server/files/task-sources.server.ts`) is its only writer: it opens a bytes file with
+`O_CREAT | O_EXCL | O_NOFOLLOW`, never an existing one, and only appends to the index. On a
+host with no launcher an agent runs as the server's user, and the writer alone keeps a
+source as it was.
+
+What a run means to keep it first saves in the task's `attachments/` folder, the one task
+folder it writes, under a name that starts with `.source-` (`SOURCE_STAGING_PREFIX`), and
+then names that file to `keep_source`. The keep copies the bytes here and removes the
+staged file. The dot is what the rule rests on: no lister of `attachments/` returns a
+dot-name (the run's window, a delivery's files, the panel), and no upload, relay or take
+can land one, so a staged file is never a completing run's file and never part of a
+delivery, whichever run finishes while it waits. The keep takes nothing else: a file under
+any other name belongs to the task and stays there, and the store's own working files in
+that folder (`.viberr-write-…`, `.viberr-prev-…`) are not staged sources. A staged file a
+run never keeps stays where it is, listed and posted nowhere, and goes with the task.
+
+`index.jsonl` holds two kinds of line. Each line is parsed on its own (`readTaskSources`):
+a line that is not JSON, or does not match either kind, is skipped and the lines around it
+still read.
+
+```json
+{"kind":"source","id":"S7","file":"S7.html","name":"aws-pricing.html","title":"AWS EC2 on-demand pricing, eu-central-1","from":"https://aws.amazon.com/ec2/pricing/on-demand/","keptAt":"2026-10-07T12:03:11.482Z","by":{"backend":"claude","profileId":"researcher","roleHint":"Researcher"},"runId":"run_abc","bytes":48213,"sha256":"<64 hex>"}
+{"kind":"delivery","deliveredAt":"2026-10-07T13:00:00.000Z","sources":["S1","S2","S7"]}
+```
+
+A `source` line is one kept source:
+
+| Key | Meaning |
+|---|---|
+| `id` | `S` and a number counted from 1 on the task. It is the number after the highest one the index or the folder holds, so an id is never given twice and a bytes file a crash left without its line is stepped over, never replaced |
+| `file` | The bytes file in the folder: the id, then the handed file's extension in lower case when it matches `.[a-z0-9]{1,10}`, else the id alone |
+| `name` | The name the agent staged the file under, without the `.source-` prefix (stored composed, NFC). It decides how the source is read and served, as an attachment's name does. One line: a name that holds a line break or a control character is refused |
+| `title` | One line, at most 200 characters, saying what the source is. No control character and no Unicode line or paragraph separator: the list a reader is answered prints one field a line |
+| `from` | One line, at most 2,000 characters, under the same rule: where the bytes came from, **as the agent that kept them stated it** (a URL, a command, `owner/repo@<commit>:path`). The server fetches nothing and cannot confirm it |
+| `keptAt` | The server's clock when it kept the bytes |
+| `by` | The agent: `backend`, `profileId`, `roleHint` |
+| `runId` | The run that called `keep_source`, or `null` when the caller could not name it |
+| `bytes`, `sha256` | The size and the SHA-256 of the bytes file |
+
+A `delivery` line records the ids of the sources the task held when a files delivery was
+stamped (`recordDeliverySources`, written with the kept delivery of ruling 597). A task
+that keeps no source gets no line, and a stamp already recorded keeps its line. A files
+delivery with no line rested on the sources kept at or before its stamp
+(`deliverySourceIds`), which for one stamped before the task kept anything is none: the
+list `read_task_source` answers names every kept delivery, and says so for that one. A
+delivery that is a revision has no line either: it rests on the sources kept at or before
+the instant the revision was minted, `workRevision.createdAt` (`sourcesRestedOn`). Either
+way a source the task's deliverer kept after that anchor counts too, by the `by` of its
+record: asked for the source of a claim, a deliverer keeps one and changes no file, so no
+stamp moves and no revision is minted. The
+completion packet's own time is not the anchor: the operator writes the packet after the
+reviews, and a page a reviewer kept while checking a claim is not what the work stood on.
+
+Limits (`SOURCE_MAX_BYTES`, `SOURCES_PER_TASK_MAX`, `SOURCES_TASK_MAX_BYTES`): 10 MB a
+source, 200 sources and 100 MB a task; the refusal for the last says how much the task
+keeps and how much is left. Bytes a task already keeps are not kept twice: the keep answers
+with the id that holds them. Bytes whose record stands while its bytes file is gone (a
+source a person took out of the store) are not kept again either: the keep refuses them
+and says the source was removed, and the staged copy is removed with that refusal. Nothing
+prunes the folder, and nothing in the app removes a source ([../operations/runbook.md](../operations/runbook.md) §Retention).
+
+The keep refuses a `from` or a `title` that reads as holding a credential, a staged name
+that does (`wget` names a download after its URL, query included), and the bytes of a
+source whose `from` is not an `http(s)` URL (a command's output can print this instance's
+own credentials); a staged file refused for its name or its bytes is removed from
+`attachments/` by the refusal itself. The shapes are a token by its prefix where it starts
+a word, an `sk-` one only when it reads as a key and not as a slug or a class name, and a
+password in a URL's userinfo, read up to the first quote, comma, semicolon or bracket
+(`readsAsCredential`, `app/server/secrets/git-output-redact.server.ts`).

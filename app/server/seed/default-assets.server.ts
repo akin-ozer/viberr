@@ -47,9 +47,13 @@ function readAsset(file: string): string {
 const viberrSkillMd = readAsset("viberr-app-expertise.skill.md");
 const developerSkillMd = readAsset("developer-expertise.skill.md");
 const reviewerSkillMd = readAsset("reviewer-expertise.skill.md");
+const writerSkillMd = readAsset("writer-expertise.skill.md");
+const editorSkillMd = readAsset("editor-expertise.skill.md");
 const operatorDefinitionMd = readAsset("operator.definition.md");
 const developerDefinitionMd = readAsset("developer.definition.md");
 const reviewerDefinitionMd = readAsset("reviewer.definition.md");
+const writerDefinitionMd = readAsset("writer.definition.md");
+const editorDefinitionMd = readAsset("editor.definition.md");
 const operatorProfileMd = readAsset("operator.profile.md");
 const controllerSkillMd = readAsset("controller-guide.skill.md");
 const controllerDefinitionMd = readAsset("controller.definition.md");
@@ -59,6 +63,7 @@ import { serializeAgentProfile } from "~/server/files/agent-profile-file.server"
 import { splitFrontmatter } from "~/server/files/frontmatter.server";
 import { logger } from "~/server/logging/logger.server";
 import {
+  LIBRARY_AGENT_PROFILES,
   SEED_AGENT_PROFILES,
   type SeedAgentProfile,
 } from "./agent-catalog.server";
@@ -75,6 +80,8 @@ import { toError } from "~/shared/errors";
 const SPECIALIST_PERSONA_BY_ID = new Map<string, string>([
   ["developer", splitFrontmatter(developerDefinitionMd).body.trim()],
   ["reviewer", splitFrontmatter(reviewerDefinitionMd).body.trim()],
+  ["writer", splitFrontmatter(writerDefinitionMd).body.trim()],
+  ["editor", splitFrontmatter(editorDefinitionMd).body.trim()],
 ]);
 
 /**
@@ -93,6 +100,20 @@ const SPECIALIST_PERSONA_BY_ID = new Map<string, string>([
 
 /** The base specialist profile ids shipped into every store (built-in agents). */
 const DEFAULT_SPECIALIST_IDS: ReadonlySet<string> = new Set(["developer", "reviewer"]);
+
+/**
+ * Every specialist template this app ships: the base roster's two, then the
+ * library's (ruling 692). The boot backfill below writes these; `npm run seed`
+ * writes the same two catalogs whole (the operator's template with them), and
+ * `seed.server.test.ts` holds its count, so neither ships a specialist the
+ * other does not.
+ */
+export function shippedSpecialistProfiles(): SeedAgentProfile[] {
+  return [
+    ...SEED_AGENT_PROFILES.filter((p) => DEFAULT_SPECIALIST_IDS.has(p.frontmatter.id)),
+    ...LIBRARY_AGENT_PROFILES,
+  ];
+}
 
 /** Static prose assets bundled from `assets/` (skills + definitions + operator
  *  profile template). */
@@ -146,6 +167,10 @@ const STATIC_ASSETS: { rel: string; content: string }[] = [
   { rel: path.join("skills", "viberr-app-expertise", "SKILL.md"), content: viberrSkillMd },
   { rel: path.join("skills", "developer-expertise", "SKILL.md"), content: developerSkillMd },
   { rel: path.join("skills", "reviewer-expertise", "SKILL.md"), content: reviewerSkillMd },
+  // Ruling 692: the Writer's and the Editor's manuals, for a board whose result
+  // is prose a person puts their name to.
+  { rel: path.join("skills", "writer-expertise", "SKILL.md"), content: writerSkillMd },
+  { rel: path.join("skills", "editor-expertise", "SKILL.md"), content: editorSkillMd },
   { rel: path.join("skills", "controller-guide", "SKILL.md"), content: controllerSkillMd },
   // Definitions — the OPERATOR and the CONTROLLER keep dedicated definition
   // files (system profiles). Specialist personas live in their profile-template
@@ -235,6 +260,14 @@ export const PRIOR_SHIPPED_HASHES: PriorShippedHashes = {
     "86f1e309de8bdb5393156fc6f12bc93a035597c43ae74c02b6b6f2c94c1b488b",
   ],
   [path.join("skills", "controller-guide", "SKILL.md")]: [
+    // Rulings 690 to 692 (owner, 2026-10-07, on a board asked to write blog
+    // posts): before "A board that delivers results" said a person is asked
+    // only what they alone know, that a board whose result is prose starts
+    // from the shipped Writer and Editor, that the account's name is not the
+    // author's, and that a result keeps its sources and a page is pictured.
+    // The controller wrote a writer and an editor from nothing and named the
+    // signed-in account as the author.
+    "f7adbea417510f20ea5c6e52aeea0fe47df4248beafe8f65d26d59b38d02a53d",
     // Rulings 684 and 685 (owner, 2026-10-07: "why would controller make the
     // template with data?"): before the guide said a template is made from an
     // example and is never the example, that a flow names no task, and that
@@ -324,6 +357,11 @@ export const PRIOR_SHIPPED_HASHES: PriorShippedHashes = {
     "a2defe42d6fb6a5eed063a1e7b9bb9b5636c1619c1f5ea0f6e56838b9628fecd",
   ],
   [path.join("agents", "definitions", "operator.md")]: [
+    // Rulings 690, 691 and 693 (2026-10-07): before the completion-packet
+    // paragraph said that what the task took is printed beside the packet,
+    // that a task keeps the sources its result rests on, and that Viberr
+    // pictures each result file that is a page.
+    "256e070e5a130fa506fd889646088420f522410dbd806f01e9fc0941128cc7c5",
     // Ruling 672 (owner, 2026-10-06): before the doctrine said what to do
     // when a task on a board with no repository needs one: ask once with
     // `ask_for_repository`, and never again once a person decided to keep none.
@@ -556,6 +594,10 @@ export const PRIOR_SHIPPED_HASHES: PriorShippedHashes = {
     "d7c78f20730ef44a8e1d490cc2efbb2a1cf1cd1c5bb21a63bf8343df7ba1b17e",
   ],
   [path.join("skills", "reviewer-expertise", "SKILL.md")]: [
+    // Ruling 690 (2026-10-07): before the guardrails said to check a claim
+    // against the source kept on the task, and that a claim with no kept
+    // source is a finding.
+    "68da19df9295f7c307fd16ce6d823a485494f9be6f5a92c5a3cc4b819997def3",
     "67b14be125a5f8b213a9ad3de6682c4762bdef703a40dc32ba1c907a267e1c31",
     "7aa79a7c54156f0556f437f525a31a5c12b2dd89a5465282974da61337bc041c",
     // outgoing before the evidence-rows-are-citations guidance
@@ -701,15 +743,14 @@ export function builtinAgentProfileTemplate(
 }
 
 /**
- * The base specialist profile templates, generated from SEED_AGENT_PROFILES so
- * a deployment resolves (kind, backends, capabilities, resources) in a store
- * that was never demo-seeded — the counterpart of the operator profile template
- * that makes Developer/Reviewer preinstalled everywhere.
+ * The specialist profile templates, generated from the catalog so a deployment
+ * resolves (kind, backends, capabilities, resources) in a store that was never
+ * demo-seeded: the counterpart of the operator profile template that makes
+ * Developer/Reviewer preinstalled everywhere, and what puts the Writer and the
+ * Editor in every instance's library (ruling 692).
  */
 function specialistProfileAssets(): { rel: string; content: string }[] {
-  return SEED_AGENT_PROFILES.filter((p) =>
-    DEFAULT_SPECIALIST_IDS.has(p.frontmatter.id),
-  ).map((p) => ({
+  return shippedSpecialistProfiles().map((p) => ({
     rel: path.join("agents", "profiles", `${p.frontmatter.id}.md`),
     content: builtinAgentProfileTemplate(p),
   }));

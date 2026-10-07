@@ -1154,6 +1154,109 @@ describe("loader — ruling 550: a task delivered as files", () => {
   });
 });
 
+describe("loader — ruling 690: the sources a task keeps", () => {
+  it("ships the task's sources, named by the agent that kept each, and the sources the delivery rested on for the card; a task that keeps none ships neither", async () => {
+    // What the loader adds to the store's list: who kept each source, by the
+    // name the page knows the agent under; the newest first; a long origin
+    // cut; and, for the result card, the sources the delivery recorded when
+    // it was stamped. CANARY: hand the card every kept source and the one a
+    // reviewer kept after the delivery reads as what the result rests on.
+    const { rmSync } = await import("node:fs");
+    const { updateTaskFile } = await import("~/server/files/task-writer.server");
+    const { recordDeliverySources, taskSourcesDir, writeTaskSource } = await import(
+      "~/server/files/task-sources.server"
+    );
+    const ref = { projectSlug: "viberr-core", taskKey: "VIB-166", dataRoot: app.dataRoot };
+    // A task that keeps none: no key at all, so its payload is what it was.
+    const bare = await runLoader("VIB-166", ids.arda);
+    expect("sources" in bare).toBe(false);
+    expect("sourcesTotal" in bare).toBe(false);
+
+    const deliveredAt = "2026-10-07T13:00:00.000Z";
+    const before: Pick<TaskFrontmatter, "workRevision" | "deliveredAt"> = { workRevision: null, deliveredAt: null };
+    await updateTaskFile(ref, (parsed) => {
+      before.workRevision = parsed.frontmatter.workRevision;
+      before.deliveredAt = parsed.frontmatter.deliveredAt ?? null;
+      parsed.frontmatter.workRevision = null;
+      parsed.frontmatter.deliveredAt = deliveredAt;
+    });
+    const longOrigin = `https://calculator.aws/#/estimate?id=${"a1b2c3d4".repeat(40)}`;
+    try {
+      // The deliverer's page, kept before the delivery was stamped.
+      writeTaskSource(
+        "viberr-core",
+        "VIB-166",
+        {
+          name: "ec2-pricing.html",
+          data: Buffer.from("t3.medium $0.0416 per hour"),
+          title: "AWS EC2 on-demand pricing",
+          from: "https://aws.amazon.com/ec2/pricing/on-demand/",
+          by: { backend: "codex", profileId: "developer", roleHint: "Implementation" },
+          runId: "run_build",
+        },
+        app.dataRoot,
+      );
+      recordDeliverySources("viberr-core", "VIB-166", deliveredAt, app.dataRoot);
+      // A reviewer's own fetch while checking it, by an agent no longer deployed.
+      writeTaskSource(
+        "viberr-core",
+        "VIB-166",
+        {
+          name: "calculator-export.json",
+          data: Buffer.from('{"monthly":1234.56}'),
+          title: "The calculator's export",
+          from: longOrigin,
+          by: { backend: "claude", profileId: "estimate-judge", roleHint: "Estimate Judge" },
+          runId: "run_review",
+        },
+        app.dataRoot,
+      );
+
+      const data = await runLoader("VIB-166", ids.arda);
+      const developer = data.deployedSpecialists.find((s) => s.id === "developer")!.name;
+      expect(data.sourcesTotal).toBe(2);
+      expect(data.sources).toEqual([
+        {
+          id: "S2",
+          name: "calculator-export.json",
+          title: "The calculator's export",
+          from: `${longOrigin.slice(0, 199)}…`,
+          keptAt: expect.any(String),
+          by: "Estimate Judge",
+          bytes: 19,
+        },
+        {
+          id: "S1",
+          name: "ec2-pricing.html",
+          title: "AWS EC2 on-demand pricing",
+          from: "https://aws.amazon.com/ec2/pricing/on-demand/",
+          keptAt: expect.any(String),
+          by: developer,
+          bytes: 26,
+        },
+      ]);
+      // The card: what the delivery rested on, not what was kept since.
+      expect(data.completion?.sources).toEqual({
+        count: 1,
+        shown: [
+          {
+            id: "S1",
+            name: "ec2-pricing.html",
+            title: "AWS EC2 on-demand pricing",
+            from: "https://aws.amazon.com/ec2/pricing/on-demand/",
+          },
+        ],
+      });
+    } finally {
+      rmSync(taskSourcesDir("viberr-core", "VIB-166", app.dataRoot), { recursive: true, force: true });
+      await updateTaskFile(ref, (parsed) => {
+        parsed.frontmatter.workRevision = before.workRevision;
+        parsed.frontmatter.deliveredAt = before.deliveredAt ?? null;
+      });
+    }
+  });
+});
+
 describe("loader — deployed specialists", () => {
   it("exposes the project's deployed specialists (developer) + the live-run profile set", async () => {
     const result = await runLoader("VIB-166", ids.arda);

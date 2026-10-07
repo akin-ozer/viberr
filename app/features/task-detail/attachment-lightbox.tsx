@@ -9,6 +9,7 @@ import {
   type MouseEvent as ReactMouseEvent,
   type ReactNode,
 } from "react";
+import { pageOfCaptureName, viewOfCaptureName } from "~/shared/page-capture";
 import { isMarkdownName, languageForName } from "~/ui/code-language";
 import { CodeView } from "~/ui/code-view";
 import { Icon } from "~/ui/icon";
@@ -278,6 +279,9 @@ function Lightbox({
   // other name tries the reader, whose NUL test has the last word.
   const kind = attachmentKind(img.name);
   const isText = kind === "text";
+  /** Ruling 691: the width Viberr pictured a delivered page at, when this
+   *  file is one of its pictures. */
+  const captureView = viewOfCaptureName(img.name);
   const isOther = kind === "binary"; // the remaining kind, image, is the <img> branch
   // An HTTP-layer response PROVED the file unservable (404 after the ruling-
   // 105 prune or a delete, 413 over the route's 50 MB cap, auth redirect).
@@ -307,7 +311,7 @@ function Lightbox({
   }, [img.url, isOther]);
   return (
     <dialog
-      className={"modal-card lightbox-card" + (isText ? " text" : "")}
+      className={"modal-card lightbox-card" + (isText ? " text" : "") + (captureView === "desktop" ? " page" : "")}
       aria-label={`Attachment ${img.name}`}
       data-screen-label="Attachment lightbox"
       ref={ref}
@@ -343,6 +347,18 @@ function Lightbox({
             Unable to show this image. Use Download or Open original to get the
             file itself.
           </p>
+        </div>
+      ) : captureView ? (
+        // Ruling 691: a page capture is the whole page. It opens at the
+        // page's own width and scrolls, so it takes focus and a name, as the
+        // markdown preview does: a keyboard reaches all of a long page.
+        <div className="lightbox-shot" tabIndex={0} role="region" aria-label={"Picture of " + pageOfCaptureName(img.name)}>
+          <img
+            className="lightbox-img"
+            src={img.url}
+            alt={img.name}
+            onError={() => setFailed(true)}
+          />
         </div>
       ) : (
         <img

@@ -55,6 +55,7 @@ import { startHttpUpstream } from "../../../test-support/mcp-upstream";
 import { signInWithOAuth, startOAuthMcpServer } from "../../../test-support/mcp-oauth-server";
 import { resetMcpOAuthForTests, signOutMcpOAuth } from "~/server/org/mcp-oauth.server";
 import { listAuditEvents } from "../../../test-support/audit-log";
+import { withEnv } from "../../../test-support/env";
 import {
   installFakeRuntime,
   queueFakeRun,
@@ -253,6 +254,31 @@ describe("governed actions record audit rows (table-driven)", () => {
             projectSlug: store.slug,
             taskKey: "VIB-1",
             summary: "The report is written and checked against the goal.",
+          });
+        },
+      },
+      {
+        // Ruling 690: a run keeps a source its result rests on, from a file
+        // it staged in the task's attachments folder. CANARY: remove
+        // recordAudit from keepTaskSource and the sweep reports the action
+        // as unaudited.
+        name: "keepTaskSource",
+        action: "task.source.kept",
+        taskKey: "VIB-1",
+        run: async () => {
+          const { taskAttachmentsDir } = await import("~/server/files/file-store-root.server");
+          const { keepTaskSource } = await import("~/server/tasks/task-sources.server");
+          const dir = taskAttachmentsDir(store.slug, "VIB-1", store.dataRoot);
+          mkdirSync(dir, { recursive: true });
+          writeFileSync(path.join(dir, ".source-aws-pricing.html"), "t3.medium $0.0416 per hour");
+          keepTaskSource(store.db, fileCtx, {
+            projectSlug: store.slug,
+            taskKey: "VIB-1",
+            file: ".source-aws-pricing.html",
+            from: "https://aws.amazon.com/ec2/pricing/on-demand/",
+            title: "AWS EC2 on-demand pricing",
+            actorRef: { kind: "agent", backend: "claude", profileId: "researcher", roleHint: "Researcher" },
+            runId: null,
           });
         },
       },
@@ -1201,6 +1227,30 @@ describe("governed actions record audit rows (table-driven)", () => {
             store.db,
             { conversationId: conversation.id, projectSlug: store.slug, dataRoot: store.dataRoot },
             actorArda(),
+          );
+        },
+      },
+      {
+        // Ruling 691: Viberr's own render of a files delivery's pages. Here
+        // the pinned browser is not on disk, and the job still records what it
+        // could not picture. CANARY: remove the recordAudit call at the end
+        // of the delivery job.
+        name: "captureDeliveredPages",
+        action: "task.pages.captured",
+        taskKey: "VIB-1",
+        run: async () => {
+          const { requestDeliveryCaptures } = await import("~/server/tasks/page-capture.server");
+          const { keepDelivery } = await import("~/server/files/kept-deliveries.server");
+          const { writeTaskAttachment } = await import("~/server/files/task-attachments.server");
+          const { updateTaskFile } = await import("~/server/files/task-writer.server");
+          const stamp = "2026-10-07T12:00:00.000Z";
+          writeTaskAttachment(store.slug, "VIB-1", "post.html", new TextEncoder().encode("<p>a page</p>"), store.dataRoot);
+          keepDelivery(store.slug, "VIB-1", stamp, ["post.html"], store.dataRoot);
+          await updateTaskFile({ projectSlug: store.slug, taskKey: "VIB-1", dataRoot: store.dataRoot }, (parsed) => {
+            parsed.frontmatter.deliveredAt = stamp;
+          });
+          await withEnv({ VIBERR_BROWSER_EXECUTABLE: path.join(store.dataRoot, "no-such-browser") }, () =>
+            requestDeliveryCaptures(store.db, fileCtx, { projectSlug: store.slug, taskKey: "VIB-1", stamp }),
           );
         },
       },

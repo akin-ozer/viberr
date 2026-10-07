@@ -56,10 +56,18 @@ Created by the code that needs them:
   projects/<slug>/project.md
   projects/<slug>/tasks/<KEY>/task.md
   projects/<slug>/tasks/<KEY>/attachments/          files agents save and people upload on the task
-                                                    (member-only served; ruling 96, ruling 379)
+                                                    (member-only served; ruling 96, ruling 379), and
+                                                    Viberr's own pictures of the delivered pages,
+                                                    `<file>.capture-desktop.png` and
+                                                    `<file>.capture-phone.png`, replaced by the next
+                                                    delivery's (ruling 691)
   projects/<slug>/tasks/<KEY>/deliveries/<stamp>/   each files delivery as it was delivered, copied
                                                     when `deliveredAt` is stamped (ruling 597): every
-                                                    file on the task then (ruling 610)
+                                                    file on the task then (ruling 610), and that
+                                                    delivery's own page pictures (ruling 691)
+  projects/<slug>/tasks/<KEY>/sources/              the sources the task's result rests on: `index.jsonl`
+                                                    and one bytes file a source, the server's own
+                                                    (ruling 690; file-formats.md §10)
   projects/<slug>/tasks/<KEY>/workspace/<repo-name>/ the delivering engagement's git clone, shared by the
                                                     operator (a cache, not canonical)
   projects/<slug>/tasks/<KEY>/workspace/support/<profileId>/<repo-name>/
@@ -75,6 +83,35 @@ Created by the code that needs them:
                                                     removed when the run finishes. Each gate's log
                                                     lands in attachments/ as
                                                     `gate-<sha7>-<NN>-<name>-<stamp>.log`
+  projects/<slug>/tasks/<KEY>/.captures/<run>/<captureId>/
+                                                    one page render's scratch (ruling 691): `out/`
+                                                    (the pictures and the report), `tmp/` and
+                                                    `profile/` (the browser's), written by the task
+                                                    owner's agent uid. `<run>` is the id of the run
+                                                    whose `capture_page` asked, or `no.run` for a
+                                                    delivery's own render. `.captures/` and `<run>/`
+                                                    are the server's own, 0710 in the agent group
+                                                    (passed through, never listed or written by an
+                                                    agent); only `<captureId>/`, made new, is 2770
+                                                    for the renderer. Beside `deliveries/`, never
+                                                    under `workspace/`, which agents write. A
+                                                    delivery's is removed when its render finishes.
+                                                    An agent's `capture_page` keeps `out/` alone,
+                                                    replaced by that run's next capture and removed
+                                                    with `<run>/` when the run ends; whatever a
+                                                    restart left goes before the next render on the
+                                                    task, with a finished task's at boot, and as the
+                                                    task's owner on a seed reset
+  projects/<slug>/tasks/<KEY>/.capture-input/<captureId>/
+                                                    a kept delivery's files, copied for the one render
+                                                    that pictures it and removed with it, or, when a
+                                                    restart cut that render, before the task's next
+                                                    one (ruling 691):
+                                                    the server's own, 0710 in the agent group with
+                                                    each file 0640, so the renderer reads a file by
+                                                    its name and no agent lists the folder or writes
+                                                    in it. Beside `deliveries/`, never under
+                                                    `workspace/`, which agents write
   projects/<slug>/tasks/<KEY>/.operator-scratch/    the Codex operator's working directory
   projects/<slug>/epics/<epic-id>.md                epics (ruling 503)
   projects/<slug>/goals/converted/<goal-id>.md      ruling 99's chained goals, filed by the
@@ -330,6 +367,7 @@ booleans are `0/1` in SQLite.
 | `controller_follow_ups` | none | a step goes with its conversation (delete, ruling 525, which says so on the task) and with its project (delete); a started or refused one stays as the record of what became of it |
 | better-auth `session` rows | none on a timer; expired rows are simply never honoured | sign-out, password change, admin disable/reset, or the auth guard on a disabled user |
 | `attachments/` | one **completion-time prune** (ruling 105): when a run finishes (and no sibling run on the task is live), the machine-stamped non-visual artifacts its browser MCP wrote (a short lowercase prefix plus the MCP's dashed-ISO stamp, such as `page-*.yml` and `console-*.log`; png/jpg/webp/gif/pdf are always kept) are deleted unless the exact filename is cited in the run's reply, its evidence rows or the timeline since it started (any entry's text, evidence rows or claimed files, ruling 593). A run that finishes while a sibling is live deletes nothing and claims only the working files it cited, so the sibling's completion decides the rest and no entry names a file that later goes (ruling 593). Beside another specialist run, live or finished inside its window, a run that does not deliver claims only the files its own words name and never one the delivery holds (ruling 627). Deliberately named files, every screenshot or PDF and every person's upload stay. No age- or size-based retention beyond that: the rest of the directory rides with the task | `pruneBrowserWorkingArtifacts` (`app/server/files/task-attachments.server.ts`, driven from `applyAgentCompletionEffects`); archive/delete of the task |
+| `sources/` (a task's kept sources) | none: a kept source is never pruned or overwritten (ruling 690). It goes with its task's directory, so with the project when the project is deleted. After 30 days it is the only copy of what a run read: `run_log_lines` and the raw run log are gone by then, and the record's `runId` names an `agent_runs` row whose lines went with them | `writeTaskSource` (`app/server/files/task-sources.server.ts`) writes it; nothing removes it |
 
 The maintenance pass (`runMaintenancePass`: retention, transcript pruning, workspace reclaim)
 runs at boot and then every `VIBERR_MAINTENANCE_INTERVAL_SECONDS` (default 6 h). A disk check runs

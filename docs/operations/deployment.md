@@ -188,8 +188,13 @@ The image ships everything needed to run real agents: the Claude/Codex SDKs' nat
 linux binaries (inside the production `node_modules` from the `prod-deps` stage) plus, in
 the runtime stage, `git` and a CA bundle (a real run clones the task's repo and the coding
 agent shells out to git), `make`, `curl` and a pinned `pnpm` (ruling 196), Debian
-`chromium` with `fonts-liberation` for the governed browser
-(`VIBERR_BROWSER_EXECUTABLE=/usr/bin/chromium`), `poppler-utils` (`pdftoppm`, `pdftotext`,
+`chromium` with `fonts-liberation` and `fonts-noto-color-emoji` for the governed browser
+and the page capture (`VIBERR_BROWSER_EXECUTABLE=/usr/bin/chromium`; ruling 691: the emoji
+font, 11 MB installed, and `/etc/fonts/local.conf`, which names the Liberation face each
+generic family means, because with `fonts-liberation` alone an emoji drew as an empty box
+and a page set in `system-ui` was pictured in a monospace face; no font is installed for
+CJK, Arabic or Indic scripts, which draw as boxes in a picture until one is added:
+`fonts-noto-cjk` is about 90 MB), `poppler-utils` (`pdftoppm`, `pdftotext`,
 `pdfinfo`) so an agent can look at the pages of a PDF it delivers or judges (ruling 566),
 and `uv`/`uvx` for Python stdio MCP
 servers (their caches live under `runtimes/uv-cache` and `runtimes/uv-python` on the
@@ -400,7 +405,7 @@ longer shares the container's.
 
 **The image fetches its Debian packages over HTTPS.** The runtime stage installs from
 `deb.debian.org` in four `apt-get` layers (`git` + `ca-certificates`, then `make` +
-`curl`, then `chromium` + `fonts-liberation`, then `poppler-utils`), each refreshing a
+`curl`, then `chromium` + `fonts-liberation` + `fonts-noto-color-emoji`, then `poppler-utils`), each refreshing a
 package index of about 10 MB before fetching its archives (roughly 25 MB, 1 MB, 192 MB
 and a few MB, a 15.2 MB layer once installed). The base image names
 that mirror over plain HTTP, and on a connection that shapes port 80 (measured on the
@@ -458,8 +463,10 @@ under `runtimes/`:
 
 ```
 projects/       canonical project.md, task.md, epics/*.md (the source of truth — editable);
-                per task: workspace/ (git clones, a cache), attachments/ (evidence files) and
-                deliveries/ (each files delivery as it was delivered, ruling 597);
+                per task: workspace/ (git clones, a cache), attachments/ (evidence files),
+                deliveries/ (each files delivery as it was delivered, ruling 597) and
+                sources/ (what the task's result rests on, kept as the agents read it and
+                never pruned, ruling 690);
                 per project: .repo-mirror/ (bare mirror, a cache)
 agents/         agents/profiles/*.md templates + agents/definitions/ doctrine files
 kb/ skills/     knowledge-base and skill files
@@ -486,6 +493,11 @@ re-asserts the modes: `/data` 0750 in group `viberr-agents`, `state/`, `audit-ex
 `runtimes/claude|codex/` 0700, `runtimes/users/` 0710, `agents/`, `kb/`, `skills/`,
 `projects/` 0755, and each task's `workspace/`, `attachments/`, `.operator-scratch/` 2770 in
 the agent group ([agents-and-runtime.md §8](../domain/agents-and-runtime.md#8-boot-recovery)).
+A task's `sources/` is not among them (ruling 690): it is the server's own, like `task.md`
+beside it, so an agent reads a kept source and cannot rewrite or delete it. Nor is its
+`.captures/` (ruling 691, the page renderer's scratch): that folder and each run's folder
+in it are the server's own, 0710 in the agent group, and only one render's own folder
+below them is 2770, made when the render starts.
 There is no `auth/`,
 `cache/` or `logs/` directory; application logs are structured JSON on stdout. Full layout
 with retention: [`../architecture/data-model.md`](../architecture/data-model.md#2-data-root-layout).
@@ -537,7 +549,10 @@ with retention: [`../architecture/data-model.md`](../architecture/data-model.md#
   project's `.repo-mirror/` bare mirror. Those two are re-derivable from the remote, a live
   run can be mid-write so the copy would be torn, and they dwarf what is actually truth (on
   the tree this was found on, 17M of git against 168K of project and task markdown); the
-  next run re-clones and re-fetches. `state/writer.lock` and `*.tmp` files are never
+  next run re-clones and re-fetches. A task's `.captures/` and `.capture-input/` are left
+  out too (ruling 691): they are what a page render works in, a browser's profile only its
+  uid can enter and a copy of a kept delivery, and the pictures it keeps are among the
+  attachments and the kept deliveries. `state/writer.lock` and `*.tmp` files are never
   copied. Without the key every sealed PAT, MCP credential and personal backend API key in
   the backed-up database is unreadable, so back an environment key up separately. A key
   the instance generated for itself is IN the artefact, as `state/instance-secrets.json`
@@ -822,7 +837,10 @@ finish is removed by the server's replace as its persons (ruling 485), what the 
 itself wrote in an agent's tree is removable by the person and an emptied workspace root
 goes with the server's `rmdir`, never through an agent's link (ruling 495), the launcher relays SIGTERM, SIGUSR2 kills the group grandchild
 included, PDEATHSIG takes the agent down with the server, `--reap` finds a detached process
-by its marker, and every refusal holds), passes the base URL to Playwright as
+by its marker, and every refusal holds), runs `scripts/check-page-capture.sh` the same way
+(ruling 691: the page capture's renderer against the image's own Chromium as an agent
+uid, its pictures' widths and pixels, a page's requests to another loopback port and to a
+remote host loading nothing, and the image's fonts), passes the base URL to Playwright as
 `VIBERR_E2E_BASE_URL`, and tears the stack down with its volume afterwards unless
 `VIBERR_E2E_KEEP=1`. Details:
 [testing.md](../development/testing.md#4-end-to-end-suite-playwright).

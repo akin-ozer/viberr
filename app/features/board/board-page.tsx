@@ -1044,8 +1044,31 @@ function ListView({
 
 /* ---------- New task modal (board spec §4.6) ---------- */
 
+/**
+ * Ruling 694: what the New task dialog asks for, in the words of the board it
+ * is on. A board with a repository files a change, and its goal is what counts
+ * as done. A board with none files a piece of a person's own work (ruling
+ * 667), and a person who came to hand over a subject and a few notes was asked
+ * for a "goal" a triage gate would flag, under an example about a force-push.
+ */
+const NEW_TASK_COPY = {
+  repository: {
+    titlePlaceholder: "e.g. Reconcile PR state after force-push",
+    stage: "The goal gets refined at triage before any work begins.",
+    goalHint: "what counts as done, for the operator and the agents",
+    goalPlaceholder: "One or two sentences. A vague goal gets flagged by the operator at triage.",
+  },
+  files: {
+    titlePlaceholder: "e.g. What you want back, in a few words",
+    stage: "The agents work from what you write here and ask you for what only you know.",
+    goalHint: "what you want back, and what you know about it",
+    goalPlaceholder: "Say what you want back and add your notes. Files go below.",
+  },
+} as const;
+
 function NewTaskModal({
   entryStageName,
+  hasRepository,
   labelSuggestions,
   epics,
   initialEpic,
@@ -1053,6 +1076,9 @@ function NewTaskModal({
 }: {
   /** R19-14: every task is created at the entry stage — the modal names it. */
   entryStageName: string;
+  /** Ruling 694: whether the project has a repository, which decides the
+   *  dialog's words. */
+  hasRepository: boolean;
   /** Labels already used across the board, offered as label autocomplete. */
   labelSuggestions: string[];
   /** Ruling 503: the project's open epics, a new task can start in one. */
@@ -1061,6 +1087,7 @@ function NewTaskModal({
   initialEpic: string | null;
   onClose: () => void;
 }) {
+  const copy = hasRepository ? NEW_TASK_COPY.repository : NEW_TASK_COPY.files;
   const [title, setTitle] = useState("");
   const [goal, setGoal] = useState("");
   const [epic, setEpic] = useState(initialEpic ?? "");
@@ -1205,7 +1232,7 @@ function NewTaskModal({
             onBlur={(e) => {
               if (e.target.value.trim() !== "") setTitleTouched(true);
             }}
-            placeholder="e.g. Reconcile PR state after force-push"
+            placeholder={copy.titlePlaceholder}
             autoFocus
             onKeyDown={(e) => {
               if (e.key === "Enter") submit();
@@ -1218,22 +1245,19 @@ function NewTaskModal({
               choice the server would refuse. */}
           <span className="flabel">Stage</span>
           <span className="fine sm">
-            Starts in {entryStageName}. The goal gets refined at triage before
-            any work begins.
+            Starts in {entryStageName}. {copy.stage}
           </span>
         </div>
         <div className="field">
           <label className="flabel" htmlFor="new-task-goal">
             Goal
-            <span className="fhint">
-              what counts as done, for the operator and the agents
-            </span>
+            <span className="fhint">{copy.goalHint}</span>
           </label>
           <textarea
             id="new-task-goal"
             value={goal}
             onChange={(e) => setGoal(e.target.value)}
-            placeholder="One or two sentences. A vague goal gets flagged by the operator at triage."
+            placeholder={copy.goalPlaceholder}
           />
         </div>
         <FiledFiles
@@ -2011,6 +2035,9 @@ interface BoardPageProps {
    * has established it", which the banner reads as silence, never as health.
    */
   repoAccess?: RepoAccessResult | null;
+  /** Ruling 694: false on a board with no repository, whose New task dialog
+   *  asks for what a person files there. */
+  hasRepository?: boolean;
   /** Ruling 503: the project's epics, for the epic filter and the New-task
    *  Epic pick. */
   epics?: readonly EpicOption[];
@@ -2024,6 +2051,7 @@ export function BoardPage({
   canRescan,
   defaultBranch = "main",
   repoAccess,
+  hasRepository = true,
   epics = [],
 }: BoardPageProps) {
   const { slug: projectSlug } = useParams();
@@ -2224,6 +2252,7 @@ export function BoardPage({
       {creating && stages[0] && (
         <NewTaskModal
           entryStageName={stages[0].name}
+          hasRepository={hasRepository}
           labelSuggestions={labelSuggestions}
           epics={openEpics}
           initialEpic={newTaskEpic(epicFilter, openEpics)}

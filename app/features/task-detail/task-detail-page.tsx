@@ -14,6 +14,8 @@ import type {
 import type { RecommendationView } from "./operator-recommendations";
 import type { TaskRunPrincipalView } from "./run-principal-view";
 import type { CompletionView } from "~/server/tasks/completion-packet.server";
+import type { TookCard } from "~/server/tasks/what-it-took.server";
+import type { TaskSourceRow } from "~/server/tasks/task-sources.server";
 import type { TaskAttachmentEntry } from "~/server/files/task-attachments.server";
 import type { TimelineFilterId } from "./timeline";
 import type { Mentionables } from "~/server/tasks/mention-suggestions.server";
@@ -77,6 +79,9 @@ function runThreadKey(run: RunView): string {
   return run.id;
 }
 
+/** Ruling 690: a task that keeps no sources, as one list every render. */
+const NO_SOURCES: TaskSourceRow[] = [];
+
 interface TaskDetailPageProps {
   /** Loader detail — `task.timeline` is the bounded newest-first slice. */
   task: TaskDetail;
@@ -99,6 +104,14 @@ interface TaskDetailPageProps {
    *  built by the route component (the one place that knows the params).
    *  Null hides the panel and the evidence links (e.g. bare test renders). */
   attachmentsBase?: string | null;
+  /** Ruling 690: the sources the task keeps (loader; absent for a task that
+   *  keeps none and for a non-member), newest first. */
+  sources?: TaskSourceRow[];
+  /** How many it keeps in all: the list stops at the newest hundred. */
+  sourcesTotal?: number;
+  /** `/projects/<slug>/tasks/<KEY>/sources`, the route that serves one by
+   *  its id, built by the route component. Null draws no source as a link. */
+  sourcesBase?: string | null;
   /** Ruling 484: `/projects/<slug>/tasks/<KEY>/changes`, the Changes panel's
    *  read, built by the route component. Null hides the panel. */
   changesUrl?: string | null;
@@ -110,6 +123,10 @@ interface TaskDetailPageProps {
    *  summary and screenshots, each reviewer's verdict, the change's size);
    *  null while nothing is delivered. */
   completion?: CompletionView | null;
+  /** Ruling 693: what the task took, as the completion card prints it; null
+   *  when the loader shipped none (nothing delivered, or a viewer who may not
+   *  see the runs). */
+  whatItTook?: TookCard | null;
   /** Per-task run projection (Phase 8). */
   runtime: RunView[];
   /** Deployed specialists the run-agent selector offers (loader). */
@@ -245,9 +262,13 @@ export function TaskDetailPage({
   attachmentsTotal,
   attachmentProducers = {},
   attachmentsBase = null,
+  sources = NO_SOURCES,
+  sourcesTotal = 0,
+  sourcesBase = null,
   changesUrl = null,
   dependencyCandidatesUrl = null,
   completion = null,
+  whatItTook = null,
   runtime: loadedRuntime,
   deployedSpecialists,
   operatorBackend,
@@ -375,6 +396,8 @@ export function TaskDetailPage({
           placement={placement}
           diff={completionDiff}
           attachmentsBase={attachmentsBase}
+          sourcesBase={sourcesBase}
+          took={whatItTook}
           githubHost={githubHost}
           acceptance={acceptance}
           resolution={resolution}
@@ -473,6 +496,9 @@ export function TaskDetailPage({
         attachments={attachments}
         attachmentsTotal={attachmentsTotal}
         attachmentProducers={attachmentProducers}
+        sources={sources}
+        sourcesTotal={sourcesTotal}
+        sourcesBase={sourcesBase}
         timelineHasMore={timelineHasMore}
         timelineRemaining={timelineRemaining}
         timelineNextLimit={timelineNextLimit}

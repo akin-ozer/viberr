@@ -55,8 +55,8 @@ import {
   projectRunsForTask,
   SDK_LABEL,
   runLiveFacts,
-  type ConsoleShipping,
   type ProjectedRunView,
+  type RunsForTaskOptions,
 } from "./run-projection.server";
 import { createRunSink, runPersistDrained } from "./run-sink.server";
 import { classifyRunEndOf } from "./provider-refusal.server";
@@ -2919,12 +2919,13 @@ async function noteRunStarted(
 // ---------------------------------------------- reads
 
 /** All runs for a task as RunView[] + their D-11 log windows (task loader).
- *  `console` says how much of each window to carry (ruling 457). */
+ *  `console` says how much of each window to carry (ruling 457); `rows` hands
+ *  in run rows the caller has already read (ruling 693). */
 export function listRunsForTask(
   db: DatabaseSync,
   projectSlug: string,
   taskKey: string,
-  options: { console?: ConsoleShipping } = {},
+  options: RunsForTaskOptions = {},
 ): ProjectedRunView[] {
   return projectRunsForTask(db, projectSlug, taskKey, options);
 }

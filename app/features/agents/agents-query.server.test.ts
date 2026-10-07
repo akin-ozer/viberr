@@ -392,9 +392,9 @@ describe("A1: read surfaces materialize an absent grant at its runtime mode", ()
       absentDeliverReviewPrMode(false),
     );
     // A grant-required capability that is absent stays withheld on every surface.
-    expect(view.actions.direct).not.toContain("Execute code or write to the repo");
+    expect(view.actions.direct).not.toContain("Write to the repository");
     expect(view.actions.recommend).not.toContain(
-      "Execute code or write to the repo",
+      "Write to the repository",
     );
     // Runtime agrees: absent repo-write is denied.
     expect(resolveSpecialistDisallowedTools(grants)).toContain("Write");

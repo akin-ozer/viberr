@@ -22,7 +22,11 @@ import {
   postAgentComment,
   openAgentQuestionPacket,
 } from "./agent-toolkit.server";
-import { takeStagedOutcome } from "./agent-outcome.server";
+import {
+  AGENT_OUTCOME_JSON_SCHEMA,
+  ASK_HUMAN_ONLY_NOTE,
+  takeStagedOutcome,
+} from "./agent-outcome.server";
 import { z, type ZodType } from "zod";
 import type { FileActorRef, Recommendation } from "~/schemas/task-file.schema";
 
@@ -379,6 +383,7 @@ describe("report_outcome's evidence field (P13-D-26)", () => {
       outcomeKey,
       collab: { ...collab, githubRead: collab.githubRead ?? false },
       kb: [],
+      webEgress: true,
     })!;
     lastStore = store;
     return mountedTools.parse(built.mcpServers.viberr_agent);
@@ -404,6 +409,7 @@ describe("report_outcome's evidence field (P13-D-26)", () => {
         githubRead: collab.githubRead ?? false,
       },
       kb: [],
+      webEgress: true,
     })!;
     lastStore = store;
     return built.mcpServers.viberr_agent;
@@ -538,6 +544,36 @@ describe("report_outcome's evidence field (P13-D-26)", () => {
   });
 
   /**
+   * Ruling 692(c): seven of the nine questions a writer put to a person were
+   * its own choices (the reader, the length, the tone), each with a default
+   * to approve. One sentence says what a question is for, on the tool a Claude
+   * run calls and on the field a Codex run fills, so it reaches an agent no
+   * manual does. The run's collaboration note carries it too, which
+   * `specialist-run.server.test.ts` owns.
+   */
+  it("ruling 692: both asking channels say a person is asked only what they alone know, in one question", async () => {
+    const { Client } = await import("@modelcontextprotocol/sdk/client/index.js");
+    const { InMemoryTransport } = await import("@modelcontextprotocol/sdk/inMemory.js");
+    const server = mountFor({ ...BASE, ask: true });
+    const [clientEnd, serverEnd] = InMemoryTransport.createLinkedPair();
+    await server.instance.connect(serverEnd);
+    const client = new Client({ name: "probe", version: "1" }, { capabilities: {} });
+    await client.connect(clientEnd);
+
+    expect(ASK_HUMAN_ONLY_NOTE).toBe(
+      "Ask what only a person knows or may decide, and put all of it in one question. " +
+        "A choice that is yours to make, make it and state it in your report as an assumption: " +
+        "never ask a person to approve your own choices.",
+    );
+    const ask = (await client.listTools()).tools.find((t) => t.name === "ask_human");
+    // CANARY: drop the note from the tool's description, or from the field's.
+    expect(ask?.description).toContain(ASK_HUMAN_ONLY_NOTE);
+    expect(AGENT_OUTCOME_JSON_SCHEMA.properties.question.description).toContain(
+      ASK_HUMAN_ONLY_NOTE,
+    );
+  });
+
+  /**
    * Ruling 478(e) (F40-31, F40-57): `ask_human` lets the agent say a choice
    * needs a typed answer, and tells it an unmarked list recommends nothing.
    */
@@ -601,6 +637,7 @@ describe("report_outcome's evidence field (P13-D-26)", () => {
       outcomeKey: "oc_load",
       collab: { comment: true, ask: true, verdict: true, evidence: true, githubRead: true },
       kb: [],
+      webEgress: true,
     })!;
     const loading = toolLoading(built.mcpServers.viberr_agent);
     expect(loading.deferred).toEqual([]);
@@ -645,6 +682,7 @@ describe("report_outcome's evidence field (P13-D-26)", () => {
         githubRead: true,
       },
       kb: ["shopify-clone-conventions"],
+      webEgress: true,
     })!;
     const mounted = Object.keys(
       mountedTools.parse(built.mcpServers.viberr_agent),
@@ -655,9 +693,11 @@ describe("report_outcome's evidence field (P13-D-26)", () => {
     expect(mounted).toEqual([
       "correct_knowledge_doc",
       "github_read",
+      "keep_source",
       "read_board",
       "read_knowledge_doc",
       "read_task_attachment",
+      "read_task_source",
       "read_timeline_entry",
       "report_outcome",
     ]);
@@ -869,6 +909,322 @@ describe("report_outcome's evidence field (P13-D-26)", () => {
     expect(await text(read, { taskKey: "VIB-9", name: "mapping.md", delivery: first })).toBe(
       `[noop] VIB-9's delivery of ${first} held no \`mapping.md\`. It held: comparison.md.`,
     );
+  });
+
+  it("ruling 690: keep_source is on the toolkit only for a profile that holds attach-evidence-references, and records the run that called it", async () => {
+    // CANARY: mount it under holdsCollaborationGrant(collab) and a profile
+    // with every other grant, which may not save a file on the task, is
+    // offered keep_source. Pass no run id from the handler and the record
+    // names no run.
+    const { mkdirSync, writeFileSync } = await import("node:fs");
+    const path = await import("node:path");
+    const { taskAttachmentsDir } = await import("~/server/files/file-store-root.server");
+    const { readTaskSources } = await import("~/server/files/task-sources.server");
+    const ungranted = toolkitTools({ comment: true, ask: true, verdict: true, evidence: false, githubRead: true }, "oc_nokeep");
+    expect(ungranted.keep_source).toBeUndefined();
+    // It still reads what the task keeps.
+    expect(ungranted.read_task_source).toBeTruthy();
+
+    const tools = toolkitTools({ comment: false, ask: false, verdict: false, evidence: true }, "oc_keep");
+    const store = lastStore;
+    // The run row as registerAgentCompletion leaves it: stamped with the key.
+    upsertRun(store.db, {
+      id: "run_keep",
+      projectSlug: store.slug,
+      taskKey: "VIB-3",
+      threadId: "thread_keep",
+      role: "Security review",
+      kind: "reviewer",
+      agentProfileId: "security-reviewer",
+      backend: "claude",
+      model: "claude-opus-5",
+      sdk: "claude-agent-sdk",
+      state: "running",
+    });
+    patchRun(store.db, "run_keep", { outcomeKey: "oc_keep" });
+    const dir = taskAttachmentsDir(store.slug, "VIB-3", store.dataRoot);
+    mkdirSync(dir, { recursive: true });
+    writeFileSync(path.join(dir, ".source-advisory.json"), '{"id":"GHSA-xxxx","fixedIn":"4.2.1"}');
+
+    // SAFETY: the tool answers the text block `{ content: [{ type: "text", text }] }`.
+    const out = (await tools.keep_source!.handler(
+      {
+        file: ".source-advisory.json",
+        from: "https://api.github.com/advisories/GHSA-xxxx",
+        title: "The advisory for the pinned parser",
+      } as never,
+      {} as never,
+    )) as { content: { text: string }[] };
+    expect(out.content[0]!.text).toMatch(/^\[kept\] S1: advisory\.json, 36 bytes, sha256 [0-9a-f]{12}\. /);
+    expect(readTaskSources(store.slug, "VIB-3", store.dataRoot).sources).toMatchObject([
+      {
+        id: "S1",
+        runId: "run_keep",
+        by: { backend: "claude", profileId: "security-reviewer", roleHint: "Security review" },
+      },
+    ]);
+  });
+
+  it("ruling 690: read_task_source lists a task's sources with what each delivery rested on, opens one by id in pages, and reads another task's with taskKey", async () => {
+    // The reader the operator's, the controller's and the gateway's tools
+    // answer with, unchanged. CANARY: resolve the bytes by the record's
+    // `name` instead of its `file` and the read answers [noop] for a source
+    // the list just named. List only the deliveries the index has a line for
+    // and the first delivery, stamped while the task kept nothing, is not
+    // named, so a reader cannot tell it rested on none. Print the start of
+    // the hash and the list does not carry the SHA-256 its description says.
+    const { createHash } = await import("node:crypto");
+    const { mkdirSync, writeFileSync } = await import("node:fs");
+    const path = await import("node:path");
+    const { taskAttachmentsDir } = await import("~/server/files/file-store-root.server");
+    const { keepDelivery } = await import("~/server/files/kept-deliveries.server");
+    const { readTaskSources, recordDeliverySources, writeTaskSource } = await import(
+      "~/server/files/task-sources.server"
+    );
+    // A reviewer with no file grant: it cannot keep a source and still reads them.
+    const tools = toolkitTools({ ...BASE, comment: true, evidence: false }, "oc_sources");
+    const read = tools.read_task_source!;
+    expect(read).toBeTruthy();
+    const store = lastStore;
+    writeTask(store.dataRoot, store.slug, { frontmatter: baseTaskFrontmatter("VIB-9", { stage: "review" }) });
+    rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
+    const by = { backend: "codex", profileId: "researcher", roleHint: "Researcher" };
+    // A first delivery, kept before the task kept any source: no line was
+    // written for it, and it rested on none.
+    const dir = taskAttachmentsDir(store.slug, "VIB-9", store.dataRoot);
+    mkdirSync(dir, { recursive: true });
+    writeFileSync(path.join(dir, "estimate.md"), "The first estimate.");
+    keepDelivery(store.slug, "VIB-9", "2024-03-01T09:00:00.000Z", ["estimate.md"], store.dataRoot);
+    // A page longer than one read, so the second half is only a page away.
+    const page = `<html>${"t3.medium $0.0416 per hour. ".repeat(1500)}</html>`;
+    const exportJson = '{"monthly":1234.56}';
+    writeTaskSource(
+      store.slug,
+      "VIB-9",
+      {
+        name: "aws-pricing.html",
+        data: Buffer.from(page),
+        title: "AWS EC2 on-demand pricing",
+        from: "https://aws.amazon.com/ec2/pricing/on-demand/",
+        by,
+        runId: "run_abc",
+      },
+      store.dataRoot,
+    );
+    recordDeliverySources(store.slug, "VIB-9", "2026-10-07T13:00:00.000Z", store.dataRoot);
+    writeTaskSource(
+      store.slug,
+      "VIB-9",
+      {
+        name: "calc-export.json",
+        data: Buffer.from(exportJson),
+        title: "The calculator's export",
+        from: "curl -sS https://calculator.aws/pricing/2.0/export",
+        by,
+        runId: null,
+      },
+      store.dataRoot,
+    );
+    const [first, second] = readTaskSources(store.slug, "VIB-9", store.dataRoot).sources;
+    const sha = (text: string) => createHash("sha256").update(text).digest("hex");
+    // SAFETY: every text answer here is `{ content: [{ type: "text", text }] }`.
+    const text = async (args: Record<string, string | number>) =>
+      ((await read.handler(args as never, {} as never)) as { content: { text: string }[] }).content[0]!.text;
+
+    // The list: what each delivery rested on, what was kept after the newest
+    // one and by whom, then each source's record. CANARY: leave the "Kept
+    // after it" line out and S2 stands under no delivery, while the card
+    // counts it when the deliverer kept it (`sourcesRestedOn`).
+    expect(JSON.parse(await text({ taskKey: "VIB-9" }))).toEqual({
+      task: "VIB-9",
+      kept: 2,
+      truncated: false,
+      text:
+        "Delivery 2024-03-01T09:00:00.000Z rested on no kept source\n" +
+        "Delivery 2026-10-07T13:00:00.000Z rested on: S1\n" +
+        "Kept after it: S2 by agent:researcher. One the task's deliverer kept counts as what its result rests on; one a reviewer kept while checking does not.\n\n" +
+        `S1 · aws-pricing.html · ${page.length.toLocaleString("en-US")} bytes · sha256 ${sha(page)}\n` +
+        "title: AWS EC2 on-demand pricing\n" +
+        "from: https://aws.amazon.com/ec2/pricing/on-demand/\n" +
+        `kept: ${first!.keptAt} by agent:researcher (run run_abc)\n\n` +
+        `S2 · calc-export.json · 19 bytes · sha256 ${sha(exportJson)}\n` +
+        "title: The calculator's export\n" +
+        "from: curl -sS https://calculator.aws/pricing/2.0/export\n" +
+        `kept: ${second!.keptAt} by agent:researcher`,
+    });
+
+    // One source, a page at a time.
+    expect(JSON.parse(await text({ taskKey: "VIB-9", id: "S1" }))).toEqual({
+      id: "S1",
+      title: "AWS EC2 on-demand pricing",
+      from: "https://aws.amazon.com/ec2/pricing/on-demand/",
+      keptAt: first!.keptAt,
+      by: "agent:researcher",
+      name: "aws-pricing.html",
+      bytes: page.length,
+      sha256: sha(page),
+      text: page.slice(0, 32_000),
+      truncated: true,
+      nextOffset: 32_000,
+    });
+    expect(JSON.parse(await text({ taskKey: "VIB-9", id: "S1", offset: 32_000 }))).toMatchObject({
+      id: "S1",
+      text: page.slice(32_000),
+      truncated: false,
+      offset: 32_000,
+    });
+
+    // The misses say what the task does keep.
+    expect(await text({ taskKey: "VIB-9", id: "S9" })).toBe(
+      "[noop] VIB-9 keeps no source `S9`. It keeps S1 to S2; call read_task_source without `id` to list them.",
+    );
+    // Without a key it reads this task, which keeps none.
+    expect(JSON.parse(await text({}))).toEqual({ task: "VIB-3", kept: 0, text: "VIB-3 keeps no sources.", truncated: false });
+    expect(await text({ id: "S1" })).toBe("[noop] VIB-3 keeps no source `S1`. It keeps no sources.");
+    expect(await text({ taskKey: "VIB-404" })).toBe(
+      "[noop] No task VIB-404 in this project; `read_board` lists the project's tasks.",
+    );
+    // `read_board` says a task keeps sources and which tool lists them.
+    // SAFETY: `read_board` answers the same one text block.
+    const boardOut = (await tools.read_board!.handler({ taskKey: "VIB-9" } as never, {} as never)) as {
+      content: { text: string }[];
+    };
+    const board = z.object({ sources: z.string() }).parse(JSON.parse(boardOut.content[0]!.text));
+    expect(board.sources).toBe(
+      "2 kept; `read_task_source` with this task's key lists them and what each delivery rested on",
+    );
+  });
+
+  it("capture_page hands a run the pictures of a page on its task in readable stretches, saves nothing on the task, and names a file that is not a page", async () => {
+    // Ruling 691: a page judged from its source hides a broken table and a
+    // layout that falls apart on a phone. CANARY: mount the tool without the
+    // pageCaptureStatus check and a server with no browser lists a tool that
+    // cannot answer.
+    const { mkdirSync, readdirSync, writeFileSync } = await import("node:fs");
+    const path = await import("node:path");
+    const { taskAttachmentsDir } = await import("~/server/files/file-store-root.server");
+    const { imageHeader } = await import("~/server/files/task-attachments.server");
+    const { withEnv } = await import("../../../test-support/env");
+    const { writeFakeBrowser } = await import("../../../test-support/fake-browser");
+    const grants = { ...BASE, comment: true, evidence: false };
+    expect(toolkitTools(grants, "oc_capture_no_browser").capture_page).toBeUndefined();
+
+    const fake = writeFakeBrowser(ctx.makeTempDir("viberr-fake-browser-"));
+    await withEnv({ VIBERR_BROWSER_EXECUTABLE: fake.executable, ...fake.env() }, async () => {
+      const capture = toolkitTools(grants, "oc_capture").capture_page!;
+      const store = lastStore;
+      // The run row as registerAgentCompletion leaves it: stamped with the
+      // key, so the tool knows which run asks and keeps the pictures for it.
+      upsertRun(store.db, {
+        id: "run_capture",
+        projectSlug: store.slug,
+        taskKey: "VIB-3",
+        threadId: "thread_capture",
+        role: "Editor",
+        kind: "reviewer",
+        agentProfileId: "editor",
+        backend: "claude",
+        model: "claude-opus-5",
+        sdk: "claude-agent-sdk",
+        state: "running",
+      });
+      patchRun(store.db, "run_capture", { outcomeKey: "oc_capture" });
+      const dir = taskAttachmentsDir(store.slug, "VIB-3", store.dataRoot);
+      mkdirSync(dir, { recursive: true });
+      writeFileSync(
+        path.join(dir, "post.html"),
+        '<img src="https://fonts.example.com/a.css"><img src="assets/chart.png"><p>fake-height:3412</p>',
+      );
+      writeFileSync(path.join(dir, "data.csv"), "a,b\n");
+      // One screen of page: 800 px on a desktop, 844 on a phone.
+      writeFileSync(path.join(dir, "short.html"), "<p>one screen</p>");
+      writeFileSync(path.join(dir, "endless.html"), "<p>fake-height:50000</p>");
+      writeFileSync(path.join(dir, ".draft.html"), "<p>a dot name is no file of the task to any reader</p>");
+      type Block = { type: "text"; text: string } | { type: "image"; data: string; mimeType: string };
+      const call = async (args: { name: string; view?: string; from?: number }) => {
+        // SAFETY: the tool answers with text and image blocks, the SDK's own
+        // tool-result shape; the handler's second argument is never read.
+        const { content } = (await capture.handler(args as never, {} as never)) as { content: Block[] };
+        return {
+          text: content.flatMap((block) => (block.type === "text" ? [block.text] : [])).join(""),
+          pictures: content.flatMap((block) =>
+            block.type === "image" ? [imageHeader(Buffer.from(block.data, "base64"))] : [],
+          ),
+        };
+      };
+
+      const first = await call({ name: "post.html" });
+      expect(first.text).toMatch(
+        new RegExp(
+          "^\\[done\\] `post\\.html` as a reader sees it\\. " +
+            "Desktop, 1280 px wide: 0 to 2,000 px of 3,412 \\(`nextFrom`: 2000\\)\\. " +
+            "Phone, 390 px wide: 0 to 2,000 px of 3,412 \\(`nextFrom`: 2000\\)\\. " +
+            "It asked the network for 1 thing \\(fonts\\.example\\.com\\), which a capture never loads, " +
+            "and for `assets/chart\\.png`, which is not among this task's files \\(the folder is flat\\)\\. " +
+            // In the run's own folder of the task's capture scratch.
+            // CANARY: pass `runId: null` from the handler and the pictures
+            // land in the folder every run-less ask shares, where the next
+            // capture on the task by anyone replaces them, and the reply
+            // says so instead.
+            "Saved for this run at `\\S+/\\.captures/run_capture/cap_\\S+/out/1-desktop\\.png` and " +
+            "`\\S+/\\.captures/run_capture/cap_\\S+/out/1-phone\\.png`: " +
+            "scratch, your next capture replaces it, and it goes when this run ends\\.$",
+        ),
+      );
+      // One picture per width, each a stretch a model can read.
+      expect(first.pictures).toEqual([
+        { mimeType: "image/png", width: 1280, height: 2000 },
+        { mimeType: "image/png", width: 390, height: 2000 },
+      ]);
+      // The rest of the page, at one width.
+      const rest = await call({ name: "post.html", view: "phone", from: 2000 });
+      expect(rest.text).toContain("Phone, 390 px wide: 2,000 to 3,412 px of 3,412, the end of the page.");
+      expect(rest.text).not.toContain("Desktop");
+      expect(rest.pictures).toEqual([{ mimeType: "image/png", width: 390, height: 1412 }]);
+
+      // A phone lays a page out taller than a desktop does. Past the shorter
+      // layout's end the other width is still handed over, and the reply says
+      // which width ended where. CANARY: fail the call when one width has
+      // nothing at `from` and following the phone's `nextFrom` ends in an
+      // error that names no width.
+      const uneven = await call({ name: "short.html", from: 820 });
+      expect(uneven.text).toMatch(
+        /^\[done\] `short\.html` as a reader sees it\. Desktop, 1280 px wide: the page ends at 800 px, so nothing starts at 820 px\. Phone, 390 px wide: 820 to 844 px of 844, the end of the page\. Saved for this run at /,
+      );
+      expect(uneven.pictures).toEqual([{ mimeType: "image/png", width: 390, height: 24 }]);
+      // Past the end at both widths nothing failed: there is nothing there.
+      expect(await call({ name: "short.html", from: 5000 })).toEqual({
+        text:
+          "[noop] `short.html` ends at 800 px at the desktop width (1280 px) and at 844 px at the phone width (390 px), " +
+          "so nothing starts at 5,000 px.",
+        pictures: [],
+      });
+      // A reply never hands out a `nextFrom` the tool would then refuse.
+      // CANARY: print `nextFrom` for every cut stretch and this one says 42000.
+      expect((await call({ name: "endless.html", view: "desktop", from: 40_000 })).text).toContain(
+        "Desktop, 1280 px wide: 40,000 to 42,000 px of 50,000; the page runs on, and a stretch starts no further down than 40,000 px.",
+      );
+
+      // It saved nothing on the task: no file, no entry, no audit row.
+      expect(readdirSync(dir).sort()).toEqual([".draft.html", "data.csv", "endless.html", "post.html", "short.html"]);
+      const file = readTaskFile({ projectSlug: store.slug, taskKey: "VIB-3", dataRoot: store.dataRoot })!.parsed;
+      expect(file.timeline).toEqual([]);
+      expect(file.frontmatter.pageCaptures).toBeUndefined();
+      expect(listAuditEvents(store.db, { action: "task.pages.captured" })).toEqual([]);
+
+      // What it does not render, in the reader's own words.
+      expect((await call({ name: "data.csv" })).text).toBe(
+        "[noop] `data.csv` is not a page. capture_page renders .html, .htm, .md and .markdown files; " +
+          "read any other file with read_task_attachment.",
+      );
+      const missing = (await call({ name: "nope.html" })).text;
+      expect(missing).toMatch(/^\[noop\] VIB-3 has no attachment `nope\.html`\. It holds: /);
+      expect(missing).toContain("post.html");
+      // A dot name is hidden from every listing, so it is no page to look at
+      // either. CANARY: let a dot name through to the renderer and the answer
+      // is no longer the reader's own sentence.
+      expect((await call({ name: ".draft.html" })).text).toMatch(/^\[noop\] VIB-3 has no attachment `\.draft\.html`\. It holds: /);
+    });
   });
 
   it("ruling 596: read_board lists a task's timeline by stamp, and read_timeline_entry opens an entry on it or on another task", async () => {
@@ -1113,6 +1469,7 @@ describe("report_outcome's evidence field (P13-D-26)", () => {
             githubRead: false,
           },
           kb: [],
+          webEgress: true,
         }),
       ).toBeNull();
 
@@ -1145,6 +1502,7 @@ describe("report_outcome's evidence field (P13-D-26)", () => {
           githubRead: false,
         },
         kb: ["shop-rulings"],
+        webEgress: true,
       });
       expect(built).not.toBeNull();
       const names = mountedTools.parse(built!.mcpServers.viberr_agent);
@@ -1211,6 +1569,7 @@ describe("report_outcome's evidence field (P13-D-26)", () => {
         outcomeKey: "oc_kb_propose",
         collab: { comment: true, ask: false, verdict: false, evidence: false, githubRead: false },
         kb: [kb.dir],
+        webEgress: true,
       })!;
       const [clientEnd, serverEnd] = InMemoryTransport.createLinkedPair();
       await built.mcpServers.viberr_agent.instance.connect(serverEnd);
@@ -1360,6 +1719,7 @@ describe("report_outcome's evidence field (P13-D-26)", () => {
         outcomeKey: "oc_gr_ok",
         collab: { comment: false, ask: false, verdict: false, evidence: false, githubRead: true },
         kb: [],
+        webEgress: true,
       })!;
       return { store, tools: mountedTools.parse(built.mcpServers.viberr_agent) };
     }

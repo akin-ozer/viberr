@@ -230,6 +230,7 @@ the only gates. Jobs run again since 2026-10-01.
 | `demo-seed.ts`, `demo-data.ts`, `custom-board.ts` | the demo fixture: `runDemoSeed(db, { dataRoot, reset?, adminPassword? })` (arda, elif, murat, selin, deniz, each signing in with `SEED_DEFAULT_PASSWORD` from `app/server/seed/seed-credentials.ts` unless `adminPassword` sets arda's, each distinct password hashed once per seed; `viberr-core` plus the stub projects `deploy-pipeline` and `billing-service`; twelve tasks, VIB-139…168 with full timelines plus DEP-31 and BIL-9; Arda's inbox, the VIB-142 scope violation, Arda's Home pins; the demo Developer stays Codex-backed) → the counts plus `userIds`, each seeded user's id by handle, so a test signs in as one without looking it up by email; `CUSTOM_3_STAGE_BOARD` (`todo` / `doing` / `done`) |
 | `backend-credentials.ts` | `connectFakeBackend(db, userId, backend)`, `connectFakeBackends(db, userId)`, `disconnectFakeBackend(db, userId, backend)`, `fakeBackendSecret(backend)` |
 | `fake-vendor-binary.ts` | `writeFakeVendorBinaries()` → executable `claude` / `codex` stand-ins (mode 0o755) for `deps.binaries`, with `cleanup()`; `setFakeVendorMode("success" \| "fail" \| "hang")`, `setFakeVendorLoggedOut()`, `setFakeVendorLogoutExit()`, `setFakeVendorEvidenceDir()`, `resetFakeVendorEnv()`; the evidence readers `fakeVendorEnv/Argv/Stdin/Terminated/Logout(home)` and, outside every home, `fakeVendorLogouts/Terminations(dir)`; `FAKE_DEVICE_CODE`, `FAKE_CLAUDE_URL`, `FAKE_CODEX_URL`, `ANSI_ESCAPE` |
+| `fake-browser.ts` | `writeFakeBrowser(dir)` → an executable stand-in for Chromium (mode 0o755) for the page capture (ruling 691): it speaks the renderer child's part of the DevTools protocol on fd 3 and 4, fetches the page it is told to open and every `src` in it from the child's own page server, and answers a screenshot with a real PNG of the clip. A page says how large it is in its own text (`fake-height:3000`, `fake-width:612`, `fake-scale:0.5`), and `fake-crash-at:390` ends the browser at that viewport width, so one width is pictured and the other is not. `env(mode)` gives the two variables a suite sets (`hang`, `crash`, `big`, `dialog`, which opens an alert and finishes the load only once it is answered, `unload`, a page that asks before the browser leaves it (a `beforeunload` dialog at every load after its first, which starts only once the dialog is accepted), and `hold`, which finishes a load only after `release()`, so a test acts while a render is in flight; each optionally `mode:needle` for one page); `launches()`, `pages()`, `shots()` and `dialogs()` read back its argv and environment, the HTML and sub-resource statuses it was served, the clips it was asked for and each dialog's type and how it was answered |
 | `mcp-tool-meta.ts` | reads a mounted in-process MCP server the way a model sees it: `toolLoading(server)` (tools loaded up front vs deferred to ToolSearch), `publishedSchemas(server)` (the JSON Schema through a real MCP client, ruling 296), `publishedInstructions(server)` (ruling 297); `callToolText(tools, toolName, args)` calls one controller tool (`viberr_controller` or `viberr_ops`) by name on a toolkit the test built as its asker and returns the text reply |
 | `strict-schema.ts` | `assertStrictSchema(node)` — the OpenAI strict structured-output rule (every object `additionalProperties: false`, every key `required`) walked recursively over the Codex agent envelope and operator plan |
 | `toolchain.ts` | `HERMETIC_TOOLCHAIN`, `primeToolchain(reading \| null)`, `primeHermeticToolchain()` |
@@ -549,9 +550,28 @@ Playwright (`npm run e2e -- e2e/01-home-board.spec.ts`).
    process by marker, and every refusal (a uid below the floor, uid 0, a relative exec, a
    home outside `runtimes/users/`, a `..`, another agent's home, a malformed marker, an
    agent executing the launcher) holds.
-5. `npx playwright test <args>` with `VIBERR_E2E_BASE_URL`; on failure prints the last
+5. Ruling 691: runs `docker compose exec -T app sh scripts/check-page-capture.sh`, failing
+   the run on a non-zero exit. The unit suites drive the page capture's renderer with a
+   stand-in browser (`test-support/fake-browser.ts`), so this is the one place the image's
+   own Chromium is asked: as a throwaway agent uid through the launcher it pictures a
+   fixture page, a markdown file, a page that navigates away, a page that stops on
+   `alert()` and a page stored in the other Unicode form than it is asked for in, from a
+   folder shaped as the server hands a kept delivery over (0710 in the agent group, files
+   0640: the uid reads a file by name and can neither list the folder nor write in it),
+   writing in a scratch made as the server makes one in a task's `.captures/` (2770 under
+   a 0710 parent the uid can neither list nor put a link in), with its job on standard
+   input, and checks both PNG widths, the sibling picture drawn (by its pixels), a `100vh`
+   section one screen tall in a picture three screens tall, that the page's image, fetch
+   and navigation to another loopback port and to a remote host loaded nothing (a
+   listener on that port records no request of the page), the report naming what the page
+   asked for, the dialog dismissed and counted, no process of the uid left running, and
+   the image's fonts (`system-ui` proportional, an emoji font present). It is the only
+   proof that a real browser loads nothing but the page server's answers, and the only
+   run of the renderer as another uid: the unit suites assert the launch flags and, with
+   isolation on, the refusal a test host meets where it has no agent group.
+6. `npx playwright test <args>` with `VIBERR_E2E_BASE_URL`; on failure prints the last
    100 app log lines.
-6. `down --volumes --remove-orphans` unless `VIBERR_E2E_KEEP=1`. Exit code is
+7. `down --volumes --remove-orphans` unless `VIBERR_E2E_KEEP=1`. Exit code is
    Playwright's (or 1 when step 4 failed).
 
 `playwright.config.ts` throws without `VIBERR_E2E_BASE_URL`; `testDir: "e2e"`,

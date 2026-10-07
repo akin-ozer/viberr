@@ -9,6 +9,8 @@ import { Icon } from "~/ui/icon";
 import type { RunView } from "~/features/runtime/runtime-types";
 import { LiveRunPanel } from "~/features/runtime/runs-panels";
 import { AttachmentsPanel } from "./attachments-panel";
+import { SourcesPanel } from "./sources-panel";
+import type { TaskSourceRow } from "~/server/tasks/task-sources.server";
 import { ChangesPanel } from "./changes-slot";
 import type { CompletionDiff } from "./completion-packet";
 import { ContinuityRecoveryPanel } from "./continuity-recovery";
@@ -58,6 +60,9 @@ export function TaskMainColumn({
   attachments,
   attachmentsTotal,
   attachmentProducers,
+  sources,
+  sourcesTotal,
+  sourcesBase,
   timelineHasMore,
   timelineRemaining,
   timelineNextLimit,
@@ -97,6 +102,11 @@ export function TaskMainColumn({
   attachments: TaskAttachmentEntry[];
   attachmentsTotal: number | undefined;
   attachmentProducers: Record<string, { actor: string; occurredAt: string }>;
+  /** Ruling 690: the sources the task keeps, newest first. */
+  sources: TaskSourceRow[];
+  sourcesTotal: number;
+  /** The sources route, or null to show no Sources panel. */
+  sourcesBase: string | null;
   timelineHasMore: boolean;
   timelineRemaining: number;
   timelineNextLimit: number;
@@ -230,6 +240,12 @@ export function TaskMainColumn({
           // F39-6: who may attach (`taskPermissions`).
           canAttach={can.canAttach}
         />
+      ) : null}
+
+      {/* Ruling 690: what the work rests on, under the files of the work.
+          Nothing on a task that keeps no sources. */}
+      {sourcesBase && sources.length > 0 ? (
+        <SourcesPanel base={sourcesBase} sources={sources} total={sourcesTotal} />
       ) : null}
 
       <Timeline

@@ -91,6 +91,9 @@ export default [
     "projects/:slug/tasks/:key/attachments/:file",
     "routes/task-attachment.ts",
   ),
+  // Ruling 690: one kept source of a task, by its id. The same kind of route
+  // as an attachment's: raw bytes, member-only, outside the workspace layout.
+  route("projects/:slug/tasks/:key/sources/:id", "routes/task-source.ts"),
   // Ruling 484: the task page's Changes panel read (the delivered revision's
   // files and patches), loaded by the panel itself, member-only.
   route("projects/:slug/tasks/:key/changes", "routes/task-changes.ts"),

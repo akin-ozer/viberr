@@ -1,6 +1,6 @@
 import { writeFileSync } from "node:fs";
 import path from "node:path";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createTestDbContext, type TestDbContext } from "../../../test-support/test-db";
 import {
   baseTaskFrontmatter,
@@ -13,6 +13,7 @@ import { taskAttachmentsDir } from "~/server/files/file-store-root.server";
 import { keepDelivery } from "~/server/files/kept-deliveries.server";
 import { readProjectFile } from "~/server/files/project-writer.server";
 import { writeTaskAttachment } from "~/server/files/task-attachments.server";
+import { readTaskSources, recordDeliverySources, writeTaskSource } from "~/server/files/task-sources.server";
 import { readTaskFile } from "~/server/files/task-writer.server";
 import { rebuildAll } from "~/server/projections/rebuilder.server";
 import type { TaskFrontmatter } from "~/schemas/task-file.schema";
@@ -22,6 +23,7 @@ import {
   completionPacketFact,
   completionPacketText,
   completionView,
+  sourcesRestedOn,
 } from "./completion-packet.server";
 
 /**
@@ -508,5 +510,285 @@ describe("ruling 668: the packet names the result of a task delivered as files",
     });
     const code = completionView(parsed().frontmatter, { canSee: null, nameOf, ruleReviewers: [] })!;
     expect(code.paths).toEqual({ shown: changed.slice(0, 40), more: 2, truncated: false });
+  });
+});
+
+describe("ruling 690: what the work under review rests on", () => {
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  /** Keep one source on VIB-1 at `at`, by the store's own writer. */
+  function keepAt(at: string, name: string, profileId = "researcher"): void {
+    vi.setSystemTime(new Date(at));
+    writeTaskSource(
+      store.slug,
+      "VIB-1",
+      {
+        name,
+        data: Buffer.from(`the page ${name}`),
+        title: `The page ${name}`,
+        from: `https://aws.amazon.com/${name}`,
+        by: { backend: "claude", profileId, roleHint: "Researcher" },
+        runId: "run_abc",
+      },
+      store.dataRoot,
+    );
+  }
+
+  it("counts a task's sources for the operator and, for the page, the ones its delivery recorded or the ones kept by the time it was delivered, and never one kept afterwards", async () => {
+    // A source a reviewer keeps while checking the work is on the task and
+    // was not under what it checks. CANARY: count every kept source as rested
+    // on and the snapshot says a result stood on a page nobody had read yet.
+    vi.useFakeTimers({ toFake: ["Date"] });
+    const fact = () =>
+      completionPacketFact(parsed().frontmatter, {
+        projectSlug: store.slug,
+        taskKey: "VIB-1",
+        dataRoot: store.dataRoot,
+      }).sources;
+    const rested = () =>
+      sourcesRestedOn(readTaskSources(store.slug, "VIB-1", store.dataRoot), parsed().frontmatter).map((s) => s.id);
+    const files = (deliveredAt: string | null) => seed({ workRevision: null, branch: null, github: null, deliveredAt });
+
+    // Nothing is delivered yet: the task keeps a source, and no result rests on it.
+    files(null);
+    keepAt("2026-10-07T12:00:00.000Z", "ec2.html");
+    expect(fact()).toEqual({ kept: 1, restedOn: 0 });
+
+    // A files delivery whose line was never written rests on what was kept by its stamp.
+    files("2026-10-07T13:00:00.000Z");
+    keepAt("2026-10-07T14:00:00.000Z", "rds.html");
+    expect(rested()).toEqual(["S1"]);
+    expect(fact()).toEqual({ kept: 2, restedOn: 1 });
+
+    // A delivery that recorded its sources rests on those, whatever the clock said.
+    files("2026-10-07T15:00:00.000Z");
+    recordDeliverySources(store.slug, "VIB-1", "2026-10-07T15:00:00.000Z", store.dataRoot);
+    keepAt("2026-10-07T14:59:00.000Z", "s3.html");
+    expect(rested()).toEqual(["S1", "S2"]);
+    expect(fact()).toEqual({ kept: 3, restedOn: 2 });
+
+    // A revision rests on what was kept by the instant it was minted, before
+    // the operator has summarized it and after: the packet is written once
+    // the reviews are in, and a page a reviewer fetched to check a claim is
+    // not what the developer's work stood on. CANARY: anchor a revision on
+    // the packet's time, or on nothing while there is no packet, and the
+    // card reads "This result rests on 3 kept sources" for a result whose
+    // developer kept two.
+    const revision = (createdAt: string) =>
+      seed({
+        workRevision: {
+          id: "rev_1",
+          headSha: SHA,
+          treeSha: "t".repeat(40),
+          branch: "vib-1-work",
+          createdAt,
+          sourceProfileId: "developer",
+        },
+      });
+    revision("2026-10-07T14:30:00.000Z");
+    expect(rested()).toEqual(["S1", "S2"]);
+    expect(fact()).toEqual({ kept: 3, restedOn: 2 });
+    // The operator's packet, written after the reviewer kept S3 at 14:59.
+    vi.setSystemTime(new Date("2026-10-07T16:00:00.000Z"));
+    expect((await write({})).outcome).toBe("done");
+    expect(rested()).toEqual(["S1", "S2"]);
+    expect(fact()).toEqual({ kept: 3, restedOn: 2 });
+    // A rework mints a new revision, and what was kept by then is under it.
+    revision("2026-10-07T17:00:00.000Z");
+    expect(rested()).toEqual(["S1", "S2", "S3"]);
+  });
+
+  it("counts a source the deliverer kept after its result was delivered, and not one a reviewer kept then", () => {
+    // Asked for the source of a claim, a deliverer keeps it and reports, and
+    // changes no file: the same tree keeps its revision and its mint instant,
+    // and a run that saved no file moves no stamp. CANARY: count by the
+    // anchor alone and the card says the result rests on no kept source after
+    // its deliverer answered the reviewer's objection with one.
+    vi.useFakeTimers({ toFake: ["Date"] });
+    const engagements = [
+      { profileId: "developer", backend: "claude" as const, role: "Implementation", delivers: true, verdictCapable: false },
+      { profileId: "reviewer", backend: "claude" as const, role: "Review", delivers: false, verdictCapable: true },
+    ];
+    const rested = () =>
+      sourcesRestedOn(readTaskSources(store.slug, "VIB-1", store.dataRoot), parsed().frontmatter).map((s) => s.id);
+
+    // A revision minted at 14:30; the reviewer keeps a page at 14:45 and the
+    // deliverer the advisory its claim rests on at 15:10, with no new commit.
+    seed({
+      engagements,
+      workRevision: {
+        id: "rev_1",
+        headSha: SHA,
+        treeSha: "t".repeat(40),
+        branch: "vib-1-work",
+        createdAt: "2026-10-07T14:30:00.000Z",
+        sourceProfileId: "developer",
+      },
+    });
+    keepAt("2026-10-07T14:45:00.000Z", "checked.html", "reviewer");
+    keepAt("2026-10-07T15:10:00.000Z", "advisory.html", "developer");
+    expect(rested()).toEqual(["S2"]);
+
+    // The same for files: the delivery recorded what the task held at its
+    // stamp (nothing), and the deliverer's later source still counts.
+    seed({ engagements, workRevision: null, branch: null, github: null, deliveredAt: "2026-10-07T14:30:00.000Z" });
+    expect(rested()).toEqual(["S2"]);
+  });
+
+  it("the page's card carries the count and the first twelve, says zero for a files result, and nothing for a revision that rests on none or a viewer who may not see", () => {
+    // CANARY: carry `sources` on every view and the task page's payload grows
+    // on every task that keeps none (ruling 457's console budget measures it);
+    // drop it at zero for a files result and the card cannot say the result
+    // rests on no kept source.
+    vi.useFakeTimers({ toFake: ["Date"] });
+    const nameOf = (id: string) => id;
+    seed({ workRevision: null, branch: null, github: null, deliveredAt: "2026-10-07T13:00:00.000Z" });
+    const filesFm = parsed().frontmatter;
+    const view = (fm: TaskFrontmatter, sources: ReturnType<typeof sourcesRestedOn> | null) =>
+      completionView(fm, { canSee: null, nameOf, ruleReviewers: [], sources })!;
+    expect(view(filesFm, []).sources).toEqual({ count: 0, shown: [] });
+    expect("sources" in view(filesFm, null)).toBe(false);
+
+    for (let n = 1; n <= 14; n += 1) keepAt("2026-10-07T12:00:00.000Z", `page-${n}.html`);
+    const kept = readTaskSources(store.slug, "VIB-1", store.dataRoot).sources;
+    const listed = view(filesFm, kept).sources!;
+    expect(listed.count).toBe(14);
+    expect(listed.shown.map((s) => s.id)).toEqual(kept.slice(0, 12).map((s) => s.id));
+    expect(listed.shown[0]).toEqual({
+      id: "S1",
+      name: "page-1.html",
+      title: "The page page-1.html",
+      from: "https://aws.amazon.com/page-1.html",
+    });
+
+    seed();
+    const revisionFm = parsed().frontmatter;
+    expect("sources" in view(revisionFm, [])).toBe(false);
+    expect(view(revisionFm, kept.slice(0, 1)).sources).toMatchObject({ count: 1 });
+  });
+});
+
+describe("ruling 691: Viberr's own pictures of a delivered page", () => {
+  const STAMP = "2026-10-07T12:00:00.000Z";
+  const AT = "2026-10-07T12:00:09.412Z";
+  const PICTURES = ["post.html.capture-desktop.png", "post.html.capture-phone.png"];
+  const PAGES = ["extra.htm", "figures.csv", "notes.md", "post.html"];
+  const AGENTS_OWN = "other.html.capture-desktop.png";
+  const nameOf = (id: string) => id;
+
+  /** VIB-1 delivered as files at `STAMP`, as the render of that delivery
+   *  leaves it: the pictures on the task and in the kept delivery, and the
+   *  record bound to the stamp. `extra.htm` is a page the record does not
+   *  name (a person's own upload is never pictured), and `AGENTS_OWN` is an
+   *  agent's screenshot of a page this task does not hold. */
+  function seedPictured(): void {
+    seed({
+      workRevision: null,
+      branch: null,
+      github: null,
+      deliveredAt: STAMP,
+      pageCaptures: {
+        deliveredAt: STAMP,
+        at: AT,
+        pages: [
+          {
+            file: "post.html",
+            shots: [
+              { view: "desktop", name: PICTURES[0]!, cut: false },
+              { view: "phone", name: PICTURES[1]!, cut: true },
+            ],
+            error: null,
+          },
+          { file: "notes.md", shots: [], error: "the render ran past 25 seconds" },
+        ],
+      },
+    });
+    for (const name of [...PAGES, ...PICTURES, "chart.png", AGENTS_OWN]) attach(name);
+    keepDelivery(store.slug, "VIB-1", STAMP, [...PAGES, ...PICTURES, "chart.png", AGENTS_OWN], store.dataRoot);
+  }
+
+  const fact = () =>
+    completionPacketFact(parsed().frontmatter, { projectSlug: store.slug, taskKey: "VIB-1", dataRoot: store.dataRoot });
+  const pagesOf = (canSee: (name: string) => boolean = () => true) =>
+    completionView(parsed().frontmatter, { canSee, nameOf, ruleReviewers: [] })!.packet!.files.map(
+      (f) => [f.name, f.page] as const,
+    );
+  const moveDelivery = async (deliveredAt: string, patch: (fm: TaskFrontmatter) => void = () => {}) => {
+    const { updateTaskFile } = await import("~/server/files/task-writer.server");
+    await updateTaskFile({ projectSlug: store.slug, taskKey: "VIB-1", dataRoot: store.dataRoot }, (file) => {
+      file.frontmatter.deliveredAt = deliveredAt;
+      patch(file.frontmatter);
+    });
+  };
+
+  it("the packet view pairs each result file that is a page with Viberr's pictures of the delivery under review, and says why one is missing", async () => {
+    seedPictured();
+    expect((await write({ files: PAGES.map((name) => ({ name })) })).outcome).toBe("done");
+    // The phone picture has since left the store: only what the viewer can
+    // open is drawn.
+    // A page the record does not name gets no row of its own. CANARY: answer
+    // it with a sentence and the card reads "No picture of this page: Viberr
+    // made no picture of this page", which says nothing.
+    expect(pagesOf((name) => name !== PICTURES[1])).toEqual([
+      ["extra.htm", null],
+      ["figures.csv", null],
+      ["notes.md", { shots: [], note: "the render ran past 25 seconds" }],
+      ["post.html", { shots: [{ view: "desktop", name: PICTURES[0], at: AT, cut: false }], note: null }],
+    ]);
+    // The operator is told the same, so it names none of them and can say
+    // why a page has no picture.
+    expect(fact().pageCaptures).toEqual([
+      { file: "post.html", pictures: PICTURES, problem: null },
+      { file: "notes.md", pictures: [], problem: "the render ran past 25 seconds" },
+    ]);
+
+    // A rework is delivered and summarized again before its own render has
+    // written a record: the pictures on file are of the earlier delivery.
+    // CANARY: drop the deliveredAt comparison and the card shows the earlier
+    // delivery's pictures beside the reworked page.
+    const rework = "2026-10-07T13:00:00.000Z";
+    await moveDelivery(rework);
+    keepDelivery(store.slug, "VIB-1", rework, PAGES, store.dataRoot);
+    expect((await write({ files: [{ name: "post.html" }] })).outcome).toBe("done");
+    expect(pagesOf()).toEqual([["post.html", null]]);
+    expect(fact().pageCaptures).toEqual([]);
+
+    // And a packet written for earlier work pairs nothing, whatever the
+    // record says of the delivery that replaced it.
+    const third = "2026-10-07T14:00:00.000Z";
+    await moveDelivery(third, (fm) => {
+      fm.pageCaptures = { ...fm.pageCaptures!, deliveredAt: third };
+    });
+    expect(pagesOf()).toEqual([["post.html", null]]);
+    expect(fact().pageCaptures).toHaveLength(2);
+  });
+
+  it("a page capture is never offered as a result file or a screenshot, and one named as a screenshot is left out with a sentence", async () => {
+    seedPictured();
+    // CANARY: drop the filter in resultFileCandidates and
+    // post.html.capture-desktop.png is offered as a result. Take every name
+    // with the suffix for Viberr's own and the agent's screenshot of a page
+    // this task does not hold is offered nowhere.
+    expect(fact().resultFileCandidates).toEqual(["chart.png", ...PAGES, AGENTS_OWN].sort());
+    expect(fact().screenshotCandidates.sort()).toEqual(["chart.png", AGENTS_OWN]);
+
+    const result = await write({
+      files: [{ name: "post.html", caption: "The launch post" }],
+      screenshots: [{ name: PICTURES[0]!, caption: "How it looks" }, { name: "chart.png" }, { name: AGENTS_OWN }],
+    });
+    expect(result.outcome).toBe("done");
+    expect(result.message).toContain(
+      " `post.html.capture-desktop.png` is Viberr's own picture of `post.html` and shows beside it, so it was left out of `screenshots`.",
+    );
+    expect(parsed().frontmatter.completionPacket).toMatchObject({
+      files: [{ name: "post.html", caption: "The launch post" }],
+      screenshots: [
+        { name: "chart.png", caption: "" },
+        { name: AGENTS_OWN, caption: "" },
+      ],
+    });
+    expect(result.message).not.toContain("`other.html`");
   });
 });

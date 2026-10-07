@@ -1,5 +1,6 @@
 import type { TaskDetail } from "~/server/projections/task-query.server";
 import type { AcceptanceAffordance } from "~/server/tasks/task-acceptance.server";
+import type { TookCard } from "~/server/tasks/what-it-took.server";
 import { TASK_DECISION_ANCHOR } from "~/shared/page-anchors";
 import type { PrOverlap } from "~/shared/pr-overlaps";
 import { AcceptConfirm, type AcceptCeremony } from "./accept-confirm";
@@ -40,6 +41,8 @@ export function TaskDecisionRegion({
   placement,
   diff,
   attachmentsBase,
+  sourcesBase,
+  took,
   githubHost,
   acceptance,
   resolution,
@@ -58,6 +61,10 @@ export function TaskDecisionRegion({
   /** The Changes panel's reader, riding inside the completion packet. */
   diff: CompletionDiff | null;
   attachmentsBase: string | null;
+  /** Ruling 690: the sources route, or null to draw no source as a link. */
+  sourcesBase: string | null;
+  /** Ruling 693: what the task took, or null when the loader shipped none. */
+  took: TookCard | null;
   githubHost: string;
   acceptance: AcceptanceAffordance;
   resolution: PacketResolution;
@@ -74,9 +81,11 @@ export function TaskDecisionRegion({
     <CompletionPacket
       view={card}
       attachmentsBase={attachmentsBase}
+      sourcesBase={sourcesBase}
       verdictSatisfiedBy={acceptance.verdictSatisfiedBy ?? null}
       diff={diff}
       standalone={!acceptanceDecision}
+      took={took}
       result={resultShown ? acceptedResult(task, githubHost) : null}
     />
   ) : null;

@@ -744,10 +744,24 @@ card until one of the person's runs has made a model call (ruling 604). A readin
   (`holdsCollaborationGrant`, the gate a Claude toolkit builds `read_board` on) mounts
   `viberr_board`, a second server the gateway answers itself over the run's token
   (`board-tool.server.ts`), fresh and resumed. It has `read_board`,
-  `read_timeline_entry` and `read_task_attachment` (ruling 594), the same readers and
+  `read_timeline_entry`, `read_task_attachment` (ruling 594) and `read_task_source`
+  (ruling 690), the same readers and
   descriptions as Claude's toolkit, over the run's own project and task; the mount carries only the store, and the run is handed the
-  URL and its token. A profile with no collaboration grant mounts nothing, and neither
-  does a run when the gateway is not running.
+  URL and its token. On a server that can render a page it also lists `capture_page`
+  (ruling 691, §4.2), answered with the text and one image block per width. Whether the
+  Codex CLI hands an image block in a tool result to the model is not established (the
+  browser mount leaves them out on Codex for the same reason), so the text names where
+  each picture was saved in the run's scratch folder, which the run opens with its own
+  image viewer. A profile with no collaboration grant mounts nothing, and neither
+  does a run when the gateway is not running. Ruling 690: for a run that may save files
+  on its task (`attach-evidence-references`) the mount also carries the agent a source is
+  kept as and the run's web grant (`sources: { agent, web }`), and the server then lists
+  `keep_source`, described for what the run can reach, and answers it with the run's own
+  id on the record; a run without the grant is not offered it, and a call to it is
+  answered as a call to any tool the server does not have. While the gateway is not
+  running a Codex run has no `keep_source`, and its prompt says it cannot keep a source
+  and why. The run-level suite reads the dispatched run's own mount and the resumed one,
+  so what a run is told and what it is offered cannot part.
 
 ## 3. A run's life
 
@@ -1339,11 +1353,29 @@ operator bursts under it (ruling 505; ui/surfaces.md).
   the run's to READ as well as to copy into, and names it read-only to a run that cannot
   post files, with why (`ATTACHMENTS_READ_SENTENCE`, ruling 592), and a run that holds
   `read_task_attachment` is told another task's files are read with it, never from that
-  task's folder (`OTHER_TASK_FILES_SENTENCE`, ruling 594); the workspace contract also lets
+  task's folder (`OTHER_TASK_FILES_SENTENCE`, ruling 594), and a run that holds
+  `capture_page` is told that a page among the task's files can be looked at as a reader
+  sees it, to look before it delivers one and to judge the picture as well as the source
+  when it reviews one (`PAGE_CAPTURE_SENTENCE`, ruling 691); the workspace contract also lets
   the run READ its knowledge-base folders, its profile's plus the project's rulings KB,
   `knowledgeBaseReadDirs`, ruling 422, and never write them; a run that holds
   `correct_knowledge_doc` is told there that the tool is how a passage changes,
-  `KB_CONTRACT_CORRECTION_SENTENCE`, ruling 591), resolve delivery permissions, compute the
+  `KB_CONTRACT_CORRECTION_SENTENCE`, ruling 591; right after the attachments line, with or
+  without a checkout, the contract says what a fact from outside rests on, ruling 690: a
+  run that holds `keep_source` is given the whole move, `sourcesKeepLine` (save the page
+  or the output into the attachments folder under a name that starts with `.source-`,
+  which nothing lists, posts or delivers, call `keep_source` with that name, where it
+  came from and a title, cite the id; a claim with no kept source reads as unsupported;
+  a run whose `use-web-search-fetch` grant is withheld is given the same move with no
+  page, no API and no `curl` in it, told that it fetches no page and keeps none, and so
+  is not handed a way to the web its profile was denied), and a run that does not is
+  told it cannot keep one and why,
+  `sourcesNotKeptLine` (its profile lacks "Attach evidence references", or it holds the
+  grant and the tool is not mounted, a Codex run while the gateway is not listening), so
+  its result names what was not kept; a supporting run that holds `read_task_source` is
+  told, before what it is asked to do, that the work's claims are checked against the
+  kept sources and that a claim with none, or one its source does not bear out, is a
+  finding, `SOURCES_REVIEW_LINE`), resolve delivery permissions, compute the
   denylist (or the "everything off" list when the profile vanished, ruling 26), write the
   redacted `run·inputs` line (with the toolkit's `toolNames`, ruling 339), flag a
   directive that asks the specialist to push or open or merge a PR
@@ -1419,7 +1451,9 @@ gates and mounts the server only when at least one was built, with `alwaysLoad: 
 (§2.4). It returns `toolNames`, read off the definitions it pushed, which is the tool list
 the run's `run·inputs` record discloses (ruling 339). Codex specialists mount none of it
 and get the outcome envelope instead (§2.5), except the board and knowledge readers,
-which Viberr's gateway answers for a Codex run (rulings 585 and 589).
+which Viberr's gateway answers for a Codex run (rulings 585 and 589), and `keep_source`,
+which the same board server answers for a run that may save files on its task (ruling
+690).
 
 | Tool | Gate | Effect |
 |---|---|---|
@@ -1429,6 +1463,9 @@ which Viberr's gateway answers for a Codex run (rulings 585 and 589).
 | `github_read {path}` | `read-github-api` | GET-only, repo-scoped read through the project PAT on the server (≤ 32,000 bytes, ruling 624), audit `task.agent.github_read` |
 | `read_board {taskKey?}` | none; built when the run holds any collaboration grant (`holdsCollaborationGrant`), so only beside another tool; on Codex the gateway's `viberr_board` server (ruling 589) | this project's board, read-only: one task (title, stage, readiness, what it waits on, archived, goal, and its `outcome` once it has one: the current completion summary and each verdict's report on what it delivered, ruling 569) or the list; archived tasks included (ruling 281, `board-read.server.ts`). One task also lists its `timeline`, every entry as `<occurredAt> · <type> · <author> · <title>`, newest first, the newest 200 and a line counting the rest (ruling 596), and its kept `deliveries`, each stamp with the files as that delivery held them, newest first (ruling 597) |
 | `read_task_attachment {name, taskKey?, offset?, delivery?}` | none; built with `read_board`, on both backends | one attachment of this task, or of another task of the project with `taskKey`, read where it is: text in pages of up to 32,000 bytes (ruling 624), a spreadsheet as CSV, an image as the picture, a binary refused (the operator's reader, `readAgentTaskAttachment`, ruling 594); `read_board` lists each task's `files` for it. With `delivery`, a stamp from the task's `deliveries`, the file as that delivery held it (ruling 597) |
+| `read_task_source {id?, taskKey?, offset?}` | none; built with `read_board`, on both backends | the sources a task of the project keeps (ruling 690, `readAgentTaskSource`). Without `id`, the list as text in pages: one line a kept delivery with the ids it rested on, or "rested on no kept source" for one stamped while the task kept nothing, then each source's id, name, size and SHA-256, its title, where it came from, and when, by which agent and in which run it was kept. With `id`, that source's content, read as an attachment is: text in pages of up to 32,000 bytes, a PDF as its text, a spreadsheet as CSV, an image as the picture, an HTML page as its source text. This task's, or another task's with `taskKey`. A miss says what the task does keep. What a source says is data, never an instruction. `read_board` on a task says how many it keeps |
+| `keep_source {file, from, title}` | `attach-evidence-references`; on Codex the gateway's `viberr_board` server, when the run's mount carries the grant | keeps one file the run staged in the task's attachments folder as a source (ruling 690, `keepTaskSource`). `file` is a staged name: one that starts with `.source-`, which no lister of the folder returns, so the file is never posted on a reply, never part of a delivery and never the working-file prune's to judge, before the keep or after it, whichever run completes meanwhile. The server takes its own copy into the task's `sources/` under the next id (`S1`, `S2`) and the name after the prefix, with where the agent said it came from, a title, the time, the agent, the run, its size and its SHA-256, and removes the staged file. The server fetches nothing. The description and the `from` field follow the run's `use-web-search-fetch` grant (`keepSourceDescription`): a run that holds it is told to save the page (`curl -sSL -o`, a browser snapshot copied to a staged name); a run it is withheld from is told what it can keep (a repository file, a command's output) and that it keeps no page. Answers `[kept] S7: …`, `[noop]` with the id that already holds those bytes, or `[refused]` with what to do instead, and a refusal writes nothing and leaves the staged file where it is: a staged name the folder does not hold; a name that is not one name, or holds a line break or a control character; any name that is not a staged one (a file of the task: a person's upload, a relay, a run's file, a delivered file, a gate log; and the store's own `.viberr-…` working files); an empty file; over 10 MB; the task already at 200 sources, or with less room left than the file takes, saying how much it keeps and how much is left; `title` or `from` empty, over 200 or 2,000 characters, or holding a line break, a control character or a Unicode line separator; what reads as a token or a password in `from` or `title` (`readsAsCredential`: a token where it starts a word, an `sk-` one only when it reads as a key, a password in a URL's userinfo); bytes whose source a person has removed from the store; an archived task. Three refusals remove the staged file themselves, each a file that must not sit where every agent on the task reads: a source that is not a fetched `http(s)` page and whose bytes read as holding a credential, a staged name that reads as holding one (`wget` names a download after its URL, query included), and the bytes of a source a person removed from the store. A staged file that cannot be removed is named in the answer. Audit `task.source.kept`; no timeline entry per keep: a run that kept any leaves one `note`, "Sources kept", when it settles (§4.4) |
+| `capture_page {name, view?, from?}` | none; built with `read_board`, on both backends, only while the server can render a page (`pageCaptureStatus`: `VIBERR_BROWSER_EXECUTABLE` set and on disk) | one page of THIS task as a reader sees it (ruling 691, `captureTaskPage`): `name` is a `.html`, `.htm`, `.md` or `.markdown` file among the task's files; Viberr renders it at a desktop width (1280 px) and a phone width (390 px), or the one `view` names, and answers with one stretch of the page per width, up to 2,000 px tall from `from` (at most 40,000), as an image block each, with `nextFrom` when the page runs on (never one past 40,000: the reply then says a stretch starts no further down), what the page asked the network for, which sibling names it asked for and did not find, which paths it asked for from the site's root or above its own folder (`/css/site.css`, `../up.png`: a capture serves the task's own files by name and never those), whether it opened a dialog as it loaded, and where the pictures were saved. A phone lays a page out taller than a desktop does, so past the shorter layout's end the reply says where the page ends at that width and still hands over the other. The name is found in either Unicode form (ruling 675) and the reply uses it as typed. It saves nothing on the task and writes no audit row or timeline entry: the pictures stay in the task's capture scratch in the folder of the run that asked (`<task>/.captures/<runId>/`, beside `deliveries/` and not under `workspace/`), replaced by that run's next capture and removed when the run ends. `[noop]` for a name the task does not hold (a dot name included, as for every reader), a file that is not a page, a source over 10 MB (markdown 2 MB) and a `from` past the page's end at every width asked for; `[busy]` when the renderer has not started the call within 15 s; `[error]` with the reason for a render that failed: a width that failed is the answer even when the other width was over before `from` (the reply still names where that one ends), a task with no owner under isolation says so, and an owner whose launch could not be prepared gets the launch's own sentence |
 | `read_timeline_entry {occurredAt, taskKey?}` | none; built with `read_board`, on both backends | one timeline entry, whole, of this task or, with `taskKey`, of another task of the project, by its stamp: the prompt's recent timeline (five entries, each cut at 220 characters) prints it after a clipped entry ("(clipped; the whole entry is at `<occurredAt>`)") and counts the older entries it leaves out, naming `read_board` for them to a run that holds it, and `read_board` on a task lists every entry's; entries written in one millisecond (a verdict's report and its quality marker) come back together under `entries`, in the order they were written, sharing the 40,000-character budget; a `kb_correction` entry comes with `correction`: the passage it replaced, the text it wrote and the evidence, whole from the record, and whether a person undid it, to a run given that knowledge base; to any other run it quotes nothing while a deployed agent is not given the knowledge base (rulings 568, 648); read-only (rulings 563, 596, 644, 645 and 648, `readTimelineEntry`; the Codex board server takes the run's knowledge mounts as what it is given) |
 | `read_knowledge_doc {kb, path}` | the run has a knowledge base attached | one document of an attached knowledge base, whole (§6; ruling 283) |
 | `correct_knowledge_doc {kb, path, replaces?, text, evidence}` | the run has a knowledge base attached; built after `read_board`, so a knowledge base alone never mounts `read_board` | writes `text` into that document in place of `replaces`, the exact passage (an empty `text` deletes it, ruling 581), or at its end (`correctKnowledgeDoc`, rulings 483 and 498; the rules are [file-formats.md §8](../architecture/file-formats.md)): only in a knowledge base this run was given; a refusal writes nothing and says what to fix; a `kb_correction` timeline event under the agent's own name, quoting the passages only when every deployed specialist is given that knowledge base (ruling 568), and audit `task.kb_correction.merged`, and no notification; a person undoes it from the Controller page |
@@ -1508,7 +1545,11 @@ write grant.
 
 `registerAgentCompletion` → `applyAgentCompletionEffects`:
 
-1. Grants are re-resolved live (an undeployed profile becomes fully withheld).
+1. Grants are re-resolved live (an undeployed profile becomes fully withheld). Before
+   anything else is written, a run that kept sources leaves one `note` on the timeline
+   under its agent, titled "Sources kept" and naming their ids (`noteSourcesKeptByRun`,
+   ruling 690), whether it finished, failed or was interrupted; a replay of the run's
+   effects after a restart finds the entry and writes no second one.
 2. Envelope = staged outcome by `outcome_key`, else a Codex parse when one was
    requested (every option an agent's envelope question carries is kept; the ≤ 4 cap is
    the live tool's, ruling 298). The reply comment is posted (audit
@@ -1635,11 +1676,11 @@ the operator's own `gate()` (`operator-authority.server.ts`).
 | `open-review-pr` | agent | direct | claude-only | scoped; grant-required |
 | `comment-on-task` | agent | direct | claude-only | gates the mid-run `post_comment` tool; the final report always posts |
 | `ask-human` | agent | direct | both | |
-| `use-web-search-fetch` | agent, operator | direct | both | absent ⇒ granted |
+| `use-web-search-fetch` | agent, operator | direct | both | absent ⇒ granted; withheld, what the run is told about keeping a source names no page and no `curl`, in the workspace contract and in `keep_source`'s own description (ruling 690) |
 | `use-browser` | agent | off | both | direct forces egress direct (ruling 95) |
 | `read-github-api` | agent | off | claude-only | `promotable: false`; the PAT never leaves the server, so it is never mounted on Codex |
 | `report-validation-verdict` | agent | off | both | grant-required; gates `approve-review`, `request-changes`, `post-quality-flags` |
-| `attach-evidence-references` | agent | direct | both | |
+| `attach-evidence-references` | agent | direct | both | the grant that lets a run save files on its task also lets it keep the sources its result rests on (`keep_source`, ruling 690) |
 | `run-unit-integration-validation`, `move-task-to-review`, `read-repo-diff`, `run-validation-suites`, `post-quality-flags`, `approve-review`, `request-changes`, `author-test-cases`, `read-task-repo`, `flag-underspecified-tasks` | agent | direct | advisory | `group: null`: persona text only, no toggle, disclosed as such (ruling 31); `capabilityIsAdvisory` is true and the controller's `get_project` marks each with `advisory: ADVISORY_CAPABILITY_NOTE` (ruling 377) |
 | `merge-pull-request`, `transition-to-done`, `change-project-policy` | agent | human | both (always human, `ALWAYS_HUMAN_CAPABILITY_IDS`) | never produce a tool on either side; `merge-pull-request` is also grant-required |
 
@@ -1736,12 +1777,16 @@ runtime's answer for a missing grant.
   tell whoever wrote it how much reaches no such run (ruling 679). The controller's own turn
   reads its skills under 40 000 (`CONTROLLER_SKILL_BUDGET`) and draws its guide from that
   first, so the guide this repository ships arrives whole whatever is attached beside it.
-- **The writing guide** (ruling 502): the operator's and the controller's prompts close
-  their static block with `HUMANIZER_PROMPT_SECTION`, the Humanizer skill vendored
+- **The writing guide** (rulings 502 and 689): the operator's and the controller's prompts
+  close their static block with `HUMANIZER_PROMPT_SECTION`, the Humanizer skill vendored
   unchanged in `app/server/runtimes/humanizer/` (MIT, pinned by hash,
   `humanizer.server.ts`). It is not a store skill and no profile grants it, so it spends
   none of the budget above, and no grant list, plugin or `run_inputs` skills row names
-  it. A specialist run does not carry it.
+  it. Every specialist run carries the same guide as `HUMANIZER_SPECIALIST_SECTION`, the
+  last part of its static block on both backends, under a framing of its own: the prose
+  it writes includes the task's result, a person's own writing (samples, or a voice guide
+  made from them) outranks the guide, and a run that reviews prose a person will read
+  holds it to the guide and says what it found in plain words.
 - **The persona's order** (ruling 370): `buildSpecialistPromptPrefix` returns the persona
   as a static block (definition, the native-skill banner, the attached-resources banner,
   injected skill bodies, the knowledge-base notes and indexes, the MCP governance rules,
@@ -1957,6 +2002,58 @@ runtime's answer for a missing grant.
   Requires effective `use-browser: direct` **and** `use-web-search-fetch: direct`, the
   package and the supervisor on disk and, when `VIBERR_BROWSER_EXECUTABLE` is set, that
   binary. `/resources/health.browser` is the instance-level probe.
+- **Page capture** (ruling 691; `page-capture.server.ts`, `page-capture-child.server.ts`):
+  the same pinned browser, driven by Viberr itself and not by an agent, with no grant.
+  The renderer is a script Node runs as TypeScript, started through the ruling 460
+  launcher as the TASK OWNER's agent uid (`taskOwnerLaunch`, `runPersonCommand`: its own
+  process group, `filteredSpawnEnv()`, the person's `$HOME`, a temp folder in its scratch,
+  `VIBERR_RUN_ID` for the sweep; SIGTERM at 10 s plus 25 s a page, then the group killed).
+  With isolation on and no owner nothing is rendered; with no launcher (the host dev
+  server, tests) it runs as the server's own user, as runs and gates do. It serves the
+  page and its sibling files from a loopback server on a random port under a random token
+  path, one file name deep, opened without following a link, and loads it over http, so a
+  page cannot pull a `file://` resource into the picture. What a page asks that server
+  for and is not served is reported and said in the note and the tool's reply: a name
+  that is not among the files, a name with a broken escape, and a path outside the
+  token (from the site's root, or above the page's folder), all but the browser's own
+  `/favicon.ico`. It starts one Chromium per page
+  over `--remote-debugging-pipe` with `--headless=new --no-sandbox` (the sandbox cannot
+  start in the image, which is why this is never the server's process) and
+  `--proxy-server=http://127.0.0.1:9 --proxy-bypass-list=<-loopback>;127.0.0.1:<port>`:
+  every request but the page server's, loopback included, goes to a closed port, and the
+  page's own response carries `default-src 'self' data: blob: 'unsafe-inline'
+  'unsafe-eval'`. Scripts run, with no network, on an origin that holds no cookie. Each
+  width loads the page afresh (1280 by 800; 390 by 844 as a phone), walks it top to bottom
+  so lazy content is drawn, and takes the page from the top to the view's cap with
+  `captureBeyondViewport` and a clip, which leaves the layout alone (a `100vh` section
+  stays one screen). A markdown file is first set as an article with react-markdown and
+  remark-gfm, raw HTML left as text. A page past 25 s is stopped with its browser and the
+  next one starts. The server reads back `out/report.json` and each PNG through
+  `readAttachmentBytes`, and keeps a picture only when its own header says PNG at the
+  view's width. A page that opens `alert()`, `confirm()` or `prompt()` would wait on its
+  dialog for the whole 25 s: each is dismissed and counted, and the note and the tool's
+  reply say the page opens one. A kept delivery's files are the server's own, which an
+  agent uid cannot read, so a delivery's job first copies them (each up to 25 MB, 200 MB
+  in all) into `<task>/.capture-input/<captureId>/`, beside `deliveries/` and not under
+  `workspace/`: the server writes no file inside a tree an agent can write (rulings 485
+  and 495). The folder and its parent are the server's own, 0710 in the agent group, each
+  file made new by descriptor and 0640, so the renderer reads a file by the name it is
+  given (the job carries the names, and reaches the renderer on its standard input, since a
+  delivery of thousands of files is past what the kernel takes as one argument) and lists
+  and writes nothing there; a folder that
+  cannot be made so is each page's reason for no picture, and the copy goes when the
+  render ends. The renderer's own scratch is `<task>/.captures/<run>/<captureId>/`, in
+  the task's own directory too: `.captures/` and the run's folder (`no.run` for a
+  delivery's own render) are the server's own, 0710 in the agent group, each checked as
+  the server's own directory before anything is made, listed or removed below it, so no
+  entry on the way can be a link an agent put there. Only the one render's folder, made
+  new, is 2770 for the renderer to write; the server reads back from it and removes it
+  as the person (ruling 485), the emptied folder with its own `rmdir` (ruling 495). A
+  scratch that cannot be made so is the page's reason ("the render's scratch folder
+  could not be made"). A page and
+  the files beside it are found in whichever Unicode form they are stored (ruling 675's
+  rule, restated in the child). Measured in the image (Debian Chromium 154, 2026-10-07):
+  1.6 s for an HTML page at both widths in a fresh browser, 1.25 s for a markdown page.
 - **Shell inventory** (rulings 191, 196, 275; `shellInventoryPrompt`,
   `app/server/ops/toolchain.server.ts`): every specialist run, operator run and controller
   turn carries "## Shell inventory (measured on this host, not a guess)": the versions
@@ -1989,7 +2086,12 @@ runtime's answer for a missing grant.
   file one agent writes is one the delivery (the owner's uid) can commit. Nothing else the server
   writes is in the agent group (its own files are `node:node`), so the canonical
   `task.md`, `project.md`, knowledge bases and skills stay readable and unwritable to an
-  agent. A correction an agent proves goes through the server instead, which writes it into
+  agent. A task's `sources/` is the same (ruling 690): it is not one of the shared
+  directories, the server creates it and writes it, and an agent reads a kept source and
+  cannot change or delete it. That is what "never overwritten" rests on where agents run
+  as their own users; on a host with no launcher an agent runs as the server's user, and
+  only the writer (`writeTaskSource`, which never opens an existing bytes file) keeps a
+  source as it was. A correction an agent proves goes through the server instead, which writes it into
   the document, keeps the record and lets a person undo it (rulings 483 and 498, §4.2). Git refuses a repository another uid owns, so the image's SYSTEM git config
   (`/etc/gitconfig`, root-owned, which no agent can edit) carries `safe.directory=*` and
   `core.sharedRepository=group`; it binds the server's git, an agent's shell and a tool that
@@ -2171,14 +2273,29 @@ and the shipped base templates, refreshed by hash through `state/shipped-assets.
 (hand-edited copies kept and warned about): the operator and controller profiles ship as
 files in `app/server/seed/assets/`; the Developer and Reviewer templates are generated
 from `SEED_AGENT_PROFILES` (`builtinAgentProfileTemplate`, `default-assets.server.ts`)
-and the boot backfill writes them with `kb: []`, because it installs no knowledge bases:
+and the boot backfill writes them with `kb: []`, because it installs no knowledge bases.
+The Writer and the Editor (`LIBRARY_AGENT_PROFILES`, ruling 692) are written by the same
+two writers and are in the library only: no project's default roster holds them, and a
+board gets them when the controller passes them as `agents` or a person adds them.
 
 | Profile | Kind | Backends | Model | Stages | Skills / KB | Grants |
 |---|---|---|---|---|---|---|
 | `operator` | operator | claude, codex | `orchestration runtime` (a sentinel, not a catalog id; falls back to the backend default) | all (`spanAll`) | `viberr-app-expertise` / `architecture-notes` after `npm run seed`, `kb: []` in the base template | direct: dispatch, packets, typed events, deliver; recommend: transitions, acceptance; human: repo write, done, policy |
 | `developer` | specialist | claude, codex (Claude first) | `sonnet` | ready, impl | `developer-expertise` / `architecture-notes`, `api-contracts` (seed only) | direct: repo write, branch, commit/push, open PR, comments, ask, browser, egress, advisory items; human: merge, done |
 | `reviewer` | specialist | claude | `sonnet` | impl, review | `reviewer-expertise` / `api-contracts` (seed only) | direct: read diff, validation suites, tests, evidence, quality flags, comments, ask, verdict, approve, request changes; human: merge, done, commit/push |
+| `writer` (library) | specialist | claude, codex (Claude first) | `opus` | ready, impl | `writer-expertise` / none | direct: repo write, branch, commit/push, open PR (all four withheld on a board made to deliver results, ruling 667), comments, ask, evidence, browser, egress, advisory items; human: merge, done |
+| `editor` (library) | specialist | claude | `opus` | impl, review | `editor-expertise` / none | direct: read diff, evidence, quality flags, comments, ask, verdict, approve, request changes, egress; human: merge, done, commit/push |
 | `controller` | controller | claude | `sonnet` | n/a | `controller-guide` / `controller-handbook` | none (tools are gated by the asker's RBAC) |
+
+The Writer and the Editor are for a task whose result is prose a person puts their name
+to. Their manuals (`writer-expertise`, `editor-expertise`) say how such work is done on
+any subject: a fact from outside rests on a source the run opened and kept (ruling 690),
+code is run, or checked without running and presented as untested, or quoted with its
+origin, the first person comes only from the person's notes and answers, a person is
+asked once and only what they alone know, their voice is taken from their own writing
+and nothing of a sample is carried over, and the page is looked at as its reader sees it
+(ruling 691). Each manual stays within half of the 24 000 characters a run with no
+checkout is given, so a board's own skill still fits beside it.
 
 The shipped operator doctrine (`operator.definition.md`, upgraded in place through
 `PRIOR_SHIPPED_HASHES`) tells the operator that a wait on other work is a fact with its

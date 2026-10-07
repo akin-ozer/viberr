@@ -1,5 +1,6 @@
 import { useId } from "react";
 import type { CompletionView } from "~/server/tasks/completion-packet.server";
+import type { TookCard } from "~/server/tasks/what-it-took.server";
 import { Markdown } from "~/ui/markdown";
 import { AttachmentThumb } from "./attachment-image";
 import { fileExtension, fileFamily } from "./attachment-kind";
@@ -8,8 +9,11 @@ import { completionCard } from "./completion-packet-derive";
 import {
   CompletionChanges,
   CompletionHead,
+  CompletionSources,
   CompletionSummary,
+  CompletionTook,
   CompletionVerdicts,
+  FilePagePictures,
   HiddenFilesNote,
   HiddenScreenshotsNote,
 } from "./completion-packet-regions";
@@ -34,6 +38,18 @@ import {
  * the result. A task delivered as a revision shows no files: its pull request
  * holds them, so the result names the pull request, the change's size and the
  * paths it changed.
+ *
+ * Ruling 693: under the reviewers the card says what the task took: its runs
+ * and their agent time, their cost, the times a person was asked and the work
+ * was sent back, and the wall time to the first delivery and to acceptance.
+ * The server builds the phrases and the sentences saying what they miss
+ * (`what-it-took.server.ts`), so this draws them and formats nothing. It
+ * stays on the Result card.
+ *
+ * Ruling 691: a result file that is a page (HTML or markdown) carries Viberr's
+ * own pictures of it under its row, at a desktop and a phone width, or the
+ * reason there is none. The source still opens from the row; the picture is
+ * what a reader of the page gets. Operator names none of them.
  */
 export interface CompletionDiff {
   url: string;
@@ -54,14 +70,19 @@ export interface CompletionResult {
 export function CompletionPacket({
   view,
   attachmentsBase,
+  sourcesBase = null,
   verdictSatisfiedBy = null,
   diff = null,
   standalone = false,
   result = null,
+  took = null,
 }: {
   view: CompletionView;
   /** The attachments serving route's base, or null where there is none. */
   attachmentsBase: string | null;
+  /** Ruling 690: the route that serves a kept source by its id, or null
+   *  where there is none: the card then says how many and lists none. */
+  sourcesBase?: string | null;
   /** R19-B: a person's GitHub approval that carries the verdict gate. */
   verdictSatisfiedBy?: string | null;
   /** The diff reader's read, while the review PR is open on the delivered
@@ -72,6 +93,9 @@ export function CompletionPacket({
   standalone?: boolean;
   /** Ruling 668: the task is accepted, so this is its result. */
   result?: CompletionResult | null;
+  /** Ruling 693: what the task took and what that figure misses, or null for
+   *  a viewer the loader sent none. */
+  took?: TookCard | null;
 }) {
   const id = useId();
   const lightbox = useAttachmentLightbox();
@@ -124,6 +148,9 @@ export function CompletionPacket({
                       {f.caption ? <span className="cmp-file-what">{f.caption}</span> : null}
                     </span>
                   </a>
+                  {f.page ? (
+                    <FilePagePictures page={f.page} fileName={f.name} href={href} lightbox={lightbox} />
+                  ) : null}
                 </li>
               );
             })}
@@ -131,6 +158,15 @@ export function CompletionPacket({
         </>
       ) : null}
       {card.hiddenFiles > 0 ? <HiddenFilesNote count={card.hiddenFiles} /> : null}
+
+      {view.sources ? (
+        <CompletionSources
+          Label={Label}
+          sources={view.sources}
+          sourcesBase={sourcesBase}
+          lightbox={lightbox}
+        />
+      ) : null}
 
       {card.notes.map((note) => (
         <div key={note.key} className="cmp-note">
@@ -148,6 +184,10 @@ export function CompletionPacket({
         result={result}
         subject={card.subject}
       />
+
+      {took && took.facts.length + took.notes.length > 0 ? (
+        <CompletionTook Label={Label} took={took} />
+      ) : null}
 
       {card.shots.length > 0 ? (
         <>

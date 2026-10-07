@@ -19,6 +19,7 @@ import type { PacketRender } from "~/shared/mapping/task.server";
 import type { AcceptanceAffordance } from "~/server/tasks/task-acceptance.server";
 import type { CompletionView } from "~/server/tasks/completion-packet.server";
 import type { TaskChangesView } from "~/server/github/task-changes.server";
+import type { TookCard } from "~/server/tasks/what-it-took.server";
 import { ToastProvider } from "~/ui/toast";
 import { AcceptConfirm } from "./accept-confirm";
 import { DecisionPacket } from "./decision-packet";
@@ -98,6 +99,8 @@ function renderPage(props: {
   entry?: string;
   /** Ruling 521: the completion packet as the loader read it. */
   completion?: CompletionView | null;
+  /** Ruling 693: what the task took, as the loader sent it. */
+  whatItTook?: TookCard | null;
   /** Ruling 550: the task is delivered as the files saved on it. */
   filesDeliveredAt?: string | null;
 }) {
@@ -141,6 +144,7 @@ function renderPage(props: {
               baseBehindBy={props.baseBehindBy ?? null}
               changesUrl={props.changesUrl ?? null}
               completion={props.completion ?? null}
+              whatItTook={props.whatItTook ?? null}
               filesDeliveredAt={props.filesDeliveredAt ?? null}
             />
           </ToastProvider>
@@ -360,6 +364,24 @@ describe("ruling 521: the completion packet stands with the offer to accept", ()
         expect(card.querySelector(".cmp-stat")?.textContent).toBe("PR #3merged·4 files changed+260−40");
         expect(findButton(card, "Show the diff")).toBeUndefined();
       }
+      unmount();
+    }
+  });
+
+  it("ruling 693: hands what the task took to the card, as the offer and as the result", () => {
+    // CANARY: drop `took={took}` from TaskDecisionRegion's `<CompletionPacket>`
+    // (task-detail-regions.tsx) and the loader's figure is read, sent and never
+    // drawn (ruling 320's shape: both ends default to nothing, so nothing fails).
+    const whatItTook: TookCard = { facts: ["2 runs, 40m of agent time"], notes: [] };
+    const merged: PrRef = { number: 3, state: "merged", title: "Notes" };
+    const rows: Parameters<typeof renderPage>[0][] = [
+      { acceptance: { atBoundary: true }, completion: COMPLETION, whatItTook },
+      { task: { stage: "done", displayReadiness: "merged", pr: merged }, acceptance: { atBoundary: false }, completion: COMPLETION, whatItTook },
+    ];
+    for (const props of rows) {
+      const { container, unmount } = renderPage(props);
+      const card = container.querySelector<HTMLElement>(".detail-packet > .cmp-card > .cmp")!;
+      expect(card.textContent, JSON.stringify(props.task ?? {})).toContain("What it took2 runs, 40m of agent time");
       unmount();
     }
   });

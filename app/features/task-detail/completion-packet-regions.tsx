@@ -1,10 +1,20 @@
-import type { CompletionVerdictRow, CompletionView } from "~/server/tasks/completion-packet.server";
+import { Fragment } from "react";
+import type {
+  CompletionFilePage,
+  CompletionVerdictRow,
+  CompletionView,
+  ResultSources,
+} from "~/server/tasks/completion-packet.server";
+import type { TookCard } from "~/server/tasks/what-it-took.server";
 import { COMPLETION_SMALL_CHANGE_LINES } from "~/shared/completion-packet";
+import { pageCaptureView } from "~/shared/page-capture";
 import { Collapsible } from "~/ui/collapsible";
 import { Icon, type IconName } from "~/ui/icon";
 import { LocalRelative } from "~/ui/local-time";
 import { Markdown } from "~/ui/markdown";
 import { Pill } from "~/ui/pill";
+import { AttachmentThumb } from "./attachment-image";
+import type { useAttachmentLightbox } from "./attachment-lightbox";
 import { ChangesPanel } from "./changes-slot";
 import type { CompletionDiff, CompletionResult } from "./completion-packet";
 
@@ -111,6 +121,149 @@ export function HiddenFilesNote({ count }: { count: number }) {
 }
 
 /** The screenshots Operator picked that this viewer cannot open. */
+/**
+ * Ruling 691: Viberr's pictures of a result file that is a page, under its
+ * row, and the reason one is missing.
+ */
+export function FilePagePictures({
+  page,
+  fileName,
+  href,
+  lightbox,
+}: {
+  page: CompletionFilePage;
+  fileName: string;
+  /** The attachments route's URL for a stored name. */
+  href: (name: string) => string;
+  /** The packet's `useAttachmentLightbox()`. */
+  lightbox: ReturnType<typeof useAttachmentLightbox>;
+}) {
+  return (
+    <>
+      {page.shots.length > 0 ? (
+        <div className="attach-grid cmp-shots">
+          {page.shots.map((s) => {
+            const view = pageCaptureView(s.view);
+            // The version is for the browser's cache alone (the
+            // route ignores it): a rework replaces the picture
+            // under the same name.
+            const url = `${href(s.name)}?v=${encodeURIComponent(s.at)}`;
+            return (
+              <AttachmentThumb
+                key={s.name}
+                variant="panel"
+                href={url}
+                name={s.name}
+                openLabel={`Open the ${view.id} picture of ${fileName}`}
+                onOpen={lightbox({ name: s.name, url })}
+              >
+                <span className="cmp-caption">
+                  {view.label}
+                  {s.cut ? ", the top of a longer page" : ""}
+                </span>
+              </AttachmentThumb>
+            );
+          })}
+        </div>
+      ) : null}
+      {page.note ? (
+        <p className="cmp-none">
+          {page.shots.length > 0 ? "Not every picture of this page was made" : "No picture of this page"}
+          : {page.note}
+        </p>
+      ) : null}
+    </>
+  );
+}
+
+/**
+ * Ruling 690: what the result rests on. A fact it states from outside is
+ * checked against these, kept as the run read them; a result that is files
+ * says so when it rests on none. Listed where there is a route to open one
+ * by, as the files are.
+ */
+export function CompletionSources({
+  Label,
+  sources,
+  sourcesBase,
+  lightbox,
+}: {
+  Label: "h3" | "h4";
+  sources: ResultSources;
+  sourcesBase: string | null;
+  /** The packet's `useAttachmentLightbox()`. */
+  lightbox: ReturnType<typeof useAttachmentLightbox>;
+}) {
+  const sourceRows = sourcesBase ? sources.shown : [];
+  return (
+    <>
+      <Label className="cmp-k">Sources</Label>
+      <p className="cmp-none">
+        {sources.count === 0
+          ? "This result rests on no kept source."
+          : `This result rests on ${plural(sources.count, "kept source", "kept sources")}.`}
+      </p>
+      {sourceRows.length > 0 ? (
+        <ul className="cmp-files">
+          {sourceRows.map((source) => {
+            const url = `${sourcesBase}/${encodeURIComponent(source.id)}`;
+            return (
+              <li key={source.id}>
+                <a
+                  className="attach-file cmp-file"
+                  href={url}
+                  target="_blank"
+                  rel="noreferrer"
+                  onClick={lightbox({ name: source.name, url })}
+                >
+                  <span className="cmp-file-ext">{source.id}</span>
+                  <span className="cmp-file-main">
+                    <span className="cmp-file-name">{source.title}</span>
+                    <span className="cmp-file-what">{source.from}</span>
+                  </span>
+                </a>
+              </li>
+            );
+          })}
+        </ul>
+      ) : null}
+      {sourceRows.length > 0 && sources.count > sourceRows.length ? (
+        <p className="cmp-none">
+          and {sources.count - sourceRows.length} more, listed under Sources.
+        </p>
+      ) : null}
+    </>
+  );
+}
+
+/** Ruling 693: what the task took, as the server phrased it. */
+export function CompletionTook({ Label, took }: { Label: "h3" | "h4"; took: TookCard }) {
+  return (
+    <>
+      <Label className="cmp-k">What it took</Label>
+      {took.facts.length > 0 ? (
+        <p className="cmp-stat">
+          {took.facts.map((fact, i) => (
+            <Fragment key={fact}>
+              {i > 0 ? (
+                <span className="cmp-sep" aria-hidden="true">
+                  ·
+                </span>
+              ) : null}
+              <span>{fact}</span>
+            </Fragment>
+          ))}
+        </p>
+      ) : null}
+      {took.notes.map((note) => (
+        <p key={note} className="cmp-none">
+          {note}
+        </p>
+      ))}
+    </>
+  );
+}
+
 export function HiddenScreenshotsNote({ count }: { count: number }) {
   return (
     <p className="cmp-none">

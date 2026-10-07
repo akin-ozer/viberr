@@ -10,10 +10,25 @@
  * way (`gateNoteView`).
  */
 
-/** The titles a verdict's note carries. An approval that does not clear the
- *  work yet adds why after a comma ("Approval noted, waiting on Security"). */
+const CHANGES_REQUESTED = "Changes requested";
+
+/**
+ * The titles a verdict's note carries. An approval that does not clear the
+ * work yet adds why after a comma ("Approval noted, waiting on Security").
+ *
+ * Ruling 693: a request for changes that sent nothing back adds why too,
+ * because what a task took counts the notes titled `changesRequested` alone
+ * (`what-it-took.server.ts`). `changesNotCounted` is an objection that bound
+ * to no delivery: nothing was delivered yet (ruling 583), the reviewer made
+ * the delivery itself (ruling 556), or the delivery moved while it read
+ * (ruling 544). `changesOnUnchangedWork` is the same reviewer objecting again
+ * to a delivery nobody has reworked since its last objection (ruling 416): it
+ * binds, and it fought no round.
+ */
 export const VERDICT_NOTE_TITLE = {
-  changesRequested: "Changes requested",
+  changesRequested: CHANGES_REQUESTED,
+  changesNotCounted: `${CHANGES_REQUESTED}, not counted`,
+  changesOnUnchangedWork: `${CHANGES_REQUESTED}, on unchanged work`,
   passed: "Review passed",
   noted: "Approval noted",
 } as const;
@@ -50,8 +65,10 @@ export function verdictNoteView(note: {
   text: string;
 }): VerdictNoteView | null {
   if (note.type !== "quality" || !note.title) return null;
+  // Every request for changes reads as one here, counted or not: the card
+  // draws the reviewer's own verdict (ruling 526).
   const result =
-    note.title === VERDICT_NOTE_TITLE.changesRequested
+    note.title.startsWith(VERDICT_NOTE_TITLE.changesRequested)
       ? "request_changes"
       : note.title === VERDICT_NOTE_TITLE.passed || note.title.startsWith(VERDICT_NOTE_TITLE.noted)
         ? "approve"

@@ -234,6 +234,8 @@ export default function Board({ loaderData }: Route.ComponentProps) {
       // repository GitHub will not serve says so where the work happens instead
       // of only on its GitHub page.
       repoAccess={loaderData.repoAccess}
+      // Ruling 694: the layout already ships the project's repository.
+      hasRepository={layout.project.repo !== null}
       epics={loaderData.epics}
     />
   );

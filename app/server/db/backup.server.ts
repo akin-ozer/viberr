@@ -23,6 +23,7 @@ import { writeFileAtomic } from "~/server/files/atomic-file.server";
 import { sha256Hex } from "~/server/files/content-hash.server";
 import { getDataRoot } from "~/server/files/file-store-root.server";
 import { logger } from "~/server/logging/logger.server";
+import { TASK_CAPTURE_INPUT_DIR, TASK_CAPTURE_SCRATCH_DIR } from "~/server/runtimes/agent-isolation.server";
 import { DATA_ROOT_LOCK_FILENAME } from "./data-root-lock.server";
 import { openDatabase, openDatabaseReadOnly } from "./sqlite.server";
 
@@ -85,6 +86,9 @@ const STORE_DIR = "store";
  *  writes the expiring audit rows there as the DURABLE record, and `npm run
  *  backup` silently dropped it. A directory that does not exist yet (a root
  *  that never purged) is skipped, as every entry here is. */
+/** Ruling 691: the two folders of a task a page render works in. */
+const RENDER_WORK_DIRS: ReadonlySet<string> = new Set([TASK_CAPTURE_SCRATCH_DIR, TASK_CAPTURE_INPUT_DIR]);
+
 const BACKED_UP_STORE_DIRS = [
   "projects",
   "agents",
@@ -257,6 +261,10 @@ export function createBackup(options: CreateBackupOptions): BackupResult {
         const parts = path.relative(from, src).split(path.sep);
         if (parts[1] === ".repo-mirror") return false;
         if (parts[1] === "tasks" && parts[3] === "workspace") return false;
+        // Ruling 691: nor is what a page render works in. The scratch holds a
+        // browser profile only its uid can enter, so a copy of it stops the
+        // whole backup, and the input folder is a copy of a kept delivery.
+        if (parts[1] === "tasks" && parts[3] !== undefined && RENDER_WORK_DIRS.has(parts[3])) return false;
         return true;
       },
     });
@@ -373,6 +381,7 @@ function excludes(includeRuntimes: boolean, instanceSecrets: boolean): string[] 
         ]),
     "*.tmp: atomic writes in flight, never content.",
     "projects/*/tasks/*/workspace/ and projects/*/.repo-mirror/: each task's git checkout and each project's bare mirror. Re-derivable from the remote (the next run re-clones and re-fetches), and a live run may be mid-write, so a copy would be torn as well as large.",
+    "projects/*/tasks/*/.captures/ and projects/*/tasks/*/.capture-input/: what a page render works in (a browser's profile, a copy of a kept delivery). The pictures it keeps are among the task's attachments and in its kept deliveries, which are backed up.",
   ];
 }
 
