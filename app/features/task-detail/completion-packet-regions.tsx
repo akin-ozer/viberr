@@ -21,8 +21,9 @@ import type { CompletionDiff, CompletionResult } from "./completion-packet";
 /**
  * The completion packet's sections (ruling 695(e), the split of
  * `completion-packet.tsx` along the task-page recipe): its head, Operator's
- * summary, the notes on what is not shown, the reviewers' verdicts and the
- * change. Each takes the slot its markup held in `CompletionPacket`'s section
+ * summary, a result page's pictures, the sources the result rests on, the
+ * notes on what is not shown, the reviewers' verdicts, what the task took and
+ * the change. Each takes the slot its markup held in `CompletionPacket`'s section
  * and calls no hook: the packet owns its `useId` and the lightbox and hands
  * them in, so the markup, and every id React derives from its place in the
  * tree, are what they were.
@@ -120,7 +121,6 @@ export function HiddenFilesNote({ count }: { count: number }) {
   );
 }
 
-/** The screenshots Operator picked that this viewer cannot open. */
 /**
  * Ruling 691: Viberr's pictures of a result file that is a page, under its
  * row, and the reason one is missing.
@@ -264,6 +264,7 @@ export function CompletionTook({ Label, took }: { Label: "h3" | "h4"; took: Took
   );
 }
 
+/** The screenshots Operator picked that this viewer cannot open. */
 export function HiddenScreenshotsNote({ count }: { count: number }) {
   return (
     <p className="cmp-none">
