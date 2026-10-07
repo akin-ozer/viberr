@@ -109,6 +109,13 @@ scan run from inside an agent worktree under `.claude/` sees no files at all.
   commit so screen readers announce it, paired with `showPopover`/`hidePopover`. Verify the
   ToastHost comment still requires the empty region to commit first.
 
+- `react-doctor/no-adjust-state-on-prop-change` — board-page-actions.tsx's abandoned
+  acceptance: when a revalidation drops the task a pending Accept is waiting on, the
+  effect clears `pendingAccept` AND pushes the error toast that says nothing was accepted
+  (P13-D-10's "abandoned out loud"). The toast is a side effect, so the pair cannot move
+  into render (it would toast during render, twice under StrictMode); the effect runs it
+  once, after the commit that lost the task. Verify the effect still pushes the toast.
+
 - `react-doctor/no-effect-chain` — stage-menu.tsx: the layout effect measures the menu the
   same commit mounted (`offsetHeight`, in a portal) to choose a side before paint, which no
   click handler can do; the effect after it moves focus. Verify the first effect reads the
@@ -118,13 +125,6 @@ scan run from inside an agent worktree under `.claude/` sees no files at all.
   directly in a `useLayoutEffect` that lists `pos`: it runs right after the commit that
   produced this `pos`, one branch per run, so an updater would read the same value.
   Verify the call is in the effect body (not a callback or timer) and the state is a dep.
-
-- `react-doctor/rerender-state-only-in-handlers` — resources-panel-actions.ts
-  `pendingSkillBrowse` / `pendingKbBrowse`: "pending until the revalidated list has it"
-  state that sits in an effect's dependency array (`[skills, pendingSkillBrowse]`), so
-  setting it is what wakes the effect; a ref would not. Verify the dependency array.
-  0.9.17 stopped reporting it once ruling 689(e) moved the state from ResourcesPanel
-  into this hook; kept for a scan that reports it there.
 
 - `react-doctor/rerender-lazy-ref-init` — use-live-updates.ts `useRef(Symbol("live-stream"))`:
   a constant-cost identity token, the rule's own cheap-call exception. Verify the argument

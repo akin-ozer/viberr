@@ -36,28 +36,24 @@ export function useResourceBrowsing(kbs: KbView[], skills: SkillView[]) {
   const linkedDoc = browsing?.kind === "kb" ? browsing.doc : undefined;
   // A files-mode skill create hands straight off to the store browser: the
   // action only returns a toast, so we wait for the revalidated skills list
-  // to deliver the new row and open its browser then.
+  // to deliver the new row and open its browser then. Both waits settle during
+  // render, React's pattern for state a prop moves on, so the list never paints
+  // the new row with its browser still shut.
   const [pendingSkillBrowse, setPendingSkillBrowse] = useState<string | null>(null);
-  useEffect(() => {
-    if (!pendingSkillBrowse) return;
-    const hit = skills.find((s) => s.name === pendingSkillBrowse);
-    if (hit) {
-      setBrowsing({ kind: "skill", id: hit.id });
-      setPendingSkillBrowse(null);
-    }
-  }, [skills, pendingSkillBrowse]);
+  const skillHit = pendingSkillBrowse ? skills.find((s) => s.name === pendingSkillBrowse) : undefined;
+  if (skillHit) {
+    setBrowsing({ kind: "skill", id: skillHit.id });
+    setPendingSkillBrowse(null);
+  }
   // The KB twin (owner request 2026-08-20): a files-mode KB create waits for
   // the revalidated list, then opens the new folder's browser. Matched on the
   // store DIR — the modal's slugified name — not the display name.
   const [pendingKbBrowse, setPendingKbBrowse] = useState<string | null>(null);
-  useEffect(() => {
-    if (!pendingKbBrowse) return;
-    const hit = kbs.find((k) => k.dir === pendingKbBrowse);
-    if (hit) {
-      setBrowsing({ kind: "kb", id: hit.id });
-      setPendingKbBrowse(null);
-    }
-  }, [kbs, pendingKbBrowse]);
+  const kbHit = pendingKbBrowse ? kbs.find((k) => k.dir === pendingKbBrowse) : undefined;
+  if (kbHit) {
+    setBrowsing({ kind: "kb", id: kbHit.id });
+    setPendingKbBrowse(null);
+  }
   const browsingKb = browsing?.kind === "kb" ? (kbs.find((k) => k.id === browsing.id) ?? null) : null;
   const browsingSkill =
     browsing?.kind === "skill" ? (skills.find((s) => s.id === browsing.id) ?? null) : null;

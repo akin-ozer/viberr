@@ -132,10 +132,9 @@ function AgentAccountCard({
     setFocusAsked({ box });
   };
   // The management closes with the last account it listed, so an account
-  // added later does not open it again on its own.
-  useEffect(() => {
-    if (others.length === 0) setManaging(false);
-  }, [others.length]);
+  // added later does not open it again on its own. Adjusted during render, as
+  // the Disconnect confirm below is, so no frame paints it open and empty.
+  if (managing && others.length === 0) setManaging(false);
 
   const { login, connected, running } = useSignInPoll(data, () => {
     push(`${label} connected`);

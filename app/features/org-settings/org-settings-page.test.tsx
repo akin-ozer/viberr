@@ -4,7 +4,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { cleanup, fireEvent, getNodeText, render, waitFor, within } from "@testing-library/react";
 import type { ComponentProps, ReactNode } from "react";
 import { renderToString } from "react-dom/server";
-import { createRoutesStub } from "react-router";
+import { createRoutesStub, useLoaderData } from "react-router";
 import { z } from "zod";
 import type { StageDef } from "~/schemas/project-file.schema";
 import type { ConnectionRecord } from "~/server/org/connections.server";
@@ -2191,6 +2191,43 @@ describe("KBModal — two content modes (P21, the skill modal's twin)", () => {
         refresh: "on change",
       }),
     );
+  });
+
+  it("'Start from files' opens the new folder's browser once the revalidated list has it", async () => {
+    // The server's list, read by the route's loader on every revalidation;
+    // the create adds the new knowledge base to it.
+    const served: KbView[] = [...KBS];
+    const Stub = createRoutesStub([
+      {
+        path: "/org/settings",
+        loader: () => ({ kbs: served.slice() }),
+        Component: function Panel() {
+          const { kbs } = useLoaderData<{ kbs: KbView[] }>();
+          return (
+            <ToastProvider>
+              <ResourcesPanel kbs={kbs} mcps={[]} skills={[]} gagents={[]} stages={STAGES} projectStages={[]} />
+            </ToastProvider>
+          );
+        },
+        action: async () => {
+          served.push({
+            ...KBS[0]!, id: "kb2", name: "Design notes", dir: "design-notes", tree: [],
+            fileCount: 0, injectableCount: 0, uri: "store://kb/design-notes",
+          });
+          return { ok: true, toast: "Design notes created" };
+        },
+      },
+    ]);
+    const view = render(<Stub initialEntries={["/org/settings"]} />);
+    const heading = await view.findByRole("heading", { name: "Knowledge bases" });
+    fireEvent.click(heading.closest(".panel")!.querySelector(".panel-head .btn")!);
+    fireEvent.change(document.querySelector<HTMLInputElement>("#kb-name")!, { target: { value: "Design notes" } });
+    fireEvent.click(view.getByText("Start from files"));
+    fireEvent.click(view.getByText("Create & add files"));
+    // CANARY: drop the pending-browse hand-off in `useResourceBrowsing`
+    // (resources-panel-actions.ts: `setBrowsing` on the revalidated row) and
+    // the modal closes onto the list with no browser open.
+    expect(await view.findByRole("dialog", { name: "Files · Design notes" })).toBeTruthy();
   });
 
   /**
