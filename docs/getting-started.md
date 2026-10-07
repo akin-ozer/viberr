@@ -60,9 +60,8 @@ Example content for agents is optional, and is one command run while nothing hol
 store's writer lock (before the first `up`, or after `docker compose down`):
 `docker compose run --rm app npm run seed`. It adds three example knowledge bases
 (architecture notes, API contracts, deploy runbooks), four skills (conventional commits,
-Terraform review, API design, a changelog writer) and the `@viberr.dev` domain to the
-Google sign-in allowlist; remove that domain in *Instance settings → Sign-in & SSO* if you
-enable Google sign-in. A seed that finds the users table empty also creates the bootstrap
+Terraform review, API design, a changelog writer); it allowlists no Google sign-in domain
+(ruling 688), so add the domains you mean in *Instance settings → Sign-in & SSO*. A seed that finds the users table empty also creates the bootstrap
 admin, with `VIBERR_SEED_ADMIN_PASSWORD` or else the development default
 `viberr-dev-2828`, so set the variable on any instance other people can reach.
 

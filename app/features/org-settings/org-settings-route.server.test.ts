@@ -183,6 +183,14 @@ describe("users & access intents", () => {
   });
 
   it("duplicate domain whitelist is refused like the other invite intents", async () => {
+    // The seed allowlists no domain (ruling 688), so the first add is the one
+    // the duplicate is refused against.
+    const first = await postAction(ids.arda, {
+      intent: "invite-domain",
+      email: "@viberr.dev",
+      role: "member",
+    });
+    expect(first).toMatchObject({ ok: true });
     const dup = await postAction(ids.arda, {
       intent: "invite-domain",
       email: "@viberr.dev",
