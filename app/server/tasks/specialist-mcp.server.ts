@@ -603,6 +603,12 @@ export async function verifyStdioMcpMountsForRun(
   // Verdicts by mount index; the first `applied` of them have been applied.
   const verdicts: (StdioDiscovery | undefined)[] = [];
   let applied = 0;
+  // A verdict that cannot be applied (its health-row write threw) fails the
+  // run start, and the check stops there as the serial loop did: nothing more
+  // is applied, logged or spawned, not even a mount that was waiting for its
+  // command's earlier probe. A probe already in flight in the other worker
+  // still ends on its own clock and kills its child; its verdict is dropped.
+  let failed = false;
   // Two mounts of ONE command (a server registered twice, say under two
   // credentials) never handshake at once: the second waits for the first, as
   // it did serially, and finds the first one's finished install instead of
@@ -610,24 +616,32 @@ export async function verifyStdioMcpMountsForRun(
   const lastProbeOf = new Map<string, Promise<unknown>>();
   let next = 0;
   const worker = async (): Promise<void> => {
-    for (;;) {
-      const index = next++;
-      const probe = probes[index];
-      if (probe === undefined) return;
-      const { row, token } = probe;
-      const discovery = (lastProbeOf.get(row.target) ?? Promise.resolve()).then(() =>
-        discoverStdioMcpTools(row.target, {
-          spawnImpl: options.spawnImpl,
-          timeoutMs: options.timeoutMs,
-          token,
-        }),
-      );
-      lastProbeOf.set(row.target, discovery);
-      verdicts[index] = await discovery;
-      for (let ready = verdicts[applied]; ready; ready = verdicts[applied]) {
-        applyVerdict(probes[applied], ready);
-        applied += 1;
+    try {
+      for (;;) {
+        const index = next++;
+        const probe = probes[index];
+        if (probe === undefined) return;
+        const { row, token } = probe;
+        const discovery = (lastProbeOf.get(row.target) ?? Promise.resolve()).then(() =>
+          failed
+            ? undefined
+            : discoverStdioMcpTools(row.target, {
+                spawnImpl: options.spawnImpl,
+                timeoutMs: options.timeoutMs,
+                token,
+              }),
+        );
+        lastProbeOf.set(row.target, discovery);
+        verdicts[index] = await discovery;
+        if (failed) return;
+        for (let ready = verdicts[applied]; ready; ready = verdicts[applied]) {
+          applyVerdict(probes[applied], ready);
+          applied += 1;
+        }
       }
+    } catch (error) {
+      failed = true;
+      throw error;
     }
   };
   await Promise.all(

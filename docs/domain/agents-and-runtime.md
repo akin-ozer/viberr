@@ -1919,6 +1919,8 @@ runtime's answer for a missing grant.
   limit, and two mounts of one command never at once (ruling 689(b)); each verdict is
   applied in mount order as soon as every earlier server's is in, so the mounts, the
   registry rows, the log lines and the prompt read as a one-at-a-time check left them.
+  A verdict whose registry write fails fails the run start and ends the check there, as
+  the one-at-a-time check did: nothing after it is applied, logged or spawned.
   A handshake that timed out on a visible install (a first-run or `@latest` download)
   also starts the background install a Retest starts (ruling 606, ruling 74's
   `startMcpWarmup`), so a later run finds the server installed; the run's prompt says so.
