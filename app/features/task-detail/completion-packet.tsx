@@ -1,15 +1,18 @@
 import { useId } from "react";
-import type { CompletionVerdictRow, CompletionView } from "~/server/tasks/completion-packet.server";
-import { COMPLETION_NOTES, COMPLETION_SMALL_CHANGE_LINES } from "~/shared/completion-packet";
-import { Collapsible } from "~/ui/collapsible";
-import { Icon, type IconName } from "~/ui/icon";
-import { LocalRelative } from "~/ui/local-time";
+import type { CompletionView } from "~/server/tasks/completion-packet.server";
 import { Markdown } from "~/ui/markdown";
-import { Pill } from "~/ui/pill";
 import { AttachmentThumb } from "./attachment-image";
 import { fileExtension, fileFamily } from "./attachment-kind";
 import { useAttachmentLightbox } from "./attachment-lightbox";
-import { ChangesPanel } from "./changes-slot";
+import { completionCard } from "./completion-packet-derive";
+import {
+  CompletionChanges,
+  CompletionHead,
+  CompletionSummary,
+  CompletionVerdicts,
+  HiddenFilesNote,
+  HiddenScreenshotsNote,
+} from "./completion-packet-regions";
 
 /**
  * Ruling 521: the completion packet, on the decision that offers the task for
@@ -48,64 +51,6 @@ export interface CompletionResult {
   pr: { number: number; url: string | null; merged: boolean } | null;
 }
 
-const RESULT_ICON = {
-  approve: "checkcircle",
-  request_changes: "xcircle",
-  pending: "clock",
-} as const satisfies Record<CompletionVerdictRow["result"], IconName>;
-
-function resultWord(result: "approve" | "request_changes"): string {
-  return result === "approve" ? "Approved" : "Requested changes";
-}
-
-function plural(n: number, one: string, many: string): string {
-  return `${n} ${n === 1 ? one : many}`;
-}
-
-function VerdictRow({ row, subject }: { row: CompletionVerdictRow; subject: string }) {
-  return (
-    <li className="cmp-verdict" data-result={row.result}>
-      <Icon name={RESULT_ICON[row.result]} />
-      <div className="cmp-verdict-main">
-        <p className="cmp-verdict-line">
-          <strong>{row.name}</strong>
-          <span className="cmp-verdict-word">
-            {row.result === "pending" ? `No verdict on ${subject} yet` : resultWord(row.result)}
-          </span>
-          {row.at ? (
-            <span className="cmp-when">
-              <LocalRelative iso={row.at} />
-            </span>
-          ) : null}
-          {!row.required ? (
-            <Pill quiet sm>
-              not required
-            </Pill>
-          ) : null}
-        </p>
-        {row.reason ? (
-          <Collapsible className="cmp-reason md-body" contentKey={row.reason} max={72}>
-            <Markdown text={row.reason} headingBase={6} />
-          </Collapsible>
-        ) : null}
-        {row.earlier ? (
-          <p className="cmp-earlier">
-            <span className="cmp-stale-tag">Stale</span>
-            {resultWord(row.earlier.result)}
-            {row.earlier.sha ? (
-              <>
-                {" on "}
-                <span className="mono">{row.earlier.sha}</span>
-              </>
-            ) : null}{" "}
-            <LocalRelative iso={row.earlier.at} />, before the work under review was delivered.
-          </p>
-        ) : null}
-      </div>
-    </li>
-  );
-}
-
 export function CompletionPacket({
   view,
   attachmentsBase,
@@ -130,36 +75,22 @@ export function CompletionPacket({
 }) {
   const id = useId();
   const lightbox = useAttachmentLightbox();
-  const { packet, change, paths } = view;
-  const subject = view.subjectSha ?? "the delivered files";
-  const Title = standalone ? "h2" : "h3";
+  const { packet } = view;
+  // What the card reads off its props (completion-packet-derive.ts).
+  const card = completionCard(view, attachmentsBase, verdictSatisfiedBy, diff, result);
   const Label = standalone ? "h3" : "h4";
+  const headingBase = standalone ? 4 : 5;
   const href = (name: string) => `${attachmentsBase}/${encodeURIComponent(name)}`;
-  const shots = attachmentsBase && packet ? packet.screenshots : [];
-  const files = attachmentsBase && packet ? packet.files : [];
-  const small = change?.small ?? false;
-  // On an accepted task nobody is still owed a verdict.
-  const verdicts = result ? view.verdicts.filter((v) => v.result !== "pending") : view.verdicts;
-  const notes = packet
-    ? COMPLETION_NOTES.flatMap(({ key, label }) => {
-        const text = packet[key];
-        return text ? [{ key, label, text }] : [];
-      })
-    : [];
 
   const section = (
     <section className="cmp" aria-labelledby={`${id}-h`} data-comment-anchor="completion">
-      <div className="cmp-head">
-        <Title id={`${id}-h`} className="cmp-title">
-          {result ? "Result" : "Completion"}
-        </Title>
-        {packet ? (
-          <span className="cmp-by">
-            Summarized by Operator <LocalRelative iso={packet.at} />
-          </span>
-        ) : null}
-        {view.subjectSha ? <span className="cmp-sha mono">{view.subjectSha}</span> : null}
-      </div>
+      <CompletionHead
+        id={id}
+        standalone={standalone}
+        result={result}
+        packet={packet}
+        subjectSha={view.subjectSha}
+      />
 
       {packet === null ? (
         <p className="cmp-none">
@@ -167,34 +98,14 @@ export function CompletionPacket({
           current.
         </p>
       ) : (
-        <>
-          {packet.staleFor !== null ? (
-            <p className="cmp-stale" role="note">
-              <Icon name="alert" />
-              <span>
-                Operator wrote this for earlier work
-                {packet.staleFor ? (
-                  <>
-                    {" ("}
-                    <span className="mono">{packet.staleFor}</span>
-                    {")"}
-                  </>
-                ) : null}
-                , before {subject} was delivered.
-              </span>
-            </p>
-          ) : null}
-          <div className="cmp-summary md-body">
-            <Markdown text={packet.summary} headingBase={standalone ? 4 : 5} />
-          </div>
-        </>
+        <CompletionSummary packet={packet} subject={card.subject} headingBase={headingBase} />
       )}
 
-      {files.length > 0 ? (
+      {card.files.length > 0 ? (
         <>
           <Label className="cmp-k">Files</Label>
           <ul className="cmp-files">
-            {files.map((f) => {
+            {card.files.map((f) => {
               const ext = fileExtension(f.name);
               return (
                 <li key={f.name}>
@@ -219,51 +130,30 @@ export function CompletionPacket({
           </ul>
         </>
       ) : null}
-      {packet && packet.hiddenFiles > 0 ? (
-        <p className="cmp-none">
-          {plural(packet.hiddenFiles, "result file", "result files")} Operator named{" "}
-          {packet.hiddenFiles === 1 ? "is" : "are"} not shown: attachments are for project
-          members, and a file removed since is gone.
-        </p>
-      ) : null}
+      {card.hiddenFiles > 0 ? <HiddenFilesNote count={card.hiddenFiles} /> : null}
 
-      {notes.map((note) => (
+      {card.notes.map((note) => (
         <div key={note.key} className="cmp-note">
           <Label className="cmp-k">{note.label}</Label>
           <div className="cmp-summary md-body">
-            <Markdown text={note.text} headingBase={standalone ? 4 : 5} />
+            <Markdown text={note.text} headingBase={headingBase} />
           </div>
         </div>
       ))}
 
-      {result && verdicts.length === 0 && !verdictSatisfiedBy ? null : (
-        <Label className="cmp-k">Reviewers</Label>
-      )}
-      {verdicts.length === 0 && !verdictSatisfiedBy ? (
-        result ? null : (
-          <p className="cmp-none">No reviewer is engaged on this task, and none has given a verdict.</p>
-        )
-      ) : (
-        <ul className="cmp-verdicts">
-          {verdicts.map((row) => (
-            <VerdictRow key={row.profileId} row={row} subject={subject} />
-          ))}
-          {verdictSatisfiedBy ? (
-            <li className="cmp-verdict" data-result="approve">
-              <Icon name="github" />
-              <div className="cmp-verdict-main">
-                <p className="cmp-verdict-line">{verdictSatisfiedBy}</p>
-              </div>
-            </li>
-          ) : null}
-        </ul>
-      )}
+      {card.reviewersHeaded ? <Label className="cmp-k">Reviewers</Label> : null}
+      <CompletionVerdicts
+        verdicts={card.verdicts}
+        verdictSatisfiedBy={verdictSatisfiedBy}
+        result={result}
+        subject={card.subject}
+      />
 
-      {shots.length > 0 ? (
+      {card.shots.length > 0 ? (
         <>
           <Label className="cmp-k">Screenshots</Label>
           <div className="attach-grid cmp-shots">
-            {shots.map((s) => (
+            {card.shots.map((s) => (
               <AttachmentThumb
                 key={s.name}
                 variant="panel"
@@ -278,89 +168,19 @@ export function CompletionPacket({
           </div>
         </>
       ) : null}
-      {packet && packet.hiddenScreenshots > 0 ? (
-        <p className="cmp-none">
-          {plural(packet.hiddenScreenshots, "screenshot", "screenshots")} Operator picked{" "}
-          {packet.hiddenScreenshots === 1 ? "is" : "are"} not shown: attachments are for project
-          members, and a file removed since is gone.
-        </p>
-      ) : null}
+      {card.hiddenScreenshots > 0 ? <HiddenScreenshotsNote count={card.hiddenScreenshots} /> : null}
 
-      {change || diff || (result && (result.pr || paths)) ? (
-        <>
-          <Label className="cmp-k">Changes</Label>
-          {change || result?.pr ? (
-            <p className="cmp-stat">
-              {result?.pr ? (
-                <>
-                  {result.pr.url ? (
-                    <a className="linkish" href={result.pr.url} target="_blank" rel="noreferrer">
-                      PR #{result.pr.number}
-                    </a>
-                  ) : (
-                    <span>PR #{result.pr.number}</span>
-                  )}
-                  <span>{result.pr.merged ? "merged" : "accepted, merge pending"}</span>
-                  {change ? (
-                    <span className="cmp-sep" aria-hidden="true">
-                      ·
-                    </span>
-                  ) : null}
-                </>
-              ) : null}
-              {change ? (
-                <>
-                  {plural(change.files, "file", "files")} changed
-                  <span className="cmp-add">+{change.add}</span>
-                  <span className="cmp-del">−{change.del}</span>
-                </>
-              ) : null}
-              {change && !small && !result ? (
-                <>
-                  <span className="cmp-sep" aria-hidden="true">
-                    ·
-                  </span>
-                  <span className="cmp-over">
-                    Over {COMPLETION_SMALL_CHANGE_LINES} lines, so this is Operator&apos;s summary
-                  </span>
-                </>
-              ) : null}
-            </p>
-          ) : null}
-          {packet?.changes ? (
-            <div className="cmp-summary md-body">
-              <Markdown text={packet.changes} headingBase={standalone ? 4 : 5} />
-            </div>
-          ) : null}
-          {result && paths && paths.shown.length > 0 ? (
-            <Collapsible className="cmp-paths" contentKey={paths.shown.length} max={120}>
-              <ul>
-                {paths.shown.map((path) => (
-                  <li key={path} className="mono">
-                    {path}
-                  </li>
-                ))}
-              </ul>
-              {paths.more > 0 || paths.truncated ? (
-                <p className="cmp-none">
-                  {paths.more > 0 ? `And ${plural(paths.more, "more path", "more paths")}. ` : ""}
-                  The pull request lists every file.
-                </p>
-              ) : null}
-            </Collapsible>
-          ) : null}
-          {diff ? (
-            <ChangesPanel
-              inline
-              defaultOpen={small}
-              url={diff.url}
-              githubHost={diff.githubHost}
-              prNumber={diff.prNumber}
-              revisionSha={diff.revisionSha}
-              delivererName={diff.delivererName}
-            />
-          ) : null}
-        </>
+      {card.changesShown ? (
+        <CompletionChanges
+          Label={Label}
+          packet={packet}
+          change={view.change}
+          small={card.small}
+          paths={view.paths}
+          diff={diff}
+          result={result}
+          headingBase={headingBase}
+        />
       ) : null}
     </section>
   );
