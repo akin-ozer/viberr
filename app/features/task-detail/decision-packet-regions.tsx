@@ -196,13 +196,11 @@ export function DecidedPacketContent({
 export function PacketOptions({
   packet: p,
   choice,
-  canResolve,
   grants,
   standing,
 }: {
   packet: PacketRender;
   choice: PacketChoice;
-  canResolve: boolean;
   grants: PacketTierGrants;
   standing: PacketStanding;
 }) {
@@ -230,9 +228,10 @@ export function PacketOptions({
         } else if (/^[1-9]$/.test(e.key)) {
           // Questionnaire shortcut: a digit jumps to that choice (the
           // chips on each row advertise the mapping). Fires only inside
-          // the radiogroup — the directive textarea lives outside it.
+          // the radiogroup — the directive textarea lives outside it. An
+          // inert option's digit does nothing, as its click does (UI-42).
           const target = Number(e.key) - 1;
-          if (target < choiceCount) {
+          if (target < choiceCount && !choice.blockedOptions[target]) {
             e.preventDefault();
             selectOption(target);
             requestAnimationFrame(() => optionRefs.current[target]?.focus());
@@ -241,16 +240,12 @@ export function PacketOptions({
       }}
     >
       {p.options.map((o, i) => {
-        // UI-42 / R14-3 / F20-6 / F31-6: an option the viewer cannot carry
-        // out is inert and says why, instead of recording a decision that
-        // dead-ends at the server's own re-check (LV-08 — no control that
-        // only exists to 403).
+        // Whether this option is inert is `blockedOptions`
+        // (decision-packet-derive.ts), which the arrows and digits read too;
+        // what it says about itself, its hover title and the clause in its
+        // description, is its gate's `option`.
         const refusal = gateFor(o.kind, grants)?.option ?? null;
-        // F20-17: a viewer who cannot resolve this packet at ALL used to see
-        // every option fully interactive with no Confirm and no reason — the
-        // un-gated ones read as "yours". Mark them all inert; the one
-        // card-level deny note below names who can decide.
-        const blocked = refusal !== null || !canResolve;
+        const blocked = choice.blockedOptions[i];
         return (
           <button
             key={i}

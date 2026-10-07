@@ -374,6 +374,10 @@ export interface PacketChoiceView {
   /** Whether the answer box under the options stands (`PacketNoteField`). */
   showsAnswerBox: boolean;
   tabStop: number;
+  /** Per authored option, whether it is inert for this viewer. A click, an
+   *  arrow and a digit all pass an inert option by; the composed directive
+   *  past them never is one (it is offered only to a resolver). */
+  blockedOptions: boolean[];
 }
 
 export function packetChoiceView(
@@ -429,6 +433,17 @@ export function packetChoiceView(
   // Roving tabindex: with nothing chosen yet, the first choice is the group's
   // one tab stop (APG radio group).
   const tabStop = noChoice ? 0 : sel;
+  // UI-42 / R14-3 / F20-6 / F31-6: an option the viewer cannot carry out is
+  // inert and says why (`PacketOptions`), instead of recording a decision
+  // that dead-ends at the server's own re-check (LV-08 — no control that
+  // only exists to 403). F20-17: a viewer who cannot resolve this packet at
+  // ALL used to see every option fully interactive with no Confirm and no
+  // reason — the un-gated ones read as "yours". Mark them all inert; the one
+  // card-level deny note names who can decide. One list, read by the click
+  // and by the keys, so the keyboard cannot choose what a click refuses.
+  const blockedOptions = p.options.map(
+    (o) => (gateFor(o.kind, grants)?.option ?? null) !== null || !canResolve,
+  );
   return {
     customIndex,
     customOffered,
@@ -445,6 +460,7 @@ export function packetChoiceView(
     replyInvalid,
     showsAnswerBox,
     tabStop,
+    blockedOptions,
   };
 }
 

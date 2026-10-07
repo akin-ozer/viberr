@@ -2950,6 +2950,72 @@ describe("UI-42/UI-44: the decision packet", () => {
     expect(tabbable).toHaveLength(1);
     expect(tabbable[0]!.getAttribute("aria-checked")).toBe("true");
   });
+
+  /**
+   * UI-42 / F20-17 under UI-44: an inert option (`aria-disabled`, its reason
+   * in its description) ignores a click, and the arrows and digits used to
+   * check it anyway: a viewer's ArrowDown walked the selection across options
+   * that are all inert on a card with no Confirm, and a contributor-owner's
+   * digit chose an archive their role cannot carry out. The keyboard now
+   * passes an inert option by, as a disabled radio is in the APG radio group,
+   * and does nothing when every option is inert; the group's one tab stop
+   * follows the check. `accept_completion` carries no option-level gate, so a
+   * click and a key both still choose it and only Confirm refuses.
+   *
+   * CANARY: drop the `blockedOptions` check from `move` (arrows) or from the
+   * digit handler in `PacketOptions` and a key checks an option a click
+   * cannot; skip on `gateFor` alone instead and the last row cannot reach
+   * accept_completion, which a click can.
+   */
+  it.each<{
+    name: string;
+    packet: PacketRender;
+    viewer: Pick<
+      ComponentProps<typeof DecisionPacket>,
+      "canResolve" | "canResolveCompletion" | "canArchive"
+    >;
+    /** Each key and the radio checked after it. */
+    steps: [key: string, checked: number][];
+  }>([
+    {
+      name: "a viewer who cannot resolve: every option is inert, so keys do nothing",
+      packet: packet142,
+      viewer: { canResolve: false, canResolveCompletion: false, canArchive: false },
+      steps: [["ArrowDown", 0], ["2", 0], ["ArrowUp", 0], ["3", 0]],
+    },
+    {
+      name: "a contributor-owner without canArchive: both archive options are passed by",
+      packet: recoveryPacket,
+      viewer: { canResolve: true, canResolveCompletion: true, canArchive: false },
+      steps: [["2", 0], ["3", 0], ["ArrowDown", 3], ["ArrowUp", 0], ["4", 3]],
+    },
+    {
+      name: "accept_completion without its grant stays choosable, as its click is",
+      packet: packet142,
+      viewer: { canResolve: true, canResolveCompletion: false, canArchive: true },
+      steps: [["2", 1], ["1", 0], ["ArrowUp", 3], ["ArrowDown", 0]],
+    },
+  ])("UI-42: an arrow or a digit passes an inert option by, as a click does ($name)", ({ packet, viewer, steps }) => {
+    const { container } = render(
+      <DecisionPacket
+        packet={packet}
+        busy={false}
+        {...viewer}
+        canEditGoal
+        onResolveCustom={() => {}}
+        onResolve={() => {}}
+        onAsk={() => {}}
+      />,
+    );
+    const group = container.querySelector('[role="radiogroup"]')!;
+    const radios = () => [...container.querySelectorAll<HTMLButtonElement>('[role="radio"]')];
+    for (const [key, checked] of steps) {
+      fireEvent.keyDown(group, { key });
+      const now = radios();
+      expect(now.findIndex((r) => r.getAttribute("aria-checked") === "true"), `checked after ${key}`).toBe(checked);
+      expect(now.findIndex((r) => r.tabIndex === 0), `tab stop after ${key}`).toBe(checked);
+    }
+  });
 });
 
 // UX19-4: the closed-PR recovery packet enumerated rework / archive / archive +
@@ -3679,7 +3745,7 @@ describe("DecisionPacket — pass-20 governance", () => {
     );
     const opts = container.querySelectorAll<HTMLButtonElement>(".options .opt");
     expect(opts.length).toBeGreaterThan(0);
-    // Canary: drop `|| !canResolve` from the option `blocked` and the un-gated
+    // Canary: drop `|| !canResolve` from `blockedOptions` and the un-gated
     // options go interactive again with no Confirm behind them.
     expect(
       Array.from(opts).every((o) => o.getAttribute("aria-disabled") === "true"),

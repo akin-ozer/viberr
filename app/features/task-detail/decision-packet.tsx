@@ -483,7 +483,6 @@ function OpenPacketContent({
       <PacketOptions
         packet={p}
         choice={choice}
-        canResolve={canResolve}
         grants={grants}
         standing={standing}
       />

@@ -36,7 +36,7 @@ export interface PacketChoice extends PacketChoiceView {
   /** Every choice change goes through here, so a standing refusal is dropped:
    *  a pristine directive is never accused (ruling 147). */
   selectOption: (i: number) => void;
-  /** An arrow key's step through the choices (UI-44). */
+  /** An arrow key's step through the choices, past an inert one (UI-44). */
   move: (delta: number) => void;
   optionRefs: RefObject<(HTMLButtonElement | null)[]>;
   noteRef: RefObject<HTMLTextAreaElement | null>;
@@ -156,12 +156,16 @@ export function usePacketChoice(
     // has focus (the group's tab stop), or enters the list at its nearest end.
     const from =
       sel >= 0 ? sel : optionRefs.current.findIndex((el) => el === document.activeElement);
-    const next =
-      from < 0
-        ? delta > 0
-          ? 0
-          : choiceCount - 1
-        : (from + delta + choiceCount) % choiceCount;
+    // UI-42: an arrow passes an inert option by, as its click does nothing
+    // (a disabled radio in the APG radio group), and with every choice inert
+    // it does nothing at all.
+    const { blockedOptions } = view;
+    let next = from < 0 ? (delta > 0 ? -1 : choiceCount) : from;
+    for (let tried = 0; tried < choiceCount; tried++) {
+      next = (next + delta + choiceCount) % choiceCount;
+      if (!blockedOptions[next]) break;
+    }
+    if (blockedOptions[next]) return;
     selectOption(next);
     requestAnimationFrame(() => optionRefs.current[next]?.focus());
   };
