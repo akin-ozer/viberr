@@ -75,15 +75,33 @@ scan run from inside an agent worktree under `.claude/` sees no files at all.
   catalog load/defaults). The same shape arrives three other ways: a hook handed the
   caller's OWN setters that seeds defaults when its fetcher answers (create-profile-modal
   `useModelCatalog(backend, model, setModel, effort, setEffort)`, which also fires the two
-  pass-to-parent rules), fetcher data passed down as a prop and settled once by a ref
-  (settings-page.tsx `changeResult={repoFetcher.data}`), and fetcher data read in place
+  pass-to-parent rules), fetcher data passed down as a prop and settled once by a ref,
+  only for a change the panel itself sent (settings-page.tsx
+  `changeResult={repoFetcher.data}`), and fetcher data read in place
   (controller-dock.tsx `staleSelection` off the dock-view fetcher). Verify the trigger is
   `fetcher.data` or a value computed from it, not a plain loader prop.
 
 - `react-doctor/no-adjust-state-on-prop-change` — imperative event counters from the
   parent, applied once per bump through a "seen" ref: timeline.tsx `ask` (bump → prefill
   + focus) and task-main-sections.tsx `editGoalSignal` (`seenEditGoal`). Not duplicated
-  prop state. Verify the once-per-bump ref.
+  prop state. Verify the once-per-bump ref. The same shape keyed on the navigation:
+  timeline.tsx's ruling 497 step (`steppedFor`, the `location.key` of the link that named
+  an event) opens All once when the tab hides the event. Verify `steppedFor` is set
+  whenever the target is found, not only when the step changes the tab (the "all" row of
+  timeline-target.test.tsx).
+
+- `react-doctor/no-reset-all-state-on-prop-change` / `no-adjust-state-on-prop-change` —
+  decision-packet.tsx DecisionPacket `seededFrom`: when a replacement packet arrives with a
+  new `id` (F10-09), the card re-seeds its own choice, note, repository answer, directive,
+  refusal count and open ask-first step during render, guarded on `p.id !== seededFrom`,
+  through the same `initialChoice` / `initialRepository` helpers its useState calls use.
+  The rule's fix, `key={packet.id}` at the render site, is wrong here: the card renders the
+  page's `completion` slot (CompletionPacket → the inline ChangesPanel → ChangesBody) inside
+  its own subtree, so a remount would discard the reader's unsent line notes and open
+  draft, close the reader and read GitHub again (rulings 484(b), 521(d)), and unmount the
+  control that held focus. A packet written before ids has none and never re-seeds. Verify
+  `{completion}` still renders inside the card, the re-seed is still guarded on the id, and
+  the F10-09 rows in task-disposition.test.tsx still cover each re-seeded field.
 
 - `react-doctor/no-adjust-state-on-prop-change` — toast.tsx `regionReady`: a deliberate
   two-commit live region (UI-34) that joins the top layer empty and fills in a second
@@ -154,9 +172,7 @@ scan run from inside an agent worktree under `.claude/` sees no files at all.
 - `react-doctor/no-array-index-as-key` — rows with no per-item identity that never
   reorder or filter: append-only log consoles (runs-panels StreamedLine), immutable
   packet observation/evidence lists (decision-packet, timeline evidence, evidence-list
-  rows of one event in a deterministic status sort), epic history (epic-page; the
-  file's append-only bullets have no id and the key already includes `occurredAt`), and
-  console-blocks TodoCard (an immutable snapshot per console line; Codex's `todo_list` is
+  rows of one event in a deterministic status sort), and console-blocks TodoCard (an immutable snapshot per console line; Codex's `todo_list` is
   projected only when completed). For decision-packet options, index-based selection is
   documented design: the decision records `decided.optionIndex` (ruling 138), and `kind`
   (ruling 7) is non-unique. Verify the list is append-only or fixed-per-mount.
