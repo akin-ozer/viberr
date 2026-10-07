@@ -1916,7 +1916,7 @@ runtime's answer for a missing grant.
   cannot be opened drops the server; stdio servers get a real discovery handshake, WITH
   the credential on both backends, before the run and are dropped (and marked
   unreachable) on failure. The handshakes run two at a time, each with its own 20 s
-  limit, and two mounts of one command never at once (ruling 684(b)); each verdict is
+  limit, and two mounts of one command never at once (ruling 689(b)); each verdict is
   applied in mount order as soon as every earlier server's is in, so the mounts, the
   registry rows, the log lines and the prompt read as a one-at-a-time check left them.
   A handshake that timed out on a visible install (a first-run or `@latest` download)

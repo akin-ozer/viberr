@@ -98,7 +98,7 @@ interface HeldChild {
 }
 
 /**
- * Ruling 684(b): children that hold their handshake until the test ends it, so
+ * Ruling 689(b): children that hold their handshake until the test ends it, so
  * a test decides which probe finishes when. `aliveAtSpawn` records, at each
  * spawn, how many children were alive (spawned and not yet killed by the
  * probe) counting the new one.
@@ -649,11 +649,11 @@ describe("resolveSpecialistMcpServersDetailed — marked write tools (ruling 176
 });
 
 /**
- * Ruling 684(b): the run-start stdio pre-flight runs two handshakes at a time
+ * Ruling 689(b): the run-start stdio pre-flight runs two handshakes at a time
  * instead of one after another, and applies their verdicts in mount order, so
  * what the run, the registry rows and the log say is what the serial check said.
  */
-describe("verifyStdioMcpMountsForRun: the bounded pre-flight (ruling 684(b))", () => {
+describe("verifyStdioMcpMountsForRun: the bounded pre-flight (ruling 689(b))", () => {
   /** One stdio server per name, each its own command, resolved for one run. */
   function mountStdio(names: string[]) {
     const store = setupTestStore(ctx);
