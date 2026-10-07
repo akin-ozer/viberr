@@ -618,7 +618,10 @@ rescan rebuilds from files (`REBUILT_FROM_FILES`: `provenance`, `schema_migratio
 those EMPTY is what makes the boot rescan re-project every file rather than trust a stale
 content hash). Move the old file aside rather than deleting it, then start the app: the
 rescan refills the projection tables from `projects/`. Users, sessions, sealed PATs,
-audit, notifications, org resources and run history survive. There is no CLI for this —
+audit, notifications, org resources and run history survive, except in a table whose new
+baseline gained a NOT NULL column without a DEFAULT: `INSERT OR IGNORE` skips every one of
+its rows unless the copy supplies that column's value, so read the diff of
+`0001_baseline.sql` first. There is no CLI for this —
 the self-heal path runs it only for a corrupt file — so it is a scripted one-off; write it
 against that module's table list rather than inventing one, and take a backup first
 either way (the in-container form under *Persistence, backup & restore*, or from the host

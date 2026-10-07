@@ -362,7 +362,7 @@ function ensureSingleFlightIndexes(db: DatabaseSync): void {
  * page. The boot WARN could not have caught it either: `projectionMissingColumns`
  * inspects the rebuilder's tables, and these are app-owned.
  *
- * What ALTER TABLE cannot carry is the conversation-scope CHECK. It is a
+ * What the healer does not add is the conversation-scope CHECK. It is a
  * constraint, not a column, so an upgraded root keeps rows without it and
  * `createConversation`'s own validation is the enforcement there — which is
  * why that validation exists in code rather than leaning on the schema.
@@ -400,7 +400,7 @@ const BASELINE_COLUMNS: readonly {
       // Pass 35 U35-7: the reason an `interrupted` run stopped ('restart' from
       // boot recovery, NULL for a person's interrupt). `patchRun` names it on
       // every orphan sweep and the run projection reads it on every task page.
-      // ALTER TABLE cannot carry the baseline's CHECK; the two writers only
+      // The ddl below leaves out the baseline's CHECK; the two writers only
       // ever store 'restart', which is the enforcement on an upgraded root.
       { name: "interrupted_reason", ddl: "interrupted_reason TEXT" },
       // F35-1: the sink patches it on every persisted line, so a root that

@@ -455,7 +455,9 @@ event, not the minute it crosses (`board-query.server.ts`).
   existing rows keep the old derivation until their file changes.
 - The baseline is squashed and forward-only: a CHECK value or column added to it reaches
   only fresh roots, except the columns, tables and indexes the open-time healer lists
-  (`ensureBaselineColumns`) and boot's in-place widening of `notifications.kind`. Boot WARNs
+  (`ensureSingleFlightIndexes`, `ensureBaselineColumns`), its rebuild of
+  `user_backend_credentials` from the one-account shape, and boot's in-place widening of
+  `notifications.kind`. Boot WARNs
   `projection schema drift` for a column `task_projections` / `task_events` lacks or a value
   one of four checked CHECKs refuses; other drift is neither repaired nor reported, and a
   row that silently stops updating almost always means a schema or CHECK problem.

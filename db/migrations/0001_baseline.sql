@@ -13,7 +13,8 @@
 -- kept. The runner records this filename in schema_migrations and skips by
 -- FILENAME alone, so editing this file reaches FRESH databases only. Every
 -- read-write open of an existing DB through `getDb`
--- (app/server/db/sqlite.server.ts; the server and the CLIs that write) runs
+-- (app/server/db/sqlite.server.ts: the server, and the seed, seed:demo,
+-- rescan and keys CLIs; a whole-root restore and `npm run backup` do not) runs
 -- `ensureSingleFlightIndexes` and `ensureBaselineColumns`: the columns, tables
 -- and indexes in `BASELINE_COLUMNS` / `BASELINE_TABLES` / `BASELINE_INDEXES`,
 -- and `user_backend_credentials` rebuilt to its several-accounts shape
@@ -25,10 +26,12 @@
 -- one of the four CHECKs `projectionCheckGaps` reads refuses (a re-baseline, as
 -- docs/operations/deployment.md "Re-baselining the projection database"
 -- describes). Other drift is neither healed nor named, so in the same change a new column
--- goes into `BASELINE_COLUMNS` (nullable or with a constant DEFAULT; a UNIQUE
--- one as a plain column plus a unique index), a new table into
--- `BASELINE_TABLES` and a new index into `BASELINE_INDEXES`, or existing DBs
--- never get it.
+-- goes into `BASELINE_COLUMNS` in a form `ALTER TABLE … ADD COLUMN` accepts on
+-- a table that has rows (a UNIQUE one as a plain column plus a unique index),
+-- a new table into `BASELINE_TABLES` and a new index into `BASELINE_INDEXES`,
+-- or existing DBs never get it. A changed constraint needs an in-place
+-- rebuild of its table, as `widenNotificationKindCheck` and
+-- `ensureBackendAccountsTable` do, or a re-baseline.
 -- Users/auth live in this file, so back it up before a re-baseline.
 
 -- ============================ tables ============================
@@ -824,22 +827,21 @@ CREATE TABLE run_log_lines (
 --      `mapProfileToUser`. Keep it through any regeneration; the CLI emits it
 --      only if it reads the config successfully.
 --   4. Reach existing databases as the convention note at the top of this file
---      says: a new column goes into `BASELINE_COLUMNS` (nullable or with a
---      constant DEFAULT; a UNIQUE one as a plain column plus a unique index), a
---      new table into `BASELINE_TABLES` and a new index (the CLI emits some) into
---      `BASELINE_INDEXES` (app/server/db/sqlite.server.ts), all applied at open.
---      ALTER cannot add a NOT NULL column without a default to a table that has
---      rows, a UNIQUE or PRIMARY KEY column or a non-constant default, and cannot
---      change an existing constraint: give such a column a constant DEFAULT where
---      the field allows. A re-baseline is the last resort. Its lossy form deletes
---      the user, session and account rows this block holds, and the
---      preserve-copy form (docs/operations/deployment.md "Re-baselining the
---      projection database") copies only the columns both files share, so it
---      too drops every row of a table that gained a NOT NULL column unless the
---      copy supplies that column's value. `npm run seed -- --reset` is no
---      re-baseline: it deletes the board, its run history and the org resources
---      (docs/development/scripts.md §3 lists everything) and makes no schema
---      change of its own.
+--      says: a new column goes into `BASELINE_COLUMNS` in a form
+--      `ALTER TABLE … ADD COLUMN` accepts on a table that has rows (with foreign
+--      keys on, a REFERENCES column goes in nullable; a UNIQUE one as a plain
+--      column plus a unique index), a new table into `BASELINE_TABLES` and a new
+--      index (the CLI emits some) into `BASELINE_INDEXES`
+--      (app/server/db/sqlite.server.ts), all applied at open. A changed
+--      constraint needs an in-place rebuild of its table or a re-baseline, the
+--      last resort: its lossy form deletes the user, session and account rows
+--      this block holds, and the preserve-copy form (docs/operations/
+--      deployment.md "Re-baselining the projection database") copies only the
+--      columns both files share, so a table that gained a NOT NULL column
+--      without a DEFAULT loses every row unless the copy supplies that column's
+--      value. `npm run seed -- --reset` is no re-baseline: it deletes the board,
+--      its run history and the org resources (docs/development/scripts.md §3
+--      lists everything) and makes no schema change of its own.
 CREATE TABLE "user" ("id" text not null primary key, "name" text not null, "email" text not null unique, "emailVerified" integer not null, "image" text, "createdAt" date not null, "updatedAt" date not null, "githubHandle" text);
 CREATE TABLE "session" ("id" text not null primary key, "expiresAt" date not null, "token" text not null unique, "createdAt" date not null, "updatedAt" date not null, "ipAddress" text, "userAgent" text, "userId" text not null references "user" ("id") on delete cascade);
 CREATE TABLE "account" ("id" text not null primary key, "accountId" text not null, "providerId" text not null, "userId" text not null references "user" ("id") on delete cascade, "accessToken" text, "refreshToken" text, "idToken" text, "accessTokenExpiresAt" date, "refreshTokenExpiresAt" date, "scope" text, "password" text, "createdAt" date not null, "updatedAt" date not null);

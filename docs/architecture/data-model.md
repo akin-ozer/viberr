@@ -376,8 +376,8 @@ It also creates the `BASELINE_TABLES` (`project_github_health`, `agent_os_users`
 that still has `UNIQUE (user_id, backend)` rebuilds it once from the baseline DDL in one
 transaction, carrying every row as its person's active account with `legacy_home = 1`) and
 `BASELINE_INDEXES` (`idx_controller_conversations__scope`, `idx_audit_events__task_action`,
-`idx_provenance__path_action`, `idx_task_projections__epic`, `idx_controller_message_files__message`) with `IF NOT EXISTS`. The healer's `ADD COLUMN` definitions leave out the baseline's column CHECKs, and ALTER cannot add a
-table-level CHECK such as the conversation-scope one, so an upgraded root lacks both; the
+`idx_provenance__path_action`, `idx_task_projections__epic`, `idx_controller_message_files__message`) with `IF NOT EXISTS`. The healer adds neither the baseline's column CHECKs (its `ADD COLUMN` definitions leave
+them out) nor the table-level conversation-scope CHECK, so an upgraded root lacks both; the
 writers enforce those values instead.
 
 **Reported at boot.** `logBootIntegrity` (`app/server/boot.server.ts`) compares the live
