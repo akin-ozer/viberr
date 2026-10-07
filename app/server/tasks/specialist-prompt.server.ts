@@ -27,6 +27,7 @@ import {
 import { attachmentsDropSection, browserPersonaSection } from "./specialist-browser-mcp.server";
 import { githubReadPersonaSection } from "~/server/github/agent-github-read.server";
 import type { CloneCredential } from "./git-clone-auth.server";
+import { HUMANIZER_SPECIALIST_SECTION } from "~/server/runtimes/humanizer.server";
 import { type PromptPrefix, sortedBy, sortedNames } from "~/server/runtimes/prompt-prefix.server";
 import { PEOPLE_RULE } from "~/server/runtimes/people-rule.server";
 import {
@@ -34,6 +35,12 @@ import {
   type DeployedSpecialistView,
   KB_CONTRACT_CORRECTION_SENTENCE,
   OTHER_TASK_FILES_SENTENCE,
+  SOURCES_NOT_KEPT_NO_GRANT,
+  SOURCES_NOT_KEPT_NO_TOOL,
+  SOURCES_REVIEW_LINE,
+  sourcesKeepLine,
+  sourcesNotKeptLine,
+  PAGE_CAPTURE_SENTENCE,
 } from "./specialist-roster.server";
 
 /**
@@ -322,6 +329,12 @@ export function buildSpecialistPromptPrefix(input: SpecialistPersonaInput): Prom
   if (input.githubRead) {
     parts.push(githubReadPersonaSection(input.githubRead.repo));
   }
+  // Ruling 689: the writing guide the two coordinators already carry (ruling
+  // 502), for the agents that write a task's result and the agents that
+  // review it. It closes the static block on both backends, whatever the
+  // profile grants, and it is no store skill, so it spends none of the skill
+  // budget above and no disclosure lists it.
+  parts.push(HUMANIZER_SPECIALIST_SECTION);
 
   // ------------------------------------------------ the per-run tail (dynamic)
   const dynamic: string[] = [];
@@ -463,6 +476,19 @@ export interface AnalyzePromptInput {
    *  the gateway's board server on Codex), so the contract names it as the way
    *  to another task's files. */
   taskFileReader?: boolean;
+  /** Ruling 690: the run holds `keep_source` (Claude's toolkit, or the
+   *  gateway's board server on Codex, for a profile that may save files on
+   *  the task), so the contract says how a source is kept. A run without it
+   *  is told it cannot keep one, and why. */
+  sourceKeeper?: boolean;
+  /** Ruling 690: the run's `use-web-search-fetch` grant is withheld, so the
+   *  contract's word on sources names no page and no `curl`: a profile that
+   *  may not fetch from the web is not handed another way to it. */
+  webWithheld?: boolean;
+  /** Ruling 691: the run holds `capture_page` (the same readers, on a server
+   *  that can render a page), so the contract says a page among the task's
+   *  files can be looked at. */
+  pageCapture?: boolean;
   /**
    * Ruling 422 (F39-45): the knowledge-base folders this run's instructions
    * index (ABSOLUTE), rendered as a READ-ONLY exception inside the workspace
@@ -598,6 +624,7 @@ export function buildAnalyzePrompt(input: AnalyzePromptInput): string {
         ` Copying a file into it is how a file is posted on the task ` +
         `thread (see "Files on the task thread").` +
         (input.taskFileReader ? OTHER_TASK_FILES_SENTENCE : ``) +
+        (input.pageCapture ? PAGE_CAPTURE_SENTENCE : ``) +
         ` Everything else ` +
         `outside the working directory` +
         (kbDirs.length > 0 ? `, apart from reading the knowledge-base folders above,` : ``) +
@@ -608,10 +635,22 @@ export function buildAnalyzePrompt(input: AnalyzePromptInput): string {
           ATTACHMENTS_READ_SENTENCE +
           ` Never write into it.` +
           (input.taskFileReader ? OTHER_TASK_FILES_SENTENCE : ``) +
+          (input.pageCapture ? PAGE_CAPTURE_SENTENCE : ``) +
           ` Everything else outside the working directory` +
           (kbDirs.length > 0 ? `, apart from reading the knowledge-base folders above,` : ``) +
           ` stays off-limits.\n`
         : ``;
+  // Ruling 690: what a fact from outside rests on, in both arms, right after
+  // the attachments folder it is kept from. A run that holds `keep_source` is
+  // given the whole move; one that does not is told so and why, so its result
+  // names what was not kept.
+  const sourcesLine =
+    input.sourceKeeper && input.attachmentsDropDir
+      ? sourcesKeepLine(input.attachmentsDropDir, input.taskFileReader === true, input.webWithheld !== true)
+      : sourcesNotKeptLine(input.attachmentsDropDir ? SOURCES_NOT_KEPT_NO_TOOL : SOURCES_NOT_KEPT_NO_GRANT);
+  // Ruling 690: a supporting run that can read the kept sources checks the
+  // work's claims against them.
+  const sourcesReviewLine = input.taskFileReader ? SOURCES_REVIEW_LINE : ``;
   if (!input.repo) {
     // Ruling 667: the contract of a run with no checkout. It used to be
     // dropped whole with the repository, and with it the attachments folder,
@@ -625,6 +664,7 @@ export function buildAnalyzePrompt(input: AnalyzePromptInput): string {
       `nothing in it is delivered or shown to anyone.\n` +
       kbLine +
       attachmentsLine(false) +
+      sourcesLine +
       (input.delivers
         ? input.attachmentsDropDir
           ? `- Your delivery is the files you save on the task (see "Files on the task thread" below): the result, in the files and formats the goal names. Those files are what the reviewers judge and what the person accepts, so save the final version of each there, and cite each one by name in your reply.\n` +
@@ -634,7 +674,9 @@ export function buildAnalyzePrompt(input: AnalyzePromptInput): string {
           (input.attachmentsDropDir
             ? ` A file a directive asks you to save (a report, a ledger) goes into the task's attachments folder above, as "Files on the task thread" says.`
             : ``) +
-          `\n- Respond to what you were actually asked (see the directive below): if it asks for a review, give one (approve or request changes, with specific reasons that name the file and the passage); if it asks a question or for advice, answer it directly and concisely. You are a conversational teammate, not a boilerplate reviewer. Do the thing that was asked. When no directive is given, default to reviewing the files delivered on the task.`);
+          `\n` +
+          sourcesReviewLine +
+          `- Respond to what you were actually asked (see the directive below): if it asks for a review, give one (approve or request changes, with specific reasons that name the file and the passage); if it asks a question or for advice, answer it directly and concisely. You are a conversational teammate, not a boilerplate reviewer. Do the thing that was asked. When no directive is given, default to reviewing the files delivered on the task.`);
   }
   if (input.repo) {
     const { canBranch, canCommitPush } = input.delivery;
@@ -645,6 +687,7 @@ export function buildAnalyzePrompt(input: AnalyzePromptInput): string {
       `repository outside it.\n` +
       kbLine +
       attachmentsLine(true) +
+      sourcesLine +
       (input.cloned
         ? `- The repository \`${input.repo}\` is already checked out in the current directory.` +
           // Ruling 129: a REUSED checkout says what its refresh did, so an
@@ -732,6 +775,7 @@ export function buildAnalyzePrompt(input: AnalyzePromptInput): string {
               : "") +
             `. Before judging, verify the content you read IS that revision: \`git rev-parse HEAD\` on the branch must equal it (or contain it: check \`git merge-base --is-ancestor ${input.reviewSubject.headSha} HEAD\`). If the local branch does NOT match, review \`${input.reviewSubject.headSha}\` directly (\`git diff <default-branch>...${input.reviewSubject.headSha}\`, \`git show\`), and if you cannot reach that commit at all, say so and do NOT record a verdict on content you could not read. Never approve the local tree as a stand-in for the delivered revision.\n`
           : "") +
+        sourcesReviewLine +
         `- Respond to what you were actually asked (see the directive below): if it asks for a review, give one (approve or request changes, with specific reasons and file/line references); if it asks a question or for advice, answer it directly and concisely. You are a conversational teammate, not a boilerplate reviewer. Do the thing that was asked. When no directive is given, default to reviewing the change on the branch.`;
     } else {
       if (canBranch) {

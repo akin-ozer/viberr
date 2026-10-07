@@ -4898,10 +4898,12 @@ describe("runOperator — authority, ordering, orphans", () => {
     // seeing a board it holds no authority over takes nothing away, the task
     // page already shows a person the whole comment that tool returns, and
     // reading is never the thing being withheld.
+    // Ruling 690: and `read_task_source`, a read like the three beside it.
     expect(spec.allowedTools).toEqual([
       "mcp__viberr__get_task",
       "mcp__viberr__read_board",
       "mcp__viberr__read_task_attachment",
+      "mcp__viberr__read_task_source",
       "mcp__viberr__read_timeline_entry",
     ]);
     expect(spec.allowedTools).not.toContain("mcp__viberr__deliver_for_review");

@@ -43,6 +43,17 @@ export interface AgentOutcomeChoice {
 }
 
 /**
+ * Ruling 692(c): what a question to a person is for, in the words every asking
+ * channel carries (the Claude tool, the Codex outcome field, the run's
+ * collaboration notes). Live, a writer asked nine questions before drafting and
+ * seven of them were its own choices to make (the reader, the length, the tone,
+ * the call to action), each with a default the person was to approve.
+ */
+export const ASK_HUMAN_ONLY_NOTE =
+  "Ask what only a person knows or may decide, and put all of it in one question. A choice " +
+  "that is yours to make, make it and state it in your report as an assumption: never ask a " +
+  "person to approve your own choices.";
+/**
  * Ruling 478(e) (F40-57, F40-31): what an agent is told about marking its
  * pick and asking for a typed answer, on both transports (`ask_human`'s schema
  * and the Codex envelope's). An unmarked list carries no recommendation: the
@@ -180,7 +191,7 @@ export const AGENT_OUTCOME_JSON_SCHEMA = {
       additionalProperties: false,
       required: ["title", "body", "options"],
       description:
-        "ONLY when you are blocked on a decision a human must make. null otherwise.",
+        `ONLY when you are blocked on a decision a human must make. ${ASK_HUMAN_ONLY_NOTE} null otherwise.`,
       properties: {
         title: { type: "string" },
         body: { type: ["string", "null"] },

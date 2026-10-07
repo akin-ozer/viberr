@@ -146,7 +146,7 @@ describe("resolveSpecialistDisallowedTools", () => {
   it("an EXPLICIT off headline is never overturned by a scoped delivery grant", () => {
     // The mirror image of P14-LV-01: permission must not appear from anything
     // other than a grant. The read side repairs an ABSENT headline (below), but
-    // an admin who set "Execute code or write to the repo: Off" while leaving
+    // an admin who set "Write to the repository: Off" while leaving
     // "Commit & push" on has withheld file writes, and a scoped grant must not
     // hand them back. (`normalizeDeliveryGrants` does rewrite this at SAVE time,
     // where the admin can see and re-edit the result — reusing it here silently
@@ -376,7 +376,7 @@ describe("bashDenyReason — named from the run's denylist alone", () => {
       grant("commit-push-branch", "off"),
     ]);
     expect(bashDenyReason("git commit", both, false)).toContain(
-      '"Commit & push to the branch" (commit-push-branch) and "Execute code or write to the repo" (execute-code-or-write-repo) are not granted on this run',
+      '"Commit & push to the branch" (commit-push-branch) and "Write to the repository" (execute-code-or-write-repo) are not granted on this run',
     );
     // Only the push family withheld: only it is named.
     const pushOnly = resolveSpecialistDisallowedTools([

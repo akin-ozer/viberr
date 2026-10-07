@@ -16,6 +16,7 @@ import { BACKEND_LABEL } from "~/shared/text/backend-label";
 import { endSentence } from "~/shared/text/sentence";
 import { countLabel } from "~/shared/text/plural";
 import { VERDICT_NOTE_TITLE, verdictNoteText } from "~/shared/verdict-note";
+import { QUESTION_LEAD } from "~/shared/timeline-leads";
 import { isRelayComment } from "./task-relay.server";
 // Ruling 489: where a react chain's work stands, read from the server's record.
 import {
@@ -163,6 +164,13 @@ import {
   suppressedReplyReason,
 } from "./task-replies.server";
 import { acceptanceRefusalFor } from "./task-acceptance.server";
+import { noteSourcesKeptByRun } from "./task-sources.server";
+import {
+  deliveryCapturesSettled,
+  removeRunPageCaptures,
+  requestDeliveryCaptures,
+} from "./page-capture.server";
+import { recordedPageCaptures } from "~/shared/page-capture";
 
 /**
  * The agent's most-recent reply comment text on a task, or null when it has
@@ -335,6 +343,13 @@ function clipVerdictReason(text: string): string {
   );
 }
 
+/** What {@link recordAgentCompletion} tells its caller. */
+interface AgentCompletionRecord {
+  escalated: boolean;
+  verdictBound: boolean;
+  delivered: string | null;
+}
+
 /** Atomically record a finished run's reply, verdict, and human question. */
 export async function recordAgentCompletion(
   db: DatabaseSync,
@@ -364,8 +379,12 @@ export async function recordAgentCompletion(
    *  packet. The caller needs it to decide whether to hand the task back to the
    *  operator — see the escalation arm in `applyAgentCompletionEffects`.
    *  Ruling 544: and whether the verdict BOUND to a subject, which is what makes
-   *  an approval a boundary (ruling 362). */
-): Promise<{ escalated: boolean; verdictBound: boolean }> {
+   *  an approval a boundary (ruling 362).
+   *  Ruling 691: and the `deliveredAt` stamp of the delivery this completion
+   *  stamped and kept, null when it stamped none. Its pages are not asked to
+   *  be pictured here: whether the delivery is files or a revision is known
+   *  only once the caller's delivery reconcile has run. */
+): Promise<AgentCompletionRecord> {
   const { actorRef, runId, replyText, verdict, question } = input;
   const evidence = normalizeEvidenceRows(input.evidence);
   const attachments = sanitizeEventAttachmentNames(input.attachments);
@@ -420,7 +439,7 @@ export async function recordAgentCompletion(
     if (suppressedReason) {
       recordAgentRepliedAudit(db, projectSlug, taskKey, runId, suppressedReason);
     }
-    return { escalated: false, verdictBound: false };
+    return { escalated: false, verdictBound: false, delivered: null };
   }
   const roleDisplay =
     actorRef.kind === "agent" ? agentRoleDisplay(actorRef) : "Agent";
@@ -484,8 +503,13 @@ export async function recordAgentCompletion(
   // `reviewSubjectAtDispatch`), which binds to the subject at completion.
   const dispatchedOn = verdict ? reviewSubjectAtDispatch(getRun(db, runId)) : undefined;
   let verdictBound = false;
+  /** Ruling 691: the stamp of the delivery this completion stamps and keeps. */
+  let delivered: string | null = null;
   /** Ruling 556: the verdict came from the agent that made what it judged. */
   let ownWork = false;
+  /** Ruling 693: this objection repeats the reviewer's last one on a delivery
+   *  nobody has reworked since, so it sends nothing back a second time. */
+  let unfoughtRepeat = false;
   if (verdict === "approve" && actorRef.kind === "agent") {
     const preFile = readTaskFile(taskRef(ctx, projectSlug, taskKey))?.parsed;
     const pre = preFile?.frontmatter;
@@ -533,6 +557,7 @@ export async function recordAgentCompletion(
         // Decided afresh on every pass of this mutator.
         verdictBound = false;
         ownWork = false;
+        unfoughtRepeat = false;
         // In-lock re-check: a delivery could have landed during the probe above.
         if (
           noChangeMint &&
@@ -631,6 +656,11 @@ export async function recordAgentCompletion(
           // that has not moved, and the packet below must not recommend asking
           // for it a second time.
           const noReworkBehind = prior !== undefined && !reworked;
+          // Ruling 693: the same objection again with no round fought (the
+          // case `rounds` above keeps its count for) is titled apart, so what
+          // a task took counts the work as sent back once, not twice.
+          unfoughtRepeat =
+            verdict === "request_changes" && prior?.result === "request_changes" && !reworked;
           // Ruling 416(b): every same-result verdict on this revision, fought
           // or not, so a later packet can tell the question was answered here.
           const reviews = prior?.result === verdict ? (prior.reviews ?? prior.rounds) + 1 : 1;
@@ -760,9 +790,12 @@ export async function recordAgentCompletion(
           // recorded in words; the task's review waits for a run on what is
           // delivered now. A question this run was asked is answered all the
           // same (ruling 421), so it does not wait on a later run.
+          // Ruling 693: an objection that binds to nothing sends nothing back,
+          // and its title says so (as an approval's does), here and in the
+          // two arms below.
           title =
             verdict === "request_changes"
-              ? VERDICT_NOTE_TITLE.changesRequested
+              ? VERDICT_NOTE_TITLE.changesNotCounted
               : VERDICT_NOTE_TITLE.noted;
           summary =
             `${roleDisplay} ${verdict === "request_changes" ? "requested changes" : "approved"}, ` +
@@ -776,14 +809,18 @@ export async function recordAgentCompletion(
           // Ruling 556: recorded in words, bound to nothing.
           title =
             verdict === "request_changes"
-              ? VERDICT_NOTE_TITLE.changesRequested
+              ? VERDICT_NOTE_TITLE.changesNotCounted
               : VERDICT_NOTE_TITLE.noted;
           summary =
             `${roleDisplay} ${verdict === "request_changes" ? "requested changes" : "approved"}, ` +
             "but it made what is delivered, so its verdict does not count. Have another agent " +
             "deliver the work, or another reviewer judge it.";
         } else if (verdict === "request_changes") {
-          title = VERDICT_NOTE_TITLE.changesRequested;
+          title = !verdictBound
+            ? VERDICT_NOTE_TITLE.changesNotCounted
+            : unfoughtRepeat
+              ? VERDICT_NOTE_TITLE.changesOnUnchangedWork
+              : VERDICT_NOTE_TITLE.changesRequested;
           // Ruling 583: with nothing delivered, the objection binds to nothing
           // and says so, as an approval with nothing to bind to does below.
           // On AWSC-19 the event read "Validation: none. Estimate Judge
@@ -998,7 +1035,7 @@ export async function recordAgentCompletion(
           type: "blocked",
           actor: actorRef,
           title: null,
-          text: askedEntryText(`**Question for a human:** ${asked.title}`, asked),
+          text: askedEntryText(`${QUESTION_LEAD} ${asked.title}`, asked),
           toAgent: false,
           evidence: null,
         });
@@ -1026,7 +1063,7 @@ export async function recordAgentCompletion(
         });
       }
     });
-    keepStampedDelivery(ctx, projectSlug, taskKey, stampBefore, written);
+    delivered = keepStampedDelivery(ctx, projectSlug, taskKey, stampBefore, written);
     reprojectTask(db, ctx, projectSlug, taskKey);
     // Ruling 237 (F37-57): the packet itself was written inside the verdict's
     // own lock above, so the objection and the escalation it raised can never
@@ -1216,7 +1253,7 @@ export async function recordAgentCompletion(
   }
   // Ruling 237: when the write above threw, nothing was escalated and the
   // caller reacts exactly as it always did.
-  return { escalated: deadlockEscalation.packet !== null, verdictBound };
+  return { escalated: deadlockEscalation.packet !== null, verdictBound, delivered };
 }
 
 /**
@@ -1567,6 +1604,15 @@ export async function applyAgentCompletionEffects(
    *  packet, so the operator react at the end of this function is suppressed —
    *  see the arm that reads it. */
   let raisedDeadlockPacket = false;
+  /** Ruling 691: the stamp of the delivery this completion stamped and kept. */
+  let stampedDelivery: string | null = null;
+  // Ruling 691: the run has ended, so the pictures `capture_page` kept for it
+  // go with it. Never awaited and never a reason for the effects to fail.
+  void removeRunPageCaptures(db, ctx, {
+    projectSlug: input.projectSlug,
+    taskKey: input.taskKey,
+    runId: finished.id,
+  });
   const actorRef: FileActorRef = {
     kind: "agent",
     backend: input.backend,
@@ -1590,6 +1636,28 @@ export async function applyAgentCompletionEffects(
   // with no `started_at` at all. Using the launch instant dropped every comment
   // refused during that wait, silently, under a note promising delivery.
   const deferredWindowFrom = thisRunRow?.created_at ?? thisRunStartedAt;
+  // Ruling 690: the sources this run kept leave one entry on the timeline,
+  // for a finished, a failed and an interrupted run alike: what a run read is
+  // on the task whatever became of the run. Written before the run's files
+  // are listed and its reply lands, so the thread reads in the order things
+  // happened and the listing below (ruling 558) runs as it did. An entry that
+  // cannot be written never fails the completion: the sources stay listed on
+  // the page.
+  try {
+    await noteSourcesKeptByRun(db, ctx, {
+      projectSlug: input.projectSlug,
+      taskKey: input.taskKey,
+      runId: finished.id,
+      actorRef,
+      startedAt: thisRunStartedAt,
+    });
+  } catch (err) {
+    logger.warn("failed to note the sources a run kept", {
+      taskKey: input.taskKey,
+      runId: finished.id,
+      err: toError(err),
+    });
+  }
   // Files this run saved into the task's attachments/ dir (browser captures):
   // everything written at-or-after the run started. Stamped onto the producing
   // event below so the panel can say who added each file and from which
@@ -1695,7 +1763,13 @@ export async function applyAgentCompletionEffects(
   const onTask = [
     ...new Set([...listTaskAttachmentNames(input.projectSlug, input.taskKey, ctx.dataRoot), ...runAttachmentsRaw]),
   ];
-  const someoneElses = new Set([...carriedHere, ...heldForOthers].map((name) => storedNameAmong(onTask, name)));
+  // Ruling 691: and a picture the record says Viberr's own render wrote. The
+  // window's listing already left out the picture of every page the folder
+  // holds; this is the one whose page has since left the task.
+  const viberrs = recordedPageCaptures(completionFm?.pageCaptures);
+  const someoneElses = new Set(
+    [...carriedHere, ...heldForOthers, ...viberrs].map((name) => storedNameAmong(onTask, name)),
+  );
   const runSaved = runAttachmentsRaw.filter((name) => !someoneElses.has(name));
   const verdictEngagement =
     input.profileId && completionFm
@@ -2003,6 +2077,7 @@ export async function applyAgentCompletionEffects(
       delivers: input.delivers,
     });
     if (recorded.escalated) raisedDeadlockPacket = true;
+    stampedDelivery = recorded.delivered;
     // Ruling 544: an approval that bound to nothing opened no gate.
     approvedThisReply = verdict === "approve" && recorded.verdictBound;
     await warnStrayAttachmentsFolder(db, ctx, input, finished.id);
@@ -2448,6 +2523,21 @@ export async function applyAgentCompletionEffects(
   }
   // 3. (The verdict/question are recorded ATOMICALLY with the reply in step 1
   //    — there is no separate verdict write to race anything.)
+  // Ruling 691: the delivery, its kept copy and the reply are written by now,
+  // and the reconcile above has minted the work revision if this run
+  // committed. So the pictures are asked for here and not where the delivery
+  // was stamped: on a board with a repository a first delivery is stamped
+  // before its revision exists, and a revision is never pictured. Only the
+  // react waits for the pictures, and only so long, so the operator and the
+  // reviewers it dispatches start with them there.
+  const deliveryCaptures = stampedDelivery
+    ? requestDeliveryCaptures(db, ctx, {
+        projectSlug: input.projectSlug,
+        taskKey: input.taskKey,
+        stamp: stampedDelivery,
+      })
+    : null;
+  await deliveryCapturesSettled(deliveryCaptures);
   // 4. React: continue an operator chain, or start a fresh one against the
   //    deployed operator. Resolve the effective react context.
   const { resolveOperatorAuthority } = await import("./operator-authority.server");

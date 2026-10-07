@@ -14,8 +14,10 @@ import {
   readTaskAttachment,
 } from "~/server/files/task-attachments.server";
 import { keptDeliveryMiss, listKeptDeliveries, type KeptDelivery } from "~/server/files/kept-deliveries.server";
+import { readTaskSource, readTaskSources, sourcesListing } from "~/server/files/task-sources.server";
 import { readTaskFile } from "~/server/files/task-writer.server";
 import { listProjectTasks } from "~/server/projections/board-query.server";
+import { pageEnd } from "~/server/runtimes/read-page-budget.server";
 import { completionPacketText, currentCompletionPacket } from "./completion-packet.server";
 import { readCorrectionOfEntry, type CorrectionReading } from "./kb-correction-actions.server";
 import type { TaskMutationContext } from "./task-mutation.server";
@@ -216,6 +218,12 @@ export function readBoardTask(
   // Ruling 597: the files deliveries, as each was delivered.
   const deliveries = listKeptDeliveries(deps.projectSlug, row.key, deps.ctx.dataRoot);
   if (deliveries.length > 0) read.deliveries = deliveries;
+  // Ruling 690: a count and the way in, not the list: this read has to reach
+  // a Codex run whole, and a task may keep two hundred sources.
+  const kept = readTaskSources(deps.projectSlug, row.key, deps.ctx.dataRoot).sources.length;
+  if (kept > 0) {
+    read.sources = `${kept} kept; \`read_task_source\` with this task's key lists them and what each delivery rested on`;
+  }
   // Ruling 596: what `read_timeline_entry` can open on this task.
   const timeline = file ? timelineIndex(file.parsed.timeline) : [];
   if (timeline.length > 0) read.timeline = timeline;
@@ -279,6 +287,9 @@ interface BoardTaskRead {
   files?: string[];
   /** Ruling 597: the deliveries kept as delivered, newest first; absent when none. */
   deliveries?: KeptDelivery[];
+  /** Ruling 690: how many sources the task keeps and the tool that lists
+   *  them; absent when it keeps none. */
+  sources?: string;
   /** Ruling 596: the timeline's index, newest first; absent when it is empty. */
   timeline?: string[];
 }
@@ -288,6 +299,17 @@ function taskFileNames(deps: BoardReadContext, taskKey: string): string[] {
   return listTaskAttachments(deps.projectSlug, taskKey, deps.ctx.dataRoot)
     .map((a) => a.name)
     .filter((name) => !isBrowserWorkingArtifact(name));
+}
+
+/** What a reader answers for a name the task does not hold: the names it
+ *  does. One sentence for every tool that takes a file of the task by name
+ *  (`read_task_attachment`, and `capture_page`, ruling 691). */
+export function noSuchAttachment(deps: BoardReadContext, taskKey: string, name: string): string {
+  const have = taskFileNames(deps, taskKey);
+  return (
+    `[noop] ${taskKey} has no attachment \`${name.trim()}\`. ` +
+    (have.length ? `It holds: ${have.join(", ")}.` : "It has no attachments.")
+  );
 }
 
 /** Ruling 594: what an agent's attachment reader answers: text, or a line and
@@ -318,20 +340,103 @@ export function readAgentTaskAttachment(
   }
   const read = readTaskAttachment(deps.projectSlug, key, name, deps.ctx.dataRoot, offset, delivery);
   if (!read && delivery) return { text: keptDeliveryMiss(deps.projectSlug, key, delivery, name, deps.ctx.dataRoot) };
-  if (!read) {
-    const have = taskFileNames(deps, key);
-    return {
-      text:
-        `[noop] ${key} has no attachment \`${name.trim()}\`. ` +
-        (have.length ? `It holds: ${have.join(", ")}.` : "It has no attachments."),
-    };
-  }
+  if (!read) return { text: noSuchAttachment(deps, key, name) };
   if ("unreadable" in read) return { text: `[noop] ${read.unreadable}` };
   if (read.kind === "image") {
     return { header: attachmentImageHeader(key, read), image: { data: read.data, mimeType: read.mimeType } };
   }
   const { kind: _text, ...body } = read;
   return { text: JSON.stringify(body, null, 1) };
+}
+
+/** A task's list of sources as `read_task_source` answers it: a page of the
+ *  listing. */
+interface SourceListRead {
+  task: string;
+  kept: number;
+  text: string;
+  truncated: boolean;
+  nextOffset?: number;
+}
+
+/**
+ * Ruling 690: the sources a task in this project keeps, for an agent: the
+ * list without `id`, one source's content with it. One reader behind every
+ * `read_task_source` (a Claude specialist's toolkit, the gateway's board
+ * server for a Codex one, the operator and the controller), so a reviewer and
+ * the coordinator that reads its verdict are answered the same thing.
+ *
+ * The list is each source's record and what each kept delivery rested on,
+ * paged like any text. A source's content is read as a task file's is
+ * (`readTaskSource`): what a reviewer checks a claim against is the bytes the
+ * run kept, not the page as it reads on the day of the review.
+ */
+export function readAgentTaskSource(
+  deps: BoardReadContext,
+  taskKey: string,
+  id: string | undefined,
+  offset = 0,
+): AgentAttachmentRead {
+  const key = taskKey.trim();
+  if (!boardRows(deps).some((t) => t.key === key)) {
+    return { text: `[noop] No task ${key} in this project; \`read_board\` lists the project's tasks.` };
+  }
+  const kept = readTaskSources(deps.projectSlug, key, deps.ctx.dataRoot);
+  const wanted = id?.trim();
+  if (!wanted) {
+    // Every kept delivery is named, one stamped while the task kept nothing
+    // included: it rested on no kept source, and the list says so.
+    const delivered = listKeptDeliveries(deps.projectSlug, key, deps.ctx.dataRoot).map((d) => d.deliveredAt);
+    const whole = kept.sources.length > 0 ? sourcesListing(kept, delivered) : `${key} keeps no sources.`;
+    const end = pageEnd(whole, offset);
+    const list: SourceListRead = {
+      task: key,
+      kept: kept.sources.length,
+      text: whole.slice(offset, end),
+      truncated: whole.length > end,
+    };
+    if (whole.length > end) list.nextOffset = end;
+    return { text: JSON.stringify(list, null, 1) };
+  }
+  const read = readTaskSource(deps.projectSlug, key, wanted, deps.ctx.dataRoot, offset);
+  if (!read) {
+    const ids = kept.sources.map((s) => s.id);
+    const have =
+      ids.length === 0
+        ? "It keeps no sources."
+        : `It keeps ${ids.length === 1 ? ids[0] : `${ids[0]} to ${ids[ids.length - 1]}`}; ` +
+          "call read_task_source without `id` to list them.";
+    return { text: `[noop] ${key} keeps no source \`${wanted}\`. ${have}` };
+  }
+  const { source, content } = read;
+  if ("unreadable" in content) return { text: `[noop] ${content.unreadable}` };
+  if (content.kind === "image") {
+    const kb = Math.max(1, Math.round(content.bytes / 1024));
+    return {
+      header:
+        `${source.id}: \`${source.name}\` (${kb} KB, ${content.mimeType}), a source kept on ${key}, ` +
+        `from ${source.from}. The image follows.`,
+      image: { data: content.data, mimeType: content.mimeType },
+    };
+  }
+  const { kind: _text, name, bytes, ...page } = content;
+  return {
+    text: JSON.stringify(
+      {
+        id: source.id,
+        title: source.title,
+        from: source.from,
+        keptAt: source.keptAt,
+        by: `agent:${source.by.profileId}`,
+        name,
+        bytes,
+        sha256: source.sha256,
+        ...page,
+      },
+      null,
+      1,
+    ),
+  };
 }
 
 type BoardRow = ReturnType<typeof boardRows>[number];

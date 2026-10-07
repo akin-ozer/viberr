@@ -9,13 +9,16 @@ import { seedOrgResources } from "~/server/org/org-seed.server";
 import { listSkills } from "~/server/org/resources.server";
 import { seedDefaultAgentAssets } from "~/server/seed/default-assets.server";
 import type { OperatorAuthority } from "~/server/tasks/operator-authority.server";
+import { buildSpecialistPromptPrefix } from "~/server/tasks/specialist-prompt.server";
 import {
   HUMANIZER_PROMPT_SECTION,
   HUMANIZER_SKILL_SHA256,
   HUMANIZER_SOURCE,
+  HUMANIZER_SPECIALIST_SECTION,
   humanizerSkillFile,
 } from "./humanizer.server";
 import { buildOperatorSystemPrompt } from "./operator-prompt.server";
+import type { RealBackend } from "./runtime-registry.server";
 import { createTempDirs } from "../../../test-support/temp-dirs";
 import { createTestDbContext } from "../../../test-support/test-db";
 
@@ -23,7 +26,8 @@ import { createTestDbContext } from "../../../test-support/test-db";
  * Ruling 502: every operator run and every controller turn writes under the
  * vendored Humanizer skill, and no surface a person uses names it. The
  * controller's prompt half is in `controller-run.server.test.ts`, beside its
- * app harness.
+ * app harness. Ruling 689 gives the same guide to every specialist run, the
+ * agents that write a task's result and the agents that review it.
  */
 
 const temp = createTempDirs();
@@ -172,5 +176,56 @@ describe("ruling 502: every operator drive carries it, and its disclosure never 
     expect(build.inputs.unresolvedResources).toEqual([]);
     // Its size is the prompt the run was sent (ruling 344), the guide included.
     expect(build.inputs.personaChars).toBe(build.prompt.length);
+  });
+});
+
+describe("ruling 689: every specialist run carries it, framed for writing and for reviewing", () => {
+  const FRAMING = HUMANIZER_SPECIALIST_SECTION.slice(0, HUMANIZER_SPECIALIST_SECTION.indexOf(BODY));
+
+  it("frames the same guide for a result, for a person's own voice and for a review", () => {
+    expect(HUMANIZER_SPECIALIST_SECTION.startsWith("\n\n---\n# How you write\n\n")).toBe(true);
+    expect(HUMANIZER_SPECIALIST_SECTION.endsWith(`\n\n${BODY}`)).toBe(true);
+    // What a specialist writes includes the result itself.
+    expect(FRAMING).toContain("any document, page or text you write or revise as the task's result");
+    expect(FRAMING).toContain("Use the guide's embedded mode as you write");
+    // A person's own writing outranks the guide.
+    expect(FRAMING).toContain("their own writing comes first");
+    expect(FRAMING).toContain("keep a habit of theirs even where the guide would remove it");
+    // A reviewer judges with it and says what it found in plain words.
+    expect(FRAMING).toContain("When you review prose a person will read, hold it to the same guide.");
+    expect(FRAMING).toContain("follow the other instruction");
+    expect(FRAMING).toContain("anything you quote from a source exactly as they are");
+    expect(FRAMING).toContain("Never name it, quote it or list it among your skills and resources.");
+    expect(FRAMING).not.toMatch(/[–—“”]/);
+  });
+
+  const backends: RealBackend[] = ["claude", "codex"];
+
+  it.each(backends)("closes the static block of a %s run, once, whatever the profile grants", (backend) => {
+    const dataRoot = temp.make("viberr-humanizer-agent-");
+    const skillDir = path.join(dataRoot, "skills", "house-rules");
+    mkdirSync(skillDir, { recursive: true });
+    writeFileSync(path.join(skillDir, "SKILL.md"), "# House rules\n\nHOUSE-RULES-MARKER", "utf8");
+    const unresolved: { name: string; reason: string }[] = [];
+    const prefix = buildSpecialistPromptPrefix({
+      profileId: "writer",
+      backend,
+      definition: "You write the task's result. PERSONA-MARKER",
+      skills: ["house-rules"],
+      dataRoot,
+      unresolvedOut: unresolved,
+    });
+    // CANARY: drop the `parts.push(HUMANIZER_SPECIALIST_SECTION)` in
+    // buildSpecialistPromptPrefix and the static block ends on the MCP note again.
+    expect(prefix.static.at(-1)).toBe(HUMANIZER_SPECIALIST_SECTION);
+    expect(prefix.dynamic.join("")).not.toContain("# How you write");
+    const prompt = [...prefix.static, ...prefix.dynamic].join("");
+    expect(prompt.split(HUMANIZER_SPECIALIST_SECTION).length - 1).toBe(1);
+    // The persona and the grants a person made are still there, ahead of it.
+    expect(prompt.indexOf("PERSONA-MARKER")).toBeLessThan(prompt.indexOf("# How you write"));
+    expect(prompt.indexOf("HOUSE-RULES-MARKER")).toBeLessThan(prompt.indexOf("# How you write"));
+    // It is no grant: nothing reports it as attached or as missing.
+    expect(unresolved).toEqual([]);
+    expect(prompt).not.toContain("name: humanizer");
   });
 });

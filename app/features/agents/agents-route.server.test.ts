@@ -1464,7 +1464,7 @@ describe("F15-05/06 — a brand-new profile claims no verdict authority", () => 
       expect(view.actions.recommend, label).not.toContain(label);
     }
     // Delivery stays withheld too (the pre-existing conservative posture).
-    expect(view.actions.direct).not.toContain("Execute code or write to the repo");
+    expect(view.actions.direct).not.toContain("Write to the repository");
     expect(view.actions.direct).not.toContain("Commit & push to the branch");
     // Verdict authority is explicit-only, and it was never granted.
     expect(view.actions.direct).not.toContain("Report a validation verdict");

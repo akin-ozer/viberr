@@ -1,7 +1,7 @@
 import { existsSync, readdirSync, rmSync } from "node:fs";
 import path from "node:path";
 import type { DatabaseSync } from "node:sqlite";
-import { TASK_SHARED_DIRS } from "~/server/runtimes/agent-isolation.server";
+import { TASK_PERSON_REMOVED_DIRS } from "~/server/runtimes/agent-isolation.server";
 import { removeAgentTreeSync } from "~/server/runtimes/agent-trees.server";
 import { taskWorkspaceLaunch } from "~/server/tasks/workspace-git.server";
 import { recordAudit, SYSTEM_ACTOR } from "~/server/audit/audit-recorder.server";
@@ -25,7 +25,7 @@ import {
 } from "~/server/files/file-store-root.server";
 import { logger } from "~/server/logging/logger.server";
 import { rebuildAll } from "~/server/projections/rebuilder.server";
-import { SEED_AGENT_PROFILES } from "./agent-catalog.server";
+import { LIBRARY_AGENT_PROFILES, SEED_AGENT_PROFILES } from "./agent-catalog.server";
 import { builtinAgentProfileTemplate } from "./default-assets.server";
 import { SEED_DEFAULT_PASSWORD } from "./seed-credentials";
 
@@ -104,13 +104,15 @@ function entriesOf(dir: string): string[] {
  * `attachments/` and `.operator-scratch/` — are the agents' trees (a tool they
  * ran can leave a directory only its uid can enter), so a reset removes them
  * as each task's owner before the rest of `projects/`, the server's own, goes.
+ * Ruling 691: so is what the page renderer left in a task's `.captures/` (a
+ * browser's profile is its uid's alone).
  * Where the seed runs beside a launcher and a task has no owner, it throws
  * rather than remove that task's trees as the server.
  */
 function removeTaskAgentTrees(db: DatabaseSync, dataRoot: string, projRoot: string): void {
   for (const slug of entriesOf(projRoot)) {
     for (const key of entriesOf(path.join(projRoot, slug, "tasks"))) {
-      for (const name of TASK_SHARED_DIRS) {
+      for (const name of TASK_PERSON_REMOVED_DIRS) {
         const target = path.join(projRoot, slug, "tasks", key, name);
         if (!existsSync(target)) continue;
         removeAgentTreeSync(target, taskWorkspaceLaunch(db, { projectSlug: slug, taskKey: key, dataRoot }));
@@ -208,7 +210,8 @@ export async function runSeed(
   //    permanently. `kbGrants: true` because `npm run seed` also seeds the
   //    backing knowledge bases (seedOrgResources); the bare boot backfill
   //    doesn't, which is the one field the two writers differ on.
-  for (const profile of SEED_AGENT_PROFILES) {
+  //    Ruling 692: the library's Writer and Editor are written beside them.
+  for (const profile of [...SEED_AGENT_PROFILES, ...LIBRARY_AGENT_PROFILES]) {
     writeFileAtomic(
       agentProfileFilePath(profile.frontmatter.id, dataRoot),
       builtinAgentProfileTemplate(profile, { kbGrants: true }),
@@ -225,14 +228,14 @@ export async function runSeed(
     details: {
       reset: options.reset ?? false,
       adminCreated: bootstrap.created,
-      agentProfiles: SEED_AGENT_PROFILES.length,
+      agentProfiles: SEED_AGENT_PROFILES.length + LIBRARY_AGENT_PROFILES.length,
     },
   });
 
   const summary: SeedSummary = {
     adminCreated: bootstrap.created,
     adminEmail,
-    agentProfiles: SEED_AGENT_PROFILES.length,
+    agentProfiles: SEED_AGENT_PROFILES.length + LIBRARY_AGENT_PROFILES.length,
     rescanChanged: rescan.changed,
   };
   logger.info("seed complete", { ...summary });

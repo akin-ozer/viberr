@@ -461,7 +461,7 @@ describe("ProfileDetail", () => {
         actions: {
           direct: [],
           recommend: [],
-          forbidden: ["Execute code or write to the repo"],
+          forbidden: ["Write to the repository"],
           off: [],
         },
         capabilities: [{ capabilityId: "execute-code-or-write-repo", mode: "off" }],
@@ -469,7 +469,7 @@ describe("ProfileDetail", () => {
       })),
     );
     const row = [...container.querySelectorAll(".cap-item")].find((el) =>
-      (el.textContent ?? "").includes("Execute code or write to the repo"),
+      (el.textContent ?? "").includes("Write to the repository"),
     );
     expect(row).toBeTruthy();
     expect(row!.querySelectorAll(".fhint")).toHaveLength(1);
@@ -500,7 +500,7 @@ describe("ProfileDetail", () => {
             "Change project policy",
           ],
           off: [
-            "Execute code or write to the repo",
+            "Write to the repository",
             "Report a validation verdict",
             "Approve the review",
             "Request changes",

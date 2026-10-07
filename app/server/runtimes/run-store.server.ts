@@ -485,6 +485,46 @@ export function listRunsForTaskRows(
     .all(projectSlug, taskKey) as AgentRunRow[];
 }
 
+/** Ruling 693: the columns what a task took reads off a run row
+ *  (`what-it-took.server.ts`), and no others. */
+export type TookRunRow = Pick<
+  AgentRunRow,
+  | "kind"
+  | "backend"
+  | "state"
+  | "started_at"
+  | "finished_at"
+  | "created_at"
+  | "total_cost_usd"
+  | "interrupted_reason"
+  | "agent_profile_id"
+  | "agent_name"
+  | "review_subject"
+>;
+
+/** A {@link TookRunRow} with the task it ran on. */
+export type ProjectTookRunRow = TookRunRow & Pick<AgentRunRow, "task_key">;
+
+/**
+ * Ruling 693: every task run of one project, oldest first, as what a task
+ * took reads a run: one statement for a whole board, which the caller groups
+ * by task. Controller turns are not task work and are left out.
+ */
+export function listTookRowsForProject(
+  db: DatabaseSync,
+  projectSlug: string,
+): ProjectTookRunRow[] {
+  // SAFETY: same `agent_runs` DDL guarantee as `getRun`, for the columns named.
+  return db
+    .prepare(
+      `SELECT task_key, kind, backend, state, started_at, finished_at, created_at,
+              total_cost_usd, interrupted_reason, agent_profile_id, agent_name, review_subject
+         FROM agent_runs WHERE project_slug = ? AND kind <> 'controller'
+        ORDER BY created_at ASC, rowid ASC`,
+    )
+    .all(projectSlug) as ProjectTookRunRow[];
+}
+
 /**
  * Ruling 265 (pass 37, F37-95): every run that is LIVE right now, across every
  * project, newest first.

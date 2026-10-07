@@ -114,6 +114,16 @@ async function main(): Promise<number> {
       console.error("e2e: the in-image agent isolation check failed");
       return 1;
     }
+    // Ruling 691: the unit suites drive the page capture's renderer with a
+    // stand-in browser, so what only the image's own Chromium can show (the
+    // proxy rule that leaves a page no way out, a full-page picture that
+    // leaves the layout alone, the fonts) is asked here, as an agent uid
+    // through the launcher (`scripts/check-page-capture.sh`).
+    const capture = await compose(["exec", "-T", "app", "sh", "scripts/check-page-capture.sh"]);
+    if (capture.code !== 0) {
+      console.error("e2e: the in-image page capture check failed");
+      return 1;
+    }
 
     const result = await run("npx", ["playwright", "test", ...playwrightArgs], {
       env: { ...process.env, VIBERR_E2E_BASE_URL: baseUrl },

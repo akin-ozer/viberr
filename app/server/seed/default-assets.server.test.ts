@@ -1170,6 +1170,35 @@ describe("the seeded-prompt sweep: the shipped prompts say what the code does", 
     expect(PRIOR_SHIPPED_HASHES[rel]).not.toContain(sha256Hex(guide));
   });
 
+  it("rulings 690 to 692: the guide starts a prose board from the shipped Writer and Editor, keeps a result's sources and has a page pictured", async () => {
+    // CANARY: drop any of the five bullets, either tool's name or the
+    // outgoing hash.
+    const { PRIOR_SHIPPED_HASHES, shippedCopyIsUnedited } = await import("./default-assets.server");
+    const guide = read("controller-guide.skill.md");
+    const results = markdownSection(guide, "A board that delivers results").replace(/\s+/g, " ");
+    expect(results).toContain("**A person is asked only what they alone know, once.**");
+    expect(results).toContain("A choice the agent can make (how long, in what order, which detail) it makes and lists as an assumption.");
+    expect(results).toContain(
+      "**When the result is prose a person puts their name to, start from the shipped Writer and Editor** (ruling 692)",
+    );
+    expect(results).toContain("Pass `writer` and `editor` in `agents`, hand the Writer delivery and make the Editor the required reviewer.");
+    expect(results).toContain("the board's own skill and rulings hold only what is this board's");
+    expect(results).toContain("never write the account's name into the rulings as the author");
+    expect(results).toContain('A sample itself is kept only as `kind: "sample"`, and nothing in a sample is carried into a result.');
+    expect(results).toContain("**A result that states facts keeps its sources** (ruling 690).");
+    expect(results).toContain("An agent hands what it opened to `keep_source`");
+    expect(results).toContain("**A result that is a page is seen before it is accepted** (ruling 691).");
+    expect(results).toContain("an agent gets the same pictures with `capture_page`");
+    // Nothing in the doctrine every board reads is about one kind of writing.
+    expect(guide).not.toMatch(/\bblog\b/i);
+    const rel = path.join("skills", "controller-guide", "SKILL.md");
+    expect(
+      shippedCopyIsUnedited(rel, "f7adbea417510f20ea5c6e52aeea0fe47df4248beafe8f65d26d59b38d02a53d", {}),
+      "the guide's outgoing hash is not recorded",
+    ).toBe(true);
+    expect(PRIOR_SHIPPED_HASHES[rel]).not.toContain(sha256Hex(guide));
+  });
+
   it("a GitHub read needs membership, not maintainer", () => {
     const skill = read("controller-guide.skill.md");
     expect(skill).not.toContain("reading GitHub state at depth need maintainer");

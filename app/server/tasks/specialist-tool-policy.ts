@@ -114,7 +114,7 @@ const CAP_DENY_RULES: readonly {
  * helper also rewrites an EXPLICIT `off` headline to `direct` — defensible at
  * save time, where it repairs an editor artifact an admin can see and re-edit,
  * but wrong here: at the enforcement layer it would let a scoped grant silently
- * overturn an admin's explicit "Execute code or write to the repo: Off", handing
+ * overturn an admin's explicit "Write to the repository: Off", handing
  * back Edit/Write/`git commit`. That is the P14-LV-01 polarity bug in mirror
  * image — permission appearing from something other than a grant — so the one
  * mode this layer never reinterprets is an explicit withholding.

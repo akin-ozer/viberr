@@ -42,11 +42,8 @@ import {
   taskEventLink,
 } from "~/server/projections/notifications.server";
 import { defaultModelFor } from "~/server/runtimes/model-catalog.server";
-import {
-  RECOMMENDATION_DECLINED_TITLE,
-  applyRecommendation,
-  dismissRecommendation,
-} from "./task-recommendations.server";
+import { applyRecommendation, dismissRecommendation } from "./task-recommendations.server";
+import { RECOMMENDATION_DECLINED_TITLE } from "~/shared/timeline-leads";
 import { resolvePacket } from "./packet-resolution.server";
 import { transitionStage } from "./task-transitions.server";
 import { applyAcceptanceWrite } from "./task-acceptance.server";

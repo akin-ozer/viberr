@@ -18,6 +18,7 @@ import {
   supportingEngagements,
 } from "~/schemas/task-file.schema";
 import {
+  ASK_HUMAN_ONLY_NOTE,
   AGENT_OUTCOME_JSON_SCHEMA,
   holdsCollaborationGrant,
   resolveAgentCollab,
@@ -74,6 +75,7 @@ import {
   type RunStartOutcome,
   type StartRunInput,
   repoWriteWithheldFromDenylist,
+  webSearchWithheldFromDenylist,
 } from "~/server/runtimes/run-service.server";
 import { listRunsForTaskRows } from "~/server/runtimes/run-store.server";
 import { newId } from "~/shared/ids/new-id.server";
@@ -92,6 +94,7 @@ import {
   resolveSpecialistMcpServersDetailed,
   verifyStdioMcpMountsForRun,
 } from "./specialist-mcp.server";
+import { pageCaptureStatus } from "./page-capture.server";
 import { BROWSER_MCP_NAME, resolveBrowserMcp } from "./specialist-browser-mcp.server";
 import { cloneProgressStep, cloneStepLabel, mirrorIsCold } from "./repo-mirror.server";
 // Values come from the leaf substrate, never the task-action modules, which
@@ -847,11 +850,25 @@ async function dispatchAgentRun(
    * were never recorded as the delivery.
    */
   const collab = input.withholdVerdict || delivers ? { ...granted, verdict: false } : granted;
+  // Ruling 690: the run's `use-web-search-fetch` grant, read off the same
+  // denylist that takes its web tools away on either backend, for what the
+  // run is told about keeping a source: a page, or only what it can reach.
+  const webEgress = !webSearchWithheldFromDenylist(disallowedTools);
   // Ruling 589: a Codex run that holds a collaboration grant reads the board
   // and its own timeline through the gateway's board server, as a Claude run's
   // toolkit does.
   const boardMount = realBackend
-    ? resolveBoardMcp({ backend, collaborates: holdsCollaborationGrant(collab), dataRoot: ctx.dataRoot })
+    ? resolveBoardMcp({
+        backend,
+        collaborates: holdsCollaborationGrant(collab),
+        // Ruling 690: the grant that lets a run save files on its task lets
+        // it keep the sources its result rests on, and the tool names
+        // fetching a page only to a run whose web grant stands.
+        keepsSources: collab.evidence,
+        webEgress,
+        agent: { profileId: engagement.profileId, roleHint: engagement.role },
+        dataRoot: ctx.dataRoot,
+      })
     : null;
   // The agent's own actor ref (D7/D8) — toolkit writes are attributed to it.
   const agentActorRef: FileActorRef = {
@@ -1165,6 +1182,14 @@ async function dispatchAgentRun(
   );
   if (kbReadDirs.length > 0) promptInput.kbReadDirs = kbReadDirs;
   if (boardReader) promptInput.taskFileReader = true;
+  // Ruling 690: the same conditions that mount `keep_source`: the grant, and
+  // on Codex the gateway's board server (a Claude run has it in its toolkit).
+  if (collab.evidence && realBackend && (backend === "claude" || !!boardMount)) {
+    promptInput.sourceKeeper = true;
+    if (!webEgress) promptInput.webWithheld = true;
+  }
+  // Ruling 691: the same condition that mounts `capture_page`.
+  if (boardReader && pageCaptureStatus().available) promptInput.pageCapture = true;
   // Ruling 591: the same condition as the correction note below.
   if (realBackend && kb.length > 0 && (backend === "claude" || knowledgeMount)) {
     promptInput.kbCorrectionTool = true;
@@ -1254,7 +1279,9 @@ async function dispatchAgentRun(
     }
     if (collab.ask) {
       collabNotes.push(
-        "- `ask_human`: raise a question you are blocked on as a decision card for the humans. The answer does not arrive during this run; note it in your report and finish. You will be RESUMED in this same session with the decision, so do not restart your work when that happens.",
+        "- `ask_human`: raise a question you are blocked on as a decision card for the humans. " +
+          ASK_HUMAN_ONLY_NOTE +
+          " The answer does not arrive during this run; note it in your report and finish. You will be RESUMED in this same session with the decision, so do not restart your work when that happens.",
       );
     }
     if (collab.verdict) {
@@ -1372,6 +1399,7 @@ async function dispatchAgentRun(
           // Ruling 283: the SAME list the persona indexed, so the tool can read
           // exactly what the index named and nothing else.
           kb,
+          webEgress,
         })
       : null;
   // R19-19: the browser sits between the org grants and the toolkit — a registry
@@ -2169,6 +2197,10 @@ export async function resolveResumeConfinement(
     const resumeBoard = resolveBoardMcp({
       backend: input.backend,
       collaborates: holdsCollaborationGrant(collab),
+      // Ruling 690: a resumed run keeps sources as the fresh one did.
+      keepsSources: collab.evidence,
+      webEgress: !webSearchWithheldFromDenylist(disallowedTools),
+      agent: { profileId: input.profileId, roleHint: input.role ?? resolved.role },
       dataRoot: ctx.dataRoot,
     });
     const resumeRepo = projectRepo(ctx, input.projectSlug);
@@ -2256,6 +2288,7 @@ export async function resolveResumeConfinement(
         outcomeKey,
         collab,
         kb,
+        webEgress: !webSearchWithheldFromDenylist(disallowedTools),
       });
     } else if (
       input.backend === "codex" &&
