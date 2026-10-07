@@ -348,7 +348,7 @@ function ensureSingleFlightIndexes(db: DatabaseSync): void {
 /**
  * Columns the baseline gained AFTER a data root may already have applied it
  * (migrations stay squashed into 0001 by ruling, so an existing root never
- * re-runs the file). Each is nullable and additive — exactly the
+ * re-runs the file). Each is nullable or carries a constant DEFAULT, and is additive — exactly the
  * "additive drift" the boot integrity WARN names `ALTER TABLE … ADD COLUMN` as
  * the remedy for — so the remedy is applied here, idempotently, instead of
  * being left to an operator: a missing column would otherwise fail every

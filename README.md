@@ -235,14 +235,14 @@ Deliberate V1 boundaries, documented rather than half-built:
 
 - **Single node.** SQLite, a local file store and an in-process event bus: one app
   process per data root, enforced by a writer lock.
-- **One schema baseline, no migration chain.** Schema changes edit
-  `0001_baseline.sql`. At boot, an older database gets the columns, tables and indexes
-  the release lists for it, and `notifications` and `user_backend_credentials` are rebuilt
-  to their current shape when they lag. The `projection schema drift` warning names, with
-  its remedy, a column `task_projections` or `task_events` lacks (a manual `ADD COLUMN`)
-  and a value one of four checked CHECK constraints refuses (re-baselining the projection
-  database). Any other drift is neither repaired nor reported, and file formats carry no
-  back-compat promise. Back up before upgrading.
+- **One schema baseline, no migration chain.** Schema changes edit `0001_baseline.sql`. At
+  boot, an older database gets the columns, tables and indexes the release lists for it,
+  and `notifications` is rebuilt when its `kind` CHECK lags and `user_backend_credentials`
+  when it still has its one-account shape. The `projection schema drift` warning names,
+  with its remedy, a column `task_projections` or `task_events` lacks (a manual `ADD
+  COLUMN`) and a value one of four checked CHECK constraints refuses (re-baselining the
+  projection database). Any other drift is neither repaired nor reported, and file formats
+  carry no back-compat promise. Back up before upgrading.
 - **No email.** Notifications are in-app, plus an opt-in browser notification for a new
   decision. Admins hand new users their one-time password themselves.
 - **TLS is the deployment's job.** The app serves plain HTTP and expects a reverse proxy.

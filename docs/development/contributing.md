@@ -107,11 +107,16 @@ supersedes an earlier one obliges the earlier one to carry an inline marker
 ## 4. Data and schema changes
 
 There is one squashed migration, `db/migrations/0001_baseline.sql`, and no
-back-compat obligation (ruling 683 kept this convention at launch). To change a table or a CHECK constraint, edit the baseline and
-recreate your local `state/projection.sqlite`. The boot WARN `projection schema drift`
-tells you when a root lags the baseline and names the refused CHECK values and the
-missing columns; a purely additive column drift can be closed with
-`ALTER TABLE <table> ADD COLUMN <column>` instead. Recreating the file also drops the
+back-compat obligation (ruling 683 kept this convention at launch). To change a table or a CHECK constraint, edit the baseline and, in the same change, give
+existing roots a way to get it: a new column goes into `BASELINE_COLUMNS` (nullable or with a
+constant DEFAULT, with a backfill when the default misdescribes older rows), a new table into
+`BASELINE_TABLES` and a new index into `BASELINE_INDEXES` (`app/server/db/sqlite.server.ts`),
+and a CHECK over an enum the build derives into belongs in `projectionCheckGaps`
+(`app/server/boot.server.ts`). Recreating your local `state/projection.sqlite` hides a
+missing entry. The boot WARN `projection schema drift` names only a column
+`task_projections` / `task_events` lacks and a value one of the four CHECKs
+`projectionCheckGaps` reads refuses, and any other lag is silent; a missing column can be
+closed with `ALTER TABLE <table> ADD COLUMN <column>`. Recreating the file also drops the
 rows no rescan can rebuild (users, sessions, sealed PATs, audit, notifications), so run
 `npm run backup` first ([../operations/deployment.md](../operations/deployment.md)
 §Re-baselining the projection database). Canonical file formats change the same way:

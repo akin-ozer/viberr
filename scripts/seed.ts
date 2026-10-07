@@ -8,8 +8,12 @@
  *
  *   npm run seed             — idempotent upsert/overwrite
  *   npm run seed -- --reset  — wipe projects/, agents/profiles, runtime
- *                              transcripts and all derived tables first
- *                              (users/auth + runtime credential homes survive)
+ *                              transcripts and all derived tables first,
+ *                              then kb/, skills/ and the org KB, skill, MCP
+ *                              server and domain-allowlist rows (users/auth,
+ *                              GitHub connections and PATs, backend
+ *                              credentials and runtime credential homes
+ *                              survive; docs/development/scripts.md §3)
  *
  * Takes the data-root WRITER lock first (B-FD1) and refuses to run while
  * another Viberr process holds it. There is NO in-app equivalent of this

@@ -193,11 +193,11 @@ and [domain/operator.md](domain/operator.md). The vocabulary is in
 - **Upgrades.** `git pull && npm run deploy`. Migrations apply at boot and the volume
   carries the state; take a backup before a major upgrade. Schema changes edit one
   baseline rather than adding to a migration chain. At boot, an older database gets the
-  columns, tables and indexes the release lists for it, and `notifications` and
-  `user_backend_credentials` are rebuilt to their current shape when they lag. The
-  `projection schema drift` warning names, with its remedy, a column `task_projections`
-  or `task_events` lacks (a manual `ADD COLUMN`) and a value one of four checked CHECK
-  constraints refuses (a
+  columns, tables and indexes the release lists for it, and `notifications` is rebuilt
+  when its `kind` CHECK lags and `user_backend_credentials` when it still has its
+  one-account shape. The `projection schema drift` warning names, with its remedy, a
+  column `task_projections` or `task_events` lacks (a manual `ADD COLUMN`) and a value one
+  of four checked CHECK constraints refuses (a
   [re-baseline](operations/deployment.md#re-baselining-the-projection-database)). Any
   other drift is neither repaired nor reported, and file formats carry no back-compat
   promise. Check what changed before you upgrade an instance that holds real work.

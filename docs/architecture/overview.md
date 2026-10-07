@@ -27,7 +27,7 @@ is vertical; run one instance per data root.
 | Runtime | Node ≥ 26 (`engines`, `.nvmrc`, image `node:26-slim`), ESM, TypeScript 7, `~/*` → `app/*` |
 | Framework | React Router 8 framework mode, `ssr: true`, served by `@react-router/serve`; React 19 |
 | Build / test | Vite 8, Vitest 4 (`app/**/*.test.{ts,tsx}`, 20 s per-test budget), Playwright 1.62 (chromium only, against the production image), oxlint 1.79 + the vendored `tools/oxlint/anti-slop` plugin (15 rules, CI gate) |
-| Data | `node:sqlite` `DatabaseSync`, `journal_mode=WAL`, `foreign_keys=ON`, `busy_timeout=5000`; one file `state/projection.sqlite`; one squashed migration `db/migrations/0001_baseline.sql` applied at open, plus an idempotent backfill of the nullable columns the baseline gained after an existing root first applied it (`ensureBaselineColumns`) |
+| Data | `node:sqlite` `DatabaseSync`, `journal_mode=WAL`, `foreign_keys=ON`, `busy_timeout=5000`; one file `state/projection.sqlite`; one squashed migration `db/migrations/0001_baseline.sql` applied at open, plus an idempotent open-time healer (`ensureSingleFlightIndexes`, `ensureBaselineColumns`) that adds the listed columns, tables and indexes the baseline gained after an existing root first applied it and brings `user_backend_credentials` to its several-accounts shape |
 | Validation | Zod 4 for env, files, SSE, DB row decoding |
 | Files | `yaml` frontmatter, chokidar 5 watchers (250 ms debounce) |
 | Auth | better-auth 1.6.25 behind `app/lib/auth.server.ts`; no plugins |
@@ -154,8 +154,10 @@ for governed state.
    start the 20 s lock-ownership guard (fails closed).
 5. Self-heal the projection DB if `PRAGMA quick_check` reports corruption (salvage the
    non-rebuildable tables into a fresh file, move the corrupt one aside).
-6. Open SQLite, apply migrations, ensure the single-flight indexes and backfill the
-   baseline columns an older root lacks (`ensureBaselineColumns`).
+6. Open SQLite (`getDb`): apply migrations, ensure the single-flight index
+   (`ensureSingleFlightIndexes`), then add the listed baseline columns, tables and indexes an
+   older root lacks and bring `user_backend_credentials` to its several-accounts shape
+   (`ensureBaselineColumns`).
 7. `seedDefaultAgentAssets`: write the shipped skills, the `agents/definitions/` doctrine
    files and the base profile templates when missing or still identical to a version the
    app shipped (`state/shipped-assets.json` plus `PRIOR_SHIPPED_HASHES`), and audit what it
@@ -195,8 +197,8 @@ for governed state.
     (`recoverControllerConversations`).
 17. Log one `boot integrity check` line (dirs, migrations, counts, users, build, disk,
     toolchain per ruling 182) and a `projection schema drift` WARN when a live CHECK
-    (`task_projections.validation`, `task_projections.waiting`, and `notifications.kind`
-    when step 7 could not widen it) does not admit a value the code declares, or
+    (`task_projections.validation`, `task_projections.waiting`, `epic_projections.status`, and
+    `notifications.kind` when step 7 could not widen it) does not admit a value the code declares, or
     `task_projections` / `task_events` lacks a baseline column.
 18. Log `viberr server booted`.
 

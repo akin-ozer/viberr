@@ -576,10 +576,13 @@ database's rebuilder tables lag the running build (`logBootIntegrity` in
 
 Migrations are squashed into `0001_baseline.sql` and forward-only, so a baseline change
 reaches a **fresh** `projection.sqlite` and nothing else — a root opened by an older build
-keeps the schema it was created with, apart from what the open-time healer below adds.
+keeps the schema it was created with, apart from what the open-time healer below adds or
+rebuilds and the in-place widening of `notifications.kind` above.
 
 **First, check whether you need a remedy at all.** Most additive drift repairs itself.
-Every open of the database runs `ensureSingleFlightIndexes` and `ensureBaselineColumns`
+Every read-write open of the database through `getDb` (the server, and the CLIs that write
+through it, such as `npm run seed` and `npm run rescan`) runs `ensureSingleFlightIndexes` and
+`ensureBaselineColumns`
 (`app/server/db/sqlite.server.ts`). The second `ALTER TABLE … ADD COLUMN`s each missing
 entry of `BASELINE_COLUMNS`, creates the `BASELINE_TABLES` and `BASELINE_INDEXES` this
 root lacks, brings `user_backend_credentials` to its several-accounts shape
