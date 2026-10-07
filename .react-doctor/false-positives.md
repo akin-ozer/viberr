@@ -118,7 +118,7 @@ scan run from inside an agent worktree under `.claude/` sees no files at all.
   produced this `pos`, one branch per run, so an updater would read the same value.
   Verify the call is in the effect body (not a callback or timer) and the state is a dep.
 
-- `react-doctor/rerender-state-only-in-handlers` — resources-panel.tsx
+- `react-doctor/rerender-state-only-in-handlers` — resources-panel-actions.ts
   `pendingSkillBrowse` / `pendingKbBrowse`: "pending until the revalidated list has it"
   state that sits in an effect's dependency array (`[skills, pendingSkillBrowse]`), so
   setting it is what wakes the effect; a ref would not. Verify the dependency array.
