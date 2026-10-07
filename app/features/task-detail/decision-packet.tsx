@@ -1124,7 +1124,8 @@ export function DecisionPacket({
    * a control that then refuses is worse than naming none:
    *
    *  - the panel still renders the button whenever no LIVE pr stands
-   *    (`task-side-panels.tsx`: `!task.pr || state === "closed" | "merged"`),
+   *    (`prIsTerminal` in `task-side-panels-derive.ts`: `!task.pr || state ===
+   *    "closed" | "merged"`),
    *    and disables it with the same refusal while the closure is unanswered;
    *  - authority is `run-agents` OR this task's own owner
    *    (`manualDeliverForReview`), which is exactly the set `canResolve`

@@ -1993,7 +1993,8 @@ describe("GithubTrace — project gates (ruling 482)", () => {
   };
 
   it("prints the server's line, each gate's outcome and a link to its log, and runs them again on a click", () => {
-    // CANARY: drop `<GatesRow>` from GithubTrace.
+    // CANARY: drop `<GatesRow>` from the PR card's status rows
+    // (`prCardSignalRows` in task-side-panels.tsx).
     const onRunGates = vi.fn();
     const { container, getByRole, getByText } = render(
       <MemoryRouter>
@@ -2359,8 +2360,9 @@ describe("GithubTrace — admin force-accept (DG-2)", () => {
 
   it("ruling 665: a task delivered as files says it has no branch, and its delivered files are work to accept", () => {
     // CANARY: drop `filesDelivery === "delivered"` from `wedgedOrDelivering`
-    // and a files-delivered task that review has stalled on loses the admin's
-    // way out along with the branch it no longer has.
+    // (`forceAcceptReason` in task-side-panels-derive.ts) and a
+    // files-delivered task that review has stalled on loses the admin's way
+    // out along with the branch it no longer has.
     const view = (filesDelivery: "expected" | "delivered") =>
       render(
         <MemoryRouter>
@@ -3078,8 +3080,8 @@ describe("UX19-4: the recovery packet names the in-app re-delivery path", () => 
   it("names the closer, and lets go once a person has answered the closure", () => {
     // The unlock is `pr.closure.answered`, the same record `openTaskPr` reads:
     // an answered closure returns the control to its normal promise. Canary:
-    // drop `!task.pr.closure?.answered` from `closedRefusal` and the answered
-    // case stays refused.
+    // drop `!task.pr.closure?.answered` from `closedPrRefusal`
+    // (task-side-panels-derive.ts) and the answered case stays refused.
     const closed = (closure: PrRef["closure"]) =>
       render(
         <MemoryRouter>
