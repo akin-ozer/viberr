@@ -1124,7 +1124,9 @@ describe("RepoPanel", () => {
 
   it("the Change dialog closes on its own change's ok, not on another answer of the repository fetcher", () => {
     // CANARY: drop the changeSent check and the branch cleanup's ok closes the
-    // dialog the admin is typing in, and the typed repository is gone.
+    // dialog the admin is typing in, and the typed repository is gone; drop the
+    // trigger's reset of it and a cancelled opening's change, answered after
+    // the next opening began, closes that one instead.
     const onChangeRepo = vi.fn();
     const { getByText, rerender } = render(
       repoPanel({ repoBusy: true, inFlight: "set-branch-cleanup", onChangeRepo }),
@@ -1146,6 +1148,18 @@ describe("RepoPanel", () => {
       repoPanel({ changeResult: { ok: true, toast: "Repository changed" }, onChangeRepo }),
     );
     expect(field()).toBeNull();
+
+    // A change sent, then Cancelled while it is checked, belongs to that opening.
+    fireEvent.click(getByText("Change…"));
+    fireEvent.change(field()!, { target: { value: "akin-ozer/wrong" } });
+    fireEvent.click(getByText("Change repository", { selector: ".confirm-actions button" }));
+    rerender(repoPanel({ repoBusy: true, inFlight: "change-repo", onChangeRepo }));
+    fireEvent.click(getByText("Cancel", { selector: ".confirm-actions button" }));
+    expect(field()).toBeNull();
+    fireEvent.click(getByText("Change…"));
+    fireEvent.change(field()!, { target: { value: "akin-ozer/right" } });
+    rerender(repoPanel({ changeResult: { ok: true, toast: "Repository changed" }, onChangeRepo }));
+    expect(field()?.value).toBe("akin-ozer/right");
   });
 
   it("a configured credential offers Rotate + a confirmed Remove (finding #13)", () => {

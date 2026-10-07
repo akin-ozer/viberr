@@ -2180,9 +2180,11 @@ export function RepoPanel({
                 type="button"
                 className="btn ghost sm repo-btn"
                 onClick={() => {
-                  // A change that landed after a Cancel must not close the
-                  // next opening at once.
+                  // A change an earlier opening sent must not close this one:
+                  // not one that landed after its Cancel, nor one still in
+                  // flight when it is answered.
                   setChangeDone(false);
+                  changeSent.current = false;
                   setChanging(true);
                 }}
               >
