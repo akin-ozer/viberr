@@ -77,7 +77,8 @@ import { errorMessage, toError } from "~/shared/errors";
  * {@link CODEX_SDK_VERIFIED_VERSION}, which a test pins to the DECLARED
  * dependency; 0.146.0 → 0.153.4 moved the SDK's surface in three additive
  * places, listed on that constant, and none of the event shapes this adapter
- * or the wire normalizer reads; 0.153.4 → 0.156.0 moved only the pinned CLI).
+ * or the wire normalizer reads; 0.153.4 → 0.156.0 → 0.160.1 moved only the
+ * pinned CLI).
  * `new Codex()`, `codex.startThread({ workingDirectory,
  * skipGitRepoCheck, sandboxMode, model })` (or `resumeThread(threadId, …)`),
  * then `thread.runStreamed(prompt, { signal })` → `{ events }`, an async
@@ -148,8 +149,21 @@ import { errorMessage, toError } from "~/shared/errors";
  * thread's `turn.completed.usage` is the THREAD's running total, where ruling
  * 369(g) had measured the turn's on runs stored before this bump. A bump
  * re-checks both.
+ *
+ * 0.160.1 (2026-10-07, from 0.156.0, the dependency refresh): the SDK's own
+ * `dist` is byte-identical again, so only the pinned CLI moved. Re-checked on
+ * the 0.160.1 binary: `exec --help` and `login --help` print byte-identical
+ * text to 0.156.0's; a real `exec` with every flag the SDK emits and every
+ * config key `codexConfigForRun` writes (the `mcp_servers` leaves included)
+ * parsed, reached the API and stopped at the 401 of an empty home, streaming
+ * the same `thread.started` / `turn.started` / `error` / `turn.failed` shapes;
+ * `login status` still prints "Not logged in"; and the binary still carries
+ * `thread/compact/start`, `contextCompaction`, `token_usage_record` and the
+ * device-flow "Enter this one-time code". Ruling 541's two rollout facts were
+ * re-checked only as far as the record's name: no signed-in model run was
+ * available, so the resumed thread's running total is unmeasured on 0.160.1.
  */
-export const CODEX_SDK_VERIFIED_VERSION = "0.156.0";
+export const CODEX_SDK_VERIFIED_VERSION = "0.160.1";
 
 /** Narrow injectable seam, derived from the installed SDK's public types. */
 export type CodexThread = Pick<Thread, "id" | "runStreamed">;

@@ -158,6 +158,19 @@ Three proxy details worth getting right:
   streams). The app serves HTTP/1.1; a proxy that speaks HTTP/2 to the browser
   multiplexes the streams over one connection.
 
+**Why React Router stays at 8.3.0.** From 8.3.1 React Router refuses an action whose
+`Origin` header differs from `request.url` in its whole origin, scheme included; 8.3.0
+compared only the host. `react-router-serve` builds `request.url` from the socket and never
+trusts `X-Forwarded-Proto` (`VIBERR_TRUST_PROXY` above is the app's own setting and does not
+reach it), so behind this proxy every `request.url` is `http://` while the browser sends an
+`https://` `Origin`, and every form and fetcher action answers 400 ("The `request.url`
+origin does not match `origin` header from a forwarded action request"; measured on 8.4.0,
+2026-10-07). Upstream's fix reads the header only in `react-router dev` and `vite preview`.
+So `react-router`, `@react-router/serve` and `@react-router/dev` are pinned exactly in
+`package.json`. Moving past 8.3.0 needs a server that takes the scheme from the proxy, or an
+upstream `react-router-serve` that does. The e2e stack (`compose.e2e.yml`) has no proxy, so
+the e2e suite would not catch the break.
+
 HSTS, certificate renewal and redirect-to-https all belong to the proxy layer.
 
 ## Agent accounts are per person (ruling 127)
@@ -315,11 +328,11 @@ rulings 182(b), 191 and 196):
 ```bash
 curl -s localhost:${PORT:-3000}/resources/health | jq .toolchain
 # {"node":"26.8.2","npm":"11.19.1","git":"2.47.3","python3":null,"go":null,
-#  "make":"4.4.1","docker":null,"pnpm":"12.4.1","yarn":null,"curl":"8.14.1",
-#  "codexCli":"0.156.0","claudeAgentSdk":"0.3.280"}
+#  "make":"4.4.1","docker":null,"pnpm":"12.9.1","yarn":null,"curl":"8.14.1",
+#  "codexCli":"0.160.1","claudeAgentSdk":"0.3.292"}
 ```
 
-`make`, `curl` and a pinned `pnpm` (`12.4.1`) ship in the image (ruling 196); `docker` is
+`make`, `curl` and a pinned `pnpm` (`12.9.1`) ship in the image (ruling 196); `docker` is
 `null` deliberately and is not coming — an agent holding the daemon socket controls every
 container on the host. The same reading is injected into every specialist, operator and
 controller prompt (ruling 191), so an agent plans around what is present instead of
