@@ -368,7 +368,25 @@ describe("the page capture's renderer child (ruling 691)", () => {
     expect(report.pages[0]).toMatchObject({ file: "alert.html", error: null, dialogs: 2 });
     expect(report.pages[0]!.shots.map((shot) => shot.view)).toEqual(["desktop", "phone"]);
     // Dismissed, once per load: nobody is there to press OK.
-    expect(b.browser.dialogs()).toEqual([{ accept: false }, { accept: false }]);
+    expect(b.browser.dialogs()).toEqual([
+      { type: "alert", accept: false },
+      { type: "alert", accept: false },
+    ]);
+  });
+
+  it("accepts the question a page asks before the browser leaves it, so the next width still loads, and counts it as no dialog of the page's", async () => {
+    // A page with a `beforeunload` handler holds the browser on itself until
+    // somebody answers, and the second width is a second load of the page.
+    // The stand-in starts that load only once the question is accepted.
+    // CANARY: dismiss it like any other dialog (`accept: false`) and the
+    // phone's load never starts: one picture, and "the render ran past 2
+    // seconds".
+    const b = bench({ "form.html": "<p>a form that asks before you leave it</p>" });
+    const report = await b.run({ pages: ["form.html"], mode: "unload:form.html", pageTimeoutMs: 1_500 });
+    expect(report.pages[0]).toMatchObject({ file: "form.html", error: null, dialogs: 0 });
+    expect(report.pages[0]!.shots.map((shot) => shot.view)).toEqual(["desktop", "phone"]);
+    // Asked once, on the way to the second width, and accepted.
+    expect(b.browser.dialogs()).toEqual([{ type: "beforeunload", accept: true }]);
   });
 
   it("finds a page and the file beside it in whichever Unicode form they are stored", async () => {

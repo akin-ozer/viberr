@@ -1201,8 +1201,13 @@ describe("a delivered page is pictured (ruling 691)", () => {
     // A run that ended with nobody to clean up after it (a restart) loses its
     // pictures to the next render on the task.
     await stopRun(second);
-    await withBrowser("", () => ask("post.html"));
+    const unnamed = await withBrowser("", () => ask("post.html"));
     expect(kept(second)).toBeNull();
+    // An ask whose caller could not name its run is kept where the next
+    // capture on the task replaces it, and says so.
+    expect(unnamed.text).toMatch(
+      /Saved at `\S+\/\.captures\/no\.run\/cap_\S+\/out\/1-desktop\.png` and `\S+\/out\/1-phone\.png`: scratch, and the next capture on this task replaces it\.$/,
+    );
   });
 
   it("makes, shares and removes nothing through a link where a render's scratch would go, and says the scratch could not be made", async () => {

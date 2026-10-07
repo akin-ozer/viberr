@@ -26,8 +26,8 @@ import { z } from "zod";
  * It records itself in the evidence directory: `launches.jsonl` (argv, the
  * whole environment, the uid), `pages.jsonl` (one line per page load: the
  * address, the viewport, the HTML it was served, each sub-resource's status),
- * `shots.jsonl` (each screenshot's clip) and `dialogs.jsonl` (how each dialog
- * it opened was answered).
+ * `shots.jsonl` (each screenshot's clip) and `dialogs.jsonl` (each dialog it
+ * opened: its type and how it was answered).
  *
  * Behaviour is switched by {@link FAKE_BROWSER_MODE_ENV} on the SUITE's
  * process (an undeclared name, so it survives `filteredSpawnEnv`): a
@@ -36,9 +36,11 @@ import { z } from "zod";
  * answers the load, `crash` ends the process at the load, `big` pads every
  * screenshot by 1,000 bytes per px of height, `dialog` opens an alert during
  * the load and finishes the load only once the dialog is answered (as a page
- * stopped on `alert()` does), and `hold` finishes the load only once the suite
- * calls {@link FakeBrowser.release}, so a test can act while a render is in
- * flight.
+ * stopped on `alert()` does), `unload` is a page that asks before it lets the
+ * browser leave it (a `beforeunload` dialog at every load after its first,
+ * which starts only once the dialog is accepted and never when it is
+ * dismissed), and `hold` finishes the load only once the suite calls
+ * {@link FakeBrowser.release}, so a test can act while a render is in flight.
  */
 export const FAKE_BROWSER_MODE_ENV = "VIBERR_FAKE_BROWSER_MODE";
 export const FAKE_BROWSER_EVIDENCE_ENV = "VIBERR_FAKE_BROWSER_EVIDENCE_DIR";
@@ -90,8 +92,23 @@ function modeFor(url, html) {
 }
 
 const pause = (ms) => new Promise((done) => setTimeout(done, ms));
-/** The dialog a page is stopped on, until the client answers it. */
+/** The dialog a page is stopped on, until the client answers it, and its
+ *  type. */
 let answerDialog = null;
+let dialogType = "";
+
+/** Open a dialog of \`type\` and resolve with how the client answered it. */
+function openDialog(sessionId, url, type) {
+  return new Promise((done) => {
+    answerDialog = done;
+    dialogType = type;
+    send({
+      method: "Page.javascriptDialogOpening",
+      sessionId,
+      params: { url, message: type === "alert" ? "Welcome" : "", type, hasBrowserHandler: false, defaultPrompt: "" },
+    });
+  });
+}
 
 function declared(name, fallback) {
   const found = new RegExp("fake-" + name + ":([0-9.]+)").exec(page.html);
@@ -131,17 +148,13 @@ async function navigate(message) {
   if (mode === "hold") {
     while (!fs.existsSync(path.join(evidenceDir, "release"))) await pause(20);
   }
-  if (mode === "dialog") {
-    const answered = new Promise((done) => {
-      answerDialog = done;
-    });
-    send({
-      method: "Page.javascriptDialogOpening",
-      sessionId: message.sessionId,
-      params: { url, message: "Welcome", type: "alert", hasBrowserHandler: false, defaultPrompt: "" },
-    });
-    await answered;
+  if (mode === "unload" && page.url !== "about:blank") {
+    // The page loaded here asks before it lets the browser go: told to
+    // stay, the browser never starts this load.
+    const leave = await openDialog(message.sessionId, page.url, "beforeunload");
+    if (!leave) return;
   }
+  if (mode === "dialog") await openDialog(message.sessionId, url, "alert");
   const resources = [];
   for (const found of html.matchAll(/src="([^"]+)"/g)) {
     const src = found[1];
@@ -179,11 +192,11 @@ function handle(message) {
     case "Runtime.evaluate":
       return reply({ result: { type: "string", value: page.url } });
     case "Page.handleJavaScriptDialog": {
-      evidence("dialogs.jsonl", { accept: message.params.accept });
+      evidence("dialogs.jsonl", { type: dialogType, accept: message.params.accept });
       reply({});
       const answer = answerDialog;
       answerDialog = null;
-      if (answer) answer();
+      if (answer) answer(message.params.accept);
       return;
     }
     case "Page.getLayoutMetrics": {
@@ -242,7 +255,8 @@ export interface FakeBrowser {
   launches(): FakeBrowserLaunch[];
   pages(): FakeBrowserPage[];
   shots(): FakeBrowserShot[];
-  /** How each dialog a `dialog` page opened was answered. */
+  /** Each dialog a `dialog` or an `unload` page opened: its type and how it
+   *  was answered. */
   dialogs(): FakeBrowserDialog[];
   /** Let every load a `hold` rule is holding finish, and every later one. */
   release(): void;
@@ -273,7 +287,7 @@ const shotSchema = z.object({
 });
 export type FakeBrowserShot = z.infer<typeof shotSchema>;
 
-const dialogSchema = z.object({ accept: z.boolean() });
+const dialogSchema = z.object({ type: z.string(), accept: z.boolean() });
 export type FakeBrowserDialog = z.infer<typeof dialogSchema>;
 
 function readLines<T>(file: string, schema: z.ZodType<T>): T[] {

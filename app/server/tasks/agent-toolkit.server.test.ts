@@ -1113,6 +1113,22 @@ describe("report_outcome's evidence field (P13-D-26)", () => {
     await withEnv({ VIBERR_BROWSER_EXECUTABLE: fake.executable, ...fake.env() }, async () => {
       const capture = toolkitTools(grants, "oc_capture").capture_page!;
       const store = lastStore;
+      // The run row as registerAgentCompletion leaves it: stamped with the
+      // key, so the tool knows which run asks and keeps the pictures for it.
+      upsertRun(store.db, {
+        id: "run_capture",
+        projectSlug: store.slug,
+        taskKey: "VIB-3",
+        threadId: "thread_capture",
+        role: "Editor",
+        kind: "reviewer",
+        agentProfileId: "editor",
+        backend: "claude",
+        model: "claude-opus-5",
+        sdk: "claude-agent-sdk",
+        state: "running",
+      });
+      patchRun(store.db, "run_capture", { outcomeKey: "oc_capture" });
       const dir = taskAttachmentsDir(store.slug, "VIB-3", store.dataRoot);
       mkdirSync(dir, { recursive: true });
       writeFileSync(
@@ -1145,8 +1161,14 @@ describe("report_outcome's evidence field (P13-D-26)", () => {
             "Phone, 390 px wide: 0 to 2,000 px of 3,412 \\(`nextFrom`: 2000\\)\\. " +
             "It asked the network for 1 thing \\(fonts\\.example\\.com\\), which a capture never loads, " +
             "and for `assets/chart\\.png`, which is not among this task's files \\(the folder is flat\\)\\. " +
-            "Saved at `\\S+/\\.captures/no\\.run/cap_\\S+/out/1-desktop\\.png` and `\\S+/out/1-phone\\.png`: " +
-            "scratch, and the next capture on this task replaces it\\.$",
+            // In the run's own folder of the task's capture scratch.
+            // CANARY: pass `runId: null` from the handler and the pictures
+            // land in the folder every run-less ask shares, where the next
+            // capture on the task by anyone replaces them, and the reply
+            // says so instead.
+            "Saved for this run at `\\S+/\\.captures/run_capture/cap_\\S+/out/1-desktop\\.png` and " +
+            "`\\S+/\\.captures/run_capture/cap_\\S+/out/1-phone\\.png`: " +
+            "scratch, your next capture replaces it, and it goes when this run ends\\.$",
         ),
       );
       // One picture per width, each a stretch a model can read.
@@ -1167,7 +1189,7 @@ describe("report_outcome's evidence field (P13-D-26)", () => {
       // error that names no width.
       const uneven = await call({ name: "short.html", from: 820 });
       expect(uneven.text).toMatch(
-        /^\[done\] `short\.html` as a reader sees it\. Desktop, 1280 px wide: the page ends at 800 px, so nothing starts at 820 px\. Phone, 390 px wide: 820 to 844 px of 844, the end of the page\. Saved at /,
+        /^\[done\] `short\.html` as a reader sees it\. Desktop, 1280 px wide: the page ends at 800 px, so nothing starts at 820 px\. Phone, 390 px wide: 820 to 844 px of 844, the end of the page\. Saved for this run at /,
       );
       expect(uneven.pictures).toEqual([{ mimeType: "image/png", width: 390, height: 24 }]);
       // Past the end at both widths nothing failed: there is nothing there.
