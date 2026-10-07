@@ -30,7 +30,9 @@
 -- goes into `BASELINE_COLUMNS` in a form `ALTER TABLE … ADD COLUMN` accepts on
 -- a table that has rows (a UNIQUE one as a plain column plus a unique index),
 -- a new table into `BASELINE_TABLES` and a new index into `BASELINE_INDEXES`,
--- or existing DBs never get it. A changed constraint needs an in-place change
+-- or existing DBs never get it. A column added to a table `BASELINE_TABLES`
+-- creates also goes into that entry's DDL, which is a hand-kept copy of the
+-- table here: a root older than the table gets it from that copy. A changed constraint needs an in-place change
 -- (an `ALTER TABLE` the bundled SQLite accepts, or a rebuild of its table as
 -- `widenNotificationKindCheck` and `ensureBackendAccountsTable` do; a table
 -- others reference must be rebuilt with `PRAGMA foreign_keys = OFF` set before
@@ -836,7 +838,8 @@ CREATE TABLE run_log_lines (
 --      keys on, a REFERENCES column goes in nullable; a UNIQUE one as a plain
 --      column plus a unique index), a new table into `BASELINE_TABLES` and a new
 --      index (the CLI emits some) into `BASELINE_INDEXES`
---      (app/server/db/sqlite.server.ts), all applied at open. A changed
+--      (app/server/db/sqlite.server.ts), all applied at open; a column on a
+--      table `BASELINE_TABLES` creates also goes into that entry's DDL. A changed
 --      constraint needs an in-place change (an `ALTER TABLE` the bundled SQLite
 --      accepts, or a rebuild of the table with `PRAGMA foreign_keys = OFF` set
 --      before its transaction: "session" and "account" reference "user" ON

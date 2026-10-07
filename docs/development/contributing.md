@@ -111,7 +111,8 @@ back-compat obligation (ruling 683 kept this convention at launch). To change a 
 existing roots a way to get it: a new column goes into `BASELINE_COLUMNS` in a form `ALTER TABLE … ADD COLUMN`
 accepts on a table that has rows (with a backfill when the default misdescribes older rows),
 a new table into `BASELINE_TABLES` and a new index into `BASELINE_INDEXES`
-(`app/server/db/sqlite.server.ts`). A changed constraint reaches existing roots only through an in-place change (an
+(`app/server/db/sqlite.server.ts`); a column added to a table `BASELINE_TABLES` creates also
+goes into that entry's DDL, a hand-kept copy that a root older than the table is created from. A changed constraint reaches existing roots only through an in-place change (an
 `ALTER TABLE` the bundled SQLite accepts, or a rebuild of the table as
 `widenNotificationKindCheck` and `ensureBackendAccountsTable` do) or a re-baseline. Those two
 rebuilds are safe because no other table references theirs; a table others reference must

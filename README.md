@@ -181,7 +181,7 @@ Most other settings live in the app, not the environment:
 | `npm run build` / `npm start` | Production build, and serve it |
 | `npm run lint` / `npm run typecheck` / `npm test` | oxlint with the vendored anti-slop rules / route typegen and `tsc` / the vitest suite |
 | `npm run e2e` | Playwright against the production Docker image |
-| `npm run seed` | Baseline content and the bootstrap admin; `-- --reset` returns the store to a clean sheet |
+| `npm run seed` | Baseline content and the bootstrap admin; `-- --reset` deletes the board, its run history, agent profiles and the org knowledge bases, skills, MCP servers (with their credentials) and domain allowlist before reseeding; users, auth, GitHub and backend credentials survive and the schema is untouched ([details](docs/development/scripts.md#npm-run-seed)) |
 | `npm run seed:demo` | The demo board the route and e2e suites use (development only) |
 | `npm run rescan` | Reconcile the projections with the file store |
 | `npm run store:check` | Read-only: list every canonical file the app cannot trust, with the offending line |
