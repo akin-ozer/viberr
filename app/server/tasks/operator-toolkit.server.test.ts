@@ -3,13 +3,19 @@ import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { z } from "zod";
 import { createTestDbContext } from "../../../test-support/test-db";
-import { publishedSchemas, toolLoading } from "../../../test-support/mcp-tool-meta";
+import { callToolText, publishedSchemas, toolLoading } from "../../../test-support/mcp-tool-meta";
 import {
   baseTaskFrontmatter,
   setupTestStore,
   writeTask,
 } from "../../../test-support/test-store";
+import { settle } from "../../../test-support/polling";
 import { rebuildAll } from "~/server/projections/rebuilder.server";
+import { upsertRun } from "~/server/runtimes/run-store.server";
+import { buildCodexOperatorPrompt } from "~/server/runtimes/operator-prompt.server";
+import { operatorSnapshot } from "./operator-snapshot.server";
+import { resolvePacket } from "./packet-resolution.server";
+import type { TaskTook } from "./what-it-took.server";
 import { writeTaskAttachment } from "~/server/files/task-attachments.server";
 import { taskAttachmentsDir } from "~/server/files/file-store-root.server";
 import { keepDelivery } from "~/server/files/kept-deliveries.server";
@@ -1586,5 +1592,99 @@ describe("buildOperatorToolkit — the completion packet goes with the acceptanc
     ).toMatchObject({ gaps: "Detaching a repository is not covered.", assumptions: null, files: [] });
     expect(await call("open_decision_packet", decision)).toContain("[done]");
     expect(packet()!.options.map((o) => o.kind)).toEqual(["accept_completion", "request_edit"]);
+  });
+});
+
+/**
+ * Ruling 693: the operator reads what the task took on either backend. Claude
+ * calls `get_task`; Codex calls nothing and is handed the snapshot in its
+ * prompt. Both are one `operatorSnapshot`, so both carry one figure. What the
+ * figure counts is `what-it-took.server.test.ts`'s; this owns its carriage.
+ */
+describe("ruling 693: the operator's read of what a task took", () => {
+  it("ruling 693: get_task carries what the task took, and a Codex operator reads the same figure in its snapshot", async () => {
+    // CANARY: (a) leave the key out of `operatorSnapshot` and both operators
+    // lose the figure; (b) leave it out of a `toolless` snapshot alone (or
+    // build it in the `get_task` handler instead) and the Codex prompt, which
+    // calls no tool, goes without.
+    const store = setupTestStore(ctxDb);
+    writeTask(store.dataRoot, store.slug, {
+      frontmatter: baseTaskFrontmatter("VIB-1", { stage: "impl", ownerUserId: store.users.arda.id }),
+    });
+    rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
+    for (const [id, kind, finishedAt, totalCostUsd] of [
+      ["run_took_op", "operator", "2026-07-01T09:05:00.000Z", 0.5],
+      ["run_took_dev", "primary", "2026-07-01T09:20:00.000Z", 2],
+    ] as const) {
+      upsertRun(store.db, {
+        id,
+        projectSlug: store.slug,
+        taskKey: "VIB-1",
+        threadId: `th-${id}`,
+        role: kind === "operator" ? "Operator" : "Implementation",
+        kind,
+        backend: "claude",
+        model: "sonnet",
+        sdk: "test",
+        agentName: kind === "operator" ? "Operator" : "Developer",
+        agentProfileId: kind === "operator" ? "operator" : "developer",
+        state: "finished",
+        startedAt: "2026-07-01T09:00:00.000Z",
+        finishedAt,
+        totalCostUsd,
+      });
+    }
+    const toolkit = buildOperatorToolkit({
+      db: store.db,
+      ctx: { dataRoot: store.dataRoot },
+      projectSlug: store.slug,
+      taskKey: "VIB-1",
+      authority: authority([]),
+    });
+    const call = (name: string, args: Parameters<typeof callToolText>[2]) =>
+      callToolText(toolkit.tools, name, args);
+
+    // One decision, put by the operator's own tool and answered by a person.
+    expect(
+      await call("open_decision_packet", {
+        packetType: "input",
+        title: "Migrate in one step or two?",
+        options: [
+          { kind: "redirect", title: "One step", recommended: true },
+          { kind: "request_edit", title: "Two steps" },
+        ],
+      }),
+    ).toContain("[done]");
+    await resolvePacket(
+      store.db,
+      { projectSlug: store.slug, taskKey: "VIB-1", optionIndex: 0 },
+      { userId: store.users.arda.id, label: store.users.arda.email },
+      { dataRoot: store.dataRoot },
+    );
+    // The answer hands the task to an operator this board does not deploy.
+    await settle();
+
+    // SAFETY: `get_task` answers the snapshot as JSON; `whatItTook` is the key
+    // under test, and a reply without it fails the first assertion below.
+    const claude = (JSON.parse(await call("get_task", {})) as { whatItTook?: TaskTook }).whatItTook;
+    expect(claude?.runs.total).toBe(2);
+    expect(claude?.runs.operator).toBe(1);
+    expect(claude?.cost.usd).toBe(2.5);
+    expect(claude?.asked).toEqual({ rounds: 1, byAgents: 0, open: false });
+    expect(claude?.byAgent.map((a) => [a.agent, a.role, a.agentMinutes])).toEqual([
+      ["Developer", "delivering", 20],
+      ["Operator", "operator", 5],
+    ]);
+
+    // Codex: the same snapshot, printed in the prompt it plans from.
+    const prompt = buildCodexOperatorPrompt(
+      operatorSnapshot(store.db, { dataRoot: store.dataRoot }, store.slug, "VIB-1", authority([]), 30, {
+        toolless: true,
+      }),
+      "manual",
+    );
+    const block = /^# Task snapshot\n\n```json\n([\s\S]*?)\n```/.exec(prompt)?.[1] ?? "{}";
+    // SAFETY: the block is `JSON.stringify(snapshot)`, read back as above.
+    expect((JSON.parse(block) as { whatItTook?: TaskTook }).whatItTook).toEqual(claude);
   });
 });

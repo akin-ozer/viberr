@@ -878,7 +878,7 @@ describe("ruling 635: one backend's runs under a switch", () => {
    */
   it("weighs a backend that reports no cost in tokens, says so once, and prints a billion as B", () => {
     const { container } = renderPage(FULL, "?backend=codex&by=kind");
-    // CANARY: render `fmtCost(totals.cost)` for a backend with no costed run
+    // CANARY: render `formatCost(totals.cost)` for a backend with no costed run
     // and the figure reads "$0.00", a price Codex never quoted.
     const cost = metric(container, "Cost");
     expect(cost.querySelector(".metric-val")?.textContent).toBe("Not reported");

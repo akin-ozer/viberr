@@ -758,6 +758,62 @@ packet goes away (`retryReviewDeadlockEscalation`, ruling 328).
   change: its size, and the diff open whole at 200 lines or fewer, else the operator's
   summary with the diff one press away. While the packet carries the diff, the Changes
   panel (ruling 484) steps aside.
+- **What a task took** (ruling 693) is printed on the same card, under the reviewers, as
+  the offer and as the result: the agent runs that started and their time, their cost
+  where a backend reported one, how many rounds a person was asked, how many times the
+  work was sent back, and the wall time from filing to the first delivery and to
+  acceptance with the share agents ran and the share it waited on a person. Nothing is
+  stored. `whatItTook` (`app/server/tasks/what-it-took.server.ts`) derives it when it is
+  read, from the task's `agent_runs` rows and the task file (frontmatter, the open
+  packet, the timeline), and reads no clock, so it does not move with the time of day.
+  Audit rows are not read: they expire at 90 days. The card gets the figure's `facts`
+  (one phrase each, a zero left out) and `notes` (one fixed sentence per thing the figure
+  misses on this task); the operator's and the controller's read of the task carry the
+  numbers ([operator.md §4](operator.md), [controller-and-epics.md](controller-and-epics.md)).
+  A project member or an org admin sees it, the run console's bar, so a task's dollars
+  are read by its project ([auth-and-rbac.md §6](auth-and-rbac.md)). Each number, where it
+  comes from and what it misses:
+  - `runs.total`, `runs.operator`: the run rows with `started_at` set (the operator's by
+    `kind`). A row that never started is counted in `runs.neverStarted`, not in the total.
+    A controller turn spent on the task is not a task run and is not counted. The rows
+    live in the projection database alone: when agents wrote on the timeline and no row is
+    left (a rebuilt or restored database), `runs.recordKept` is false and the card says the
+    runs, agent time and cost are not known.
+  - `runs.agentMinutes`: the sum of `finished_at - started_at` over ended runs. A run cut
+    by a restart is left out and counted in `runs.unmeasured.cutByRestart` (boot recovery
+    stamps its `finished_at` with the boot instant, so the gap is the outage); a run still
+    going is counted in `runs.unmeasured.live`.
+  - `cost.usd`: the sum of the costs the runs reported, each run's own share (ruling 542).
+    Null when no run reported one, never zero. `cost.unreported` counts the ended runs
+    with none, by backend: every Codex run, and a Claude run stopped before its result.
+  - `asked.rounds`: the decisions a person recorded (an entry by a person, or by the
+    controller for one, that opens with `**Decision:**`), plus one while a decision is
+    open (`asked.open`). One packet is one round, whoever raised it and however many
+    options it carried. Not counted: a declined recommendation (nobody was asked a
+    question), a packet withdrawn or superseded unanswered, and a decision answered by
+    accepting, which is the acceptance. `asked.byAgents` counts the questions agents
+    raised themselves (`**Question for a human:**`), on either backend.
+  - `sentBack.byReviewers`: the reviewers' requests for changes, read from the `quality`
+    notes titled "Changes requested", because the `verdicts[]` row is one reviewer's
+    current answer and an approval on the same delivery replaces the objection. Two
+    reviewers objecting to one delivery count two.
+  - `sentBack.byPeople`: a person's moves of the task to an earlier stage, by the board's
+    stage order and names as they stand now (the move's own sentence on the timeline). A
+    decision answered with a request for changes is an asked round, not a send-back, and
+    an `@agent` comment that restarts work is counted in neither.
+  - `wall.firstDelivery`: from `createdAt` to the earliest trace of a delivery:
+    `deliveredAt`, the delivered revision's `createdAt`, a `files:<stamp>` subject a
+    verdict or a run was bound to, or, for a revision that was reworked (the file keeps
+    the newest revision's time alone), the first run dispatched on the one before it,
+    which is an upper bound and is said in a note. Null on a task with nothing to deliver
+    (`noChanges`) or nothing delivered.
+  - `wall.acceptance`: from `createdAt` to the newest `completion` entry of a task at the
+    terminal stage. Every door to that stage writes one.
+  - Each span's `agentMinutes` is the wall time some ended run covered (two agents running
+    at once count once); its `waitedOnPersonMinutes` is, for each entry a person wrote in
+    the span, the time since the entry before it less the time an agent ran in between.
+    That is a proxy: time a run sat queued behind the run cap just before a person acted
+    reads as waiting on them, and a wait still open is not counted until the person acts.
 - **Schedules** live in `task.md` `schedules[]`: `run-operator` (optional steer) or
   `run-agent` (a profile id and prompt; the profile must be deployed when the entry is
   created). Creating one needs `run-agents`, through the task page's run controls or

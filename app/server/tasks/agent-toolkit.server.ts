@@ -85,6 +85,7 @@ import {
   type OfferWithdrawalCause,
 } from "./task-mutation.server";
 import { toError } from "~/shared/errors";
+import { QUESTION_LEAD } from "~/shared/timeline-leads";
 import { pageEnd } from "~/server/runtimes/read-page-budget.server";
 
 /**
@@ -322,7 +323,7 @@ export async function openAgentQuestionPacket(
       type: "blocked",
       actor: input.actorRef,
       title: null,
-      text: askedEntryText(`**Question for a human:** ${packet.title}`, packet),
+      text: askedEntryText(`${QUESTION_LEAD} ${packet.title}`, packet),
       toAgent: false,
       evidence: null,
     });

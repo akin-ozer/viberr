@@ -5,6 +5,7 @@ import type { SeedUserIds } from "../../test-support/demo-data";
 import { setupAppTest, type AppTestContext } from "../../test-support/test-app";
 import type { TaskLinks } from "~/shared/task-key-links";
 import type { CompletionView } from "~/server/tasks/completion-packet.server";
+import type { TookCard } from "~/server/tasks/what-it-took.server";
 
 /**
  * F19-22 — the task page's GitHub panel needs the last CHECK as well as the
@@ -44,6 +45,8 @@ interface TaskLoaderData {
   mergeCollisions: { taskKey: string; prNumber: number; paths: string[]; partial: boolean }[];
   /** Ruling 521. */
   completion: CompletionView | null;
+  /** Ruling 693: on a payload that carries a completion view, and no other. */
+  whatItTook?: TookCard;
 }
 
 /**
@@ -408,5 +411,58 @@ describe("ruling 521: the completion packet", () => {
     expect(verdicts.map((v) => [v.name, v.result, v.required])).toEqual([
       ["Reviewer", "approve", true],
     ]);
+  });
+});
+
+/**
+ * Ruling 693: the loader ships what the task took for the completion card to
+ * print: the facts and the sentences saying what they miss, built from the run
+ * rows and the task file it has already read. The arithmetic is the server
+ * suite's (`what-it-took.server.test.ts`); this owns what the route sends and
+ * when. The key also rides the run console's bar (a project member or an org
+ * admin), which this suite cannot prove on anyone: a person who is neither
+ * never reaches this loader's body (R15-4 above).
+ */
+describe("ruling 693: what the task took", () => {
+  async function ran(taskKey: string, minutes: number, costUsd: number) {
+    const { upsertRun } = await import("~/server/runtimes/run-store.server");
+    upsertRun(app.db, {
+      id: `run_took_${taskKey}_${minutes}`,
+      projectSlug: "viberr-core",
+      taskKey,
+      threadId: `th-took-${taskKey}-${minutes}`,
+      role: "Implementation",
+      kind: "primary",
+      backend: "claude",
+      model: "sonnet",
+      sdk: "test",
+      agentProfileId: "developer",
+      state: "finished",
+      startedAt: "2026-09-27T09:00:00.000Z",
+      finishedAt: new Date(Date.parse("2026-09-27T09:00:00.000Z") + minutes * 60_000).toISOString(),
+      totalCostUsd: costUsd,
+    });
+  }
+
+  it("ruling 693: the loader ships what the task took with the completion card, as its facts and notes alone, and nothing for a task with no card", async () => {
+    // CANARY: (a) drop `completion &&` from the loader's condition and a task
+    // with nothing delivered ships the key, so every task's payload grows;
+    // (b) assign the whole figure (`tookShipped.whatItTook = took`) and the
+    // page is sent numbers the card never draws; (c) hand `whatItTook` no
+    // rows and the card says nothing of the runs the loader read.
+    // VIB-160 has delivered a revision; VIB-166 stands at Triage.
+    await ran("VIB-160", 20, 1);
+    await ran("VIB-160", 10, 0.5);
+    await ran("VIB-166", 5, 0.25);
+
+    const delivered = await loadTask("VIB-160");
+    expect(delivered.completion).not.toBeNull();
+    expect(Object.keys(delivered.whatItTook!)).toEqual(["facts", "notes"]);
+    expect(delivered.whatItTook!.facts.slice(0, 2)).toEqual(["2 runs, 30m of agent time", "$1.50"]);
+    expect(delivered.whatItTook!.notes).toEqual([]);
+
+    const undelivered = await loadTask("VIB-166");
+    expect(undelivered.completion).toBeNull();
+    expect("whatItTook" in undelivered).toBe(false);
   });
 });
