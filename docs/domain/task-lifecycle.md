@@ -631,6 +631,26 @@ for a person (ruling 609): the Calculator Builder's headline ask comes before th
 delivered link, so what it saved is drafts, posted under its name, and its next report
 once the question is answered is the delivery.
 
+**A delivered page is pictured (ruling 691).** Once a files delivery is stamped and kept
+(ruling 597), Viberr renders each page in it, a `.html`, `.htm`, `.md` or `.markdown` file,
+in a headless browser at a desktop width (1280 px) and a phone width (390 px), and keeps
+the pictures: `<file>.capture-desktop.png` and `<file>.capture-phone.png` in the task's
+attachments, a copy in the kept delivery they picture, the `pageCaptures` record bound to
+that delivery's stamp, and one timeline note from "Page capture" that claims them and
+says what the pictures do not show by themselves (a page that runs longer than its
+picture, one wider than a phone's screen, what the page asked the network for). Pages a
+person uploaded or a relay carried in are inputs and are not pictured; a delivery is
+pictured up to 8 pages, the deliverer's own first. The next delivery's pictures replace
+these under the same names, a page it no longer holds loses its picture, and each kept
+delivery keeps its own. The render reads the kept copy, runs as the task owner's agent
+user with no network, and is one job at a time for the whole instance
+(`page-capture.server.ts`). The completion waits up to 45 s for it before the operator
+reacts, so the operator and the reviewers it dispatches start with the pictures there; a
+slower render finishes in the background. A page that cannot be pictured says why in the
+note and in the record, and the delivery stands without it. A delivery that is a revision
+is not pictured: its pages live in the pull request. With no browser named
+(`VIBERR_BROWSER_EXECUTABLE` unset) nothing is pictured and nothing is said on the task.
+
 A reviewer's `report_outcome` records a **verdict** (`approve | request_changes`)
 bound to the review subject (§6). A run whose workspace could not be provisioned
 records no verdict (ruling 248). The reason is capped at 2,000 characters

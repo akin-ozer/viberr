@@ -11,6 +11,7 @@ import {
   listTaskAttachmentNames,
 } from "~/server/files/task-attachments.server";
 import { keepDelivery } from "~/server/files/kept-deliveries.server";
+import { isPageCaptureName } from "~/shared/page-capture";
 import type { FileLease } from "~/shared/file-leases";
 import { isRelayComment } from "./task-relay.server";
 import type { DatabaseSync } from "node:sqlite";
@@ -531,6 +532,11 @@ export function deliveredFileNames(fm: TaskFrontmatter, timeline: readonly TaskF
  * the Estimate Judge's J4 audit found no `mapping.md` in the first delivery and
  * called its Deliverable 10/10 unsupported. The browser's working files stay
  * out, as they stay out of the delivery (ruling 570).
+ *
+ * Ruling 691: so do Viberr's own page pictures. At the moment a delivery is
+ * stamped they picture the one before it; this delivery's are made from the
+ * kept copy and added to it by the render. Returns the stamp it kept, which
+ * is the delivery the caller asks to be pictured, or null when none was.
  */
 export function keepStampedDelivery(
   ctx: TaskMutationContext,
@@ -538,22 +544,23 @@ export function keepStampedDelivery(
   taskKey: string,
   stampBefore: string | null,
   written: ParsedTaskFile,
-): void {
+): string | null {
   const stamp = written.frontmatter.deliveredAt;
-  if (!stamp || stamp === stampBefore) return;
+  if (!stamp || stamp === stampBefore) return null;
   try {
     keepDelivery(
       projectSlug,
       taskKey,
       stamp,
       listTaskAttachmentNames(projectSlug, taskKey, ctx.dataRoot).filter(
-        (name) => !isBrowserWorkingArtifact(name),
+        (name) => !isBrowserWorkingArtifact(name) && !isPageCaptureName(name),
       ),
       ctx.dataRoot,
     );
   } catch (error) {
     logger.warn("a files delivery could not be kept", { projectSlug, taskKey, stamp, err: toError(error) });
   }
+  return stamp;
 }
 
 /** Build the reply event without writing so completion effects can land atomically. */

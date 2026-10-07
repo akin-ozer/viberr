@@ -131,7 +131,7 @@ per process: restart to apply a change.
 
 | Variable | Default | Notes |
 |---|---|---|
-| `VIBERR_BROWSER_EXECUTABLE` | unset; the image sets `/usr/bin/chromium` | Absolute path of the browser the `use-browser` capability's Playwright MCP server drives (ruling 75, `specialist-browser-mcp.server.ts`). When set, the server passes `--executable-path <path> --no-sandbox` to that MCP server (chromium's user-namespace sandbox cannot start under Docker's default seccomp profile as a non-root user). A set path that is not on disk makes health's `browser` read `unavailable`. Unset on a dev host, Playwright's own browser resolution applies. |
+| `VIBERR_BROWSER_EXECUTABLE` | unset; the image sets `/usr/bin/chromium` | Absolute path of the browser the `use-browser` capability's Playwright MCP server drives (ruling 75, `specialist-browser-mcp.server.ts`). When set, the server passes `--executable-path <path> --no-sandbox` to that MCP server (chromium's user-namespace sandbox cannot start under Docker's default seccomp profile as a non-root user). A set path that is not on disk makes health's `browser` read `unavailable`. Unset on a dev host, Playwright's own browser resolution applies. It also decides whether delivered pages are pictured (ruling 691, `page-capture.server.ts`): set, the renderer drives this browser for each files delivery and for `capture_page`; set to a path that is not on disk, every delivered page records that as the reason it has no picture; unset, nothing is pictured, no agent is offered `capture_page`, and no task says anything about it. |
 
 ### MCP gateway
 
