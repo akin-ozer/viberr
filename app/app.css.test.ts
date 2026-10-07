@@ -5723,7 +5723,7 @@ describe("app.css ruling 459: the better-ui pass — contextual icon motion", ()
         // Ruling 469: the MCP editor's Sign in and Sign out.
         "features/org-settings/resource-modals.tsx: user → loader (spins)",
         "features/org-settings/resource-modals.tsx: x → loader (spins)",
-        "features/task-detail/decision-packet.tsx: message → loader (spins)",
+        "features/task-detail/decision-packet-regions.tsx: message → loader (spins)",
         "features/policy/policy-page.tsx: x → loader (spins)",
         // Ruling 463: a GitHub connection's Re-check.
         "features/org-settings/connections-panel.tsx: refresh → loader (spins)",

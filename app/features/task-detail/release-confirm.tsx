@@ -46,7 +46,6 @@ export function ReleaseConfirm({
     tone: undefined,
   };
   const mine = o.userId === me.id;
-  const packet = task.packet;
   // UI-41: only members who can actually HOLD the seat are offered. `setOwner`
   // rejects viewers (`own-task` is contributor+), and `OwnerControl` already
   // applies this filter — so clicking a viewer's chip here closed the dialog and
@@ -102,29 +101,7 @@ export function ReleaseConfirm({
               )}
             </span>
           </div>
-          <div className="obs">
-            <span className="k">Open now</span>
-            <span>
-              {packet ? (
-                <span className="rel-open">
-                  <Pill
-                    // Ruling 625 (B11): a decision waiting on a person is
-                    // info blue; amber is an agent's question.
-                    kind={packet.type === "blocked" ? "blocked" : packet.answerTo ? "input" : "info"}
-                    sm
-                    dot
-                  >
-                    {packet.kind}
-                  </Pill>{" "}
-                  waiting on the owner
-                </span>
-              ) : task.waiting === "human" ? (
-                "A human decision is pending on this task"
-              ) : (
-                "Agent work in progress. No boundary is waiting"
-              )}
-            </span>
-          </div>
+          <OpenNowRow task={task} />
           <div className="obs">
             <span className="k">After</span>
             <span>
@@ -188,5 +165,40 @@ export function ReleaseConfirm({
         </div>
       </div>
     </dialog>
+  );
+}
+
+/**
+ * The dialog's "Open now" row: the open packet waiting on the owner, a pending
+ * human decision, or agent work with no boundary waiting. A hook-free
+ * component of its own (ruling 689(e), the split of `ReleaseConfirm` along the
+ * task-page recipe) in the slot the row always held.
+ */
+function OpenNowRow({ task }: { task: TaskSummary }) {
+  const packet = task.packet;
+  return (
+    <div className="obs">
+      <span className="k">Open now</span>
+      <span>
+        {packet ? (
+          <span className="rel-open">
+            <Pill
+              // Ruling 625 (B11): a decision waiting on a person is
+              // info blue; amber is an agent's question.
+              kind={packet.type === "blocked" ? "blocked" : packet.answerTo ? "input" : "info"}
+              sm
+              dot
+            >
+              {packet.kind}
+            </Pill>{" "}
+            waiting on the owner
+          </span>
+        ) : task.waiting === "human" ? (
+          "A human decision is pending on this task"
+        ) : (
+          "Agent work in progress. No boundary is waiting"
+        )}
+      </span>
+    </div>
   );
 }
