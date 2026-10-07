@@ -56,7 +56,9 @@ import { z } from "zod";
  *    `prompt()` stop a page until somebody answers, and nobody is there: each
  *    is dismissed and counted, so the page loads on and the report says so.
  *
- * Run as `node page-capture-child.server.ts '<job json>'`. It writes
+ * Run as `node page-capture-child.server.ts` with the job, as JSON, on its
+ * standard input (never an argument: a job names every file of a delivery
+ * and can be past what the kernel takes as one). It writes
  * `<out>/<n>-<view>.png` and `<out>/report.json` and prints nothing the server
  * parses. Node runs it as TypeScript; it imports only `node:` modules and
  * declared packages, and nothing in the app imports it.
@@ -917,13 +919,20 @@ async function picturePage(job: Job, server: PageServer, page: JobPage, index: n
   return report(error);
 }
 
+/** Everything on the standard input, as text. */
+async function readInput(): Promise<string> {
+  const chunks: Buffer[] = [];
+  for await (const chunk of process.stdin) chunks.push(Buffer.from(chunk));
+  return Buffer.concat(chunks).toString("utf8");
+}
+
 async function main(): Promise<number> {
   let job: Job;
   try {
-    job = jobSchema.parse(JSON.parse(process.argv[2] ?? ""));
+    job = jobSchema.parse(JSON.parse(await readInput()));
   } catch (error) {
     process.stderr.write(
-      `usage: page-capture-child.server.ts '<job json>' (${error instanceof Error ? error.message : String(error)})\n`,
+      `usage: page-capture-child.server.ts < job.json (${error instanceof Error ? error.message : String(error)})\n`,
     );
     return 2;
   }

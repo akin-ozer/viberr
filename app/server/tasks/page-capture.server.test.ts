@@ -569,6 +569,20 @@ describe("a delivered page is pictured (ruling 691)", () => {
         "A page renders as its person's agent user, never as the server.",
     );
     expect(readFileSync(log, "utf8")).not.toContain("page-capture-child");
+
+    // The owner is back and their launch cannot be prepared (the launcher
+    // refuses to hand them their home): the tool gives the launch's own
+    // sentence. CANARY: answer every failed launch with the no-owner
+    // sentence, as before, and a task that has an owner is told it has none.
+    writeDeliveringTask();
+    writeFileSync(launcher, "#!/bin/sh\necho 'chown refused' >&2\nexit 1\n");
+    const home = path.join(store.dataRoot, "runtimes", "users", store.users.arda.id);
+    expect((await withBrowser("", () => ask("post.html"))).text).toBe(
+      "[error] `post.html` could not be captured. " +
+        "The agent could not be started as its person's own user (ruling 460): " +
+        `the launcher could not prepare ${home} (chown refused). ` +
+        "Nothing ran; nothing falls back to the server's own user.",
+    );
   });
 
   it("a page that cannot be pictured is said on the task and leaves the delivery, its kept copy and the other pages as they were", async () => {
@@ -735,15 +749,17 @@ describe("a delivered page is pictured (ruling 691)", () => {
 
   it("pictures the delivery as it was kept and not the files as they are now, tells the renderer what a capture does not carry, and leaves no copy behind", async () => {
     const stamp = "2026-10-07T12:00:00.000Z";
+    // A name longer than the 80 characters a sentence prints of one.
+    const film = `${"film-".repeat(17)}reel.bin`;
     await keptDelivery(
       "VIB-1",
       stamp,
       {
-        "post.html": '<h1>As delivered</h1><img src="chart.png"><img src="film.bin">',
+        "post.html": `<h1>As delivered</h1><img src="chart.png"><img src="${film}">`,
         "chart.png": "the chart as delivered",
       },
       // Past the 25 MB a capture carries for one file.
-      { "film.bin": 26 * 1024 * 1024 },
+      { [film]: 26 * 1024 * 1024 },
     );
     // After the delivery was stamped and kept, a run saves the page again and
     // removes the picture beside it. A verdict binds to the kept copy, so
@@ -758,17 +774,21 @@ describe("a delivered page is pictured (ruling 691)", () => {
     expect(served!.html).toContain("As delivered");
     expect(served!.resources).toEqual([
       { src: "chart.png", status: 200, bytes: 22 },
-      { src: "film.bin", status: 404, bytes: 10 },
+      { src: film, status: 404, bytes: 10 },
     ]);
     // The renderer was handed the copy by name, in a folder of the task's
     // own directory and not under the workspace agents write.
     const [launch] = fake.launches();
     expect(launch!.argv.join(" ")).not.toContain(inputRoot());
     expect(served!.url).toMatch(/^http:\/\/127\.0\.0\.1:\d+\/[0-9a-f]{16}\/post\.html$/);
+    // The name is matched against what was not carried as it is, and only
+    // printed cut. CANARY: cut the name where the report is read, before it
+    // is compared, and a file that is among the task's files and was left out
+    // for its size is said to be "not among this task's files".
     expect(captureNote()!.text).toBe(
       "Viberr rendered `post.html` as a reader sees it, at a desktop width (1,280 px) and a phone width (390 px). " +
         "The pictures are attached and show beside each file on the result. " +
-        "`post.html` asked for `film.bin`, which a capture does not carry (a file over 25 MB, or past 200 MB in all).",
+        `\`post.html\` asked for \`${film.slice(0, 79)}\u2026\`, which a capture does not carry (a file over 25 MB, or past 200 MB in all).`,
     );
     // The copy is gone with the render, and so is the render's scratch.
     expect(existsSync(inputRoot())).toBe(false);
@@ -1041,6 +1061,76 @@ describe("a delivered page is pictured (ruling 691)", () => {
       "It asked for `/css/site.js` and `/up.png`, paths from the site's root or above the page's folder, " +
         "which a capture does not serve (it serves the task's own files by name).",
     );
+    // And when one width is over before the stretch asked for and the other
+    // failed, the failure is the answer, with the width that ended named.
+    // `half.html` is one screen tall, 800 px on a desktop, and ends the
+    // browser at the phone's width. CANARY: answer [noop] whenever any width
+    // reports its end, as before, and the agent is told the page is simply
+    // over where a phone had content and the render failed.
+    expect((await withBrowser("", () => ask("half.html", { from: 820 }))).text).toBe(
+      "[error] `half.html` could not be captured: the browser ended before the page was pictured. " +
+        "It ends at 800 px at the desktop width (1280 px), so nothing starts at 820 px there.",
+    );
+  });
+
+  it("pictures one of two pages whose pictures would be kept under the same names, and says why the other has none", async () => {
+    // The store keeps a name trimmed and composed, so the pictures of
+    // ` notes.html` and of `notes.html` are one pair of names.
+    const stamp = "2026-10-07T12:00:00.000Z";
+    await keptDelivery("VIB-1", stamp, { "notes.html": "<p>the notes</p>", " notes.html": "<p>other notes</p>" });
+    await withBrowser("", () => picture("VIB-1", stamp));
+    // CANARY: hand both pages to the renderer, as before, and the second
+    // page's pictures are written over the first's: the record names the
+    // same two pictures under both pages and the task holds one pair.
+    expect(frontmatter().pageCaptures!.pages).toEqual([
+      {
+        file: " notes.html",
+        shots: [],
+        error: 'its pictures would be kept under the same names as the pictures of "notes.html"',
+      },
+      {
+        file: "notes.html",
+        shots: [
+          { view: "desktop", name: "notes.html.capture-desktop.png", cut: false },
+          { view: "phone", name: "notes.html.capture-phone.png", cut: false },
+        ],
+        error: null,
+      },
+    ]);
+    // The page spelled the way the store spells it is the one pictured.
+    expect(opened()).toEqual(["notes.html"]);
+    expect(fake.pages()[0]!.html).toBe("<p>the notes</p>");
+    expect(captureNote()!.text).toBe(
+      "Viberr rendered `notes.html` as a reader sees it, at a desktop width (1,280 px) and a phone width (390 px). " +
+        "The pictures are attached and show beside each file on the result. " +
+        'Viberr could not picture ` notes.html`: its pictures would be kept under the same names as the pictures of "notes.html". ' +
+        "The delivery stands without it.",
+    );
+  });
+
+  it("pictures a page of a delivery of thousands of files: the renderer is handed its job on standard input, not as one argument", async () => {
+    // The job names every file of the kept delivery (ruling 610 keeps every
+    // file on the task). 4,400 names of 240 characters are over a megabyte
+    // of job: past the 131,072 bytes Linux takes as one argument, and past
+    // the megabyte macOS takes for all of them.
+    const stamp = "2026-10-07T12:00:00.000Z";
+    const many = Object.fromEntries(
+      Array.from({ length: 4_400 }, (_, i) => [`${String(i).padStart(5, "0")}-${"x".repeat(230)}.txt`, ""]),
+    );
+    await keptDelivery("VIB-1", stamp, { "post.html": "<p>the page</p>", ...many });
+    await withBrowser("", () => picture("VIB-1", stamp));
+    // CANARY: pass the job as an argument of the renderer again and it
+    // cannot be spawned: the page records "the renderer could not be started".
+    expect(frontmatter().pageCaptures!.pages).toEqual([
+      {
+        file: "post.html",
+        shots: [
+          { view: "desktop", name: "post.html.capture-desktop.png", cut: false },
+          { view: "phone", name: "post.html.capture-phone.png", cut: false },
+        ],
+        error: null,
+      },
+    ]);
   });
 
   it("an agent's ask finds a page in either Unicode form and renders it under the name the folder holds", async () => {

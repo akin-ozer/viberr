@@ -30,6 +30,7 @@ import { taskAttachmentsDir, taskDir } from "~/server/files/file-store-root.serv
 import { keepDelivery, keptDeliveryDir, resolveKeptDeliveryFile } from "~/server/files/kept-deliveries.server";
 import {
   IMAGE_READ_MAX_BYTES,
+  checkAttachmentUpload,
   imageHeader,
   readAttachmentBytes,
   resolveTaskAttachment,
@@ -353,7 +354,8 @@ interface RenderedPage {
   asked: string[];
   askedCount: number;
   /** What it asked the renderer's page server for and was not served: a
-   *  name, or (starting with `/`) a path outside its own folder. */
+   *  name, or (starting with `/`) a path outside its own folder. Whole, as
+   *  the report gave them: only a sentence prints them, cut and cleaned. */
   missing: string[];
   error: string | null;
 }
@@ -659,7 +661,11 @@ async function render(request: RenderRequest): Promise<Render> {
     }
     outcome = await runPersonCommand({
       file: process.execPath,
-      args: [request.renderer.child, JSON.stringify(job)],
+      args: [request.renderer.child],
+      // On its standard input, never as an argument: the job names every file
+      // of a kept delivery, and a delivery of thousands is past what the
+      // kernel takes as one argument.
+      stdin: JSON.stringify(job),
       cwd: scratch,
       launch,
       // The server's environment minus every credential and every Viberr
@@ -740,7 +746,9 @@ async function render(request: RenderRequest): Promise<Render> {
       dialogs: said.dialogs,
       asked: said.asked.slice(0, 12).map(reportName),
       askedCount: said.askedCount,
-      missing: said.missing.slice(0, 12).map(reportName),
+      // As the renderer wrote them: a name is matched against the names a
+      // capture did not carry before it is cut for print (`missingClauses`).
+      missing: said.missing.slice(0, 12),
       error: shots.length === 0 && error === null ? unreported : error,
     };
   });
@@ -768,22 +776,23 @@ function missingClauses(page: RenderedPage, notCarried: ReadonlySet<string>): st
   // site's root, or above the page's own folder. No file name starts so.
   const outside = page.missing.filter((name) => !notCarried.has(name) && name.startsWith("/"));
   const absent = page.missing.filter((name) => !notCarried.has(name) && !name.startsWith("/"));
+  // Sorted into its kind by the name as it is, then printed cut and cleaned:
+  // a long name cut first would no longer be the name that was not carried.
+  const named = (names: readonly string[]): string => LIST_AND.format(names.map((name) => code(reportName(name))));
   const clauses: string[] = [];
   if (absent.length > 0) {
     clauses.push(
-      `${LIST_AND.format(absent.map(code))}, which ${absent.length === 1 ? "is" : "are"} not among this task's files (the folder is flat)`,
+      `${named(absent)}, which ${absent.length === 1 ? "is" : "are"} not among this task's files (the folder is flat)`,
     );
   }
   if (outside.length > 0) {
     clauses.push(
-      `${LIST_AND.format(outside.map(code))}, ${outside.length === 1 ? "a path" : "paths"} from the site's root or above the page's folder, ` +
+      `${named(outside)}, ${outside.length === 1 ? "a path" : "paths"} from the site's root or above the page's folder, ` +
         "which a capture does not serve (it serves the task's own files by name)",
     );
   }
   if (tooLarge.length > 0) {
-    clauses.push(
-      `${LIST_AND.format(tooLarge.map(code))}, which a capture does not carry (a file over 25 MB, or past 200 MB in all)`,
-    );
+    clauses.push(`${named(tooLarge)}, which a capture does not carry (a file over 25 MB, or past 200 MB in all)`);
   }
   return clauses;
 }
@@ -938,6 +947,38 @@ function sourceRefusal(file: string, kind: PageKind, bytes: number): SourceRefus
   return null;
 }
 
+/** The name the store keeps a page's picture under: trimmed and composed
+ *  (`checkAttachmentUpload`, ruling 675), so two pages can come to one. Null
+ *  for a name the store refuses, which the write itself then says. */
+function keptPictureName(file: string): string | null {
+  try {
+    return checkAttachmentUpload(pageCaptureName(file, "desktop"), 0);
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Pages whose pictures another page's would be kept over, each with that
+ * page: two names that differ only in what the store trims or composes
+ * (` notes.md` and `notes.md`, or one name in both Unicode forms on a disk
+ * that holds names byte for byte) share one pair of picture names. The page
+ * spelled the way the store spells it keeps them.
+ */
+function pictureNameClashes(pages: readonly PageInput[]): Map<string, string> {
+  const keeper = new Map<string, string>();
+  const asStored = (page: PageInput): boolean => keptPictureName(page.file) === pageCaptureName(page.file, "desktop");
+  const clashes = new Map<string, string>();
+  for (const page of [...pages].sort((a, b) => Number(asStored(b)) - Number(asStored(a)))) {
+    const kept = keptPictureName(page.file);
+    if (kept === null) continue;
+    const first = keeper.get(kept);
+    if (first === undefined) keeper.set(kept, page.file);
+    else clashes.set(page.file, first);
+  }
+  return clashes;
+}
+
 /** Remove the pictures a record named. By the record, never by pattern, and
  *  never a name that does not end like a picture, whatever a record holds. */
 function unlinkRecorded(ctx: TaskMutationContext, slug: string, key: string, names: Iterable<string>): void {
@@ -1016,6 +1057,7 @@ async function captureDelivery(
     return;
   }
   const refused = new Map<string, SourceRefusal>();
+  const clashes = pictureNameClashes(pages);
   for (const page of pages) {
     let bytes = 0;
     try {
@@ -1023,7 +1065,15 @@ async function captureDelivery(
     } catch {
       bytes = 0;
     }
-    const refusal = sourceRefusal(page.file, page.kind, bytes);
+    const other = clashes.get(page.file);
+    const refusal =
+      sourceRefusal(page.file, page.kind, bytes) ??
+      (other === undefined
+        ? null
+        : {
+            reason: `its pictures would be kept under the same names as the pictures of "${reportName(other)}"`,
+            sharedByTool: true,
+          });
     if (refusal) refused.set(page.file, refusal);
   }
   const toRender = pages.filter((page) => !refused.has(page.file));
@@ -1356,13 +1406,23 @@ async function capturePage(
   const { name, stored, kind } = asked;
   const file = readTaskFile(taskRef(ctx, projectSlug, taskKey));
   if (!file) return said(`[noop] ${code(name)} is not a page on ${taskKey}.`);
+  const owner = file.parsed.frontmatter.ownerUserId;
   let launch: AgentLaunch | null;
   try {
-    launch = taskOwnerLaunch(db, file.parsed.frontmatter.ownerUserId, ctx.dataRoot, NO_OWNER);
-  } catch {
+    launch = taskOwnerLaunch(db, owner, ctx.dataRoot, NO_OWNER);
+  } catch (error) {
+    if (owner === null) {
+      return said(
+        `[error] ${code(name)} could not be captured: this task has no owner to render it as. ` +
+          "A page renders as its person's agent user, never as the server.",
+      );
+    }
+    // The owner is there and their launch could not be prepared: the
+    // launch's own sentence, which says what failed.
+    logger.warn("a page could not be captured", { taskKey, file: name, reason: errorMessage(error) });
     return said(
-      `[error] ${code(name)} could not be captured: this task has no owner to render it as. ` +
-        "A page renders as its person's agent user, never as the server.",
+      `[error] ${code(name)} could not be captured. ` +
+        (error instanceof AppError ? error.userMessage : "The renderer could not be started as the task owner's agent user."),
     );
   }
   const from = ask.from ?? 0;
@@ -1394,20 +1454,21 @@ async function capturePage(
     for (const spent of ["profile", "tmp"]) await removeScratch(path.join(rendered.scratch, spent), launch);
   }
   const page = rendered.pages[0];
-  if (page && page.shots.length === 0 && page.ended.length > 0) {
+  const ends = page && page.ended.length > 0 ? `ends ${LIST_AND.format(page.ended.map(endedClause))}` : null;
+  if (page && page.shots.length === 0 && page.ended.length === views.length && ends) {
     // Asked for a stretch past the page's end at every width: nothing failed.
-    return said(
-      `[noop] ${code(name)} ends ${LIST_AND.format(page.ended.map(endedClause))}, so nothing starts at ${px(from)} px.`,
-    );
+    return said(`[noop] ${code(name)} ${ends}, so nothing starts at ${px(from)} px.`);
   }
   if (!page || page.shots.length === 0) {
+    // A width that failed is the answer, whatever another width ended at.
     const reason = page?.error ?? "it was not rendered";
     logger.warn("a page could not be captured", { taskKey, file: name, reason });
     return said(
       `[error] ${code(name)} could not be captured: ${reason}.` +
         (reason.startsWith("the render ran past")
           ? " A script that never finishes, or a page that never finishes loading, does that."
-          : ""),
+          : "") +
+        (ends ? ` It ${ends}, so nothing starts at ${px(from)} px there.` : ""),
     );
   }
   logger.info("a page was captured for a run", { projectSlug, taskKey, file: name, views: page.shots.length });

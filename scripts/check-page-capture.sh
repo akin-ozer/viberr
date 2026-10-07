@@ -408,9 +408,10 @@ fi
 started=$(date +%s)
 (
   cd "$SCRATCH" || exit 1
-  HOME="$SCRATCH" TMPDIR="$SCRATCH/tmp" TMP="$SCRATCH/tmp" TEMP="$SCRATCH/tmp" \
+  # The job on the renderer's standard input, as the server hands it over.
+  printf '%s' "$JOB" | HOME="$SCRATCH" TMPDIR="$SCRATCH/tmp" TMP="$SCRATCH/tmp" TEMP="$SCRATCH/tmp" \
     VIBERR_RUN_ID="$TAG" VIBERR_LAUNCH_UID=$UID_C VIBERR_LAUNCH_EXEC="$NODE" \
-    "$LAUNCH" "$CHILD" "$JOB"
+    "$LAUNCH" "$CHILD"
 )
 code=$?
 took=$(($(date +%s) - started))

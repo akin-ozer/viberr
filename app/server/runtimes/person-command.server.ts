@@ -1,7 +1,7 @@
 import { spawn, type ChildProcessByStdio } from "node:child_process";
 import { constants as osConstants } from "node:os";
 import type { DatabaseSync } from "node:sqlite";
-import type { Readable } from "node:stream";
+import type { Readable, Writable } from "node:stream";
 import { AppError } from "~/server/errors/app-error.server";
 import { ERROR_CODES } from "~/server/errors/error-codes";
 import { errorMessage } from "~/shared/errors";
@@ -111,6 +111,11 @@ export interface PersonCommandInput {
   marker: string;
   /** The line the output gains when the command is stopped at its timeout. */
   timeoutNote: string;
+  /** What the command reads on its standard input, which is then closed;
+   *  absent, it has none. For what is too large to be an argument: the
+   *  kernel bounds one argument (131,072 bytes on Linux) and the arguments
+   *  and the environment together. */
+  stdin?: string;
 }
 
 export interface PersonCommandOutcome {
@@ -134,20 +139,23 @@ export function runPersonCommand(input: PersonCommandInput): Promise<PersonComma
       settled = true;
       resolve({ ...outcome, wallMs: Date.now() - started, output: log.text() });
     };
-    let child: ChildProcessByStdio<null, Readable, Readable>;
+    let child: ChildProcessByStdio<Writable | null, Readable, Readable>;
     try {
       const file = input.launch ? input.launch.launcher : input.file;
       const env = input.launch ? launchEnv(input.launch, input.file, input.env) : input.env;
-      child = spawn(file, [...input.args], {
-        cwd: input.cwd,
-        env,
-        detached: true,
-        stdio: ["ignore", "pipe", "pipe"],
-        windowsHide: true,
-      });
+      const options = { cwd: input.cwd, env, detached: true, windowsHide: true };
+      child =
+        input.stdin === undefined
+          ? spawn(file, [...input.args], { ...options, stdio: ["ignore", "pipe", "pipe"] })
+          : spawn(file, [...input.args], { ...options, stdio: ["pipe", "pipe", "pipe"] });
     } catch (error) {
       settle({ exitCode: null, timedOut: false, spawnError: errorMessage(error) });
       return;
+    }
+    if (child.stdin) {
+      // A command that ends without reading closes the pipe under the write.
+      child.stdin.on("error", () => {});
+      child.stdin.end(input.stdin);
     }
     const pid = child.pid ?? null;
     const signalGroup = (requested: NodeJS.Signals): void => {

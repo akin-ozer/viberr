@@ -535,7 +535,9 @@ history opens with "Converted from goal-N …", and the project's Activity colum
   and the task has no owner: give it one and the next delivery is pictured), "the pinned
   browser executable (VIBERR_BROWSER_EXECUTABLE) is not on disk" (health's `browser` says
   the same), a source over 10 MB (markdown 2 MB), "a delivery is pictured up to 8 pages"
-  for a page past the eighth, and "the delivered files could not be handed to the
+  for a page past the eighth, "its pictures would be kept under the same names as the
+  pictures of …" (two pages whose names differ only by what the store trims or composes:
+  rename one), and "the delivered files could not be handed to the
   renderer": the server could not make `<task>/.capture-input/` its own folder in the
   agent group (the log line `a delivery's files could not be handed to the page renderer`
   carries the cause; check the store layout and that the server's user is in the agent

@@ -97,10 +97,13 @@ function bench(files: Record<string, string>): Bench {
         maxBytes: input.maxBytes ?? 3_750_000,
       };
       return new Promise((resolve, reject) => {
-        const child = spawn(process.execPath, [CHILD, JSON.stringify(job)], {
+        // The job goes in on the child's standard input, as the server
+        // hands it over.
+        const child = spawn(process.execPath, [CHILD], {
           env: { ...process.env, ...browser.env(input.mode ?? "") },
-          stdio: ["ignore", "ignore", "pipe"],
+          stdio: ["pipe", "ignore", "pipe"],
         });
+        child.stdin.end(JSON.stringify(job));
         let stderr = "";
         child.stderr.on("data", (chunk: Buffer) => {
           stderr += chunk.toString("utf8");
