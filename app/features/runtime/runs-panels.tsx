@@ -11,13 +11,12 @@ import {
   type RefObject,
 } from "react";
 import NumberFlow, { NumberFlowGroup } from "@number-flow/react";
-import { toolIdentity, type ToolIdentity } from "~/shared/mcp-tools";
+import type { ToolIdentity } from "~/shared/mcp-tools";
 import { normalizeWorkspacePaths } from "~/shared/workspace-paths";
 import { AgentGlyph } from "~/ui/identity";
 import { CopyGlyph, GlyphSwap } from "~/ui/copy-glyph";
 import { Icon } from "~/ui/icon";
 import { NumberTicker } from "~/ui/number-ticker";
-import { formatClock, formatClockUTC } from "~/shared/dates/format";
 import { useHydrated } from "~/ui/local-time";
 import { useDismiss } from "~/ui/use-dismiss";
 import { useFreshLine } from "~/ui/use-fresh-line";
@@ -25,41 +24,25 @@ import { useLiveStreamFailed } from "~/features/live-updates/use-live-updates";
 // Ruling 457: backend labels and count plurals are spelled inline here, not
 // through `BACKEND_LABEL` / `countLabel` (why: shared/text/backend-label.ts,
 // shared/text/plural.ts).
-
-/** P13-UI-57: the projection ships the ISO so the CLIENT renders the clock in
- *  the viewer's zone. During SSR + hydration the UTC form is rendered instead
- *  (`hydrated: false`) — the server's zone and the viewer's differ, and a
- *  zone-dependent first paint is a hydration text mismatch (React #418). A
- *  seeded/mock label that isn't an ISO is shown verbatim. */
-function finishedClock(value: string, hydrated: boolean): string {
-  if (!/^\d{4}-\d{2}-\d{2}T/.test(value)) return value;
-  return hydrated ? formatClock(value) : formatClockUTC(value);
-}
 import { Pill } from "~/ui/pill";
 import {
-  agentMessageProse,
   argumentRows,
-  commandNote,
-  consoleCodeBlock,
   diffLineKind,
-  fileChangeChips,
-  filePathOf,
   fmtClock,
   fmtTok,
   HEARTBEAT_NOTE,
   heartbeatLabel,
-  hiddenArguments,
   roleAfterName,
   roleShort,
   runInputRows,
   runLabel,
   runStatePill,
   thoughtLabel,
-  toolChip,
   useElapsed,
   waitCountTitle,
   waitText,
   type ConsoleCodeBlock,
+  type ToolChip,
 } from "./runs-helpers";
 import { localLogClock } from "./log-clock";
 import { telemetryLabel } from "./log-noise";
@@ -75,8 +58,15 @@ import type { RunLogStore, StreamedLine } from "./run-log-store";
 import { useConsoleStatus, useConsoleThread, useRunFacts } from "./use-run-log-stream";
 import { readableStep } from "./readable-step";
 import { ConsoleOrb, DiffStat, EditDiffBlock, FilePath, TodoCard } from "./console-blocks";
-import { consoleTodos } from "./console-todos";
-import { editDiff } from "./edit-diff";
+import {
+  historyNotice,
+  lineParts,
+  logsFooter,
+  olderNote,
+  retryOffer,
+  waitFacts,
+  type LineParts,
+} from "./runs-panels-derive";
 
 /**
  * Ruling 366(e): the counts that climb while a run waits roll their digits
@@ -458,40 +448,16 @@ export const LiveRunPanel = memo(function LiveRunPanel({
       </div>
       <div className="runbar-body">
         <RunStripFacts run={run} store={store} />
-        <div className="run-actions">
-          <button
-            type="button"
-            className="btn ghost sm"
-            onClick={() => onViewLogs(run.id)}
-            aria-expanded={consoleSlot !== null ? consoleOpen : undefined}
-          >
-            <Icon name="term" />
-            {consoleSlot === null
-              ? // No inline slot: the caller still keeps its console elsewhere,
-                // and the old jump-to-anchor wording is the honest one there.
-                "View logs"
-              : consoleOpen
-                ? "Hide console"
-                : "Show console"}
-          </button>
-          {canInterrupt && (
-            /* Ruling 150: a stop discards the work in flight, so the trigger
-               wears ruling 149's danger label like the confirm it opens
-               (`btn danger`) — the neutral/red pair inside `.run-actions` is
-               what separates it from the sibling `View logs`. `disabled` here
-               is the request in flight (ruling 147(a)), not a validity gate. */
-            <button
-              type="button"
-              className="btn ghost sm danger"
-              disabled={interrupting}
-              aria-busy={stoppingThis || undefined}
-              onClick={() => onInterrupt(run.id)}
-            >
-              <GlyphSwap rest="hand" alt="loader" on={stoppingThis} spinAlt />
-              {stoppingThis ? "Interrupting…" : "Interrupt"}
-            </button>
-          )}
-        </div>
+        <RunActions
+          runId={run.id}
+          inlineConsole={consoleSlot !== null}
+          consoleOpen={consoleOpen}
+          canInterrupt={canInterrupt}
+          interrupting={interrupting}
+          stoppingThis={stoppingThis}
+          onViewLogs={onViewLogs}
+          onInterrupt={onInterrupt}
+        />
         {consoleOpen && consoleSlot !== null && (
           <div className="runbar-console">{consoleSlot}</div>
         )}
@@ -499,6 +465,70 @@ export const LiveRunPanel = memo(function LiveRunPanel({
     </div>
   );
 });
+
+/**
+ * The strip's actions: the console's trigger and Interrupt. Ruling 689(e):
+ * LiveRunPanel's `.run-actions` slot as a component of its own, with no hook,
+ * so the strip around it keeps its markup.
+ */
+function RunActions({
+  runId,
+  inlineConsole,
+  consoleOpen,
+  canInterrupt,
+  interrupting,
+  stoppingThis,
+  onViewLogs,
+  onInterrupt,
+}: {
+  runId: string;
+  /** The caller renders the console inside the card (F39). */
+  inlineConsole: boolean;
+  consoleOpen: boolean;
+  canInterrupt: boolean;
+  interrupting: boolean;
+  /** Ruling 368: THIS run's interrupt is the request in flight. */
+  stoppingThis: boolean;
+  onViewLogs: (id: string) => void;
+  onInterrupt: (runId: string) => void;
+}) {
+  return (
+    <div className="run-actions">
+      <button
+        type="button"
+        className="btn ghost sm"
+        onClick={() => onViewLogs(runId)}
+        aria-expanded={inlineConsole ? consoleOpen : undefined}
+      >
+        <Icon name="term" />
+        {!inlineConsole
+          ? // No inline slot: the caller still keeps its console elsewhere,
+            // and the old jump-to-anchor wording is the honest one there.
+            "View logs"
+          : consoleOpen
+            ? "Hide console"
+            : "Show console"}
+      </button>
+      {canInterrupt && (
+        /* Ruling 150: a stop discards the work in flight, so the trigger
+           wears ruling 149's danger label like the confirm it opens
+           (`btn danger`) — the neutral/red pair inside `.run-actions` is
+           what separates it from the sibling `View logs`. `disabled` here
+           is the request in flight (ruling 147(a)), not a validity gate. */
+        <button
+          type="button"
+          className="btn ghost sm danger"
+          disabled={interrupting}
+          aria-busy={stoppingThis || undefined}
+          onClick={() => onInterrupt(runId)}
+        >
+          <GlyphSwap rest="hand" alt="loader" on={stoppingThis} spinAlt />
+          {stoppingThis ? "Interrupting…" : "Interrupt"}
+        </button>
+      )}
+    </div>
+  );
+}
 
 /**
  * The strip's phase, step and figures. Ruling 457 (LIVE-1): read from the
@@ -623,6 +653,36 @@ function missLabel(reason: string): string {
 }
 
 /**
+ * Ruling 369: the facts row's first chip, the run's first model call: warm or
+ * cold and its figure, or why there is none to show. Ruling 689(e): the row's
+ * first slot as a component of its own, with no hook.
+ */
+function FirstCallChip({ first, reported }: { first: RunCacheView["firstCall"]; reported: boolean }) {
+  if (!first) {
+    return (
+      <Pill kind="neutral" sm quiet>
+        <span data-start="none" title="No model call has reported its prompt figures yet">
+          {reported ? "first call not recorded" : "no first call yet"}
+        </span>
+      </Pill>
+    );
+  }
+  return (
+    <Pill kind={first.warm ? "done" : "input"} sm quiet dot>
+      <span
+        data-start={first.warm ? "warm" : "cold"}
+        data-first-write={first.write}
+        data-first-read={first.read}
+        title={`First model call: prompt ${fmtTok(first.promptTokens)} · wrote ${fmtTok(first.write)} into the cache · read ${fmtTok(first.read)} from it. Warm means it read more than it wrote.`}
+      >
+        {first.warm ? "warm start" : "cold start"} ·{" "}
+        {first.warm ? `read ${fmtTok(first.read)}` : `wrote ${fmtTok(first.write)}`}
+      </span>
+    </Pill>
+  );
+}
+
+/**
  * Ruling 369: the console's record of what the prompt cache did for the run —
  * the first call's temperature and figures (with the provider's miss reason
  * when it sent one), the TTL bucket, the run's writes and reads, the peak
@@ -643,25 +703,7 @@ const RunFactsRow = memo(function RunFactsRow({
   const reported = first !== null || c.writeTokens > 0 || c.readTokens > 0 || c.peakPromptTokens > 0;
   return (
     <div className="run-facts" data-comment-anchor="run-facts">
-      {first ? (
-        <Pill kind={first.warm ? "done" : "input"} sm quiet dot>
-          <span
-            data-start={first.warm ? "warm" : "cold"}
-            data-first-write={first.write}
-            data-first-read={first.read}
-            title={`First model call: prompt ${fmtTok(first.promptTokens)} · wrote ${fmtTok(first.write)} into the cache · read ${fmtTok(first.read)} from it. Warm means it read more than it wrote.`}
-          >
-            {first.warm ? "warm start" : "cold start"} ·{" "}
-            {first.warm ? `read ${fmtTok(first.read)}` : `wrote ${fmtTok(first.write)}`}
-          </span>
-        </Pill>
-      ) : (
-        <Pill kind="neutral" sm quiet>
-          <span data-start="none" title="No model call has reported its prompt figures yet">
-            {reported ? "first call not recorded" : "no first call yet"}
-          </span>
-        </Pill>
-      )}
+      <FirstCallChip first={first} reported={reported} />
       {first?.missReason ? (
         <Pill kind="neutral" sm quiet>
           <span data-miss={first.missReason} title="The provider's own reason the first call missed the cache">
@@ -895,16 +937,12 @@ function WaitRow({
   open,
   onToggle,
 }: FoldRowProps) {
-  const last = lines[lines.length - 1]!.display;
-  const who = toolIdentity(last.name ?? "");
-  const reported = last.progress?.elapsed ?? null;
-  const at = last.progress?.at ?? null;
+  const { last, who, from, at } = waitFacts(lines);
   // The count runs on from the heartbeat's own instant, so a page opened
   // mid-wait starts at the right figure and the next heartbeat resyncs it
-  // rather than jumping. With no instant or no figure there is nothing honest
-  // to count from, and the row prints the static words.
+  // rather than jumping (`waitFacts` says when there is nothing to count from).
   const since = useElapsed(live ? at : null, live);
-  const ticking = live && reported !== null && at !== null;
+  const ticking = live && from !== null;
   const clock = (t: string) => (hydrated ? localLogClock(t, startedAt) : t);
   const n = lines.length;
   // Ruling 459: a row seen live keeps its orb once the wait ends, paused and
@@ -935,7 +973,7 @@ function WaitRow({
             {ticking ? (
               <span>
                 still running ·{" "}
-                <WaitClock seconds={reported + since} title={waitCountTitle(lines, clock(last.t))} />
+                <WaitClock seconds={from + since} title={waitCountTitle(lines, clock(last.t))} />
               </span>
             ) : (
               waitText(lines, live)
@@ -1155,138 +1193,215 @@ function LineRow({
   // that toggle's contract is the stored envelope.
   if (!raw && isRunInputsLine(display)) {
     return (
-      <>
-        <div className="log-line meta">
-          <span className="lt">{clock}</span>
-          <span className="ltag">{display.tag}</span>
-          <span className="lx">
-            {display.text}
-            <span className="log-more-note"> · </span>
-            <button
-              type="button"
-              className="log-more"
-              aria-expanded={open}
-              onClick={() => onToggle("inputs", line.key)}
-            >
-              {open ? "hide what this run was given" : "show what this run was given"}
-            </button>
-          </span>
-        </div>
-        {open &&
-          runInputRows(display.inputs!, backend, kind).map((row) => (
-            <div className="log-line meta" key={row.tag}>
-              <span className="lt" />
-              <span className="ltag">{row.tag}</span>
-              <span
-                className="lx"
-                {...(row.pre ? { style: { whiteSpace: "pre-wrap" as const } } : {})}
-              >
-                {row.text}
-              </span>
-            </div>
-          ))}
-      </>
+      <RunInputsRow
+        rowKey={line.key}
+        display={display}
+        clock={clock}
+        backend={backend}
+        kind={kind}
+        open={open}
+        onToggle={onToggle}
+      />
     );
   }
-  // P19-RC1: the three shapes the projection already distinguishes and the
-  // console used to flatten. All three are computed only when `raw` is off —
-  // under it the stored envelope prints verbatim, unchanged.
-  const chip = raw ? null : toolChip(display);
-  // Ruling 499: an edit drawn as its diff, a to-do list as its steps. What
-  // they draw in full is no longer cut from the row.
-  const diff = raw ? null : editDiff(display);
-  const todos = raw ? null : consoleTodos(display);
-  const path = diff ? null : filePathOf(display);
-  // Ruling 366(d): what the one-line summary cut, if anything worth a click,
-  // and Bash's description for the row itself.
-  const hidden = raw ? null : hiddenArguments(display, diff?.drawn ?? todos?.drawn ?? []);
-  const argsOpen = hidden !== null && open;
-  const note = raw ? null : commandNote(display);
-  const files = raw ? null : fileChangeChips(display);
-  const code = raw ? null : consoleCodeBlock(display);
-  // N20-18: a Codex final message is the raw outcome-envelope JSON; fold it to
-  // the prose it wraps so it reads like Claude's `assistant`.
-  const prose = raw ? null : agentMessageProse(display);
+  // P19-RC1: the shapes the projection distinguishes (`lineParts`), computed
+  // only when `raw` is off — under it the stored envelope prints verbatim,
+  // unchanged.
+  const parts = raw ? null : lineParts(display, open);
   return (
     <>
       <div className={"log-line " + display.ev}>
         <span className="lt">{clock}</span>
         <span className="ltag">{display.tag}</span>
         <span className="lx">
-          {raw ? (
+          {parts === null ? (
             (line.raw ?? RAW_PENDING)
           ) : (
             <>
-              {chip ? (
-                <span className={"log-chip" + (chip.who.kind === "viberr" ? " vb" : "")}>
-                  <ToolName who={chip.who} />
-                  {(chip.detail && !todos) || note || hidden ? (
-                    // The note and the link live INSIDE the detail's own text
-                    // flow: as flex items of the chip they were squeezed to a
-                    // letter a line, and after the chip they dangled on a line
-                    // of their own once the detail wrapped.
-                    <span className="lc-detail">
-                      {diff ? (
-                        <>
-                          <FilePath path={diff.path} shown={diff.shown} /> <DiffStat diff={diff} />
-                        </>
-                      ) : path !== null ? (
-                        <FilePath path={path} shown={normalizeWorkspacePaths(path)} />
-                      ) : todos ? null : (
-                        chip.detail
-                      )}
-                      {note ? <span className="log-more-note"> # {note}</span> : null}
-                      {hidden ? (
-                        <span className="log-more-note">
-                          {" · "}
-                          <button
-                            type="button"
-                            className="log-more"
-                            aria-expanded={argsOpen}
-                            title="Show it in full under this row"
-                            onClick={() => onToggle("args", line.key)}
-                          >
-                            {hidden.label}
-                          </button>
-                        </span>
-                      ) : null}
-                    </span>
-                  ) : null}
-                </span>
+              {parts.chip ? (
+                <ToolCallChip
+                  chip={parts.chip}
+                  parts={parts}
+                  rowKey={line.key}
+                  open={open}
+                  onToggle={onToggle}
+                />
               ) : (
                 <>
                   {display.name ? <b className="ln">{display.name} </b> : null}
-                  {/* When the text IS the block below, printing it here too
-                      would render the whole dump twice; a to-do list's count
-                      is the card's own header. */}
-                  {code || todos ? null : (prose ?? display.text)}
+                  {parts.text}
                 </>
               )}
-              {diff ? (
-                <EditDiffBlock diff={diff} open={open} onToggle={() => onToggle("args", line.key)} />
+              {parts.blocks ? (
+                <LineBlocks parts={parts} rowKey={line.key} live={live} open={open} onToggle={onToggle} />
               ) : null}
-              {todos ? <TodoCard todos={todos} live={live} /> : null}
-              {files ? (
-                <span className="log-files">
-                  {files.map((f, n) => (
-                    <span className={"log-file lf-" + f.kind} key={n} title={FILE_KIND_WORD[f.kind]}>
-                      <span className="lf-kind" aria-hidden="true">
-                        {FILE_KIND_MARK[f.kind]}
-                      </span>
-                      <span className="vh">{FILE_KIND_WORD[f.kind]} </span>
-                      {f.path}
-                    </span>
-                  ))}
-                </span>
-              ) : null}
-              {code ? <ConsoleCode block={code} /> : null}
             </>
           )}
         </span>
       </div>
-      {argsOpen && hidden && display.input ? (
-        <ArgumentRows input={display.input} keys={hidden.keys} />
+      {parts?.args ? <ArgumentRows input={parts.args.input} keys={parts.args.keys} /> : null}
+    </>
+  );
+}
+
+/**
+ * P19-G11: the run-inputs line, summarised on one row and opened on demand
+ * into the rows of what the run was given. Ruling 689(e): LineRow's branch
+ * for it, as a component of its own with no hook.
+ */
+function RunInputsRow({
+  rowKey,
+  display,
+  clock,
+  backend,
+  kind,
+  open,
+  onToggle,
+}: {
+  rowKey: string;
+  display: LogLine;
+  clock: string;
+  backend: RunView["backend"];
+  kind: RunKind;
+  open: boolean;
+  onToggle: (kind: Disclosure, key: string) => void;
+}) {
+  return (
+    <>
+      <div className="log-line meta">
+        <span className="lt">{clock}</span>
+        <span className="ltag">{display.tag}</span>
+        <span className="lx">
+          {display.text}
+          <span className="log-more-note"> · </span>
+          <button
+            type="button"
+            className="log-more"
+            aria-expanded={open}
+            onClick={() => onToggle("inputs", rowKey)}
+          >
+            {open ? "hide what this run was given" : "show what this run was given"}
+          </button>
+        </span>
+      </div>
+      {open &&
+        runInputRows(display.inputs!, backend, kind).map((row) => (
+          <div className="log-line meta" key={row.tag}>
+            <span className="lt" />
+            <span className="ltag">{row.tag}</span>
+            <span
+              className="lx"
+              {...(row.pre ? { style: { whiteSpace: "pre-wrap" as const } } : {})}
+            >
+              {row.text}
+            </span>
+          </div>
+        ))}
+    </>
+  );
+}
+
+/**
+ * P19-RC1: a tool call as a chip, marked by whose tool it is (ruling 366),
+ * with what it was pointed at. Ruling 689(e): LineRow's chip, as a component
+ * of its own with no hook.
+ */
+function ToolCallChip({
+  chip,
+  parts,
+  rowKey,
+  open,
+  onToggle,
+}: {
+  chip: ToolChip;
+  parts: LineParts;
+  rowKey: string;
+  open: boolean;
+  onToggle: (kind: Disclosure, key: string) => void;
+}) {
+  const { diff, path, todos, note, hidden } = parts;
+  // The detail leads with the file the call touched (an edit's with its
+  // +N −M), else with the chip's own words; a to-do list's are its card.
+  const lead = diff ? (
+    <>
+      <FilePath path={diff.path} shown={diff.shown} /> <DiffStat diff={diff} />
+    </>
+  ) : path !== null ? (
+    <FilePath path={path} shown={normalizeWorkspacePaths(path)} />
+  ) : todos ? null : (
+    chip.detail
+  );
+  return (
+    <span className={"log-chip" + (chip.who.kind === "viberr" ? " vb" : "")}>
+      <ToolName who={chip.who} />
+      {(chip.detail && !todos) || note || hidden ? (
+        // The note and the link live INSIDE the detail's own text
+        // flow: as flex items of the chip they were squeezed to a
+        // letter a line, and after the chip they dangled on a line
+        // of their own once the detail wrapped.
+        <span className="lc-detail">
+          {lead}
+          {note ? <span className="log-more-note"> # {note}</span> : null}
+          {hidden ? (
+            <span className="log-more-note">
+              {" · "}
+              <button
+                type="button"
+                className="log-more"
+                aria-expanded={open}
+                title="Show it in full under this row"
+                onClick={() => onToggle("args", rowKey)}
+              >
+                {hidden.label}
+              </button>
+            </span>
+          ) : null}
+        </span>
       ) : null}
+    </span>
+  );
+}
+
+/**
+ * What a console line draws below its words (P19-RC1, ruling 499): an edit's
+ * diff, a to-do list, the files a change touched, multi-line output. Ruling
+ * 689(e): LineRow's blocks, as a component of its own with no hook, drawn only
+ * for a line that has one.
+ */
+function LineBlocks({
+  parts,
+  rowKey,
+  live,
+  open,
+  onToggle,
+}: {
+  parts: LineParts;
+  rowKey: string;
+  live: boolean;
+  open: boolean;
+  onToggle: (kind: Disclosure, key: string) => void;
+}) {
+  const { diff, todos, files, code } = parts;
+  return (
+    <>
+      {diff ? (
+        <EditDiffBlock diff={diff} open={open} onToggle={() => onToggle("args", rowKey)} />
+      ) : null}
+      {todos ? <TodoCard todos={todos} live={live} /> : null}
+      {files ? (
+        <span className="log-files">
+          {files.map((f, n) => (
+            <span className={"log-file lf-" + f.kind} key={n} title={FILE_KIND_WORD[f.kind]}>
+              <span className="lf-kind" aria-hidden="true">
+                {FILE_KIND_MARK[f.kind]}
+              </span>
+              <span className="vh">{FILE_KIND_WORD[f.kind]} </span>
+              {f.path}
+            </span>
+          ))}
+        </span>
+      ) : null}
+      {code ? <ConsoleCode block={code} /> : null}
     </>
   );
 }
@@ -1541,6 +1656,7 @@ const ConsoleView = memo(function ConsoleView({
   }, [lines.length, raw, threadId, follow, boxRef]);
 
   const older = thread?.older;
+  const notice = historyNotice(thread);
   // P13-D-11: the footer counts EVENTS — stored console lines that EXIST, not
   // the rows on screen: the window withholds older lines, and UI-53's
   // `── resumed ──` rows are not stored lines. `lineCount` is the loader's
@@ -1578,17 +1694,11 @@ const ConsoleView = memo(function ConsoleView({
       >
         {/* Ruling 457 (owner decision 2): a thread the page did not carry
             lines for fills itself with one request when it is shown. */}
-        {thread === null || thread.status === "unloaded" || thread.status === "loading" ? (
-          <div className="log-line meta">
+        {notice ? (
+          <div className={"log-line " + notice.ev}>
             <span className="lt" />
             <span className="ltag">history</span>
-            <span className="lx">loading this console…</span>
-          </div>
-        ) : thread.status === "failed" ? (
-          <div className="log-line err">
-            <span className="lt" />
-            <span className="ltag">history</span>
-            <span className="lx">{thread.loadError}</span>
+            <span className="lx">{notice.text}</span>
           </div>
         ) : null}
         {/* P13-D-11: the loader ships a bounded window (NFR5), so the console
@@ -1616,11 +1726,7 @@ const ConsoleView = memo(function ConsoleView({
               >
                 {older.loading ? "loading older lines…" : "load older lines"}
               </button>
-              <span className="log-more-note">
-                {older.error
-                  ? " · " + older.error
-                  : ` · ${older.withheld} earlier line${older.withheld === 1 ? "" : "s"} not loaded`}
-              </span>
+              <span className="log-more-note">{olderNote(older)}</span>
             </span>
           </div>
         ) : null}
@@ -1750,174 +1856,10 @@ export const AgentLogsPanel = memo(function AgentLogsPanel({
   }
 
   const st = runStatePill(cur);
-  // UI-38: the FAILURE EXPLANATION describes the RUN, not the viewer.
-  // `backendUnavailable` is a property of the run (the projection carries it);
-  // `canRetryBackend` additionally requires an `onRetryBackend` handler, which
-  // the page withholds from anyone without `run-agents` AND while any run is
-  // streaming — so a contributor (and everyone during a concurrent run) was told
-  // a quota failure was a "continuity error — see the blocked packet", pointing
-  // at a packet that need not exist. Only the BUTTON is grant-gated now.
-  // Ruling 350: the CLASS describes the run whatever its kind. The kind gate
-  // that used to sit here was for the retry clause, which keeps its own gate
-  // below (`retryOffered`); on the class it sent an operator drive or a
-  // controller turn refused for `unavailable` to the unclassified sentence —
-  // "continuity error; see the blocked packet" — and a controller turn has no
-  // packet at all.
-  const backendUnavailable = cur.state === "error" && !!cur.failedBackendUnavailable;
-  // Ruling 127: the retry OFFER needs somebody to bill, which is a different
-  // question from why this run failed. The projection withholds `altBackend`
-  // when the run had no principal at all (an unowned task), and `retryBackends`
-  // is the task owner's live connection set — the same question the blocked
-  // packet asks before offering `retry_other_backend` (run-failure-remedy.server.ts),
-  // so the button and the packet cannot tell two stories about one task.
-  const altBackend = cur.altBackend ?? null;
-  const retryPossible =
-    backendUnavailable &&
-    altBackend !== null &&
-    (retryBackends?.includes(altBackend) ?? false);
-  const canRetryBackend = retryPossible && !!onRetryBackend;
-  const altLabel = altBackend === "codex" ? "Codex" : "Claude";
+  const offer = retryOffer(cur, retryBackends, !!onRetryBackend);
+  const { altBackend, altLabel, canRetryBackend } = offer;
   const retryingThis = retryingProfileId !== null && retryingProfileId === cur.profileId;
-  // Ruling 127: the offer, and when there is none, WHY there is none. A run
-  // that failed on quota with an owner who never connected the other backend
-  // gets no button on any surface (the blocked packet withholds
-  // `retry_other_backend` for the same reason), so the console names the
-  // owner's missing connection rather than leaving the absent control
-  // unexplained. `retryBackends === undefined` is "not asked", and claims
-  // nothing about the owner.
-  // Pass 34 review: the "isn't connected" clause is about a retry this panel
-  // can offer, and only an AGENT run has one — an operator or controller run
-  // has no other backend to move to, so appending it there stated a
-  // credential fact that was often false and always irrelevant.
-  const retryOffered = cur.kind === "primary" || cur.kind === "reviewer";
-  const retryClause = canRetryBackend
-    ? `. Retry on ${altLabel}`
-    : retryPossible
-      ? ". A maintainer can retry it on the other backend"
-      : retryOffered && altBackend !== null && retryBackends !== undefined
-        ? `. ${altLabel} isn't connected for the task owner, so there is no other backend to retry on`
-        : "";
-  const footer =
-    cur.state === "running"
-      ? // A controller turn's record is its transcript (ruling 99), not a task.
-        cur.kind === "controller"
-        ? "streaming: raw output stays here as evidence, never in the transcript"
-        : "streaming: raw output stays here as evidence, never in the task record"
-      : cur.lifecycle === "queued"
-        ? // UI-57: a QUEUED run is not an idle thread. The strip renders only for
-          // `running`, so a queued run used to show a "queued" pill next to the
-          // footer "thread alive — no run executing", which contradicted it.
-          "queued: waiting for a runtime slot; output appears once it starts"
-        : cur.lifecycle === "interrupted"
-          ? // Pass 35 U35-7: a restart is a reason, not a person. Boot
-            // recovery re-invokes the operator for a task run it interrupted
-            // (a controller turn gets a note on its conversation instead), so
-            // the footer says what already happened rather than "resumable".
-            cur.interruptedBy
-            ? // Ruling 350: the row knows WHO stopped it and whether a session
-              // existed — not whether the task still takes a run. Both live
-              // person-interrupts on this instance were closure interrupts
-              // (ruling 177 refuses every re-run on a closed task) and the
-              // footer promised "resumable" on each; ruling 207(g)'s note
-              // already says "there is no thread to resume" when no session
-              // was reported, and the footer said the opposite beside it.
-              cur.sid
-              ? `interrupted by ${cur.interruptedBy.label.split(" ")[0]}; the thread can be resumed where the task still takes a run`
-              : `interrupted by ${cur.interruptedBy.label.split(" ")[0]} before a session existed, so there is no thread to resume`
-            : cur.interruptedReason === "restart"
-              ? cur.kind === "controller"
-                ? "interrupted by a restart; the conversation carries a note"
-                : // Ruling 338: this said "the operator was re-invoked", and the
-                  // panel holds no fact about whether one was. Recovery stamps
-                  // the identical row state on a re-invoked orphan and on one
-                  // its crash-loop guard REFUSED to re-invoke
-                  // (`RECOVERY_REINVOKE_CAP`, 3 in 30 minutes), and records the
-                  // refusal only as an audit row and a note on the task.
-                  //
-                  // Live: 250 restart renderings on this board, 6 of them on
-                  // capped runs — SHOP-27, SHOP-34 (twice, two boots), SHOP-35,
-                  // SHOP-36, SHOP-38 — and on every one the task's own timeline
-                  // says the opposite, one panel away: "Viberr did NOT re-invoke
-                  // the operator for it… Run the operator from this page when
-                  // you are ready." A person who believes the footer does not
-                  // do the one thing the note asks. At the 13:01:50Z boot,
-                  // SHOP-34/35/38 sat two and a half hours until a human
-                  // commented by hand.
-                  //
-                  // This is ruling 198's defect surviving in the second surface
-                  // a person opens when a run stops. The panel knows the run was
-                  // cut by a restart and nothing more, so that is all it says —
-                  // and it points at the record that does know. A stronger
-                  // sentence would need a real `recoveryReinvoked` field
-                  // written on both branches, which is more than the lie is
-                  // worth.
-                  "interrupted by a restart; the task record says what recovery did"
-              : "interrupted; the thread stays resumable"
-          : cur.state === "done"
-            ? // Ruling 148: a missing timestamp is said by leaving the clause
-              // out, not by a "−" mid-sentence — "run finished at −;" read as a
-              // broken template rather than as the fact. Same treatment as
-              // `SessionIdChip` above, and worse here because the glyph landed
-              // inside a sentence instead of in a value slot.
-              // Ruling 419(d): a controller conversation is not re-engaged,
-              // it is continued, and the way to do that is the composer.
-              cur.kind === "controller"
-              ? (cur.finished
-                  ? "turn finished at " + finishedClock(cur.finished, hydrated)
-                  : "turn finished") + "; send a message to continue the conversation"
-              : cur.finished
-                ? "run finished at " +
-                  finishedClock(cur.finished, hydrated) +
-                  "; thread can be re-engaged"
-                : "run finished; thread can be re-engaged"
-            : cur.state === "error"
-              ? // Ruling 130(a): the SENTENCE follows the classified failure
-                // for every run kind; the retry clause follows the OFFER.
-                cur.failureKind === "quota"
-                ? `${cur.backend === "codex" ? "Codex" : "Claude"} refused this run: the account's usage window is spent (the error line names the reset and the account remedy)${retryClause}`
-                : cur.failureKind === "auth"
-                  ? `${cur.backend === "codex" ? "Codex" : "Claude"} refused this run: the account was rejected by the provider (an organization restriction or a rejected credential; the error line names the remedy)${retryClause}`
-                  : cur.failureKind === "overloaded"
-                  ? // The provider's side, not the account's: the sentence
-                    // must not send the reader to a quota or account remedy.
-                    // U35-11: unless the request never reached the provider,
-                    // which is this deployment's network path, not its side.
-                    cur.failureOrigin === "local"
-                    ? `${cur.backend === "codex" ? "Codex" : "Claude"} could not be reached from this deployment: the connection failed before the provider answered; nothing about the account is wrong, check the network path and retry in a few minutes${retryClause}`
-                    : `${cur.backend === "codex" ? "Codex" : "Claude"} could not serve this run: the provider was overloaded or failed on its side; nothing about the account is wrong, retry in a few minutes${retryClause}`
-                  : cur.failureKind === "max_budget"
-                    ? // Ruling 175 / ruling 350: the pill above already says "cut off ·
-                      // spending cap"; the footer said "continuity error" beneath it.
-                      "cut off by the instance's spending cap (Instance settings → Max spend per Claude run): not a task failure; continue the run or raise the cap"
-                    : cur.failureKind === "max_turns"
-                      ? "cut off at the run's turn cap: not a task failure; continue the run"
-                      : cur.failureKind === "idle_timeout"
-                        ? "stopped after producing nothing for the whole idle window: the run hung, it did not fail; re-run it"
-                        : cur.failureKind === "tool_loop"
-                        ? // Ruling 598: the error line names the call and its answer.
-                          "stopped for sending one tool call and getting the same answer again and again (the error line names both): redirect it with what the tool said"
-                        : cur.failureKind === "session_missing"
-                          ? "the provider session this run tried to resume no longer exists; a fresh run re-anchored on the task record is the recovery"
-                          : backendUnavailable
-                ? // Ruling 127: the same `run·unavailable` classification now
-                  // also covers "the account this run bills has not connected
-                  // the backend", so the footer states the CLASS and lets the
-                  // run's own error line (which names the person and the
-                  // remedy) carry the specifics, instead of asserting a quota
-                  // failure that may not have happened.
-                  // The retry clause follows the OFFER, not the viewer's
-                  // grant: with nobody to bill on the other backend there is
-                  // no retry to advertise, and the run's own error line
-                  // carries the real remedy (own the task, connect the
-                  // account).
-                  `${cur.backend === "codex" ? "Codex" : "Claude"} could not run this (quota, rate limit, or an account that cannot run it)${retryClause}`
-                : // Ruling 350: only a specialist's failure raises the packet the
-                  // old sentence pointed at; an operator drive or a controller
-                  // turn is sent to the record it does have.
-                  cur.kind === "primary" || cur.kind === "reviewer"
-                  ? "stream ended on a continuity error; see the blocked packet"
-                  : "stream ended on a continuity error; the error line above carries what the provider said"
-              : "thread alive, no run executing";
+  const footer = logsFooter(cur, hydrated, offer);
 
   return (
     <div className="panel" data-comment-anchor="agent-logs">
