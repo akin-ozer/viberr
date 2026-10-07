@@ -22,7 +22,11 @@ import {
   postAgentComment,
   openAgentQuestionPacket,
 } from "./agent-toolkit.server";
-import { takeStagedOutcome } from "./agent-outcome.server";
+import {
+  AGENT_OUTCOME_JSON_SCHEMA,
+  ASK_HUMAN_ONLY_NOTE,
+  takeStagedOutcome,
+} from "./agent-outcome.server";
 import { z, type ZodType } from "zod";
 import type { FileActorRef, Recommendation } from "~/schemas/task-file.schema";
 
@@ -537,6 +541,36 @@ describe("report_outcome's evidence field (P13-D-26)", () => {
       { label: "npm test", result: "102 passed, 0 failed", status: "pass" },
       { label: "README.md:23 against the Output contract", result: "", status: "fail" },
     ]);
+  });
+
+  /**
+   * Ruling 692(c): seven of the nine questions a writer put to a person were
+   * its own choices (the reader, the length, the tone), each with a default
+   * to approve. One sentence says what a question is for, on the tool a Claude
+   * run calls and on the field a Codex run fills, so it reaches an agent no
+   * manual does. The run's collaboration note carries it too, which
+   * `specialist-run.server.test.ts` owns.
+   */
+  it("ruling 692: both asking channels say a person is asked only what they alone know, in one question", async () => {
+    const { Client } = await import("@modelcontextprotocol/sdk/client/index.js");
+    const { InMemoryTransport } = await import("@modelcontextprotocol/sdk/inMemory.js");
+    const server = mountFor({ ...BASE, ask: true });
+    const [clientEnd, serverEnd] = InMemoryTransport.createLinkedPair();
+    await server.instance.connect(serverEnd);
+    const client = new Client({ name: "probe", version: "1" }, { capabilities: {} });
+    await client.connect(clientEnd);
+
+    expect(ASK_HUMAN_ONLY_NOTE).toBe(
+      "Ask what only a person knows or may decide, and put all of it in one question. " +
+        "A choice that is yours to make, make it and state it in your report as an assumption: " +
+        "never ask a person to approve your own choices.",
+    );
+    const ask = (await client.listTools()).tools.find((t) => t.name === "ask_human");
+    // CANARY: drop the note from the tool's description, or from the field's.
+    expect(ask?.description).toContain(ASK_HUMAN_ONLY_NOTE);
+    expect(AGENT_OUTCOME_JSON_SCHEMA.properties.question.description).toContain(
+      ASK_HUMAN_ONLY_NOTE,
+    );
   });
 
   /**

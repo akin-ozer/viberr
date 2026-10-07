@@ -305,7 +305,9 @@ export const ATTACHMENTS_READ_SENTENCE =
  * changes, and a reviewer was left to check the claim against today's page.
  * The contract carries the whole move, because the keep takes a file from
  * the attachments folder the line above it hands the run: save the bytes
- * there under a staged name, call the tool, cite the id. `dir` is that
+ * there under a staged name, call the tool, say which id supports which claim
+ * (in the report or a notes file: a piece a person sends out as their own
+ * carries no id). `dir` is that
  * folder; `reader` adds the way to see what the task already keeps.
  *
  * `web` is the run's `use-web-search-fetch` grant. Withholding it takes the
@@ -331,7 +333,7 @@ export function sourcesKeepLine(dir: string, reader: boolean, web: boolean): str
     `A file so named is listed, posted and delivered nowhere while it waits, so save it under that name from the start. ` +
     `The keep takes it out of the attachments folder and holds it with the task as a source (\`S1\`, \`S2\` and so on): ` +
     `it is never overwritten, it is not posted on your reply or counted in your delivery, and it stays when the browser's working files are cleared after a run. ` +
-    `Cite the id beside the claim it supports. A claim with no kept source is read as unsupported, so keep the source or say in your result that the claim is unverified.` +
+    `Say which id supports which claim in your report or in a notes file beside the result. Put an id in the result's own text only where its reader is meant to check it, and never in a piece that goes out under a person's name. A claim with no kept source is read as unsupported, so keep the source or say in your result that the claim is unverified.` +
     (reader
       ? ` \`read_task_source\` lists what the task already keeps: cite one of those rather than keeping the same ${web ? "page" : "file"} again.`
       : ``) +

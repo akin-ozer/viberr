@@ -266,7 +266,7 @@ export function keepTaskSource(db: DatabaseSync, ctx: TaskMutationContext, input
     (gone
       ? "The staged file left the attachments folder: it is a source now, not a file of the result. "
       : `It is a source now, not a file of the result. ${stuck} `) +
-    `Cite ${source.id} beside the claim it supports.`
+    `Say which claim ${source.id} supports in your report or in a notes file beside the result.`
   );
 }
 

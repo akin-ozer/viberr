@@ -171,11 +171,11 @@ export function keepSourceDescription(web: boolean): string {
     ? "Keep ONE source this task's result rests on: a web page as you fetched it, a file from a repository at a commit, an API answer, the output of a command you ran. " +
         `First save the bytes as a file in the task's attachments folder ${staged} (\`curl -sSL -o\`, a browser snapshot copied to such a name, a redirected command output); ` +
         kept +
-        "What a fetch or search tool answered is a summary, not the page: keep the page. Cite the id beside the claim it supports."
+        "What a fetch or search tool answered is a summary, not the page: keep the page. Say which id supports which claim in your report or in a notes file beside the result. Put an id in the result's own text only where its reader is meant to check it, and never in a piece that goes out under a person's name."
     : "Keep ONE source this task's result rests on: a file from a repository at a commit, the output of a command you ran. " +
         `First save the bytes as a file in the task's attachments folder ${staged} (a copied file, a redirected command output); ` +
         kept +
-        'Your profile does not hold "Search & fetch from the web", so this run fetches no page and keeps none. Cite the id beside the claim it supports.';
+        `Your profile does not hold "Search & fetch from the web", so this run fetches no page and keeps none. Say which id supports which claim in your report or in a notes file beside the result. Put an id in the result's own text only where its reader is meant to check it, and never in a piece that goes out under a person's name.`;
 }
 
 /** What each of `keep_source`'s fields says it takes. */

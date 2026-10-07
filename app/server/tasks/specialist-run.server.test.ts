@@ -2174,6 +2174,48 @@ describe("P14-RT-01 — a FRESH run of an UNDEPLOYED profile is confined like a 
     expect(Object.keys(spec.mcpServers ?? {})).toContain("viberr_agent");
   });
 
+  /**
+   * Ruling 692(c): the note a Claude run reads about `ask_human` says what a
+   * question is for, the same sentence the tool and the Codex field carry.
+   */
+  it("ruling 692: an ask-granted Claude run is told a person is asked only what they alone know", async () => {
+    const file = readProjectFile({ projectSlug: store.slug, dataRoot: store.dataRoot })!;
+    writeProject(store.dataRoot, {
+      ...file.parsed.frontmatter,
+      repo: null,
+      agents: [
+        {
+          profileId: "dev",
+          capabilities: [{ capabilityId: "ask-human", mode: "direct" }],
+          extras: [],
+          definition: {
+            kind: "specialist",
+            name: "dev",
+            role: "developer",
+            backends: ["claude"],
+            model: "claude-sonnet-4-5",
+          },
+        },
+      ],
+    });
+    rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
+
+    await startAgentRun(
+      store.db,
+      { projectSlug: store.slug, taskKey: "VIB-1" },
+      actorOf(store.users.arda),
+      { dataRoot: store.dataRoot },
+    );
+
+    // CANARY: drop ASK_HUMAN_ONLY_NOTE from the `ask_human` collaboration note.
+    expect(specs.at(-1)!.prompt).toContain(
+      "- `ask_human`: raise a question you are blocked on as a decision card for the humans. " +
+        "Ask what only a person knows or may decide, and put all of it in one question. " +
+        "A choice that is yours to make, make it and state it in your report as an assumption: " +
+        "never ask a person to approve your own choices.",
+    );
+  });
+
   it("its prompt offers no delivery step it cannot perform (XS-4)", async () => {
     undeployAll();
 
@@ -3082,7 +3124,7 @@ describe("buildAnalyzePrompt — server-side delivery contract (both backends)",
       "A file so named is listed, posted and delivered nowhere while it waits, so save it under that name from the start. " +
       "The keep takes it out of the attachments folder and holds it with the task as a source (`S1`, `S2` and so on): " +
       "it is never overwritten, it is not posted on your reply or counted in your delivery, and it stays when the browser's working files are cleared after a run. " +
-      "Cite the id beside the claim it supports. A claim with no kept source is read as unsupported, so keep the source or say in your result that the claim is unverified.";
+      "Say which id supports which claim in your report or in a notes file beside the result. Put an id in the result's own text only where its reader is meant to check it, and never in a piece that goes out under a person's name. A claim with no kept source is read as unsupported, so keep the source or say in your result that the claim is unverified.";
     const keepLine =
       "- Sources: a fact your result states from outside (a figure, a quote, a date, what a page, a file, an API or a command said) rests on a source you opened in this run and kept. " +
       `What a fetch or search tool answers is its summary of the page, not the page: save the page itself into the attachments folder above ${staged} ` +

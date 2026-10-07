@@ -110,7 +110,7 @@ describe("ruling 690: keeping a source on a task", () => {
     expect(keep(store)).toBe(
       `[kept] S1: aws-pricing.html, ${page.length} bytes, sha256 ${sha256.slice(0, 12)}. ` +
         "The staged file left the attachments folder: it is a source now, not a file of the result. " +
-        "Cite S1 beside the claim it supports.",
+        "Say which claim S1 supports in your report or in a notes file beside the result.",
     );
 
     const lines = readFileSync(sourceFile(store, "index.jsonl"), "utf8").trimEnd().split("\n");
@@ -458,7 +458,7 @@ describe("ruling 690: keeping a source on a task", () => {
       what: "a kept source",
       body: "t3.medium $0.0416 per hour",
       reply:
-        /^\[kept\] S2: aws-pricing\.html, 26 bytes, sha256 [0-9a-f]{12}\. It is a source now, not a file of the result\. The staged file `\.source-aws-pricing\.html` could not be removed from the attachments folder; nothing posts it, and you may delete it\. Cite S2 beside the claim it supports\.$/,
+        /^\[kept\] S2: aws-pricing\.html, 26 bytes, sha256 [0-9a-f]{12}\. It is a source now, not a file of the result\. The staged file `\.source-aws-pricing\.html` could not be removed from the attachments folder; nothing posts it, and you may delete it\. Say which claim S2 supports in your report or in a notes file beside the result\.$/,
       keeps: 2,
     },
     {
