@@ -602,56 +602,27 @@ export function ModelEffortFields({
         ) : null}
       </div>
       {showEffort && (
-        <EffortField
-          uid={uid}
-          backend={backend}
-          effort={effort}
-          setEffort={setEffort}
-          catalogLoading={catalogLoading}
-          effortOptions={effortOptions}
-        />
+        <div className="field">
+          <label className="flabel" htmlFor={`${uid}-effort`}>
+            Effort
+            <span className="fhint">reasoning level per turn</span>
+          </label>
+          <select
+            id={`${uid}-effort`}
+            aria-label="Effort"
+            value={effort}
+            onChange={(e) => setEffort(e.target.value)}
+            disabled={!backend || catalogLoading}
+          >
+            {(!backend || effort === "") && <option value="">no effort yet</option>}
+            {effortOptions.map((e) => (
+              <option key={e} value={e}>
+                {effortLabel(e)}
+              </option>
+            ))}
+          </select>
+        </div>
       )}
-    </div>
-  );
-}
-
-/** The effort picker beside the model's, shown while the selected model takes
- *  an effort (ruling 689(e) took it out of `ModelEffortFields`). */
-function EffortField({
-  uid,
-  backend,
-  effort,
-  setEffort,
-  catalogLoading,
-  effortOptions,
-}: {
-  uid: string;
-  backend: "codex" | "claude" | "";
-  effort: string;
-  setEffort: (v: string) => void;
-  catalogLoading: boolean;
-  effortOptions: string[];
-}) {
-  return (
-    <div className="field">
-      <label className="flabel" htmlFor={`${uid}-effort`}>
-        Effort
-        <span className="fhint">reasoning level per turn</span>
-      </label>
-      <select
-        id={`${uid}-effort`}
-        aria-label="Effort"
-        value={effort}
-        onChange={(e) => setEffort(e.target.value)}
-        disabled={!backend || catalogLoading}
-      >
-        {(!backend || effort === "") && <option value="">no effort yet</option>}
-        {effortOptions.map((e) => (
-          <option key={e} value={e}>
-            {effortLabel(e)}
-          </option>
-        ))}
-      </select>
     </div>
   );
 }
