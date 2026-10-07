@@ -1,7 +1,6 @@
 import { useState } from "react";
 import { useSearchParams } from "react-router";
 import type { DomainRecord, OrgUserView } from "~/server/org/org-users.server";
-import { isValidGithubHandle, normalizeHandle } from "~/shared/github-handle";
 import { countLabel } from "~/shared/text/plural";
 import { Avatar } from "~/ui/avatar";
 import { ConfirmDialog } from "~/ui/confirm-dialog";
@@ -13,6 +12,16 @@ import { ConfirmDelete } from "./confirm-delete";
 import { MiniModal } from "./mini-modal";
 import { useModalAction } from "./resource-helpers";
 import { useOrgAction } from "./use-org-action";
+import {
+  defaultInviteIdp,
+  editUserCheck,
+  idpName,
+  inviteComplete,
+  inviteFootHint,
+  inviteSaveLabel,
+  isDomainInvite,
+  type InviteIdp,
+} from "./users-panel-derive";
 
 /**
  * Users & access tab (org-settings spec §4.2) — the REAL org-user surface
@@ -62,6 +71,111 @@ export interface SetupNotice {
   tempPassword: string;
 }
 
+/** Allow access's sign-in method picker (ruling 689(e), split out of
+ *  `InviteModal`, which keeps the state): a method this deployment has not
+ *  configured is drawn, disabled and marked off (F18-3). */
+function InviteMethodPicker({
+  idp,
+  providers,
+  onPick,
+}: {
+  idp: InviteIdp;
+  providers: { github: boolean; google: boolean };
+  onPick: (idp: InviteIdp) => void;
+}) {
+  return (
+    <div className="field">
+      <span className="flabel">Sign-in method</span>
+      <div className="be-pick three">
+        <button
+          type="button"
+          className={"be-opt" + (idp === "github" ? " on" : "")}
+          onClick={() => onPick("github")}
+          aria-pressed={idp === "github"}
+          disabled={!providers.github}
+          title={
+            providers.github
+              ? undefined
+              : "GitHub sign-in isn't configured on this deployment"
+          }
+        >
+          <span className="be-ic">
+            <Icon name="github" />
+          </span>
+          <span className="bnm">
+            GitHub{providers.github ? "" : " · off"}
+          </span>
+          <span className="bcheck">
+            <Icon name="check" />
+          </span>
+        </button>
+        <button
+          type="button"
+          className={"be-opt" + (idp === "google" ? " on" : "")}
+          onClick={() => onPick("google")}
+          aria-pressed={idp === "google"}
+          disabled={!providers.google}
+          title={
+            providers.google
+              ? undefined
+              : "Google sign-in isn't configured on this deployment"
+          }
+        >
+          <span className="be-ic">
+            <Icon name="google" />
+          </span>
+          <span className="bnm">
+            Google{providers.google ? "" : " · off"}
+          </span>
+          <span className="bcheck">
+            <Icon name="check" />
+          </span>
+        </button>
+        <button
+          type="button"
+          className={"be-opt" + (idp === "local" ? " on" : "")}
+          onClick={() => onPick("local")}
+          aria-pressed={idp === "local"}
+        >
+          <span className="be-ic">
+            <Icon name="lock" />
+          </span>
+          <span className="bnm">Local</span>
+          <span className="bcheck">
+            <Icon name="check" />
+          </span>
+        </button>
+      </div>
+    </div>
+  );
+}
+
+/** The instance-role toggle both user modals end on (ruling 689(e), split out
+ *  of `InviteModal` and `EditUserModal`, which keep the role's state). */
+function InstanceRoleField({
+  label,
+  role,
+  onRole,
+}: {
+  label: string;
+  role: "admin" | "member";
+  onRole: (role: "admin" | "member") => void;
+}) {
+  return (
+    <div className="field">
+      <span className="flabel">{label}</span>
+      <span className="mini-seg self-start" role="group" aria-label="Instance role">
+        <button type="button" className={role === "admin" ? "on" : ""} aria-pressed={role === "admin"} onClick={() => onRole("admin")}>
+          Admin
+        </button>
+        <button type="button" className={role === "member" ? "on" : ""} aria-pressed={role === "member"} onClick={() => onRole("member")}>
+          Member
+        </button>
+      </span>
+    </div>
+  );
+}
+
 function InviteModal({
   onClose,
   onSetupNotice,
@@ -73,17 +187,9 @@ function InviteModal({
   providers: { github: boolean; google: boolean };
   initialRole: "admin" | "member";
 }) {
-  // F18-3: default to a method this deployment can actually grant. A whitelisted
-  // GitHub/Google account can NEVER sign in if that OAuth provider is unset, so
-  // defaulting the modal to GitHub (and promising "allowed the moment they sign
-  // in with GitHub") on a local-only deployment sets a trap. Lead with the first
-  // configured OAuth provider, else Local — mirroring R17-4's login-page rule.
-  const defaultIdp: "github" | "google" | "local" = providers.github
-    ? "github"
-    : providers.google
-      ? "google"
-      : "local";
-  const [idp, setIdp] = useState<"github" | "google" | "local">(defaultIdp);
+  // F18-3: default to a method this deployment can actually grant
+  // (`defaultInviteIdp`).
+  const [idp, setIdp] = useState<InviteIdp>(() => defaultInviteIdp(providers));
   const [handle, setHandle] = useState("");
   const [email, setEmail] = useState("");
   const [name, setName] = useState("");
@@ -101,14 +207,8 @@ function InviteModal({
   });
 
   const g = email.trim();
-  const isDomain =
-    idp === "google" && (g.startsWith("@") || (g.includes("@") && !g.split("@")[0]));
-  const canSave =
-    (idp === "github"
-      ? handle.trim().replace(/^@/, "").length > 1
-      : idp === "google"
-        ? g.includes("@") && (g.split("@")[1] || "").includes(".")
-        : name.trim().length > 1 && email.includes("@"));
+  const isDomain = isDomainInvite(idp, g);
+  const canSave = inviteComplete(idp, { handle, account: g, name, email });
 
   const submit = () => {
     // Enter in a field reaches this directly, so the busy guard lives here
@@ -149,87 +249,11 @@ function InviteModal({
       sub="Whitelist who can sign in: no invite emails, access on first login"
       onClose={onClose}
       canSave={canSave}
-      saveLabel={
-        idp === "local"
-          ? "Create account"
-          : isDomain
-            ? "Whitelist domain"
-            : "Whitelist " + (idp === "github" ? "user" : "account")
-      }
-      footHint={
-        idp === "github"
-          ? "allowed the moment they sign in with GitHub"
-          : idp === "google"
-            ? isDomain
-              ? "everyone " + g + " can sign in with Google"
-              : "allowed the moment they sign in with Google"
-            : "they sign in with the generated temp password, then set their own"
-      }
+      saveLabel={inviteSaveLabel(idp, isDomain)}
+      footHint={inviteFootHint(idp, isDomain, g)}
       onSave={submit}
     >
-      <div className="field">
-        <span className="flabel">Sign-in method</span>
-        <div className="be-pick three">
-          <button
-            type="button"
-            className={"be-opt" + (idp === "github" ? " on" : "")}
-            onClick={() => setIdp("github")}
-            aria-pressed={idp === "github"}
-            disabled={!providers.github}
-            title={
-              providers.github
-                ? undefined
-                : "GitHub sign-in isn't configured on this deployment"
-            }
-          >
-            <span className="be-ic">
-              <Icon name="github" />
-            </span>
-            <span className="bnm">
-              GitHub{providers.github ? "" : " · off"}
-            </span>
-            <span className="bcheck">
-              <Icon name="check" />
-            </span>
-          </button>
-          <button
-            type="button"
-            className={"be-opt" + (idp === "google" ? " on" : "")}
-            onClick={() => setIdp("google")}
-            aria-pressed={idp === "google"}
-            disabled={!providers.google}
-            title={
-              providers.google
-                ? undefined
-                : "Google sign-in isn't configured on this deployment"
-            }
-          >
-            <span className="be-ic">
-              <Icon name="google" />
-            </span>
-            <span className="bnm">
-              Google{providers.google ? "" : " · off"}
-            </span>
-            <span className="bcheck">
-              <Icon name="check" />
-            </span>
-          </button>
-          <button
-            type="button"
-            className={"be-opt" + (idp === "local" ? " on" : "")}
-            onClick={() => setIdp("local")}
-            aria-pressed={idp === "local"}
-          >
-            <span className="be-ic">
-              <Icon name="lock" />
-            </span>
-            <span className="bnm">Local</span>
-            <span className="bcheck">
-              <Icon name="check" />
-            </span>
-          </button>
-        </div>
-      </div>
+      <InviteMethodPicker idp={idp} providers={providers} onPick={setIdp} />
       {idp === "github" && (
         <div className="field">
           <label className="flabel" htmlFor="inv-gh">
@@ -298,19 +322,11 @@ function InviteModal({
           </div>
         </div>
       )}
-      <div className="field">
-        <span className="flabel">
-          {isDomain ? "Role for everyone joining via this domain" : "Instance role"}
-        </span>
-        <span className="mini-seg self-start" role="group" aria-label="Instance role">
-          <button type="button" className={role === "admin" ? "on" : ""} aria-pressed={role === "admin"} onClick={() => setRole("admin")}>
-            Admin
-          </button>
-          <button type="button" className={role === "member" ? "on" : ""} aria-pressed={role === "member"} onClick={() => setRole("member")}>
-            Member
-          </button>
-        </span>
-      </div>
+      <InstanceRoleField
+        label={isDomain ? "Role for everyone joining via this domain" : "Instance role"}
+        role={role}
+        onRole={setRole}
+      />
       {/* Pass-19 UX coherence audit, finding #20 — see the note on the Edit
           modal's slot below: this is the invite half of the same asymmetry
           ("A user with email … already exists.", an invalid handle, an
@@ -322,6 +338,82 @@ function InviteModal({
         </div>
       )}
     </MiniModal>
+  );
+}
+
+/** A local account's Password field in Edit user (ruling 689(e), split out of
+ *  `EditUserModal`, which keeps the reset's fetcher and the one-time temp
+ *  password it returned). */
+function PasswordResetField({
+  user,
+  tempPassword,
+  busy,
+  onReset,
+}: {
+  user: OrgUserView;
+  tempPassword: string | null;
+  busy: boolean;
+  onReset: () => void;
+}) {
+  return (
+    <div className="field">
+      <span className="flabel">Password</span>
+      {/* LV-F1: the pending state is CONTEXT, never a replacement for the
+          action. This branch used to render the "Reset pending" banner
+          INSTEAD of the button whenever `pwreset`/`invited` was set — which
+          is true for EVERY freshly created account. So an admin who missed
+          or reloaded past the one-time temp password had no way to issue a
+          new one: the account was permanently un-signin-able and the only
+          escape was Remove + recreate (live-reproduced by the owner). The
+          button now always renders for a local account; the banner sits
+          above it and carries the freshly generated password when there is
+          one. */}
+      {(user.pwreset || user.status === "invited" || tempPassword) && (
+        <div className="cred-ok">
+          <Icon name="check" />
+          <span>
+            Reset pending: {user.name} will be prompted to set a new password at
+            next sign-in.
+            {tempPassword && (
+              <>
+                {" "}
+                Temp sign-in password:{" "}
+                <code className="mono">{tempPassword}</code> (shown once, hand it
+                over out-of-band).
+              </>
+            )}
+          </span>
+        </div>
+      )}
+      <div>
+        <button
+          type="button"
+          className="btn ghost sm"
+          onClick={onReset}
+          disabled={busy}
+          // Ruling 368: the reset in flight shows itself here.
+          aria-busy={busy || undefined}
+        >
+          <GlyphSwap rest="lock" alt="loader" on={busy} spinAlt />
+          {user.pwreset || user.status === "invited"
+            ? busy
+              ? "Generating…"
+              : "Generate a new temp password"
+            : busy
+              ? "Resetting…"
+              : "Reset password"}
+        </button>
+        <div className="def-note after">
+          <Icon name="lock" />
+          <span>
+            No email is sent. A temp password is generated for you to hand over;
+            they're prompted to set a new password at their next sign-in.
+            {(user.pwreset || user.status === "invited") &&
+              " Generating again replaces any temp password you handed over earlier."}
+          </span>
+        </div>
+      </div>
+    </div>
   );
 }
 
@@ -363,10 +455,7 @@ function EditUserModal({
     },
   });
 
-  const handleInput = normalizeHandle(githubHandle);
-  const handleOk = handleInput === null || isValidGithubHandle(handleInput);
-  const canSave =
-    handleOk && (!isLocal || (name.trim().length > 1 && email.includes("@")));
+  const { handleInput, handleOk, canSave } = editUserCheck({ isLocal, name, email, githubHandle });
   const save = () => {
     if (!canSave) return;
     if (isYou && role !== "admin") {
@@ -396,11 +485,7 @@ function EditUserModal({
       title={"Edit " + user.name}
       busy={saveAction.busy}
       done={done}
-      sub={
-        isLocal
-          ? "Local account"
-          : "Signs in with " + (user.idp === "github" ? "GitHub" : "Google")
-      }
+      sub={isLocal ? "Local account" : "Signs in with " + idpName(user.idp)}
       onClose={onClose}
       canSave={canSave}
       saveLabel="Save changes"
@@ -445,7 +530,7 @@ function EditUserModal({
         <div className="def-note pulled">
           <Icon name="lock" />
           <span>
-            Name &amp; email sync from {user.idp === "github" ? "GitHub" : "Google"} at
+            Name &amp; email sync from {idpName(user.idp)} at
             each sign-in and can't be edited here.
           </span>
         </div>
@@ -471,78 +556,16 @@ function EditUserModal({
           </span>
         </div>
       )}
-      <div className="field">
-        <span className="flabel">Instance role</span>
-        <span className="mini-seg self-start" role="group" aria-label="Instance role">
-          <button type="button" className={role === "admin" ? "on" : ""} aria-pressed={role === "admin"} onClick={() => setRole("admin")}>
-            Admin
-          </button>
-          <button type="button" className={role === "member" ? "on" : ""} aria-pressed={role === "member"} onClick={() => setRole("member")}>
-            Member
-          </button>
-        </span>
-      </div>
+      <InstanceRoleField label="Instance role" role={role} onRole={setRole} />
       {isLocal && (
-        <div className="field">
-          <span className="flabel">Password</span>
-          {/* LV-F1: the pending state is CONTEXT, never a replacement for the
-              action. This branch used to render the "Reset pending" banner
-              INSTEAD of the button whenever `pwreset`/`invited` was set — which
-              is true for EVERY freshly created account. So an admin who missed
-              or reloaded past the one-time temp password had no way to issue a
-              new one: the account was permanently un-signin-able and the only
-              escape was Remove + recreate (live-reproduced by the owner). The
-              button now always renders for a local account; the banner sits
-              above it and carries the freshly generated password when there is
-              one. */}
-          {(user.pwreset || user.status === "invited" || tempPassword) && (
-            <div className="cred-ok">
-              <Icon name="check" />
-              <span>
-                Reset pending: {user.name} will be prompted to set a new password at
-                next sign-in.
-                {tempPassword && (
-                  <>
-                    {" "}
-                    Temp sign-in password:{" "}
-                    <code className="mono">{tempPassword}</code> (shown once, hand it
-                    over out-of-band).
-                  </>
-                )}
-              </span>
-            </div>
-          )}
-          <div>
-            <button
-              type="button"
-              className="btn ghost sm"
-              onClick={() =>
-                resetAction.submit({ intent: "user-reset-password", userId: user.id })
-              }
-              disabled={resetAction.busy}
-              // Ruling 368: the reset in flight shows itself here.
-              aria-busy={resetAction.busy || undefined}
-            >
-              <GlyphSwap rest="lock" alt="loader" on={resetAction.busy} spinAlt />
-              {user.pwreset || user.status === "invited"
-                ? resetAction.busy
-                  ? "Generating…"
-                  : "Generate a new temp password"
-                : resetAction.busy
-                  ? "Resetting…"
-                  : "Reset password"}
-            </button>
-            <div className="def-note after">
-              <Icon name="lock" />
-              <span>
-                No email is sent. A temp password is generated for you to hand over;
-                they're prompted to set a new password at their next sign-in.
-                {(user.pwreset || user.status === "invited") &&
-                  " Generating again replaces any temp password you handed over earlier."}
-              </span>
-            </div>
-          </div>
-        </div>
+        <PasswordResetField
+          user={user}
+          tempPassword={tempPassword}
+          busy={resetAction.busy}
+          onReset={() =>
+            resetAction.submit({ intent: "user-reset-password", userId: user.id })
+          }
+        />
       )}
       {/* Pass-19 UX coherence audit, finding #20: this panel gave one server
           guard two different feedback semantics. The member row's role toggle
