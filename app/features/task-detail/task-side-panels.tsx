@@ -101,11 +101,11 @@ function prSignal({
 /** Ruling 134(c): the push control's label, with its own busy text and tooltip. */
 const PUSH_LABEL = (rev: string, prNumber: number): string =>
   `Push ${rev} to PR #${prNumber}`;
-/** The refusal the server would give a plain push of a diverged branch.
- *  Exported with no importer on purpose: exported, the build inlines it at its
- *  one use; module-local, it ships as a variable, 6 B more on the budgeted
- *  project.task closure (ruling 457's ratchet; measured for ruling 458(g)). */
-export const DIVERGED_PUSH_REFUSAL =
+/** The refusal the server would give a plain push of a diverged branch (the
+ *  name ruling 160 cites). Module-local: since the ruling 689(e) split its one
+ *  use sits in `deliverButton`, and the build ships it as a variable whether or
+ *  not it is exported (project.task 360,333 B gzip both ways, measured). */
+const DIVERGED_PUSH_REFUSAL =
   "Origin's copy of this branch holds commits the workspace does not, so a plain push would be refused as non-fast-forward. Resolve the branch history first; the operator can open a decision packet for it.";
 
 export function GithubTrace({
