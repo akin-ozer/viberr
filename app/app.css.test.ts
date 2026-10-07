@@ -2140,7 +2140,7 @@ const HIDDEN_BY_DESIGN = {
  *  that are already there. */
 const VIEWPORT_READS = {
   "app/ui/stage-menu.tsx": "clamps the stage popover's left edge into the window with an 8px gutter after `getBoundingClientRect()`, and (interface review 2026-09-24, layo-8) flips it above its trigger or caps its height when the room below runs out. It positions an element that is already open and already rendered — no branch of the tree depends on the number.",
-  "app/features/profile/agent-accounts-panel.tsx": "ruling 616: the account picker clips the box its menu shows in (the overlay's scrolling body) to the window, then opens the menu above its trigger or caps its height when the room below runs out, as the stage menu does. It positions a menu that is already open and already rendered — no branch of the tree depends on the number.",
+  "app/features/profile/agent-account-picker.tsx": "ruling 616: the account picker clips the box its menu shows in (the overlay's scrolling body) to the window, then opens the menu above its trigger or caps its height when the room below runs out, as the stage menu does. It positions a menu that is already open and already rendered — no branch of the tree depends on the number.",
 } satisfies Record<string, string>;
 
 type Hidden = {
@@ -5716,7 +5716,7 @@ describe("app.css ruling 459: the better-ui pass — contextual icon motion", ()
         "features/github/github-view.tsx: check → loader (spins)",
         "features/github/github-view.tsx: refresh → loader (spins)",
         "features/project-settings/settings-page.tsx: check → loader (spins)",
-        "features/profile/profile-page.tsx: github → loader (spins)",
+        "features/profile/profile-github.tsx: github → loader (spins)",
         "features/org-settings/users-panel.tsx: lock → loader (spins)",
         "features/org-settings/resource-rows.tsx: refresh → loader (spins)",
         "features/org-settings/resource-rows.tsx: refresh → loader (spins)",
