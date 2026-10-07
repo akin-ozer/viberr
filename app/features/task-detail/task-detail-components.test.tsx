@@ -4525,7 +4525,8 @@ describe("TimelineItem — a gate run's note (ruling 493)", () => {
   };
 
   it("puts the ending in the pill and the revision beside it, and each gate in the table with its log", () => {
-    // CANARY: drop the `gates ?` branch from TimelineItem and the note is prose again.
+    // CANARY: drop the `ev.gates` branch from TimelineEntryBody (timeline-entry.tsx)
+    // and the note is prose again.
     const { container, getByRole } = render(<TimelineItem ev={gateNote(FAILED)} attachmentsBase={BASE} />);
     expect(container.querySelector(".tl-node.blocked")).not.toBeNull();
     const pill = container.querySelector(".tl-meta .pill");
@@ -4585,8 +4586,8 @@ describe("TimelineItem — a reviewer's verdict (ruling 526)", () => {
     });
 
   it("draws the title, the tally, the revision and the checklist, and says nothing twice", () => {
-    // CANARY: drop the `verdict ?` branch from TimelineItem and the note is a
-    // sentence over a monospaced block again.
+    // CANARY: drop the `ev.verdict` branch from TimelineEntryBody (timeline-entry.tsx)
+    // and the note is a sentence over a monospaced block again.
     const { container, getByRole } = render(
       <TimelineItem ev={verdictNote({})} attachmentNames={new Set([LOG, "board.png"])} attachmentsBase={BASE} />,
     );

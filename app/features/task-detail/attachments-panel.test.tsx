@@ -263,8 +263,8 @@ describe("AttachmentsPanel attach control (F39-6)", () => {
 
 describe("U39-31: TimelineItem links the other tasks an event names", () => {
   it("links them in a comment and in a typed event", () => {
-    // CANARY: drop `taskLinks` from TimelineItem's CollapsibleComment and
-    // RichText and neither links.
+    // CANARY: drop `taskLinks` from TimelineEntryBody's CollapsibleComment and
+    // TypedEventBody's Markdown (timeline-entry.tsx) and neither links.
     const links = { "AX-33": "/projects/ax-clone/tasks/AX-33" };
     const comment: TimelineEventRender = { ...evidenceEvent("x"), type: "comment", text: "Fixed by AX-33.", evidence: null };
     const note: TimelineEventRender = { ...evidenceEvent("x"), id: 8, type: "note", text: "Waits on AX-33.", evidence: null };
