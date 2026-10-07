@@ -269,7 +269,7 @@ export function ControllerAdminPanel({
   const [model, setModel] = useState(config.model);
   const [effort, setEffort] = useState(config.effort);
   const [definition, setDefinition] = useState(config.definition);
-  const [grantSkills, setGrantSkills] = useState(new Set(config.skills));
+  const [grantSkills, setGrantSkills] = useState(() => new Set(config.skills));
   // P13-KM-01, same repair as the global-profile editor: a KB grant stored
   // under the display NAME is rewritten to its dir on open (so it renders
   // granted and the next save repairs the file); only an entry matching
@@ -280,7 +280,7 @@ export function ControllerAdminPanel({
   const [grantKbs, setGrantKbs] = useState(
     () => new Set([...kbDirsOf(config.kb, kbs), ...kbLegacyOf(config.kb, kbs)]),
   );
-  const [grantMcps, setGrantMcps] = useState(new Set(config.mcps));
+  const [grantMcps, setGrantMcps] = useState(() => new Set(config.mcps));
 
   const lockedSections = (
     [
