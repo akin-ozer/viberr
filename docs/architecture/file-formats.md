@@ -113,7 +113,11 @@ repo: akin-ozer/viberr            # THE project's GitHub repo (one per project),
                                   # 100, never `.` or `..`. Any other value reads as
                                   # null (no repository) with an error-severity
                                   # `frontmatter.invalid_field`, which
-                                  # `npm run store:check` lists
+                                  # `npm run store:check` lists. Like any field
+                                  # that falls back, it lasts until the file's
+                                  # next write (a new task, a settings save),
+                                  # which writes `repo: null`: the value and its
+                                  # diagnostic go, and nothing records why
 defaultBranch: main
 taskPrefix: VIB                   # letters only; task keys: VIB-142. `EPIC` is reserved
 nextTaskNumber: 169               # atomic per-project key counter
