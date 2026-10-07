@@ -1,5 +1,5 @@
 import { existsSync, readFileSync } from "node:fs";
-import { AppError } from "~/server/errors/app-error.server";
+import { AppError, isAppError } from "~/server/errors/app-error.server";
 import { ERROR_CODES } from "~/server/errors/error-codes";
 import type { FileDiagnostic } from "~/schemas/file-diagnostics";
 import type {
@@ -43,9 +43,17 @@ export interface TaskFileReadResult {
   absPath: string;
 }
 
-/** Reads + tolerantly parses a task file. Returns null when absent. */
+/** Reads + tolerantly parses a task file. Returns null when absent, and for a
+ *  key that is not one folder under the project's tasks (ruling 695): a read
+ *  finds no task there, as it finds none under a key nobody has used. */
 export function readTaskFile(ref: TaskFileRef): TaskFileReadResult | null {
-  const absPath = resolveTaskFilePath(ref);
+  let absPath: string;
+  try {
+    absPath = resolveTaskFilePath(ref);
+  } catch (error) {
+    if (isAppError(error) && error.code === ERROR_CODES.NOT_FOUND) return null;
+    throw error;
+  }
   if (!existsSync(absPath)) return null;
   const content = readFileSync(absPath, "utf8");
   const { parsed, diagnostics } = parseStoreFile(

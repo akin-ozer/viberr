@@ -9,7 +9,8 @@ import { setupAppTest, type AppTestContext } from "../../test-support/test-app";
  */
 
 let app: AppTestContext;
-let ardaId: string; // viberr-core member
+let ardaId: string; // viberr-core member, and billing-service's only one
+let muratId: string; // viberr-core member, NOT in billing-service
 let denizId: string; // signed-in NON-member
 
 beforeAll(async () => {
@@ -17,6 +18,7 @@ beforeAll(async () => {
   const { runDemoSeed } = await import("../../test-support/demo-seed");
   const { userIds } = await runDemoSeed(app.db, { dataRoot: app.dataRoot });
   ardaId = userIds.arda;
+  muratId = userIds.murat;
   denizId = userIds.deniz;
 
   const dir = path.join(
@@ -38,6 +40,7 @@ async function get(
   userId: string,
   file: string,
   query = "",
+  { slug, key } = { slug: "viberr-core", key: "VIB-142" },
 ): Promise<{ status: number; headers: Headers; body: () => Promise<ArrayBuffer> }> {
   const { loader } = await import("~/routes/task-attachment");
   const { cookie } = await app.cookieFor(userId);
@@ -47,10 +50,10 @@ async function get(
     // its matches) is untouched on every path this file exercises.
     const res = await loader({
       request: app.request(
-        `/projects/viberr-core/tasks/VIB-142/attachments/${encodeURIComponent(file)}${query}`,
+        `/projects/${slug}/tasks/${encodeURIComponent(key)}/attachments/${encodeURIComponent(file)}${query}`,
         { cookie },
       ),
-      params: { slug: "viberr-core", key: "VIB-142", file },
+      params: { slug, key, file },
       context: {},
     } as never);
     return { status: res.status, headers: res.headers, body: () => res.arrayBuffer() };
@@ -149,6 +152,40 @@ describe("GET /projects/:slug/tasks/:key/attachments/:file (R19-19)", () => {
     for (const file of ["nope.png", "../task.md", "..", "a/b.png", "\\bad.png"]) {
       const res = await get(ardaId, file);
       expect(res.status, file).toBe(404);
+    }
+  });
+
+  /**
+   * Ruling 695: the task key is one folder under the project's tasks. The
+   * router hands a loader its params decoded, `%2F` as `/` (measured over HTTP
+   * on the production build, 2026-10-07: `/projects/viberr-core/tasks/
+   * ..%2F..%2Fbilling-service%2Ftasks%2FBIL-9/attachments/<file>` answered 200
+   * with billing-service's bytes to a person who is not in it), so the key
+   * this loader reads can hold a path.
+   */
+  it("ruling 695: a key that walks to another task's folder serves nothing, another project's files least of all", async () => {
+    const billing = { slug: "billing-service", key: "BIL-9" };
+    const dir = path.join(app.dataRoot, "projects", billing.slug, "tasks", billing.key, "attachments");
+    mkdirSync(dir, { recursive: true });
+    writeFileSync(path.join(dir, "invoice-run.txt"), "billing only");
+    // The file is there, and its own door serves it to the project's member.
+    const own = await get(ardaId, "invoice-run.txt", "", billing);
+    expect(own.status).toBe(200);
+    expect(new TextDecoder().decode(await own.body())).toBe("billing only");
+    // Murat is in viberr-core, whose files he is served, and not in
+    // billing-service, which answers him as a project that is not there.
+    expect((await get(muratId, "board-after.png")).status).toBe(200);
+    expect((await get(muratId, "invoice-run.txt", "", billing)).status).toBe(404);
+
+    // CANARY: drop the containment in `taskDir` and both are 200: the first
+    // with billing-service's bytes, the second by a key that left the tasks
+    // folder and came back.
+    for (const [key, file] of [
+      ["../../billing-service/tasks/BIL-9", "invoice-run.txt"],
+      ["../tasks/VIB-142", "board-after.png"],
+    ] as const) {
+      const walked = await get(muratId, file, "", { slug: "viberr-core", key });
+      expect(walked.status, key).toBe(404);
     }
   });
 });
