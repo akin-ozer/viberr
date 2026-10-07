@@ -307,6 +307,9 @@ export interface ControllerMountInput {
   /** Ruling 476(h): the conversation the turn answers in, which an epic the
    *  turn creates records (ruling 503). */
   conversationId?: string | null;
+  /** The user message this turn answers, by which a turn a follow-up started
+   *  is told from one a person asked for. */
+  answering?: string | null;
   /** The ORG MCP grants that resolved and pre-flighted for this turn. */
   orgServers: RunMcpServers;
   /** Ruling 283: the knowledge bases this turn's prompt indexes, so the tool
@@ -371,6 +374,7 @@ export function buildControllerMounts(
     projectSlug: input.projectSlug,
     taskKey: input.taskKey,
     conversationId: input.conversationId ?? null,
+    answering: input.answering ?? null,
     kb: input.kb,
   });
   const ops = buildControllerOpsMcp({ db, ctx, user: input.user });
@@ -760,6 +764,7 @@ async function startTurnRun(
     projectSlug: conversation.projectSlug,
     taskKey: conversation.taskKey,
     conversationId: conversation.id,
+    answering: message.id,
     orgServers,
     kb: controllerKbNames(config.kb, conversation.projectSlug, dataRoot),
     dataRoot,

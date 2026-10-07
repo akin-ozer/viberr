@@ -33,6 +33,7 @@ import { roleCan } from "~/shared/rbac";
 import { isRepositoryAskCause } from "~/shared/repository-ask";
 import { REVIEW_DEADLOCK_QUESTION } from "./review-deadlock.server";
 import type { FanOutOutcome } from "./packet-fanout.server";
+import { maybeContinueController } from "./controller-continuation.server";
 import { setTaskDependencies } from "./dependencies.server";
 import { recordAudit } from "~/server/audit/audit-recorder.server";
 import { AGENT_QUESTION_PACKET_KIND } from "./agent-outcome.server";
@@ -1657,6 +1658,11 @@ export async function resolvePacket(
     throw error;
   }
   reprojectTask(db, ctx, input.projectSlug, input.taskKey);
+  // Ruling 685: the `accept_completion` arm writes the last stage itself, so
+  // this door starts a waiting controller conversation's turn itself too. The
+  // hook reads the stage, so every answer may ask: only an acceptance finds
+  // the task there.
+  maybeContinueController(db, ctx, input.projectSlug, input.taskKey);
 
   // U3: one act, one row. A no-op write made no decision to record.
   if (!alreadyAccepted) {

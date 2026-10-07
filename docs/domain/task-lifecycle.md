@@ -1065,7 +1065,9 @@ them.
 Post-acceptance: the task workspace is reclaimed once no run is live, the task's epic is
 checked for being all done (ruling 503: its history says so once and its lead is told),
 held dependents are swept (ruling 131(e): a task whose every `blockedBy`
-entry is now done is released), and the board renders "accepted" (or "merged").
+entry is now done is released), a controller conversation that left itself a step for this
+acceptance has its next turn started with it, as the person who asked (ruling 685), and the
+board renders "accepted" (or "merged").
 
 **A post-merge proof is a follow-up read task** (ruling 492, the owner's F40-64 decision).
 Acceptance moves the task to Done and no stage sits after it, so nothing that happens after
