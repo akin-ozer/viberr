@@ -2973,8 +2973,8 @@ describe("UI-42/UI-44: the decision packet", () => {
    * directive; skip on `gateFor` alone and the third row cannot reach
    * accept_completion, which a click can; put `tabStop` on option 0 whatever
    * it is and the last two rows' tab stop and refusal focus land on an
-   * archive; let an arrow re-select the checked choice and the last row's
-   * refusal goes.
+   * archive; let `selectOption` count the checked choice chosen again as a
+   * change and the last row's refusal goes on the arrow that lands back on it.
    */
   it.each<{
     name: string;
@@ -5086,8 +5086,14 @@ describe("DecisionPacket questionnaire custom answer (P21)", () => {
   });
 
   // Ruling 147: a pristine form is never accused — leaving the directive and
-  // coming back drops the standing refusal.
-  it("ruling 147: changing choice clears a standing directive refusal", () => {
+  // coming back drops the standing refusal. Choosing the directive again while
+  // it is the checked choice changes nothing, by a click or by its digit as by
+  // an arrow (UI-42's table): the box is as empty as when Confirm refused it,
+  // so the alert and the mark stay.
+  //
+  // CANARY: drop `selectOption`'s return on the checked choice and a click or
+  // the digit on the checked directive clears its refusal.
+  it("ruling 147: only a choice change clears a standing directive refusal", () => {
     const { getByText, getByLabelText } = render(
       <DecisionPacket
         packet={packet142}
@@ -5109,6 +5115,14 @@ describe("DecisionPacket questionnaire custom answer (P21)", () => {
     ) as HTMLButtonElement;
     fireEvent.click(confirm);
     expect(document.querySelector('[role="alert"]')).toBeTruthy();
+
+    // The checked directive chosen again: still the same choice, still refused.
+    const box = document.querySelector("#pkt-custom")!;
+    fireEvent.click(custom);
+    expect(document.querySelector('[role="alert"]'), "after a click on it").not.toBeNull();
+    fireEvent.keyDown(custom, { key: String(packet142.options.length + 1) });
+    expect(document.querySelector('[role="alert"]'), "after its digit").not.toBeNull();
+    expect(box.getAttribute("aria-invalid")).toBe("true");
 
     // Pick an authored option, then come back: the directive is pristine again.
     fireEvent.click(

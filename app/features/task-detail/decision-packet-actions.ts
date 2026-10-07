@@ -33,8 +33,9 @@ type PacketOption = PacketRender["options"][number];
  *  the handlers that change it. */
 export interface PacketChoice extends PacketChoiceView {
   sel: number;
-  /** Every choice change goes through here, so a standing refusal is dropped:
-   *  a pristine directive is never accused (ruling 147). */
+  /** Every choice goes through here, and a change drops a standing refusal:
+   *  a pristine directive is never accused (ruling 147). The checked choice
+   *  chosen again is no change, so its refusal stands. */
   selectOption: (i: number) => void;
   /** An arrow key's step through the choices, past an inert one (UI-44). */
   move: (delta: number) => void;
@@ -83,6 +84,7 @@ export function usePacketChoice(
   const refusalShake = useRefusalShake(refused);
   const customRef = useRef<HTMLTextAreaElement>(null);
   const selectOption = (i: number) => {
+    if (i === sel) return;
     setSel(i);
     setRefused(0);
   };
@@ -159,7 +161,8 @@ export function usePacketChoice(
     // UI-42: an arrow passes an inert option by, as its click does nothing
     // (a disabled radio in the APG radio group), and with every choice inert
     // it does nothing at all. With none but the checked one reachable it
-    // changes no choice, so a standing refusal stays (ruling 147).
+    // lands on that one again, which `selectOption` counts as no change, so
+    // a standing refusal stays (ruling 147).
     const { blockedOptions } = view;
     let next = from < 0 ? (delta > 0 ? -1 : choiceCount) : from;
     for (let tried = 0; tried < choiceCount; tried++) {
@@ -167,7 +170,7 @@ export function usePacketChoice(
       if (!blockedOptions[next]) break;
     }
     if (blockedOptions[next]) return;
-    if (next !== sel) selectOption(next);
+    selectOption(next);
     requestAnimationFrame(() => optionRefs.current[next]?.focus());
   };
 
