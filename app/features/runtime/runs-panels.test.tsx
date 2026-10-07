@@ -1430,9 +1430,25 @@ describe("AgentLogsPanel — run inputs (P19-G11)", () => {
     // The `{ } raw` contract is "the stored envelope, verbatim" — a viberr line
     // does not get to keep its friendly rendering there.
     const { getByText, queryByText, container } = renderConsole([line]);
+    const clock = container.querySelector(".log-line .lt");
+    const tag = container.querySelector(".log-line .ltag");
     fireEvent.click(getByText("{ } raw"));
     expect(container.textContent).toContain(rawEnvelope);
     expect(queryByText("show what this run was given")).toBeNull();
+    // ...and, like every other line, it is patched there rather than replaced:
+    // a reader's selection in its clock or tag survives the toggle, and so
+    // does the size `content-visibility` remembered for the row. Ruling
+    // 689(e)'s split once drew this branch as a component of its own, a
+    // different element type from the other branch's fragment, and React
+    // swapped the whole row on every toggle with the same markup either side.
+    // CANARY: make `runInputsRow` a component LineRow renders
+    // (`<RunInputsRow … />`) again.
+    expect(container.querySelector(".log-line .lt")).toBe(clock);
+    expect(container.querySelector(".log-line .ltag")).toBe(tag);
+    fireEvent.click(getByText("{ } raw"));
+    expect(getByText("show what this run was given")).toBeTruthy();
+    expect(container.querySelector(".log-line .lt")).toBe(clock);
+    expect(container.querySelector(".log-line .ltag")).toBe(tag);
   });
 });
 

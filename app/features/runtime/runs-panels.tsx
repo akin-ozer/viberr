@@ -1192,17 +1192,7 @@ function LineRow({
   // of the run's narrative. `raw` still wins, as it does for every other line:
   // that toggle's contract is the stored envelope.
   if (!raw && isRunInputsLine(display)) {
-    return (
-      <RunInputsRow
-        rowKey={line.key}
-        display={display}
-        clock={clock}
-        backend={backend}
-        kind={kind}
-        open={open}
-        onToggle={onToggle}
-      />
-    );
+    return runInputsRow({ rowKey: line.key, display, clock, backend, kind, open, onToggle });
   }
   // P19-RC1: the shapes the projection distinguishes (`lineParts`), computed
   // only when `raw` is off — under it the stored envelope prints verbatim,
@@ -1247,9 +1237,14 @@ function LineRow({
 /**
  * P19-G11: the run-inputs line, summarised on one row and opened on demand
  * into the rows of what the run was given. Ruling 689(e): LineRow's branch
- * for it, as a component of its own with no hook.
+ * for it, which LineRow CALLS rather than renders. As a component it was a
+ * different element type from the fragment the other branch returns, so a raw
+ * toggle tore the row down and mounted it again (a reader's selection in its
+ * clock or tag lost, its `content-visibility` size forgotten); called, LineRow
+ * returns the same fragment of `div.log-line` and rows in both branches, and
+ * React patches the row in place as it did before the split.
  */
-function RunInputsRow({
+function runInputsRow({
   rowKey,
   display,
   clock,
