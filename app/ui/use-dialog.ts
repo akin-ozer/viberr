@@ -25,6 +25,12 @@ import { pinLivePose } from "./live-pose";
  * it). A caller with an inner layer (store-browser's new-folder row) passes
  * onDismissRequest: return true to consume the Escape/backdrop dismiss
  * without closing (no exit animation plays); explicit close() always closes.
+ *
+ * onClose also runs when the dialog unmounts mid-exit (a revalidation took
+ * it away): the fallback timer is not cleared on unmount, because that call
+ * settles a parent whose state still holds the dialog open. A close that
+ * does more than reset state checks that its dialog is still mounted
+ * (PageOverlay).
  */
 
 export function useDialog(

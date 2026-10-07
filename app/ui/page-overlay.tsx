@@ -23,6 +23,10 @@ export function PageOverlay({ label, children }: { label: string; children: Reac
   const navigate = useNavigate();
   const location = useLocation();
   const { ref: panelRef, close } = useDialog(() => {
+    // useDialog still ends an exit the overlay did not outlive (a row's page,
+    // or Back, replaced it mid-fade); going back then would undo where the
+    // person went.
+    if (!panelRef.current) return;
     const { returnTo } = overlayReturnState.parse(location.state);
     navigate(returnTo ?? "/");
   });
