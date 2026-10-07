@@ -78,7 +78,7 @@ scan run from inside an agent worktree under `.claude/` sees no files at all.
   `useModelCatalog(backend, model, setModel, effort, setEffort)`, which also fires the two
   pass-to-parent rules), fetcher data passed down as a prop and settled once by a ref,
   only for a change the panel itself sent (settings-page.tsx
-  `changeResult={repoFetcher.data}`), and fetcher data read in place
+  `changeResult={repoPosts.result}`), and fetcher data read in place
   (controller-dock.tsx `staleSelection` off the dock-view fetcher). Verify the trigger is
   `fetcher.data` or a value computed from it, not a plain loader prop.
 
@@ -520,7 +520,7 @@ design-system or cross-file decision — revisit deliberately, not per lint run.
   each.
 
 - `react-doctor/no-high-complexity-react-function` / `no-giant-component` — the large
-  surfaces (SettingsPage, DecisionPacket, Timeline, the agents and
+  surfaces (DecisionPacket, Timeline, the agents and
   org-settings modals, and their siblings). Splitting them is a structural refactor per
   surface, best done with the e2e suite and the bundle ratchet beside it, not as a lint
   sweep. Ruling 689(d) piloted the recipe on TaskDetailPage, which no longer carries

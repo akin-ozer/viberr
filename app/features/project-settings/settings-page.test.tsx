@@ -1974,7 +1974,8 @@ describe("ProjectGatesPanel (ruling 482)", () => {
  * Ruling 652(b): the File leases panel's save answers like every other panel's.
  * Its fetcher was the one of nine on the page without `useActionToast`, so a
  * saved table said nothing and a refusal vanished. Canary: drop
- * `useActionToast(leaseFetcher)` from SettingsPage and the refusal is never read.
+ * `useActionToast(fetcher)` from `useListSave` (settings-page-actions.ts), the
+ * hook the lease save goes through, and the refusal is never read.
  */
 describe("ruling 652(b): a file-lease save answers on the page", () => {
   it("toasts what the action answers, a refusal included", async () => {
