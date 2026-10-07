@@ -55,6 +55,7 @@ import { startHttpUpstream } from "../../../test-support/mcp-upstream";
 import { signInWithOAuth, startOAuthMcpServer } from "../../../test-support/mcp-oauth-server";
 import { resetMcpOAuthForTests, signOutMcpOAuth } from "~/server/org/mcp-oauth.server";
 import { listAuditEvents } from "../../../test-support/audit-log";
+import { withEnv } from "../../../test-support/env";
 import {
   installFakeRuntime,
   queueFakeRun,
@@ -1226,6 +1227,30 @@ describe("governed actions record audit rows (table-driven)", () => {
             store.db,
             { conversationId: conversation.id, projectSlug: store.slug, dataRoot: store.dataRoot },
             actorArda(),
+          );
+        },
+      },
+      {
+        // Ruling 691: Viberr's own render of a files delivery's pages. Here
+        // the pinned browser is not on disk, and the job still records what it
+        // could not picture. CANARY: remove the recordAudit call at the end
+        // of the delivery job.
+        name: "captureDeliveredPages",
+        action: "task.pages.captured",
+        taskKey: "VIB-1",
+        run: async () => {
+          const { requestDeliveryCaptures } = await import("~/server/tasks/page-capture.server");
+          const { keepDelivery } = await import("~/server/files/kept-deliveries.server");
+          const { writeTaskAttachment } = await import("~/server/files/task-attachments.server");
+          const { updateTaskFile } = await import("~/server/files/task-writer.server");
+          const stamp = "2026-10-07T12:00:00.000Z";
+          writeTaskAttachment(store.slug, "VIB-1", "post.html", new TextEncoder().encode("<p>a page</p>"), store.dataRoot);
+          keepDelivery(store.slug, "VIB-1", stamp, ["post.html"], store.dataRoot);
+          await updateTaskFile({ projectSlug: store.slug, taskKey: "VIB-1", dataRoot: store.dataRoot }, (parsed) => {
+            parsed.frontmatter.deliveredAt = stamp;
+          });
+          await withEnv({ VIBERR_BROWSER_EXECUTABLE: path.join(store.dataRoot, "no-such-browser") }, () =>
+            requestDeliveryCaptures(store.db, fileCtx, { projectSlug: store.slug, taskKey: "VIB-1", stamp }),
           );
         },
       },

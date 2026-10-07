@@ -26,6 +26,8 @@ import {
   readBoardTask,
   readTimelineEntry,
 } from "./board-read.server";
+import { PAGE_CAPTURE_MAX_FROM } from "~/shared/page-capture";
+import { captureTaskPage, pageCaptureStatus } from "./page-capture.server";
 import {
   KB_DOC_KB_DESCRIPTION,
   KB_DOC_OFFSET_DESCRIPTION,
@@ -39,6 +41,8 @@ import {
   READ_BOARD_DESCRIPTION,
   READ_BOARD_TASK_KEY_DESCRIPTION,
   READ_TASK_ATTACHMENT_DESCRIPTION,
+  CAPTURE_PAGE_DESCRIPTION,
+  CAPTURE_PAGE_FIELDS,
   READ_TASK_ATTACHMENT_FIELDS,
   READ_TASK_SOURCE_DESCRIPTION,
   READ_TASK_SOURCE_FIELDS,
@@ -895,6 +899,40 @@ export function buildAgentToolkit(deps: AgentToolkitDeps): AgentToolkit | null {
         },
       ),
     );
+    // Ruling 691: one page of this task as a reader sees it. Same gate, and
+    // only on a server that can render one: a tool that cannot answer is
+    // never listed. It saves nothing on the task; the Codex twin is the
+    // gateway's board server.
+    if (pageCaptureStatus().available) {
+      tools.push(
+        tool(
+          "capture_page",
+          CAPTURE_PAGE_DESCRIPTION,
+          {
+            name: z.string().describe(CAPTURE_PAGE_FIELDS.name),
+            view: z.enum(["desktop", "phone"]).optional().describe(CAPTURE_PAGE_FIELDS.view),
+            from: z.number().int().min(0).max(PAGE_CAPTURE_MAX_FROM).optional().describe(CAPTURE_PAGE_FIELDS.from),
+          },
+          async (args) => {
+            try {
+              const reply = await captureTaskPage(db, ctx, {
+                projectSlug,
+                taskKey,
+                name: args.name,
+                view: args.view,
+                from: args.from,
+                // The run this toolkit serves: its pictures go when it ends.
+                runId: runIdForOutcomeKey(db, outcomeKey),
+              });
+              return reply.images.length > 0 ? imageResult(reply.text, reply.images) : textResult(reply.text);
+            } catch (error) {
+              logger.warn("agent capture_page failed", { taskKey, err: toError(error) });
+              return textResult("[error] The page could not be captured.");
+            }
+          },
+        ),
+      );
+    }
   }
 
   // Ruling 283: a knowledge base is INDEXED into the prompt now, not injected,

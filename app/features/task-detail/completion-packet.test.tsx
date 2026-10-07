@@ -214,8 +214,8 @@ describe("ruling 668: the card is the task's result once it is accepted", () => 
           assumptions: "730 hours a month.",
           gaps: "Nobody gave data transfer figures.",
           files: [
-            { name: "My-Estimate.json", caption: "The calculator import" },
-            { name: "summary.md", caption: "" },
+            { name: "My-Estimate.json", caption: "The calculator import", page: null },
+            { name: "summary.md", caption: "", page: null },
           ],
           hiddenFiles: 1,
         },
@@ -268,6 +268,58 @@ describe("ruling 668: the card is the task's result once it is accepted", () => 
     expect(reads).toEqual([]);
   });
 
+  it("a result file that is a page shows its desktop and phone pictures beside its row, and the reason when there is none", () => {
+    // Ruling 691. CANARY: remove the `f.page` block from the Files list and a
+    // delivered page is a file row again, judged from its source.
+    const at = "2026-10-07T12:00:09.412Z";
+    renderPacket(
+      view({
+        subjectSha: null,
+        change: null,
+        packet: {
+          ...view().packet!,
+          files: [
+            {
+              name: "post.html",
+              caption: "The launch post",
+              page: {
+                shots: [
+                  { view: "desktop", name: "post.html.capture-desktop.png", at, cut: false },
+                  { view: "phone", name: "post.html.capture-phone.png", at, cut: true },
+                ],
+                note: null,
+              },
+            },
+            { name: "notes.md", caption: "", page: { shots: [], note: "the render ran past 25 seconds" } },
+            { name: "figures.csv", caption: "", page: null },
+          ],
+        },
+      }),
+      { pr: null },
+    );
+    const row = (name: string) => screen.getByText(name, { selector: ".cmp-file-name" }).closest("li")!;
+    const post = row("post.html");
+    // Each picture opens from its own tile, and its link carries when it was
+    // made: a rework replaces the picture under the same name.
+    const desktop = within(post).getByRole("link", { name: "Open the desktop picture of post.html" });
+    expect(desktop.getAttribute("href")).toBe(
+      "/t/attachments/post.html.capture-desktop.png?v=2026-10-07T12%3A00%3A09.412Z",
+    );
+    expect(desktop.querySelector("img")?.getAttribute("src")).toBe(desktop.getAttribute("href"));
+    expect(within(post).getByRole("link", { name: "Open the phone picture of post.html" })).toBeTruthy();
+    expect([...post.querySelectorAll(".cmp-caption")].map((el) => el.textContent)).toEqual([
+      "Desktop, 1280 px wide",
+      "Phone, 390 px wide, the top of a longer page",
+    ]);
+    // The source still opens from the row.
+    expect(post.querySelector("a.cmp-file")?.getAttribute("href")).toBe("/t/attachments/post.html");
+    // A page with no picture says why; a file that is not a page says nothing.
+    const notes = row("notes.md");
+    expect(within(notes).getByText("No picture of this page: the render ran past 25 seconds")).toBeTruthy();
+    expect(notes.querySelector(".cmp-shots")).toBeNull();
+    expect(row("figures.csv").querySelector(".cmp-shots, .cmp-none")).toBeNull();
+  });
+
   it("offers the same notes and files before the acceptance, under the offer's own title", () => {
     // CANARY: gate the notes or the files on `result` and the person who
     // accepts reads less than the result they are accepting.
@@ -278,7 +330,7 @@ describe("ruling 668: the card is the task's result once it is accepted", () => 
         packet: {
           ...view().packet!,
           considerations: "Reserved pricing was not applied.",
-          files: [{ name: "summary.md", caption: "The estimate in prose" }],
+          files: [{ name: "summary.md", caption: "The estimate in prose", page: null }],
         },
       }),
     );

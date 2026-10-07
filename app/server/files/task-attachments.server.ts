@@ -25,6 +25,7 @@ import {
   READABLE_TEXT_EXTENSIONS,
 } from "~/shared/attachment-kinds";
 import path from "node:path";
+import { pageCapturesAmong } from "~/shared/page-capture";
 import { isGateLogName } from "~/shared/project-gates";
 import {
   resolveStoredSegment,
@@ -161,6 +162,8 @@ export function attachmentNamesSince(
   } catch {
     return []; // no attachments dir yet — the common case
   }
+  // Ruling 691: Viberr's own pictures of the pages this folder holds.
+  const pagePictures = pageCapturesAmong(names);
   const inWindow: { name: string; at: string }[] = [];
   for (const name of names) {
     if (name.startsWith(".")) continue;
@@ -168,6 +171,11 @@ export function attachmentNamesSince(
     // runner while any run may be in flight. Claiming it for that run would
     // name the run as its author and, for a deliverer, move `deliveredAt`.
     if (isGateLogName(name)) continue;
+    // Ruling 691: so is a page capture, written by the renderer's job after
+    // a delivery is stamped. No run made it, and a reviewer's window that
+    // held it would move `deliveredAt` by "re-saving" it (ruling 587). A
+    // screenshot an agent named like one, of no page here, is that run's.
+    if (pagePictures.has(name)) continue;
     try {
       const st = statSync(path.join(dir, name));
       if (!st.isFile()) continue;
@@ -840,7 +848,7 @@ const IMAGE_READ_TYPES = new Map<string, string>([
   [".webp", "image/webp"],
   [".gif", "image/gif"],
 ]);
-const IMAGE_READ_MAX_BYTES = 3_750_000;
+export const IMAGE_READ_MAX_BYTES = 3_750_000;
 /** The model API refuses a picture wider or taller than this, and refuses the
  *  whole request with it, so a larger one is named instead of sent. */
 const IMAGE_READ_MAX_SIDE = 8000;

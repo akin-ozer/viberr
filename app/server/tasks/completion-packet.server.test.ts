@@ -669,3 +669,126 @@ describe("ruling 690: what the work under review rests on", () => {
     expect(view(revisionFm, kept.slice(0, 1)).sources).toMatchObject({ count: 1 });
   });
 });
+
+describe("ruling 691: Viberr's own pictures of a delivered page", () => {
+  const STAMP = "2026-10-07T12:00:00.000Z";
+  const AT = "2026-10-07T12:00:09.412Z";
+  const PICTURES = ["post.html.capture-desktop.png", "post.html.capture-phone.png"];
+  const PAGES = ["extra.htm", "figures.csv", "notes.md", "post.html"];
+  const AGENTS_OWN = "other.html.capture-desktop.png";
+  const nameOf = (id: string) => id;
+
+  /** VIB-1 delivered as files at `STAMP`, as the render of that delivery
+   *  leaves it: the pictures on the task and in the kept delivery, and the
+   *  record bound to the stamp. `extra.htm` is a page the record does not
+   *  name (a person's own upload is never pictured), and `AGENTS_OWN` is an
+   *  agent's screenshot of a page this task does not hold. */
+  function seedPictured(): void {
+    seed({
+      workRevision: null,
+      branch: null,
+      github: null,
+      deliveredAt: STAMP,
+      pageCaptures: {
+        deliveredAt: STAMP,
+        at: AT,
+        pages: [
+          {
+            file: "post.html",
+            shots: [
+              { view: "desktop", name: PICTURES[0]!, cut: false },
+              { view: "phone", name: PICTURES[1]!, cut: true },
+            ],
+            error: null,
+          },
+          { file: "notes.md", shots: [], error: "the render ran past 25 seconds" },
+        ],
+      },
+    });
+    for (const name of [...PAGES, ...PICTURES, "chart.png", AGENTS_OWN]) attach(name);
+    keepDelivery(store.slug, "VIB-1", STAMP, [...PAGES, ...PICTURES, "chart.png", AGENTS_OWN], store.dataRoot);
+  }
+
+  const fact = () =>
+    completionPacketFact(parsed().frontmatter, { projectSlug: store.slug, taskKey: "VIB-1", dataRoot: store.dataRoot });
+  const pagesOf = (canSee: (name: string) => boolean = () => true) =>
+    completionView(parsed().frontmatter, { canSee, nameOf, ruleReviewers: [] })!.packet!.files.map(
+      (f) => [f.name, f.page] as const,
+    );
+  const moveDelivery = async (deliveredAt: string, patch: (fm: TaskFrontmatter) => void = () => {}) => {
+    const { updateTaskFile } = await import("~/server/files/task-writer.server");
+    await updateTaskFile({ projectSlug: store.slug, taskKey: "VIB-1", dataRoot: store.dataRoot }, (file) => {
+      file.frontmatter.deliveredAt = deliveredAt;
+      patch(file.frontmatter);
+    });
+  };
+
+  it("the packet view pairs each result file that is a page with Viberr's pictures of the delivery under review, and says why one is missing", async () => {
+    seedPictured();
+    expect((await write({ files: PAGES.map((name) => ({ name })) })).outcome).toBe("done");
+    // The phone picture has since left the store: only what the viewer can
+    // open is drawn.
+    // A page the record does not name gets no row of its own. CANARY: answer
+    // it with a sentence and the card reads "No picture of this page: Viberr
+    // made no picture of this page", which says nothing.
+    expect(pagesOf((name) => name !== PICTURES[1])).toEqual([
+      ["extra.htm", null],
+      ["figures.csv", null],
+      ["notes.md", { shots: [], note: "the render ran past 25 seconds" }],
+      ["post.html", { shots: [{ view: "desktop", name: PICTURES[0], at: AT, cut: false }], note: null }],
+    ]);
+    // The operator is told the same, so it names none of them and can say
+    // why a page has no picture.
+    expect(fact().pageCaptures).toEqual([
+      { file: "post.html", pictures: PICTURES, problem: null },
+      { file: "notes.md", pictures: [], problem: "the render ran past 25 seconds" },
+    ]);
+
+    // A rework is delivered and summarized again before its own render has
+    // written a record: the pictures on file are of the earlier delivery.
+    // CANARY: drop the deliveredAt comparison and the card shows the earlier
+    // delivery's pictures beside the reworked page.
+    const rework = "2026-10-07T13:00:00.000Z";
+    await moveDelivery(rework);
+    keepDelivery(store.slug, "VIB-1", rework, PAGES, store.dataRoot);
+    expect((await write({ files: [{ name: "post.html" }] })).outcome).toBe("done");
+    expect(pagesOf()).toEqual([["post.html", null]]);
+    expect(fact().pageCaptures).toEqual([]);
+
+    // And a packet written for earlier work pairs nothing, whatever the
+    // record says of the delivery that replaced it.
+    const third = "2026-10-07T14:00:00.000Z";
+    await moveDelivery(third, (fm) => {
+      fm.pageCaptures = { ...fm.pageCaptures!, deliveredAt: third };
+    });
+    expect(pagesOf()).toEqual([["post.html", null]]);
+    expect(fact().pageCaptures).toHaveLength(2);
+  });
+
+  it("a page capture is never offered as a result file or a screenshot, and one named as a screenshot is left out with a sentence", async () => {
+    seedPictured();
+    // CANARY: drop the filter in resultFileCandidates and
+    // post.html.capture-desktop.png is offered as a result. Take every name
+    // with the suffix for Viberr's own and the agent's screenshot of a page
+    // this task does not hold is offered nowhere.
+    expect(fact().resultFileCandidates).toEqual(["chart.png", ...PAGES, AGENTS_OWN].sort());
+    expect(fact().screenshotCandidates.sort()).toEqual(["chart.png", AGENTS_OWN]);
+
+    const result = await write({
+      files: [{ name: "post.html", caption: "The launch post" }],
+      screenshots: [{ name: PICTURES[0]!, caption: "How it looks" }, { name: "chart.png" }, { name: AGENTS_OWN }],
+    });
+    expect(result.outcome).toBe("done");
+    expect(result.message).toContain(
+      " `post.html.capture-desktop.png` is Viberr's own picture of `post.html` and shows beside it, so it was left out of `screenshots`.",
+    );
+    expect(parsed().frontmatter.completionPacket).toMatchObject({
+      files: [{ name: "post.html", caption: "The launch post" }],
+      screenshots: [
+        { name: "chart.png", caption: "" },
+        { name: AGENTS_OWN, caption: "" },
+      ],
+    });
+    expect(result.message).not.toContain("`other.html`");
+  });
+});

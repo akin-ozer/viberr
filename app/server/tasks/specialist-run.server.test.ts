@@ -35,6 +35,7 @@ import {
   type TestStore,
 } from "../../../test-support/test-store";
 import { listAuditEvents } from "../../../test-support/audit-log";
+import { withEnv } from "../../../test-support/env";
 import type { AgentDeployment } from "~/schemas/project-file.schema";
 import {
   deliveringEngagement,
@@ -107,6 +108,7 @@ import {
   KB_CONTRACT_CORRECTION_SENTENCE,
   ATTACHMENTS_READ_SENTENCE,
   OTHER_TASK_FILES_SENTENCE,
+  PAGE_CAPTURE_SENTENCE,
 } from "./specialist-roster.server";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
@@ -5822,6 +5824,64 @@ describe("P19-G11 — the run records what it was given", () => {
     expect(ungranted.prompt).toContain(noGrant);
     expect(ungranted.prompt).not.toContain(keeps);
     expect(ungranted.keep).toBeNull();
+  });
+
+  it("a run that holds capture_page is told to look at a page before it delivers or judges one, and a run without it is told nothing", async () => {
+    // Ruling 691. CANARY: append the sentence unconditionally and a run on a
+    // server with no browser, which is given no such tool, is told to call it.
+    const fm = readProjectFile({ projectSlug: store.slug, dataRoot: store.dataRoot })!.parsed.frontmatter;
+    const COLLABORATION = ["comment-on-task", "ask-human", "attach-evidence-references", "read-github-api"];
+    /** The run's contract when it holds `granted` of the collaboration
+     *  capabilities and every other one is withheld. */
+    const contract = async (granted: string[]) => {
+      writeProject(store.dataRoot, {
+        ...fm,
+        repo: "acme/widgets",
+        agents: [
+          {
+            profileId: "dev",
+            capabilities: COLLABORATION.map((capabilityId) => ({
+              capabilityId,
+              mode: granted.includes(capabilityId) ? ("direct" as const) : ("off" as const),
+            })),
+            extras: [],
+            definition: {
+              kind: "specialist" as const,
+              name: "dev",
+              role: "developer",
+              backends: ["claude" as const],
+              model: "sonnet",
+              resources: { skills: [], mcps: [], kb: [] },
+            },
+          },
+        ],
+      });
+      rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
+      await assignAndRun();
+      return lastRunSpec()!.prompt;
+    };
+    // No browser on this server: no tool, and no word about one.
+    expect(await contract(["comment-on-task", "attach-evidence-references"])).not.toContain("capture_page");
+
+    await withEnv({ VIBERR_BROWSER_EXECUTABLE: process.execPath }, async () => {
+      // A run that posts files: the sentence follows the folder it posts into.
+      const posts = await contract(["comment-on-task", "attach-evidence-references"]);
+      expect(posts).toContain(
+        `(see "Files on the task thread").${OTHER_TASK_FILES_SENTENCE}${PAGE_CAPTURE_SENTENCE} Everything else`,
+      );
+      // A run that only reads them: the same sentence, in the read-only arm.
+      const reads = await contract(["comment-on-task"]);
+      expect(reads).toContain(`Never write into it.${OTHER_TASK_FILES_SENTENCE}${PAGE_CAPTURE_SENTENCE} Everything else`);
+      // What it is told, word for word.
+      expect(reads).toContain(
+        " A file here that is a page (.html, .htm, .md, .markdown) can be looked at as a reader sees it: " +
+          "`capture_page` with its name hands you the picture at a desktop and a phone width. " +
+          "Look before you deliver a page, and judge the picture as well as the source when you review one. " +
+          "A page must carry what it needs or point at files saved beside it: a capture loads nothing from the network.",
+      );
+      // A run with no collaboration grant holds no Viberr reader, this one included.
+      expect(await contract([])).not.toContain("capture_page");
+    });
   });
 
   it("ruling 596: a fresh run's anchor names the readers of the entries it leaves out, only for a run that holds them", async () => {

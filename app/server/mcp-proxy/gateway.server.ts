@@ -73,6 +73,7 @@ import {
   BOARD_READ_TOOL,
   BOARD_TOOLS,
   KEEP_SOURCE_NAME,
+  PAGE_CAPTURE_TOOL,
   TASK_ATTACHMENT_TOOL,
   TASK_SOURCE_TOOL,
   TIMELINE_ENTRY_TOOL,
@@ -84,6 +85,8 @@ import {
   keepSourceArgsSchema,
   keepSourceResult,
   keepSourceTool,
+  pageCaptureArgsSchema,
+  pageCaptureResult,
   taskAttachmentArgsSchema,
   taskAttachmentResult,
   taskSourceArgsSchema,
@@ -1413,18 +1416,27 @@ function openKnowledgeSession(grant: RunGrant, server: string, mount: KnowledgeM
  * file of any task in the project. Ruling 690 adds `read_task_source`, and
  * `keep_source` for a run whose mount says it may keep one.
  */
-function openBoardSession(grant: RunGrant, server: string, mount: BoardMount): Promise<Session> {
+async function openBoardSession(grant: RunGrant, server: string, mount: BoardMount): Promise<Session> {
+  // Ruling 691: `capture_page` is listed only while this server can render a
+  // page. Loaded here, not at the top: the capture reaches the task layer,
+  // which reaches the run service that binds this gateway.
+  const { pageCaptureStatus } = await import("~/server/tasks/page-capture.server");
+  // Ruling 690: a run that may save files on its task keeps sources here,
+  // told how for what its web grant lets it reach.
+  const tools = [
+    ...BOARD_TOOLS,
+    ...(pageCaptureStatus().available ? [PAGE_CAPTURE_TOOL] : []),
+    ...(mount.sources ? [keepSourceTool(mount.sources.web)] : []),
+  ];
   const context = {
     db: grant.db,
+    runId: grant.runId,
     projectSlug: grant.projectSlug,
     taskKey: grant.taskKey,
     mount,
     // Ruling 648: what the run's knowledge server lets it read.
     readerKbs: [...grant.knowledge.values()].flatMap((knowledge) => knowledge.kb),
   };
-  // Ruling 690: a run that may save files on its task keeps sources here,
-  // told how for what its web grant lets it reach.
-  const tools = mount.sources ? [...BOARD_TOOLS, keepSourceTool(mount.sources.web)] : BOARD_TOOLS;
   return openOwnSession(grant, server, tools, async (tool, raw) => {
     if (tool === BOARD_READ_TOOL.name) {
       const args = boardReadArgsSchema.safeParse(raw);
@@ -1452,6 +1464,11 @@ function openBoardSession(grant: RunGrant, server: string, mount: BoardMount): P
       return args.success
         ? await keepSourceResult({ ...context, runId: grant.runId }, args.data)
         : keepSourceArgsRefusal();
+    }
+    // Ruling 691: one page of the run's own task, as a reader sees it.
+    if (tool === PAGE_CAPTURE_TOOL.name && tools.includes(PAGE_CAPTURE_TOOL)) {
+      const args = pageCaptureArgsSchema.safeParse(raw);
+      return args.success ? await pageCaptureResult(context, args.data) : boardArgsRefusal(PAGE_CAPTURE_TOOL);
     }
     return null;
   });

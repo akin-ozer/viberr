@@ -30,12 +30,17 @@ ${VIBERR_DATA_ROOT}/
   projects/<slug>/tasks/<KEY>/task.md     ← task truth
   projects/<slug>/tasks/<KEY>/attachments/ ← files agents save and people upload on the task
                                              (canonical bytes, served member-only, not
-                                             projected; ruling 96, ruling 379)
+                                             projected; ruling 96, ruling 379), and Viberr's
+                                             own pictures of the delivered pages,
+                                             `<file>.capture-desktop.png` and
+                                             `<file>.capture-phone.png` (ruling 691)
   projects/<slug>/tasks/<KEY>/deliveries/<stamp>/ ← each files delivery as it was delivered,
                                              copied when `deliveredAt` is stamped, the stamp's
                                              colons as dashes (a record, not projected; ruling 597):
                                              every file on the task then, whichever agent saved
-                                             it, the browser's working files aside (ruling 610)
+                                             it, the browser's working files aside (ruling 610),
+                                             then that delivery's own page pictures, added
+                                             when its render finishes (ruling 691)
   projects/<slug>/tasks/<KEY>/sources/    ← the sources the task's result rests on, kept apart
                                              from its files: `index.jsonl` and one bytes file a
                                              source (§10). The server's own folder: an agent
@@ -482,6 +487,24 @@ gateRun:                          # optional; ruling 482 — the project's gates
       wallMs: 41230
       log: gate-a91f7c2-02-build-20260925T101512Z.log  # the task attachment holding
                                   # the combined output (null when it could not be saved)
+pageCaptures:                     # optional; ruling 691 — Viberr's own pictures of the
+  deliveredAt: 2026-10-07T12:00:00.000Z  # pages of one files delivery, bound to that
+  at: 2026-10-07T12:00:09.412Z    # delivery's `deliveredAt` like a verdict; `at` is when
+  pages:                          # the render finished. One entry per delivered page
+    - file: post.html             # (.html, .htm, .md, .markdown): its shots, each a
+      shots:                      # view (desktop | phone), the picture's name in the
+        - view: desktop           # attachments store and whether the page runs on
+          name: post.html.capture-desktop.png   # below it (`cut`), and `error`, why it
+          cut: false              # could not be pictured (null when it was). The first
+        - view: phone             # 8 pages are pictured; the next ones, up to 40 entries
+          name: post.html.capture-phone.png     # in all, are named with `error` "a
+          cut: true               # delivery is pictured up to 8 pages". Written by the
+      error: null                 # server alone, once the render of a stamped files
+    - file: notes.md              # delivery finishes; the latest delivery only. A reader
+      shots: []                   # pairs a picture with a file only while this stamp is
+      error: the render ran past 25 seconds   # the task's own. A malformed record reads
+                                  # as absent (no picture is drawn; the next delivery's
+                                  # render rewrites it)
 completionPacket:                 # optional; ruling 521 — what Operator hands over at
   subject: rev_9f2c               # the acceptance boundary, bound like a verdict to the
   headSha: a91f7c2e…              # review subject it describes (the workRevision.id, or

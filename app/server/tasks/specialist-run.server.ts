@@ -94,6 +94,7 @@ import {
   resolveSpecialistMcpServersDetailed,
   verifyStdioMcpMountsForRun,
 } from "./specialist-mcp.server";
+import { pageCaptureStatus } from "./page-capture.server";
 import { BROWSER_MCP_NAME, resolveBrowserMcp } from "./specialist-browser-mcp.server";
 import { cloneProgressStep, cloneStepLabel, mirrorIsCold } from "./repo-mirror.server";
 // Values come from the leaf substrate, never the task-action modules, which
@@ -1187,6 +1188,8 @@ async function dispatchAgentRun(
     promptInput.sourceKeeper = true;
     if (!webEgress) promptInput.webWithheld = true;
   }
+  // Ruling 691: the same condition that mounts `capture_page`.
+  if (boardReader && pageCaptureStatus().available) promptInput.pageCapture = true;
   // Ruling 591: the same condition as the correction note below.
   if (realBackend && kb.length > 0 && (backend === "claude" || knowledgeMount)) {
     promptInput.kbCorrectionTool = true;

@@ -1091,6 +1091,116 @@ describe("report_outcome's evidence field (P13-D-26)", () => {
     );
   });
 
+  it("capture_page hands a run the pictures of a page on its task in readable stretches, saves nothing on the task, and names a file that is not a page", async () => {
+    // Ruling 691: a page judged from its source hides a broken table and a
+    // layout that falls apart on a phone. CANARY: mount the tool without the
+    // pageCaptureStatus check and a server with no browser lists a tool that
+    // cannot answer.
+    const { mkdirSync, readdirSync, writeFileSync } = await import("node:fs");
+    const path = await import("node:path");
+    const { taskAttachmentsDir } = await import("~/server/files/file-store-root.server");
+    const { imageHeader } = await import("~/server/files/task-attachments.server");
+    const { withEnv } = await import("../../../test-support/env");
+    const { writeFakeBrowser } = await import("../../../test-support/fake-browser");
+    const grants = { ...BASE, comment: true, evidence: false };
+    expect(toolkitTools(grants, "oc_capture_no_browser").capture_page).toBeUndefined();
+
+    const fake = writeFakeBrowser(ctx.makeTempDir("viberr-fake-browser-"));
+    await withEnv({ VIBERR_BROWSER_EXECUTABLE: fake.executable, ...fake.env() }, async () => {
+      const capture = toolkitTools(grants, "oc_capture").capture_page!;
+      const store = lastStore;
+      const dir = taskAttachmentsDir(store.slug, "VIB-3", store.dataRoot);
+      mkdirSync(dir, { recursive: true });
+      writeFileSync(
+        path.join(dir, "post.html"),
+        '<img src="https://fonts.example.com/a.css"><img src="assets/chart.png"><p>fake-height:3412</p>',
+      );
+      writeFileSync(path.join(dir, "data.csv"), "a,b\n");
+      // One screen of page: 800 px on a desktop, 844 on a phone.
+      writeFileSync(path.join(dir, "short.html"), "<p>one screen</p>");
+      writeFileSync(path.join(dir, "endless.html"), "<p>fake-height:50000</p>");
+      writeFileSync(path.join(dir, ".draft.html"), "<p>a dot name is no file of the task to any reader</p>");
+      type Block = { type: "text"; text: string } | { type: "image"; data: string; mimeType: string };
+      const call = async (args: { name: string; view?: string; from?: number }) => {
+        // SAFETY: the tool answers with text and image blocks, the SDK's own
+        // tool-result shape; the handler's second argument is never read.
+        const { content } = (await capture.handler(args as never, {} as never)) as { content: Block[] };
+        return {
+          text: content.flatMap((block) => (block.type === "text" ? [block.text] : [])).join(""),
+          pictures: content.flatMap((block) =>
+            block.type === "image" ? [imageHeader(Buffer.from(block.data, "base64"))] : [],
+          ),
+        };
+      };
+
+      const first = await call({ name: "post.html" });
+      expect(first.text).toMatch(
+        new RegExp(
+          "^\\[done\\] `post\\.html` as a reader sees it\\. " +
+            "Desktop, 1280 px wide: 0 to 2,000 px of 3,412 \\(`nextFrom`: 2000\\)\\. " +
+            "Phone, 390 px wide: 0 to 2,000 px of 3,412 \\(`nextFrom`: 2000\\)\\. " +
+            "It asked the network for 1 thing \\(fonts\\.example\\.com\\), which a capture never loads, " +
+            "and for `assets/chart\\.png`, which is not among this task's files \\(the folder is flat\\)\\. " +
+            "Saved at `\\S+/workspace/\\.captures/\\S+/out/1-desktop\\.png` and `\\S+/out/1-phone\\.png`: " +
+            "scratch, and the next capture on this task replaces it\\.$",
+        ),
+      );
+      // One picture per width, each a stretch a model can read.
+      expect(first.pictures).toEqual([
+        { mimeType: "image/png", width: 1280, height: 2000 },
+        { mimeType: "image/png", width: 390, height: 2000 },
+      ]);
+      // The rest of the page, at one width.
+      const rest = await call({ name: "post.html", view: "phone", from: 2000 });
+      expect(rest.text).toContain("Phone, 390 px wide: 2,000 to 3,412 px of 3,412, the end of the page.");
+      expect(rest.text).not.toContain("Desktop");
+      expect(rest.pictures).toEqual([{ mimeType: "image/png", width: 390, height: 1412 }]);
+
+      // A phone lays a page out taller than a desktop does. Past the shorter
+      // layout's end the other width is still handed over, and the reply says
+      // which width ended where. CANARY: fail the call when one width has
+      // nothing at `from` and following the phone's `nextFrom` ends in an
+      // error that names no width.
+      const uneven = await call({ name: "short.html", from: 820 });
+      expect(uneven.text).toMatch(
+        /^\[done\] `short\.html` as a reader sees it\. Desktop, 1280 px wide: the page ends at 800 px, so nothing starts at 820 px\. Phone, 390 px wide: 820 to 844 px of 844, the end of the page\. Saved at /,
+      );
+      expect(uneven.pictures).toEqual([{ mimeType: "image/png", width: 390, height: 24 }]);
+      // Past the end at both widths nothing failed: there is nothing there.
+      expect(await call({ name: "short.html", from: 5000 })).toEqual({
+        text:
+          "[noop] `short.html` ends at 800 px at the desktop width (1280 px) and at 844 px at the phone width (390 px), " +
+          "so nothing starts at 5,000 px.",
+        pictures: [],
+      });
+      // A reply never hands out a `nextFrom` the tool would then refuse.
+      // CANARY: print `nextFrom` for every cut stretch and this one says 42000.
+      expect((await call({ name: "endless.html", view: "desktop", from: 40_000 })).text).toContain(
+        "Desktop, 1280 px wide: 40,000 to 42,000 px of 50,000; the page runs on, and a stretch starts no further down than 40,000 px.",
+      );
+
+      // It saved nothing on the task: no file, no entry, no audit row.
+      expect(readdirSync(dir).sort()).toEqual([".draft.html", "data.csv", "endless.html", "post.html", "short.html"]);
+      const file = readTaskFile({ projectSlug: store.slug, taskKey: "VIB-3", dataRoot: store.dataRoot })!.parsed;
+      expect(file.timeline).toEqual([]);
+      expect(file.frontmatter.pageCaptures).toBeUndefined();
+      expect(listAuditEvents(store.db, { action: "task.pages.captured" })).toEqual([]);
+
+      // What it does not render, in the reader's own words.
+      expect((await call({ name: "data.csv" })).text).toBe(
+        "[noop] `data.csv` is not a page. capture_page renders .html, .htm, .md and .markdown files; " +
+          "read any other file with read_task_attachment.",
+      );
+      const missing = (await call({ name: "nope.html" })).text;
+      expect(missing).toMatch(/^\[noop\] VIB-3 has no attachment `nope\.html`\. It holds: /);
+      expect(missing).toContain("post.html");
+      // A dot name is hidden from every listing, so it is no page to look at
+      // either. CANARY: let a dot name through to the renderer and the answer
+      // is no longer the reader's own sentence.
+      expect((await call({ name: ".draft.html" })).text).toMatch(/^\[noop\] VIB-3 has no attachment `\.draft\.html`\. It holds: /);
+    });
+  });
+
   it("ruling 596: read_board lists a task's timeline by stamp, and read_timeline_entry opens an entry on it or on another task", async () => {
     // Live in round 4, three Estimate Judges re-reviewing a rework could not
     // find their own first verdict: the prompt carries only recent entries,

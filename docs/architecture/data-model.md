@@ -56,10 +56,15 @@ Created by the code that needs them:
   projects/<slug>/project.md
   projects/<slug>/tasks/<KEY>/task.md
   projects/<slug>/tasks/<KEY>/attachments/          files agents save and people upload on the task
-                                                    (member-only served; ruling 96, ruling 379)
+                                                    (member-only served; ruling 96, ruling 379), and
+                                                    Viberr's own pictures of the delivered pages,
+                                                    `<file>.capture-desktop.png` and
+                                                    `<file>.capture-phone.png`, replaced by the next
+                                                    delivery's (ruling 691)
   projects/<slug>/tasks/<KEY>/deliveries/<stamp>/   each files delivery as it was delivered, copied
                                                     when `deliveredAt` is stamped (ruling 597): every
-                                                    file on the task then (ruling 610)
+                                                    file on the task then (ruling 610), and that
+                                                    delivery's own page pictures (ruling 691)
   projects/<slug>/tasks/<KEY>/sources/              the sources the task's result rests on: `index.jsonl`
                                                     and one bytes file a source, the server's own
                                                     (ruling 690; file-formats.md §10)
@@ -78,6 +83,26 @@ Created by the code that needs them:
                                                     removed when the run finishes. Each gate's log
                                                     lands in attachments/ as
                                                     `gate-<sha7>-<NN>-<name>-<stamp>.log`
+  projects/<slug>/tasks/<KEY>/workspace/.captures/<captureId>/
+                                                    one page render's scratch (ruling 691): `out/`
+                                                    (the pictures and the report), `tmp/` and
+                                                    `profile/` (the browser's), written by the task
+                                                    owner's agent uid; a delivery's is removed when
+                                                    its render finishes. An agent's `capture_page`
+                                                    keeps `<runId>/<captureId>/out/` alone, replaced
+                                                    by that run's next capture and removed when the
+                                                    run ends; whatever a restart left goes before the
+                                                    next render on the task
+  projects/<slug>/tasks/<KEY>/.capture-input/<captureId>/
+                                                    a kept delivery's files, copied for the one render
+                                                    that pictures it and removed with it, or, when a
+                                                    restart cut that render, before the task's next
+                                                    one (ruling 691):
+                                                    the server's own, 0710 in the agent group with
+                                                    each file 0640, so the renderer reads a file by
+                                                    its name and no agent lists the folder or writes
+                                                    in it. Beside `deliveries/`, never under
+                                                    `workspace/`, which agents write
   projects/<slug>/tasks/<KEY>/.operator-scratch/    the Codex operator's working directory
   projects/<slug>/epics/<epic-id>.md                epics (ruling 503)
   projects/<slug>/goals/converted/<goal-id>.md      ruling 99's chained goals, filed by the

@@ -39,6 +39,13 @@ import {
   changedLines,
   isSmallChange,
 } from "~/shared/completion-packet";
+import {
+  pageCapturesAmong,
+  recordedPageCaptures,
+  pageKindOf,
+  pageOfCaptureName,
+  type PageCaptureViewId,
+} from "~/shared/page-capture";
 import { IMAGE_RE } from "~/ui/picked-files";
 import { reprojectTask, taskRef, type TaskMutationContext } from "./task-mutation.server";
 
@@ -79,6 +86,18 @@ import { reprojectTask, taskRef, type TaskMutationContext } from "./task-mutatio
  * pull request holds them, and the result shows the change's size, the
  * operator's summary of it and the paths it changed.
  */
+
+/**
+ * Ruling 691: the operator's word on a delivered page's pictures, said where
+ * `write_completion_packet` is described on either backend (and in the
+ * operator's definition). Viberr puts them on the card itself, so the operator
+ * names none, and it opens one before it writes how a page looks.
+ */
+export const PAGE_PICTURES_PACKET_SENTENCE =
+  "When Viberr pictured the delivery's pages, `completionPacket.pageCaptures` lists each page with its pictures, which show beside it on the result, so never name one of those as a screenshot. Open a page's picture with `read_task_attachment` before you say how it looks. A page listed with no picture carries the reason, and a page that is not listed was not pictured.";
+/** The same, in the space a plan field's description has. */
+export const PAGE_PICTURES_PLAN_SENTENCE =
+  "Never one of Viberr's own pictures of a result page (`completionPacket.pageCaptures`): those show beside the page without being named.";
 
 /** The slice of the frontmatter the packet binds to. */
 type PacketState = Pick<TaskFrontmatter, "workRevision" | "deliveredAt" | "completionPacket">;
@@ -137,9 +156,14 @@ export function completionPacketRefusal(fm: PacketState, taskKey: string): strin
   );
 }
 
-/** The image attachments a packet may show, newest first. */
-function screenshotCandidates(entries: readonly TaskAttachmentEntry[]): string[] {
-  return entries.filter((e) => IMAGE_RE.test(e.name)).map((e) => e.name);
+/** The image attachments a packet may show, newest first. Ruling 691: never
+ *  Viberr's own picture of a page on the task (`pagePictures`), which shows
+ *  beside that page. A screenshot an agent named like one is offered. */
+function screenshotCandidates(
+  entries: readonly TaskAttachmentEntry[],
+  pagePictures: ReadonlySet<string>,
+): string[] {
+  return entries.filter((e) => IMAGE_RE.test(e.name) && !pagePictures.has(e.name)).map((e) => e.name);
 }
 
 type StoreRef = { projectSlug: string; taskKey: string; dataRoot?: string | undefined };
@@ -149,13 +173,12 @@ type StoreRef = { projectSlug: string; taskKey: string; dataRoot?: string | unde
  * files. They are the files of the delivery under review as it was kept
  * (ruling 597: what the reviewers judged), still on the task; a delivery
  * nobody kept offers the task's files. The browser's working files are never
- * a result (ruling 570). Empty when the delivery is a revision.
+ * a result (ruling 570), and neither is Viberr's own picture of a delivered
+ * page (ruling 691). Empty when the delivery is a revision.
  */
-function resultFileCandidates(fm: PacketState, ref: StoreRef): string[] {
+function resultFileCandidates(fm: PacketState, ref: StoreRef, files: TaskFiles): string[] {
   if (!deliveredAsFiles(fm)) return [];
-  const onTask = listTaskAttachmentNames(ref.projectSlug, ref.taskKey, ref.dataRoot).filter(
-    (name) => !isBrowserWorkingArtifact(name),
-  );
+  const onTask = files.names.filter((name) => !isBrowserWorkingArtifact(name) && !files.pagePictures.has(name));
   const kept = listKeptDeliveries(ref.projectSlug, ref.taskKey, ref.dataRoot).find(
     (d) => d.deliveredAt === fm.deliveredAt,
   );
@@ -201,6 +224,18 @@ export function sourcesRestedOn(
   return kept.sources.filter((s) => Date.parse(s.keptAt) <= minted || byDeliverer(s));
 }
 
+/** The names a task's attachments hold, and which of them are Viberr's own
+ *  pictures of the pages among them (ruling 691). */
+interface TaskFiles {
+  names: string[];
+  pagePictures: Set<string>;
+}
+
+function taskFiles(ref: StoreRef, fm: Pick<TaskFrontmatter, "pageCaptures">): TaskFiles {
+  const names = listTaskAttachmentNames(ref.projectSlug, ref.taskKey, ref.dataRoot);
+  return { names, pagePictures: pageCapturesAmong(names, recordedPageCaptures(fm.pageCaptures)) };
+}
+
 /** How many candidate names a refusal or the snapshot lists. */
 const CANDIDATES_SHOWN = 40;
 
@@ -226,6 +261,11 @@ export interface CompletionPacketFact {
    *  lists them. A result that states facts from outside and rests on none
    *  has a gap to name. */
   sources: CompletionSourcesFact;
+  /** Ruling 691: Viberr's own pictures of the pages of the delivery under
+   *  review, which the card shows beside each page without your naming them.
+   *  `problem` says why a page has no picture. Empty when it has no page, or
+   *  none was pictured. */
+  pageCaptures: PageCaptureFact[];
   note: string;
 }
 
@@ -233,6 +273,21 @@ export interface CompletionPacketFact {
 interface CompletionSourcesFact {
   kept: number;
   restedOn: number;
+}
+
+/** One delivered page and Viberr's pictures of it, for the operator. */
+export interface PageCaptureFact {
+  file: string;
+  /** The pictures' names among the task's attachments. */
+  pictures: string[];
+  problem: string | null;
+}
+
+/** The record's pages while it pictures the delivery under review. */
+function currentPageCaptures(fm: Pick<TaskFrontmatter, "deliveredAt" | "pageCaptures" | "workRevision">) {
+  const record = fm.pageCaptures;
+  if (!record || !deliveredAsFiles(fm) || record.deliveredAt !== fm.deliveredAt) return null;
+  return record;
 }
 
 export function completionPacketFact(
@@ -254,15 +309,18 @@ export function completionPacketFact(
       resultFilesRequired: false,
       resultFileCandidates: [],
       sources,
+      pageCaptures: [],
       note: "Nothing is delivered yet, so there is no completion packet to write.",
     };
   }
   const current = currentCompletionPacket(fm);
   const state = current ? "current" : fm.completionPacket ? "stale" : "none";
+  const files = taskFiles(input, fm);
   const candidates = screenshotCandidates(
     listTaskAttachments(input.projectSlug, input.taskKey, input.dataRoot),
+    files.pagePictures,
   ).slice(0, 20);
-  const resultFiles = resultFileCandidates(fm, input);
+  const resultFiles = resultFileCandidates(fm, input, files);
   const size = deliveredAsFiles(fm)
     ? resultFiles.length > 0
       ? "The delivery is files on the task, so the packet names the ones that are the result (`files`, from `resultFileCandidates`), each with a line saying what it is."
@@ -285,6 +343,11 @@ export function completionPacketFact(
     resultFilesRequired: resultFiles.length > 0,
     resultFileCandidates: resultFiles.slice(0, CANDIDATES_SHOWN),
     sources,
+    pageCaptures: (currentPageCaptures(fm)?.pages ?? []).map((page) => ({
+      file: page.file,
+      pictures: page.shots.map((shot) => shot.name),
+      problem: page.error,
+    })),
     note,
   };
 }
@@ -406,16 +469,25 @@ export async function writeCompletionPacket(
   const asFiles = deliveredAsFiles(fm);
   const files: CompletionPacket["files"] = [];
   const namedFiles = new Set<string>();
+  // Ruling 691: Viberr's own picture of a page on the task is neither a
+  // result file nor a screenshot to pick: it shows beside its page. One named
+  // is left out, and the reply says so.
+  const onTask = taskFiles({ projectSlug, taskKey, dataRoot: ctx.dataRoot }, fm);
+  const capturesLeftOut: { name: string; from: "files" | "screenshots" }[] = [];
   for (const file of input.files ?? []) {
     const name = file.name.trim();
     if (name === "" || namedFiles.has(name)) continue;
     namedFiles.add(name);
+    if (onTask.pagePictures.has(name)) {
+      capturesLeftOut.push({ name, from: "files" });
+      continue;
+    }
     files.push({ name, caption: captionOf(file.caption) });
   }
   const filesLeftOut = !asFiles && files.length > 0;
   if (filesLeftOut) files.length = 0;
   const candidates = asFiles
-    ? resultFileCandidates(fm, { projectSlug, taskKey, dataRoot: ctx.dataRoot })
+    ? resultFileCandidates(fm, { projectSlug, taskKey, dataRoot: ctx.dataRoot }, onTask)
     : [];
   // A delivery none of whose files is still on the task has nothing to name.
   if (asFiles && candidates.length === 0) files.length = 0;
@@ -462,6 +534,10 @@ export async function writeCompletionPacket(
     const name = shot.name.trim();
     if (name === "" || seen.has(name)) continue;
     seen.add(name);
+    if (onTask.pagePictures.has(name)) {
+      capturesLeftOut.push({ name, from: "screenshots" });
+      continue;
+    }
     screenshots.push({ name, caption: captionOf(shot.caption) });
   }
   if (screenshots.length > COMPLETION_SCREENSHOTS_MAX) {
@@ -476,7 +552,10 @@ export async function writeCompletionPacket(
     .filter((s) => !taskAttachmentExists(projectSlug, taskKey, s.name, ctx.dataRoot))
     .map((s) => s.name);
   if (notImages.length > 0 || missing.length > 0) {
-    const candidates = screenshotCandidates(listTaskAttachments(projectSlug, taskKey, ctx.dataRoot));
+    const candidates = screenshotCandidates(
+      listTaskAttachments(projectSlug, taskKey, ctx.dataRoot),
+      onTask.pagePictures,
+    );
     const problems = [
       notImages.length > 0
         ? `${notImages.map((n) => `\`${n}\``).join(", ")} ${notImages.length === 1 ? "is not an image" : "are not images"} (png, jpg, webp or gif)`
@@ -545,12 +624,19 @@ export async function writeCompletionPacket(
   const leftOut = filesLeftOut
     ? " `files` was left out: this task's pull request holds its files."
     : "";
+  const captures = capturesLeftOut
+    .map(
+      ({ name, from }) =>
+        ` \`${name}\` is Viberr's own picture of \`${pageOfCaptureName(name)}\` and shows beside it, ` +
+        `so it was left out of \`${from}\`.`,
+    )
+    .join("");
   return {
     written: true,
     message:
       `Wrote the completion packet for ${what}` +
       (parts.length > 0 ? ` (the summary, ${parts.join(" and ")}).` : " (the summary).") +
-      `${size}${leftOut} It stands until new work replaces ${what}, and stays on the task as its ` +
+      `${size}${leftOut}${captures} It stands until new work replaces ${what}, and stays on the task as its ` +
       "result once a person accepts it.",
   };
 }
@@ -571,6 +657,35 @@ export interface CompletionVerdictRow {
   earlier: { result: "approve" | "request_changes"; sha: string | null; at: string } | null;
 }
 
+/** Ruling 691: one of Viberr's pictures of a result file that is a page. */
+export interface CompletionPageShot {
+  view: PageCaptureViewId;
+  /** The picture's name in the attachments store. */
+  name: string;
+  /** When it was made: a rework replaces the picture under the same name, so
+   *  the card's link carries this past the browser's cache. */
+  at: string;
+  /** The page runs on below the picture. */
+  cut: boolean;
+}
+
+/** Viberr's pictures of a result file that is a page, and why one is missing. */
+export interface CompletionFilePage {
+  shots: CompletionPageShot[];
+  note: string | null;
+}
+
+/** One result file on the packet, as the task page draws it. */
+export interface CompletionFile {
+  name: string;
+  caption: string;
+  /** Ruling 691: null for a file that is not a page, for a packet written
+   *  for earlier work, for a page the record does not name, and while no
+   *  record pictures the delivery under review (a server without a browser,
+   *  or a delivery from before the ruling), so nothing extra is drawn there. */
+  page: CompletionFilePage | null;
+}
+
 /** What the task page shows as the completion packet. */
 export interface CompletionView {
   /** The revision under review, abbreviated; null when the delivered work
@@ -584,7 +699,7 @@ export interface CompletionView {
     assumptions: string | null;
     gaps: string | null;
     /** Ruling 668: the result's files the viewer may see. */
-    files: { name: string; caption: string }[];
+    files: CompletionFile[];
     /** Result files the viewer may not see, or that have left the store. */
     hiddenFiles: number;
     screenshots: { name: string; caption: string }[];
@@ -660,7 +775,27 @@ export function completionView(
   if (onFile) {
     const canSee = opts.canSee;
     const screenshots = canSee ? onFile.screenshots.filter((s) => canSee(s.name)) : [];
-    const files = canSee ? onFile.files.filter((f) => canSee(f.name)) : [];
+    // Ruling 691: bound to the delivery under review, like the packet itself.
+    // A picture of an earlier delivery never shows beside a newer file.
+    const pictured = onFile.subject === subject ? currentPageCaptures(fm) : null;
+    const pageOf = (name: string): CompletionFilePage | null => {
+      if (!pictured || !canSee || pageKindOf(name) === null) return null;
+      // A page the record does not name was not this render's to picture (a
+      // person's own upload, say), and the card has nothing true to add.
+      const page = pictured.pages.find((p) => p.file === name);
+      if (!page) return null;
+      return {
+        shots: page.shots
+          .filter((shot) => canSee(shot.name))
+          .map((shot) => ({ view: shot.view, name: shot.name, at: pictured.at, cut: shot.cut })),
+        note: page.error,
+      };
+    };
+    const files = canSee
+      ? onFile.files
+          .filter((f) => canSee(f.name))
+          .map((f): CompletionFile => ({ name: f.name, caption: f.caption, page: pageOf(f.name) }))
+      : [];
     packet = {
       summary: onFile.summary,
       changes: onFile.changes,

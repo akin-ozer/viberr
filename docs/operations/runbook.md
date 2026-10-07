@@ -523,6 +523,38 @@ history opens with "Converted from goal-N …", and the project's Activity colum
   `runtimes/users/<userId>/` are theirs: read them as the server (group `node` reads every
   file there once the launcher has handed the home back after a run) or with
   `docker compose exec`, never by changing their owner.
+- **A delivered page has no picture** (ruling 691). The task says why in three places: the
+  "Page captures" note on its timeline ("Viberr could not picture `x.html`: …"), "No
+  picture of this page: …" under that file on the completion or Result card, and
+  `task.md` `pageCaptures.pages[].error`. The server logs `a page could not be captured`
+  with the task, the file and the reason, and `page captures made` with the counts and
+  the wall time; audit `task.pages.captured` carries who it ran as. The reasons: "the
+  render ran past 25 seconds" (a script that never finishes or a page that never finishes
+  loading; the job as a whole is stopped at 10 s plus 25 s a page), "the browser ended
+  before the page was pictured", "the task has no owner to render it as" (isolation is on
+  and the task has no owner: give it one and the next delivery is pictured), "the pinned
+  browser executable (VIBERR_BROWSER_EXECUTABLE) is not on disk" (health's `browser` says
+  the same), a source over 10 MB (markdown 2 MB), "a delivery is pictured up to 8 pages"
+  for a page past the eighth, and "the delivered files could not be handed to the
+  renderer": the server could not make `<task>/.capture-input/` its own folder in the
+  agent group (the log line `a delivery's files could not be handed to the page renderer`
+  carries the cause; check the store layout and that the server's user is in the agent
+  group), and it copies a delivery nowhere else. The note ends by naming `capture_page`
+  only when that tool can still show the page. A result file that is a page with no row
+  at all under it was not this render's to picture: a person's own upload, a relayed
+  file, or a page past the 40 one record names. No note at all on a files delivery means
+  the deployment names no browser, the delivery held no page, or the task's delivery is
+  a revision. A picture that shows boxes where text should be is a script the image has
+  no font for (it ships Liberation and an emoji font). A page that opens `alert()`,
+  `confirm()` or `prompt()` as it loads is pictured with the dialog dismissed, and the
+  note says so. Renders are one at a time for the whole instance, so a burst of
+  deliveries queues; an agent's `capture_page` goes ahead of waiting deliveries and
+  answers `[busy]` when it has not started within 15 s. Its pictures stay under
+  `workspace/.captures/<runId>/` until the run ends; a folder there whose run is no
+  longer live is removed before the next render on the task. A restart during a render
+  loses that delivery's pictures: the next delivery is pictured, and an agent can look
+  with `capture_page` meanwhile. `docker compose exec -T app sh
+  scripts/check-page-capture.sh` checks the renderer against the image's own browser.
 
 ## Auth / access
 

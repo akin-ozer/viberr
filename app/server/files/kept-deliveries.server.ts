@@ -43,6 +43,13 @@ function dirStamp(dir: string): string | null {
   return m ? `${m[1]}T${m[2]}:${m[3]}:${m[4]}Z` : null;
 }
 
+/** Ruling 691: the folder that holds the kept delivery `stamp`, or null for a
+ *  stamp that cannot be one. Whether it exists is the reader's to find out. */
+export function keptDeliveryDir(slug: string, key: string, stamp: string, dataRoot?: string): string | null {
+  const dir = stampDir(stamp);
+  return dir ? path.join(taskDeliveriesDir(slug, key, dataRoot), dir) : null;
+}
+
 /**
  * Copy a delivery's files, as the attachments folder holds them now, into the
  * kept delivery `stamp`. A name the folder no longer holds is skipped. Returns

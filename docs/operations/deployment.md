@@ -188,8 +188,13 @@ The image ships everything needed to run real agents: the Claude/Codex SDKs' nat
 linux binaries (inside the production `node_modules` from the `prod-deps` stage) plus, in
 the runtime stage, `git` and a CA bundle (a real run clones the task's repo and the coding
 agent shells out to git), `make`, `curl` and a pinned `pnpm` (ruling 196), Debian
-`chromium` with `fonts-liberation` for the governed browser
-(`VIBERR_BROWSER_EXECUTABLE=/usr/bin/chromium`), `poppler-utils` (`pdftoppm`, `pdftotext`,
+`chromium` with `fonts-liberation` and `fonts-noto-color-emoji` for the governed browser
+and the page capture (`VIBERR_BROWSER_EXECUTABLE=/usr/bin/chromium`; ruling 691: the emoji
+font, 11 MB installed, and `/etc/fonts/local.conf`, which names the Liberation face each
+generic family means, because with `fonts-liberation` alone an emoji drew as an empty box
+and a page set in `system-ui` was pictured in a monospace face; no font is installed for
+CJK, Arabic or Indic scripts, which draw as boxes in a picture until one is added:
+`fonts-noto-cjk` is about 90 MB), `poppler-utils` (`pdftoppm`, `pdftotext`,
 `pdfinfo`) so an agent can look at the pages of a PDF it delivers or judges (ruling 566),
 and `uv`/`uvx` for Python stdio MCP
 servers (their caches live under `runtimes/uv-cache` and `runtimes/uv-python` on the
@@ -400,7 +405,7 @@ longer shares the container's.
 
 **The image fetches its Debian packages over HTTPS.** The runtime stage installs from
 `deb.debian.org` in four `apt-get` layers (`git` + `ca-certificates`, then `make` +
-`curl`, then `chromium` + `fonts-liberation`, then `poppler-utils`), each refreshing a
+`curl`, then `chromium` + `fonts-liberation` + `fonts-noto-color-emoji`, then `poppler-utils`), each refreshing a
 package index of about 10 MB before fetching its archives (roughly 25 MB, 1 MB, 192 MB
 and a few MB, a 15.2 MB layer once installed). The base image names
 that mirror over plain HTTP, and on a connection that shapes port 80 (measured on the
@@ -826,7 +831,10 @@ finish is removed by the server's replace as its persons (ruling 485), what the 
 itself wrote in an agent's tree is removable by the person and an emptied workspace root
 goes with the server's `rmdir`, never through an agent's link (ruling 495), the launcher relays SIGTERM, SIGUSR2 kills the group grandchild
 included, PDEATHSIG takes the agent down with the server, `--reap` finds a detached process
-by its marker, and every refusal holds), passes the base URL to Playwright as
+by its marker, and every refusal holds), runs `scripts/check-page-capture.sh` the same way
+(ruling 691: the page capture's renderer against the image's own Chromium as an agent
+uid, its pictures' widths and pixels, a page's requests to another loopback port and to a
+remote host loading nothing, and the image's fonts), passes the base URL to Playwright as
 `VIBERR_E2E_BASE_URL`, and tears the stack down with its volume afterwards unless
 `VIBERR_E2E_KEEP=1`. Details:
 [testing.md](../development/testing.md#4-end-to-end-suite-playwright).
