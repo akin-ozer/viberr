@@ -68,7 +68,8 @@ test("a new epic opens on its own page", async ({ page }) => {
   await dialog.getByLabel("Description").fill("Small checkout fixes that ship together.");
   await dialog.getByRole("button", { name: "Create epic" }).click();
 
-  // CANARY: navigate from EpicDialog's effect before the fetcher is idle.
+  // CANARY: navigate from useCreateEpic's result handler before the fetcher is
+  // idle (on `fetcher.data` alone, not through useFetcherResult).
   await expect(page).toHaveURL(EPIC);
   await expect(page.getByRole("heading", { level: 1 })).toContainText("Checkout polish");
   await expect(page.getByText("Small checkout fixes that ship together.")).toBeVisible();

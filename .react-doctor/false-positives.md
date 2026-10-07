@@ -483,10 +483,9 @@ design-system or cross-file decision — revisit deliberately, not per lint run.
   derivable and no loader-data discriminator exists for a key-remount without
   route-layer changes. Mitigated to a single reducer dispatch.
 
-- `react-doctor/no-pass-data-to-parent` — timeline.tsx comment-posted callback and
-  epic-parts.tsx `onCreated(fetcher.data.epicId)`: the canonical fix lifts the fetcher to
-  the parent route (cross-file data-flow change); each callback is a once-per-success
-  event notification after the fetcher settles.
+- `react-doctor/no-pass-data-to-parent` — timeline.tsx comment-posted callback: the
+  canonical fix lifts the fetcher to the parent route (cross-file data-flow change); the
+  callback is a once-per-success event notification after the fetcher settles.
 
 - `react-doctor/async-await-in-loop` — specialist-mcp.server.ts stdio MCP health checks at
   run start: one handshake per mounted server, up to 20 s each, before the run begins.

@@ -377,8 +377,8 @@ describe("ruling 503(e): New epic, for manage-epics", () => {
     fireEvent.change(within(dialog).getByLabelText(/Name/), { target: { value: "Launch" } });
     fireEvent.change(within(dialog).getByLabelText("Lead"), { target: { value: "u_selin" } });
     fireEvent.click(within(dialog).getByRole("button", { name: "Create epic" }));
-    // CANARY: drop `onCreated` from EpicsPage's dialog and the page stays on
-    // the list after the epic is made.
+    // CANARY: drop the `navigate` from useCreateEpic's result handler and the
+    // page stays on the list after the epic is made.
     expect(await screen.findByText("Epic page for epic-7")).toBeTruthy();
     expect(posted).toEqual([
       {

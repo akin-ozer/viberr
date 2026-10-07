@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type KeyboardEvent } from "react";
+import { useImperativeHandle, useRef, useState, type KeyboardEvent, type Ref } from "react";
 import { useFetcher } from "react-router";
 import {
   EPIC_COLORS,
@@ -203,30 +203,36 @@ function draftOf(epic: EpicSummary | null): EpicDraft {
  * Membership is not here: tasks join and leave from the epic's page, the task
  * page and the board. The server checks everything again (`manage-epics`,
  * the dates' order, the lead's membership) and a refusal keeps the dialog
- * open beside its sentence.
+ * open beside its sentence. An edit's answer is the dialog's own: it toasts
+ * and closes. A create's is the page's (ruling 689(c)).
  */
 export function EpicDialog({
   epic,
   members,
   onClose,
-  onCreated,
+  fetcher: held,
+  ref,
 }: {
   /** The epic being edited; null to create one. */
   epic: EpicSummary | null;
   members: EpicMemberView[];
   onClose: () => void;
-  /** A create's answer, with the new epic's id. */
-  onCreated?: (epicId: string) => void;
+  /** Ruling 689(c): a create's fetcher, held by the page that acts on its
+   *  answer, so the new epic's id never goes up through an effect. */
+  fetcher?: ReturnType<typeof useFetcher<EpicActionResult>>;
+  /** The dialog's animated close, for the page to play once it has acted. */
+  ref?: Ref<{ close: () => void }>;
 }) {
   const [draft, setDraft] = useState<EpicDraft>(() => draftOf(epic));
   const [titleTouched, setTitleTouched] = useState(false);
-  const fetcher = useFetcher<EpicActionResult>();
+  const own = useFetcher<EpicActionResult>();
+  const fetcher = held ?? own;
   const csrf = useCsrfToken();
   const push = useToast();
-  const { ref, close } = useDialog(onClose);
+  const { ref: dialogRef, close } = useDialog(onClose);
+  useImperativeHandle(ref, () => ({ close }), [close]);
   const titleRef = useRef<HTMLInputElement>(null);
   const busy = fetcher.state !== "idle";
-  const doneRef = useRef(false);
   const valid = draft.title.trim().length > 0;
   const titleError = titleTouched && !valid;
   const datesReversed = draft.startDate !== "" && draft.targetDate !== "" && draft.targetDate < draft.startDate;
@@ -234,20 +240,16 @@ export function EpicDialog({
   const set = <K extends keyof EpicDraft>(key: K, value: EpicDraft[K]) =>
     setDraft((d) => ({ ...d, [key]: value }));
 
-  useEffect(() => {
-    // Idle, not just answered: the answer lands while the page's loaders are
-    // still reloading for it, and a navigation started then can finish with
-    // the new epic's URL over the old page (a React Router race, seen live).
-    if (fetcher.state !== "idle" || !fetcher.data?.ok || doneRef.current) return;
-    doneRef.current = true;
-    if (fetcher.data.toast) push(fetcher.data.toast);
-    if (!epic && fetcher.data.epicId) onCreated?.(fetcher.data.epicId);
+  useFetcherResult(own, (d) => {
+    if (!d.ok) return;
+    if (d.toast) push(d.toast);
     close();
-  }, [fetcher.state, fetcher.data, close, push, epic, onCreated]);
+  });
 
   const submit = () => {
     setTitleTouched(true);
-    if (busy || doneRef.current) return;
+    // Once made or saved, the dialog is closing: a second Enter posts nothing.
+    if (busy || fetcher.data?.ok) return;
     if (!valid || datesReversed) {
       titleRef.current?.focus();
       return;
@@ -281,7 +283,7 @@ export function EpicDialog({
     <dialog
       className="modal-card epic-dialog"
       aria-label={epic ? `Edit ${epic.id}` : "New epic"}
-      ref={ref}
+      ref={dialogRef}
       data-screen-label={epic ? "Edit epic dialog" : "New epic dialog"}
     >
       <div className="modal-head">
