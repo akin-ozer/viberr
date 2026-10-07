@@ -1,5 +1,5 @@
-import { useEffect, useRef, useState } from "react";
-import { Link, useFetcher } from "react-router";
+import { useEffect, useRef, useState, type FormEvent, type RefObject } from "react";
+import { Link, useFetcher, type FetcherWithComponents } from "react-router";
 import type {
   DiagnosticRecord,
   TaskDetail,
@@ -24,7 +24,7 @@ import {
 import type { TaskRunPrincipalView } from "./run-principal-view";
 import type { ActionResult } from "./task-detail-hooks";
 import { useActionToast } from "~/ui/use-action-toast";
-import { useRefusalShake } from "~/ui/use-refusal-shake";
+import { useRefusalShake, type RefusalShake } from "~/ui/use-refusal-shake";
 import { useFetcherResult } from "~/ui/use-fetcher-result";
 
 /**
@@ -144,9 +144,7 @@ export function TaskHero({
   // Ruling 451(g): the box shakes once per refusal, not on each mount.
   const refusalShake = useRefusalShake(refused);
   const goalRef = useRef<HTMLTextAreaElement>(null);
-  const goalErrId = "goal-err";
   const short = draft.trim().length < 3;
-  const goalInvalid = refused > 0 && short;
   const goalBusy = goalFetcher.state !== "idle";
   // Surface a failed save as a toast instead of silently leaving the editor
   // open with no explanation (WI-11); on success the effect below closes it.
@@ -186,240 +184,341 @@ export function TaskHero({
   // an accepted/merged completion owes nobody one either, and a force-accepted
   // one would otherwise read "accepted · awaiting verdict". Extend the archived
   // predicate to the same accepted/merged pair the rest of the app treats as
-  // terminal (task-side-panels.tsx `isTerminal`, task-detail-derive.ts
-  // `isClosedForWork`). The readiness pill stays for a terminal task: its value is
-  // "accepted"/"merged", a terminal STATUS, not a live claim.
+  // terminal (task-side-panels-derive.ts `forceAcceptReason`'s `isTerminal`,
+  // task-detail-derive.ts `isClosedForWork`). The readiness pill stays for a
+  // terminal task: its value is "accepted"/"merged", a terminal STATUS, not a
+  // live claim.
   const terminal =
     archived ||
     task.displayReadiness === "accepted" ||
     task.displayReadiness === "merged";
 
+  // Ruling 147: the click AND a keyboard submit both route through the
+  // refusal, so a short draft can never become a request.
+  const submitGoal = (e: FormEvent<HTMLFormElement>) => {
+    if (goalBusy) {
+      e.preventDefault();
+      return;
+    }
+    if (short) {
+      e.preventDefault();
+      setRefused((n) => n + 1);
+      goalRef.current?.focus();
+    }
+  };
+  const cancelGoalEdit = () => {
+    setDraft(task.goal);
+    setRefused(0);
+    setEditing(false);
+  };
+  const openGoalEditor = () => {
+    // F35-6: the pending draft, when a decided packet owes one.
+    setDraft(pendingGoalDraft ?? task.goal);
+    setRefused(0);
+    setEditing(true);
+  };
+
   return (
     <div className="task-hero">
       <span className="key">{task.key}</span>
       <h1>{task.title}</h1>
-      <div className="hero-meta">
-        {archived && (
-          <Pill kind="neutral">
-            <Icon name="lock" />
-            archived
-          </Pill>
-        )}
-        {/* Ruling 169 (owner, 2026-09-09): the stage and the status are FIELDS,
-            each under the key the Current state panel gives it. The default
-            workflow's second stage is called Ready, so the bare stage pill read
-            as a status word — "Ready · blocked · awaiting verdict" was read as
-            three statuses that cannot be true at once ("what does ready
-            mean?"). C5's status glyph on the readiness chip was not enough to
-            tell the two classes apart; the label is. */}
-        <span className="hero-field">
-          <span className="hero-field-lbl">Stage</span>
-          <Pill kind="neutral">
-            <span
-              className="col-stage-dot sm"
-              data-stage-color={stage?.color}
-            />
-            {stage?.name ?? ""}
-          </Pill>
-        </span>
-        {/* UXO-1: an ARCHIVED task is out of the flow — the archive confirm and
-            the acceptance panel both already say so. Its readiness pill kept
-            asserting a live obligation ("ready" = someone will act) that is
-            false on abandoned work, so it drops and the `archived` pill above
-            stands in its place. A terminal (accepted/merged) task keeps its
-            readiness pill: that value IS the terminal status, not a live claim.
+      {heroMeta({ task, stage, archived, terminal, epic })}
+      {heroGoal({
+        editing,
+        goal: task.goal,
+        taskLinks,
+        canEditGoal,
+        onEdit: openGoalEditor,
+        goalFetcher,
+        csrf,
+        draft,
+        onDraft: setDraft,
+        short,
+        refused,
+        refusalShake,
+        goalBusy,
+        goalRef,
+        onSubmit: submitGoal,
+        onCancel: cancelGoalEdit,
+      })}
+    </div>
+  );
+}
 
-            R21-8's agent-working yield used to be re-derived here (and again on
-            the board card, and again on the list row, with two different
-            gates). It is one server-side derivation now —
-            `deriveDisplayReadiness` — so this surface renders the value and
-            does not re-decide it.
+/*
+ * Ruling 689(e): the hero's parts, each the markup of one slot of `TaskHero`.
+ * The hero keeps every hook and every state change; these draw. Plain
+ * functions rather than components, as the side column's panel parts are:
+ * none calls a hook, and a component each would add a render per part to
+ * every revalidation (ruling 457).
+ */
 
-            Ruling 169: ONE status word. Readiness and validation are different
-            questions, but the hero drew both as peers, and "blocked" beside
-            "awaiting verdict" read as a contradiction (a held task is not up
-            for a verdict yet). The readiness value is the status; the one
-            quiet validation value that names an obligation — `changed`,
-            "awaiting verdict" — takes the slot only when readiness is `ready`
-            and so said nothing about what for (and, beside the Ready stage,
-            said "ready" twice). The other quiet values — healthy, none —
-            describe and stay off the hero, as they do on the card (ruling
-            168(b)); a failing validation is a problem and keeps its own pill
-            below. */}
-        {!archived && (
-          <span className="hero-field">
-            <span className="hero-field-lbl">Status</span>
-            {!terminal &&
-            task.displayReadiness === "ready" &&
-            task.validation === "changed" ? (
-              <ValidationPill value="changed" />
-            ) : (
-              <ReadinessPill value={task.displayReadiness} />
-            )}
-          </span>
-        )}
-        {/* C2 (⇄ N20-14/UXO-1): the validation pill is a live obligation and is
-            withdrawn on every terminal task, not just archived ones — see the
-            `terminal` note above. Ruling 169: and it renders here only as a
-            PROBLEM (the fill tier — "validation failing"); see the status
-            slot's note for where "awaiting verdict" went. */}
-        {!terminal && !validationQuiet(task.validation) && (
-          <ValidationPill value={task.validation} />
-        )}
-        {/* Ruling 503: the epic is a FIELD, like the stage beside it: the
-            body of work this task belongs to, opening the epic's page, where
-            its other tasks and its progress are. It replaced ruling 99's goal
-            chip, which named one link of a chain. */}
-        {epic && (
-          <span className="hero-field">
-            <span className="hero-field-lbl">Epic</span>
-            <EpicChip epic={epic} to={epicHref(task.projectSlug, epic.id)} />
-          </span>
-        )}
-        {/* Ruling 131(a): what this task waits on, each entry a link to the
-            task it names, with its resolved state when it is not simply open.
-            A key the project does not answer to links nowhere. */}
-        {task.blockedBy.map((entry) =>
-          entry.taskKey ? (
-            <Link
-              key={entry.ref}
-              className="pill neutral sm hero-wait-chip"
-              data-wait-state={entry.state}
-              to={`/projects/${task.projectSlug}/tasks/${entry.taskKey}`}
-              title={`Waits on ${entry.label} (${entry.state})`}
-            >
-              <Icon name="lock" />
-              {entry.label}
-              {entry.state !== "open" ? ` · ${entry.state === "failed" ? "archived" : entry.state}` : ""}
-            </Link>
-          ) : (
-            <span
-              key={entry.ref}
-              className="pill neutral sm hero-wait-chip"
-              data-wait-state={entry.state}
-              title={`Waits on ${entry.label} (${entry.state})`}
-            >
-              <Icon name="lock" />
-              {entry.label} · {entry.state}
-            </span>
-          ),
-        )}
-        <span className="hero-file">
-          <Icon name="file" />
-          {/* Ruling 625: one box per segment, its slash included, so a
-              narrow line breaks after a slash and never inside the key
-              ("tasks/VIB-" | "151/task.md"). */}
-          <span>
-            {task.filePath.split("/").map((seg, i, all) => (
-              <span key={i} className="hero-file-seg">
-                {i < all.length - 1 ? `${seg}/` : seg}
-              </span>
-            ))}
-          </span>
-        </span>
-      </div>
-      {editing ? (
-        <goalFetcher.Form
-          method="post"
-          className="goal-edit"
-          // Ruling 147: the click AND a keyboard submit both route through the
-          // refusal, so a short draft can never become a request.
-          onSubmit={(e) => {
-            if (goalBusy) {
-              e.preventDefault();
-              return;
-            }
-            if (short) {
-              e.preventDefault();
-              setRefused((n) => n + 1);
-              goalRef.current?.focus();
-            }
-          }}
-        >
-          {/* P11-47: the editor is already open (`editing` is true here); the
-              old onSubmit re-set it to true, a no-op leftover — removed. */}
-          <input type="hidden" name="intent" value="update-goal" />
-          <input type="hidden" name="_csrf" value={csrf} />
-          <textarea
-            ref={goalRef}
-            name="goal"
-            className="goal-textarea"
-            defaultValue={draft}
-            onChange={(e) => setDraft(e.currentTarget.value)}
-            rows={4}
-            aria-label="Task goal and acceptance criteria"
-            aria-invalid={goalInvalid || undefined}
-            aria-describedby={goalInvalid ? goalErrId : undefined}
-            // Focus lands here whether the editor opened via the Edit button
-            // or an edit_goal packet decision — the browser scrolls it into view.
-            autoFocus
+/** The hero's fields: stage, status, validation, epic, waits and the file. */
+function heroMeta({
+  task,
+  stage,
+  archived,
+  terminal,
+  epic,
+}: {
+  task: TaskDetail;
+  stage: TaskDetail["stages"][number] | undefined;
+  archived: boolean;
+  terminal: boolean;
+  epic: EpicChipView | null;
+}) {
+  return (
+    <div className="hero-meta">
+      {archived && (
+        <Pill kind="neutral">
+          <Icon name="lock" />
+          archived
+        </Pill>
+      )}
+      {/* Ruling 169 (owner, 2026-09-09): the stage and the status are FIELDS,
+          each under the key the Current state panel gives it. The default
+          workflow's second stage is called Ready, so the bare stage pill read
+          as a status word — "Ready · blocked · awaiting verdict" was read as
+          three statuses that cannot be true at once ("what does ready
+          mean?"). C5's status glyph on the readiness chip was not enough to
+          tell the two classes apart; the label is. */}
+      <span className="hero-field">
+        <span className="hero-field-lbl">Stage</span>
+        <Pill kind="neutral">
+          <span
+            className="col-stage-dot sm"
+            data-stage-color={stage?.color}
           />
-          <div className="goal-edit-actions">
-            {/* P13-D-19: was `btn btn-primary`, a class no stylesheet defines —
-                it fell back to the plain grey `.btn` and rendered identically to
-                the Cancel button beside it. The vocabulary is `btn primary`. */}
-            <button
-              type="submit"
-              className="btn primary"
-              disabled={goalBusy}
-              aria-busy={goalBusy}
-            >
-              Save goal
-            </button>
-            {/* UXA-14: the 3-character floor left a dead button and no reason —
-                and a disabled control cannot explain itself via `title`. The
-                board's New-task modal already states its own requirement; say
-                this one too, and only while it is actually unmet.
-                Ruling 147: after a refused submit the same sentence becomes the
-                alert, a fresh element per attempt. */}
-            {short && (
-              <span
-                key={refused ? `alert-${refused}` : "hint"}
-                id={goalErrId}
-                className={refused ? "composer-err" + (refusalShake.shake ? " refused" : "") : "fine dim"}
-                onAnimationEnd={refused ? refusalShake.onAnimationEnd : undefined}
-                role={refused ? "alert" : undefined}
-              >
-                A goal needs at least 3 characters.
-              </span>
-            )}
-            <button
-              type="button"
-              className="btn"
-              onClick={() => {
-                setDraft(task.goal);
-                setRefused(0);
-                setEditing(false);
-              }}
-            >
-              Cancel
-            </button>
-          </div>
-        </goalFetcher.Form>
-      ) : (
-        <div className="goal md-body">
-          {/* Pass 30 (owner-approved): the goal renders as markdown like every
-              timeline comment — literal ** and backticks read as unfinished.
-              task.md on disk stays canonical; the editor still edits raw text. */}
-          <Markdown text={task.goal} {...(taskLinks ? { taskLinks } : {})} />
-          {canEditGoal && (
-            <button
-              type="button"
-              className="goal-edit-btn"
-              onClick={() => {
-                // F35-6: the pending draft, when a decided packet owes one.
-                setDraft(pendingGoalDraft ?? task.goal);
-                setRefused(0);
-                setEditing(true);
-              }}
-              title="Edit the goal / acceptance criteria"
-            >
-              Edit
-            </button>
+          {stage?.name ?? ""}
+        </Pill>
+      </span>
+      {/* UXO-1: an ARCHIVED task is out of the flow — the archive confirm and
+          the acceptance panel both already say so. Its readiness pill kept
+          asserting a live obligation ("ready" = someone will act) that is
+          false on abandoned work, so it drops and the `archived` pill above
+          stands in its place. A terminal (accepted/merged) task keeps its
+          readiness pill: that value IS the terminal status, not a live claim.
+
+          R21-8's agent-working yield used to be re-derived here (and again on
+          the board card, and again on the list row, with two different
+          gates). It is one server-side derivation now —
+          `deriveDisplayReadiness` — so this surface renders the value and
+          does not re-decide it.
+
+          Ruling 169: ONE status word. Readiness and validation are different
+          questions, but the hero drew both as peers, and "blocked" beside
+          "awaiting verdict" read as a contradiction (a held task is not up
+          for a verdict yet). The readiness value is the status; the one
+          quiet validation value that names an obligation — `changed`,
+          "awaiting verdict" — takes the slot only when readiness is `ready`
+          and so said nothing about what for (and, beside the Ready stage,
+          said "ready" twice). The other quiet values — healthy, none —
+          describe and stay off the hero, as they do on the card (ruling
+          168(b)); a failing validation is a problem and keeps its own pill
+          below. */}
+      {!archived && (
+        <span className="hero-field">
+          <span className="hero-field-lbl">Status</span>
+          {!terminal &&
+          task.displayReadiness === "ready" &&
+          task.validation === "changed" ? (
+            <ValidationPill value="changed" />
+          ) : (
+            <ReadinessPill value={task.displayReadiness} />
           )}
-        </div>
+        </span>
+      )}
+      {/* C2 (⇄ N20-14/UXO-1): the validation pill is a live obligation and is
+          withdrawn on every terminal task, not just archived ones — see the
+          `terminal` note in `TaskHero`. Ruling 169: and it renders here only
+          as a PROBLEM (the fill tier — "validation failing"); see the status
+          slot's note for where "awaiting verdict" went. */}
+      {!terminal && !validationQuiet(task.validation) && (
+        <ValidationPill value={task.validation} />
+      )}
+      {/* Ruling 503: the epic is a FIELD, like the stage beside it: the
+          body of work this task belongs to, opening the epic's page, where
+          its other tasks and its progress are. It replaced ruling 99's goal
+          chip, which named one link of a chain. */}
+      {epic && (
+        <span className="hero-field">
+          <span className="hero-field-lbl">Epic</span>
+          <EpicChip epic={epic} to={epicHref(task.projectSlug, epic.id)} />
+        </span>
+      )}
+      {/* Ruling 131(a): what this task waits on, each entry a link to the
+          task it names, with its resolved state when it is not simply open.
+          A key the project does not answer to links nowhere. */}
+      {task.blockedBy.map((entry) =>
+        entry.taskKey ? (
+          <Link
+            key={entry.ref}
+            className="pill neutral sm hero-wait-chip"
+            data-wait-state={entry.state}
+            to={`/projects/${task.projectSlug}/tasks/${entry.taskKey}`}
+            title={`Waits on ${entry.label} (${entry.state})`}
+          >
+            <Icon name="lock" />
+            {entry.label}
+            {entry.state !== "open" ? ` · ${entry.state === "failed" ? "archived" : entry.state}` : ""}
+          </Link>
+        ) : (
+          <span
+            key={entry.ref}
+            className="pill neutral sm hero-wait-chip"
+            data-wait-state={entry.state}
+            title={`Waits on ${entry.label} (${entry.state})`}
+          >
+            <Icon name="lock" />
+            {entry.label} · {entry.state}
+          </span>
+        ),
+      )}
+      <span className="hero-file">
+        <Icon name="file" />
+        {/* Ruling 625: one box per segment, its slash included, so a
+            narrow line breaks after a slash and never inside the key
+            ("tasks/VIB-" | "151/task.md"). */}
+        <span>
+          {task.filePath.split("/").map((seg, i, all) => (
+            <span key={i} className="hero-file-seg">
+              {i < all.length - 1 ? `${seg}/` : seg}
+            </span>
+          ))}
+        </span>
+      </span>
+    </div>
+  );
+}
+
+/**
+ * The hero's goal: the goal as the page reads it, with the Edit that opens
+ * the editor, or while it is open the editor itself (the draft, Save goal,
+ * the 3-character floor, Cancel).
+ */
+function heroGoal({
+  editing,
+  goal,
+  taskLinks,
+  canEditGoal,
+  onEdit,
+  goalFetcher,
+  csrf,
+  draft,
+  onDraft,
+  short,
+  refused,
+  refusalShake,
+  goalBusy,
+  goalRef,
+  onSubmit,
+  onCancel,
+}: {
+  editing: boolean;
+  goal: string;
+  taskLinks: TaskLinks | undefined;
+  canEditGoal: boolean;
+  onEdit: () => void;
+  goalFetcher: FetcherWithComponents<ActionResult>;
+  csrf: string;
+  draft: string;
+  onDraft: (draft: string) => void;
+  /** The draft is under the 3-character floor. */
+  short: boolean;
+  /** Ruling 147: how many submits the floor has refused since the editor opened. */
+  refused: number;
+  refusalShake: RefusalShake;
+  goalBusy: boolean;
+  goalRef: RefObject<HTMLTextAreaElement | null>;
+  onSubmit: (e: FormEvent<HTMLFormElement>) => void;
+  onCancel: () => void;
+}) {
+  const goalErrId = "goal-err";
+  const goalInvalid = refused > 0 && short;
+  return editing ? (
+    <goalFetcher.Form
+      method="post"
+      className="goal-edit"
+      onSubmit={onSubmit}
+    >
+      {/* P11-47: the editor is already open (`editing` is true here); the
+          old onSubmit re-set it to true, a no-op leftover — removed. */}
+      <input type="hidden" name="intent" value="update-goal" />
+      <input type="hidden" name="_csrf" value={csrf} />
+      <textarea
+        ref={goalRef}
+        name="goal"
+        className="goal-textarea"
+        defaultValue={draft}
+        onChange={(e) => onDraft(e.currentTarget.value)}
+        rows={4}
+        aria-label="Task goal and acceptance criteria"
+        aria-invalid={goalInvalid || undefined}
+        aria-describedby={goalInvalid ? goalErrId : undefined}
+        // Focus lands here whether the editor opened via the Edit button
+        // or an edit_goal packet decision — the browser scrolls it into view.
+        autoFocus
+      />
+      <div className="goal-edit-actions">
+        {/* P13-D-19: was `btn btn-primary`, a class no stylesheet defines —
+            it fell back to the plain grey `.btn` and rendered identically to
+            the Cancel button beside it. The vocabulary is `btn primary`. */}
+        <button
+          type="submit"
+          className="btn primary"
+          disabled={goalBusy}
+          aria-busy={goalBusy}
+        >
+          Save goal
+        </button>
+        {/* UXA-14: the 3-character floor left a dead button and no reason —
+            and a disabled control cannot explain itself via `title`. The
+            board's New-task modal already states its own requirement; say
+            this one too, and only while it is actually unmet. */}
+        {short && goalFloorNote(goalErrId, refused, refusalShake)}
+        <button
+          type="button"
+          className="btn"
+          onClick={onCancel}
+        >
+          Cancel
+        </button>
+      </div>
+    </goalFetcher.Form>
+  ) : (
+    <div className="goal md-body">
+      {/* Pass 30 (owner-approved): the goal renders as markdown like every
+          timeline comment — literal ** and backticks read as unfinished.
+          task.md on disk stays canonical; the editor still edits raw text. */}
+      <Markdown text={goal} {...(taskLinks ? { taskLinks } : {})} />
+      {canEditGoal && (
+        <button
+          type="button"
+          className="goal-edit-btn"
+          onClick={onEdit}
+          title="Edit the goal / acceptance criteria"
+        >
+          Edit
+        </button>
       )}
     </div>
+  );
+}
+
+/** The 3-character floor's sentence under the goal editor. Ruling 147: after
+ *  a refused submit the same sentence becomes the alert, a fresh element per
+ *  attempt. */
+function goalFloorNote(id: string, refused: number, refusalShake: RefusalShake) {
+  return (
+    <span
+      key={refused ? `alert-${refused}` : "hint"}
+      id={id}
+      className={refused ? "composer-err" + (refusalShake.shake ? " refused" : "") : "fine dim"}
+      onAnimationEnd={refused ? refusalShake.onAnimationEnd : undefined}
+      role={refused ? "alert" : undefined}
+    >
+      A goal needs at least 3 characters.
+    </span>
   );
 }
 
