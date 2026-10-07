@@ -2,7 +2,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { act, cleanup, fireEvent, render, waitFor, type RenderResult } from "@testing-library/react";
 import { renderToString } from "react-dom/server";
-import { createRoutesStub, useFetcher } from "react-router";
+import { createRoutesStub, useFetcher, useLoaderData, useRevalidator } from "react-router";
 import { ToastProvider } from "~/ui/toast";
 import { AgentAccountsPanel } from "./agent-accounts-panel";
 import type { ProfileBackend } from "./profile-query.server";
@@ -102,6 +102,23 @@ function runningLogin(
   };
 }
 
+/** The panel on one fetcher, as the profile page mounts it. A submit is
+ *  recorded in `lastSubmit` and never reaches a server. */
+function PanelOver({ backends }: { backends: ProfileBackend[] }) {
+  const fetcher = useFetcher();
+  return (
+    <ToastProvider>
+      <AgentAccountsPanel
+        backends={backends}
+        fetcher={fetcher}
+        submit={(fields) => {
+          lastSubmit = fields;
+        }}
+      />
+    </ToastProvider>
+  );
+}
+
 /** `poll` answers the card's poll, or is `unreachable`: a server that gives
  *  no answer (a restart, a dead network). */
 function panelElement(
@@ -110,23 +127,7 @@ function panelElement(
 ) {
   lastSubmit = null;
   const Stub = createRoutesStub([
-    {
-      path: "/profile",
-      Component: () => {
-        const fetcher = useFetcher();
-        return (
-          <ToastProvider>
-            <AgentAccountsPanel
-              backends={backends}
-              fetcher={fetcher}
-              submit={(fields) => {
-                lastSubmit = fields;
-              }}
-            />
-          </ToastProvider>
-        );
-      },
-    },
+    { path: "/profile", Component: () => <PanelOver backends={backends} /> },
     {
       // The real poll target, through the route's own `clientLoader`. Its
       // answer is what the success toast must settle on, so it is a route
@@ -1337,6 +1338,91 @@ describe("rulings 507 and 616: several accounts on one backend", () => {
     expect(active.textContent).toContain(
       "Your runs switch to personal@example.com, the Claude account you used before it.",
     );
+  });
+
+  /** What the loader finds for the Claude card: its accounts and sign-in. */
+  interface ClaudeOnServer {
+    accounts: Account[];
+    login: ProfileBackend["login"];
+  }
+
+  /** The panel over a loader that reads `server` on every load, a fresh copy
+   *  each time as a decoded payload is; `reload` is a live event or another
+   *  panel's post revalidating the page. */
+  async function renderLoaded(server: ClaudeOnServer) {
+    let revalidate: () => Promise<void> = async () => {};
+    const Stub = createRoutesStub([
+      {
+        path: "/profile",
+        loader: (): ProfileBackend[] => [
+          server.accounts.length > 0
+            ? claudeWith(structuredClone(server.accounts), { login: server.login })
+            : backend("claude", { login: server.login }),
+          backend("codex"),
+        ],
+        Component: () => {
+          revalidate = useRevalidator().revalidate;
+          return <PanelOver backends={useLoaderData<ProfileBackend[]>()} />;
+        },
+      },
+      // A sign-in on the card starts its poll; nothing here answers it.
+      { path: "/resources/backend-login", loader: clientLoaderOver(backendLoginRoute, () => null) },
+    ]);
+    const view = render(<Stub initialEntries={["/profile"]} />);
+    await view.findByText("Agent accounts");
+    return { view, reload: () => act(() => revalidate()) };
+  }
+
+  // The confirm asks about an account on screen. An account disconnected in
+  // another tab while its "Disconnect …?" was open here left the dialog open
+  // over an account that no longer existed while others remained; with none
+  // left, or a sign-in from another tab in the card's place, the dialog went
+  // with the accounts but the card's state kept it, and the next load that
+  // showed an account opened it again with nobody asking.
+  // CANARY: drop the reset of `confirmDisconnect` in `AgentAccountCard`
+  // (agent-accounts-panel.tsx) and every row ends with the dialog open (drop
+  // only its `running` and the sign-in row does); match the account by
+  // identity instead of id and the load that changed nothing closes it under
+  // the person reading it.
+  it.each<[string, ClaudeOnServer[], string]>([
+    [
+      "another tab disconnects it and other accounts remain",
+      [{ accounts: [WORK, PERSONAL], login: null }],
+      "Work",
+    ],
+    [
+      "another tab disconnects every account, then connects a new one",
+      [
+        { accounts: [], login: null },
+        { accounts: [account("ubc_fresh", "fresh@example.com", { active: true })], login: null },
+      ],
+      "fresh@example.com",
+    ],
+    [
+      "another tab starts a sign-in, then cancels it",
+      [
+        { accounts: [WORK, PERSONAL, KEY], login: runningLogin("claude") },
+        { accounts: [WORK, PERSONAL, KEY], login: runningLogin("claude", { state: "cancelled" }) },
+      ],
+      "Work",
+    ],
+  ])("a Disconnect confirm closes, and stays closed, when %s", async (_label, loads, inUse) => {
+    const server: ClaudeOnServer = { accounts: [WORK, PERSONAL, KEY], login: null };
+    const { view, reload } = await renderLoaded(server);
+    chooseAction(view, "Work", "Manage other accounts");
+    fireEvent.click(buttonIn(rowOf(view.container, "ubc_key"), "Disconnect"));
+    // A load that still lists the account (a live event about something
+    // else) leaves the dialog where the person is reading it.
+    await reload();
+    expect(view.getByRole("alertdialog", { name: "Disconnect API key ending in abcd?" })).toBeTruthy();
+
+    for (const [index, load] of loads.entries()) {
+      Object.assign(server, load);
+      await reload();
+      expect(view.queryByRole("alertdialog"), `after load ${index + 1}`).toBeNull();
+    }
+    // The card shows an account in use again, where the dialog would be.
+    expect(pickerFor(view, inUse)).toBeTruthy();
   });
 
   it("renames in place, and refuses a name too long in the store's own words (ruling 147)", () => {

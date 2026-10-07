@@ -145,6 +145,23 @@ function AgentAccountCard({
     void revalidator.revalidate();
   });
 
+  // The confirm asks about an account on screen, so it goes when that account
+  // does, or when a sign-in under way takes the card's accounts off it. A
+  // confirmed Disconnect closes it itself (ruling 459). An account
+  // disconnected in another tab while its "Disconnect …?" was open here kept
+  // the dialog open over an account that no longer existed while others
+  // remained; with none left, or a sign-in from another tab in their place,
+  // the dialog went with the accounts but this state stayed, and the next load
+  // that showed an account opened it again with nobody asking. Matched by id,
+  // since every load brings fresh objects. Adjusted during render, React's
+  // pattern for state a prop invalidates, not in an effect.
+  if (
+    confirmDisconnect &&
+    (running || !accounts.some((account) => account.id === confirmDisconnect.id))
+  ) {
+    setConfirmDisconnect(null);
+  }
+
   // A completed rename or saved key closes what the person had open for it.
   // Settled on the RESULT, so a refusal leaves the field as it was. The
   // disconnect dialog closes on either outcome: it holds its busy state until
