@@ -64,7 +64,7 @@ A picture earns its place by showing something the text is about: a screenshot o
 
 ## Where it goes
 
-Deliver what the destination takes, as the rulings describe it: the text in the format it is pasted or imported from, a title a person would write, a one-sentence description, tags, a canonical link when the piece has an original elsewhere, and the alt texts. Markup the destination does not render must not be in the file.
+Deliver what the destination takes, as the rulings describe it: the text in the format it is pasted or imported from, a title a person would write, a one-sentence description, tags, a canonical link when the piece has an original elsewhere, and the alt texts. Keep those fields apart from the text, in the place the destination takes them from: a description is not the piece's first line, and a piece that opens by summarising itself reads as generated. Markup the destination does not render must not be in the file.
 
 ## Before you hand it over
 
