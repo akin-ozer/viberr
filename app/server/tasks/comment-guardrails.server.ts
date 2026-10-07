@@ -18,7 +18,7 @@ import { DEFAULT_COMPACTION, type CompactionOptions } from "./timeline-compactio
  *
  * There is deliberately NO length cap on operator narration (owner ruling
  * 2026-08-31): the record keeps the full text and the timeline handles length
- * VIEW-side — `CollapsibleComment` in task-detail/timeline.tsx clamps tall
+ * VIEW-side — `CollapsibleComment` in task-detail/timeline-entry.tsx clamps tall
  * comments behind a Show more toggle, same as long agent replies. The old
  * `operator-brevity` guardrail hard-truncated the canonical record, which
  * destroyed the overflow for every future reader; brevity is now a style

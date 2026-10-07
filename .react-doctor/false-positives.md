@@ -52,8 +52,9 @@ scan run from inside an agent worktree under `.claude/` sees no files at all.
 
 - `react-doctor/no-derived-useState` — capture-once optimistic/uncontrolled state:
   a local copy seeded from a prop that the user then mutates ahead of the server
-  (profile-page.tsx notification/theme toggles `ntf`/`tl`/`mo`; timeline.tsx
-  `tlDefault` filter tabs). Deriving from the prop would lag the UI a round-trip.
+  (profile-page.tsx notification/theme toggles `ntf`/`tl`/`mo`; timeline-actions.ts
+  `useTimelineTab`'s `tlDefault` filter tabs). Deriving from the prop would lag the UI a
+  round-trip.
 
 - `react-doctor/no-derived-state` — state seeded from loader props but appended to by
   a second setter with data that exists only client-side (use-run-log-stream.ts
@@ -71,7 +72,7 @@ scan run from inside an agent worktree under `.claude/` sees no files at all.
   async react-router **fetcher** result (`fetcher.state === "idle" && fetcher.data`):
   the success signal only exists after the round-trip, so no click handler can host
   the work (agents-page.tsx handled-result effect; profile-page.tsx password-form
-  post-success reset; timeline.tsx `setDraft("")` after submit; create-profile-modal
+  post-success reset; timeline-actions.ts draft reset after submit; create-profile-modal
   catalog load/defaults). The same shape arrives three other ways: a hook handed the
   caller's OWN setters that seeds defaults when its fetcher answers (create-profile-modal
   `useModelCatalog(backend, model, setModel, effort, setEffort)`, which also fires the two
@@ -82,13 +83,13 @@ scan run from inside an agent worktree under `.claude/` sees no files at all.
   `fetcher.data` or a value computed from it, not a plain loader prop.
 
 - `react-doctor/no-adjust-state-on-prop-change` — imperative event counters from the
-  parent, applied once per bump through a "seen" ref: timeline.tsx `ask` (bump → prefill
-  + focus) and task-main-sections.tsx `editGoalSignal` (`seenEditGoal`). Not duplicated
-  prop state. Verify the once-per-bump ref. The same shape keyed on the navigation:
-  timeline.tsx's ruling 497 step (`steppedFor`, the `location.key` of the link that named
-  an event) opens All once when the tab hides the event. Verify `steppedFor` is set
-  whenever the target is found, not only when the step changes the tab (the "all" row of
-  timeline-target.test.tsx).
+  parent, applied once per bump through a "seen" ref: timeline-actions.ts `ask`
+  (`useCommentPost`: bump → prefill + focus) and task-main-sections.tsx `editGoalSignal`
+  (`seenEditGoal`). Not duplicated prop state. Verify the once-per-bump ref. The same
+  shape keyed on the navigation: timeline-actions.ts's ruling 497 step (`useTimelineTab`'s
+  `steppedFor`, the `location.key` of the link that named an event) opens All once when
+  the tab hides the event. Verify `steppedFor` is set whenever the target is found, not
+  only when the step changes the tab (the "all" row of timeline-target.test.tsx).
 
 - `react-doctor/no-reset-all-state-on-prop-change` / `no-adjust-state-on-prop-change` —
   decision-packet-actions.ts `usePacketChoice` (DecisionPacket's choice, ruling 689(e))
@@ -197,7 +198,7 @@ scan run from inside an agent worktree under `.claude/` sees no files at all.
   execution-profile.tsx and agent-select.tsx (bounded by reviewers actively running on ONE
   task — well under the rule's ~10-item threshold), and lists capped by a constant: one
   message's or comment's files (ATTACHMENT_BATCH_MAX = 10: controller-dock,
-  controller-page, timeline), event attachments (EVENT_ATTACHMENTS_MAX = 20,
+  controller-page, timeline-actions), event attachments (EVENT_ATTACHMENTS_MAX = 20,
   task-file.schema.ts), one MCP server's saved write tools (MCP_WRITE_TOOLS_MAX = 200:
   resources.server.ts `sameNameSet`, both sides saved or checked), the `Fact` union (5
   members, revalidation-policy `overlaps`), `codexVendor().pathDirs` (0 or 1), and
@@ -485,9 +486,10 @@ design-system or cross-file decision — revisit deliberately, not per lint run.
   derivable and no loader-data discriminator exists for a key-remount without
   route-layer changes. Mitigated to a single reducer dispatch.
 
-- `react-doctor/no-pass-data-to-parent` — timeline.tsx comment-posted callback: the
-  canonical fix lifts the fetcher to the parent route (cross-file data-flow change); the
-  callback is a once-per-success event notification after the fetcher settles.
+- `react-doctor/no-pass-data-to-parent` — timeline-actions.ts comment-posted callback
+  (`useCommentPost`'s `onAgentLog`): the canonical fix lifts the fetcher to the parent
+  route (cross-file data-flow change); the callback is a once-per-success event
+  notification after the fetcher settles.
 
 - `react-doctor/async-await-in-loop` — backend-credentials.server.ts `retireUserBackends`,
   run when an admin removes a person (`deleteOrgUser`): each account retires in turn, and

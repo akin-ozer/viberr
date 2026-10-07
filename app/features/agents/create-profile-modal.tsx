@@ -839,7 +839,7 @@ function CapabilityGrants({
                   nothing. `aria-expanded` is the house pattern for every other
                   collapsible trigger in the app (`StageMoveMenu` in
                   settings-page.tsx, `AgentPicker` in runs-panels.tsx,
-                  `CollapsibleComment` in timeline.tsx). */}
+                  `CollapsibleComment` in timeline-entry.tsx). */}
               <button
                 type="button"
                 className={"cap-mghead" + (open ? " open" : "")}
