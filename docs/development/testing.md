@@ -180,7 +180,12 @@ the only gates. Jobs run again since 2026-10-01.
   loads, and falls back to one no test can fire without it; ruling 451(g)) and
   `Range.prototype.getBoundingClientRect` (Lexical measures a selection with it). jsdom
   30 ships none of the four. It stubs no canvas: the run console's orb is CSS since
-  ruling 499, and nothing in the app draws on one.
+  ruling 499, and nothing in the app draws on one. jsdom is pinned exactly at 30.1.1:
+  30.1.2's `focus()` refuses an element hidden by `display`, and jsdom's own stylesheet
+  hides a `<dialog>` until the polyfill opens it (after React's commit-time `autoFocus`)
+  and every `[popover]` (it has no `showPopover`), so the toast and `useDialog` focus
+  tests fail there. `app.css` displays `.modal-card` before it opens; jsdom loads no
+  `app.css`. Moving on means modelling both in this file first.
 - **Availability is a fact about a PERSON, so a test seeds it like data (ruling 127).**
   `test-support/backend-credentials.ts` gives `connectFakeBackend(db, userId, backend)`,
   `connectFakeBackends(db, userId)` and `disconnectFakeBackend(db, userId, backend)`,
