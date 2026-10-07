@@ -1471,7 +1471,8 @@ describe("ExecutionProfile — 'operator active' pill honesty (F7-UI1)", () => {
     // Live: the Code Reviewer (scoped to Agent Review) was listed as runnable
     // on an Intake task with "Runs as the delivering agent: it owns the branch
     // and PR."; the server refused after the click. Canary: delete the
-    // `ineligible` computation in AgentRunControl.
+    // `ineligible` computation in `agentDispatch`, or make `stageRefusal`
+    // return null (both in execution-profile-derive.ts).
     const scoped: DeployedSpecialistView[] = [
       { ...deployedFixture[1]!, stages: ["review"], spanAll: false },
     ];
