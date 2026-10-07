@@ -183,6 +183,14 @@ describe("users & access intents", () => {
   });
 
   it("duplicate domain whitelist is refused like the other invite intents", async () => {
+    // The seed allowlists no domain (ruling 688), so the first add is the one
+    // the duplicate is refused against.
+    const first = await postAction(ids.arda, {
+      intent: "invite-domain",
+      email: "@viberr.dev",
+      role: "member",
+    });
+    expect(first).toMatchObject({ ok: true });
     const dup = await postAction(ids.arda, {
       intent: "invite-domain",
       email: "@viberr.dev",
@@ -977,7 +985,7 @@ describe("R19-16 sign-in providers, configured in the app", () => {
   // CANARY: build callbackOrigin or the probe's redirectUri from request.url
   // again and, behind the TLS proxy, the card tells an admin to register, and
   // Google's probe sends, an http:// callback better-auth never sends; it
-  // sends BETTER_AUTH_URL's (ruling 683).
+  // sends BETTER_AUTH_URL's (ruling 687).
   it("shows and probes the callback under BETTER_AUTH_URL's origin, not the request's", async () => {
     const saved = await postAction(ids.arda, {
       intent: "oauth-save",

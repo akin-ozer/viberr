@@ -405,7 +405,7 @@ start) regenerates user ids and destroys every primary row in the file. Both are
 `task_events`, `task_projections`, `project_members` and `projects` (the full rescan that
 follows prunes the orphaned `epic_projections` rows). The same command then deletes `kb/` and `skills/` and empties
 `org_knowledge_bases`, `org_mcp_servers`, `org_skills` and `google_domain_allowlist` before
-reseeding the example knowledge bases, skills and allowlist row (`seedOrgResources`). It
+reseeding the example knowledge bases and skills (`seedOrgResources`). It
 keeps users and better-auth tables, GitHub connections and PATs, backend credentials, audit
 rows, controller transcripts and the per-person runtime homes
 ([../development/scripts.md](../development/scripts.md) §3 lists both sides). The owner kept this convention at launch

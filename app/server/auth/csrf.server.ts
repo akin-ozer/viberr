@@ -8,7 +8,7 @@ import { appOrigin, getEnv } from "../config/env.server";
  *    metadata) — a request that proves nothing about where it came from is
  *    refused, see assertTrustedOrigin. It is the app's one origin check:
  *    React Router's own is switched off in react-router.config.ts, because
- *    behind the TLS proxy it cannot see the public scheme (ruling 683).
+ *    behind the TLS proxy it cannot see the public scheme (ruling 687).
  * 2. A double-submit token tied to the session: HMAC(secret, session id),
  *    injected into forms via <CsrfInput /> (app/ui/csrf-input.tsx, fed by
  *    the root loader) as hidden field "_csrf".
@@ -61,7 +61,7 @@ function configuredOrigin(): URL | null {
  * The origin people reach this deployment on: the configured public origin,
  * else the origin the request arrived on. The Sign-in & SSO card shows the
  * OAuth callback under it and the credential probe sends that callback, so
- * both match the callback better-auth sends (ruling 683).
+ * both match the callback better-auth sends (ruling 687).
  */
 export function publicOrigin(request: Request): string {
   return configuredOrigin()?.origin ?? new URL(request.url).origin;
@@ -72,7 +72,7 @@ export function publicOrigin(request: Request): string {
  * deployment. Every signal it carries (`Sec-Fetch-Site`, `Origin`, `Referer`)
  * has to say same-origin, and it has to carry at least one of them.
  *
- * Two origins count as this deployment's (ruling 683): the request's own, and
+ * Two origins count as this deployment's (ruling 687): the request's own, and
  * the configured public origin (`BETTER_AUTH_URL`). Behind the TLS-terminating
  * proxy deployment.md requires, react-router-serve builds `request.url` from
  * the plain-HTTP socket, so the request's own origin is `http://` while the

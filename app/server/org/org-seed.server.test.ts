@@ -32,7 +32,6 @@ describe("seedOrgResources", () => {
       kbs: 3,
       skills: 4,
       mcps: 0, // honest empty slate — no fabricated MCP health seeded
-      domains: 1,
       connections: 0, // no placeholder GitHub connection seeded
     });
 
@@ -68,7 +67,8 @@ describe("seedOrgResources", () => {
     expect(listMcpServers(db)).toHaveLength(0);
     expect(listConnections(db)).toHaveLength(0);
 
-    expect(listDomains(db).map((d) => d.domain)).toEqual(["@viberr.dev"]);
+    // Ruling 688: no Google sign-in domain is allowlisted by the seed.
+    expect(listDomains(db)).toEqual([]);
   });
 
   it("is idempotent and --reset restores a pristine org dataset", async () => {

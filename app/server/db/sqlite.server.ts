@@ -752,7 +752,7 @@ export function ensureBaselineColumns(db: DatabaseSync): void {
       }
     } catch (error) {
       logger.warn(
-        "baseline columns could not be ensured: writers that name them will fail until the root is re-baselined",
+        "baseline columns could not be ensured: writers that name them fail until the columns exist; it is retried on the next open, and if it keeps failing, add them by hand with the app stopped (ALTER TABLE … ADD COLUMN with the definition in db/migrations/0001_baseline.sql; docs/operations/deployment.md, Re-baselining the projection database), never by deleting the database",
         { table, err: toError(error) },
       );
     }
@@ -762,7 +762,7 @@ export function ensureBaselineColumns(db: DatabaseSync): void {
       db.exec(ddl);
     } catch (error) {
       logger.warn(
-        "a baseline table could not be ensured: readers that name it degrade until the root is re-baselined",
+        "a baseline table could not be ensured: readers that name it degrade until it exists; it is retried on the next open, and if it keeps failing, create it by hand with the app stopped from its CREATE TABLE in db/migrations/0001_baseline.sql, never by deleting the database",
         { err: toError(error) },
       );
     }

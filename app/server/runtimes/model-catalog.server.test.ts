@@ -130,7 +130,7 @@ describe("curated catalog", () => {
 
   it("codex curated: the pinned CLI's bundled models + low…max efforts, per model", () => {
     const cat = curatedCatalog("codex");
-    // Ruling 683: GPT-6.1 Sol is listed FIRST, so it is the fallback a
+    // Ruling 687: GPT-6.1 Sol is listed FIRST, so it is the fallback a
     // model-less operator or profile runs on (it replaced F20-33's Terra).
     // The rest follow the 0.160.1 bundled catalog's priority order, its
     // hidden models left out. CANARY: move GPT-6.1 Sol below another entry and

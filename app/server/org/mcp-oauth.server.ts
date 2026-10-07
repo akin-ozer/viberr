@@ -90,7 +90,7 @@ export const MCP_OAUTH_CALLBACK_PATH = "/resources/mcp-oauth/callback";
  * (required behind a reverse proxy, where the request's own origin is the
  * proxy's upstream), else the origin the request arrived on. `publicOrigin`
  * is the one definition; the Sign-in & SSO card's callback uses it too
- * (R19-16, ruling 683).
+ * (R19-16, ruling 687).
  */
 export function mcpOAuthRedirectUri(request: Request): string {
   return `${publicOrigin(request)}${MCP_OAUTH_CALLBACK_PATH}`;

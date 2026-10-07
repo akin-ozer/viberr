@@ -211,7 +211,7 @@ Records from boot, the watchers and the timers, and from a run they started, car
 A few answers carry no header: static assets (served before the app sees the request),
 a document form post whose `Origin` header is not a URL, which React Router refuses
 before routing (a plain `400 Bad Request`, whose log record does carry an id; a
-cross-origin post gets the app's own 403, which carries the header, ruling 683), the route
+cross-origin post gets the app's own 403, which carries the header, ruling 687), the route
 manifest, and React Router's last-resort
 answers (a document it could not render at all). Match those by time, method and path.
 

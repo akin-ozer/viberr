@@ -50,7 +50,7 @@ Two independent layers, both required (`app/server/auth/csrf.server.ts`):
    with `BETTER_AUTH_URL` unset the whole origin, scheme included, must be the
    request's. This is the app's one origin check for every app action but
    `/api/auth/*` (below): React Router's own is off (`allowedActionOrigins: ["**"]`,
-   ruling 683; [deployment.md §TLS and the reverse proxy](../operations/deployment.md#tls-and-the-reverse-proxy)).
+   ruling 687; [deployment.md §TLS and the reverse proxy](../operations/deployment.md#tls-and-the-reverse-proxy)).
 2. **Double-submit token**: `HMAC-SHA256(VIBERR_SESSION_SECRET, "viberr-csrf:" +
    sessionId)`, issued by the root loader and rendered by `<CsrfInput />` as
    `_csrf` (or the `X-Csrf-Token` header), compared with `timingSafeEqual`.
@@ -73,7 +73,7 @@ Providers are GitHub (`read:user user:email`, `githubHandle` captured) and Googl
 (offline access, account chooser). Callback path: `/api/auth/callback/<provider>`. The
 Sign-in & SSO card shows the full callback, and Google's credential test sends it (GitHub's
 probe sends none), under the origin of `BETTER_AUTH_URL`, else of the request, which is
-the callback better-auth sends (`publicOrigin` in `csrf.server.ts`, ruling 683).
+the callback better-auth sends (`publicOrigin` in `csrf.server.ts`, ruling 687).
 Configuration has two sources with a clear precedence (ruling 72):
 
 - **The deployment env** (`GITHUB_OAUTH_*`, `GOOGLE_OAUTH_*`) is the bootstrap default.
