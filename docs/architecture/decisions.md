@@ -1050,6 +1050,7 @@ The verified module map, directory by directory, is [`codebase-map.md`](codebase
     across rounds, where before each round reset to zero.
     (`app/server/org/mcp-warmup.server.ts`; reaper wired in `app/server/boot.server.ts`;
     polling in `app/features/org-settings/resources-panel.tsx`)
+    *Dated note 2026-10-07 (ruling 689(e)):* the 20 s poll now lives in `useWarmingRevalidation`, `app/features/org-settings/resources-panel-actions.ts`.
 
 75. **R19-19 (2026-08-14): agents get a REAL BROWSER — as a first-class capability.** Agents
     could read the web (`use-web-search-fetch`) but never drive it: no screenshots, no console,
