@@ -380,7 +380,10 @@ export function readAgentTaskSource(
   const kept = readTaskSources(deps.projectSlug, key, deps.ctx.dataRoot);
   const wanted = id?.trim();
   if (!wanted) {
-    const whole = kept.sources.length > 0 ? sourcesListing(kept) : `${key} keeps no sources.`;
+    // Every kept delivery is named, one stamped while the task kept nothing
+    // included: it rested on no kept source, and the list says so.
+    const delivered = listKeptDeliveries(deps.projectSlug, key, deps.ctx.dataRoot).map((d) => d.deliveredAt);
+    const whole = kept.sources.length > 0 ? sourcesListing(kept, delivered) : `${key} keeps no sources.`;
     const end = pageEnd(whole, offset);
     const list: SourceListRead = {
       task: key,

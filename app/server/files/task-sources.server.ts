@@ -20,6 +20,12 @@
  * source and cannot change it. This module is the only writer: it never opens
  * an existing bytes file for writing, and the index only grows.
  *
+ * What a run means to keep it first saves in the task's attachments folder,
+ * the one task folder it writes, under a name that starts with
+ * `SOURCE_STAGING_PREFIX`. A name that starts with a dot is listed by no
+ * reader of that folder, so a staged file is never a completing run's file
+ * and never part of a delivery, whichever run completes while it waits.
+ *
  * File operations only. The action that decides whether a file may be kept,
  * and audits it, is `tasks/task-sources.server.ts`.
  */
@@ -57,6 +63,25 @@ export const SOURCES_TASK_MAX_BYTES = 100 * 1024 * 1024;
 export const SOURCE_TITLE_MAX = 200;
 /** Where it came from: a URL, a command, or `owner/repo@<commit>:path`. */
 export const SOURCE_FROM_MAX = 2000;
+
+/**
+ * How a file staged for a keep is named in the task's attachments folder:
+ * this prefix, then the name the source is kept under. The dot is what the
+ * rule rests on: every lister of that folder skips a dot-name (the run's
+ * window of ruling 593, the delivery's files of ruling 610, the panel), and
+ * no upload, relay or take can land one. The rest keeps the name apart from
+ * the store's own working files there (`.viberr-write-`, `.viberr-prev-`),
+ * which hold somebody else's bytes.
+ */
+export const SOURCE_STAGING_PREFIX = ".source-";
+
+/** The name a staged file is kept under, or null for a name that is not a
+ *  staged source's. */
+export function stagedSourceName(file: string): string | null {
+  return file.startsWith(SOURCE_STAGING_PREFIX) && file.length > SOURCE_STAGING_PREFIX.length
+    ? file.slice(SOURCE_STAGING_PREFIX.length)
+    : null;
+}
 
 const INDEX_FILE = "index.jsonl";
 /** A source's id: `S` and its number, counted from 1 on each task. */
@@ -200,20 +225,26 @@ export interface SourceToKeep {
   runId: string | null;
 }
 
-/** A keep's answer: the new source, or the one that already holds these bytes. */
-export type SourceWriteResult = { kept: TaskSource } | { already: TaskSource };
+/** A keep's answer: the new source; the one that already holds these bytes;
+ *  or the one that held them until its bytes were taken out of the store. */
+export type SourceWriteResult = { kept: TaskSource } | { already: TaskSource } | { removed: TaskSource };
+
+const MB = 1024 * 1024;
 
 /**
  * Keep one source. Synchronous from the index read to the append: one process
  * writes a data root, so nothing else can take the id in between.
  *
- * Bytes a task already keeps answer with that source and write nothing. A new
- * source takes the number after the highest one the index or the folder has
- * seen, so a bytes file a crash left without its record is stepped over and
- * never replaced. The bytes are written to a name that must not exist, then
- * the record is appended; if the append fails the bytes go, and nothing is
- * kept. Throws `AppError.validation`, with the sentence an agent reads, when
- * the task already keeps as many sources or as many bytes as it may.
+ * Bytes a task already keeps answer with that source and write nothing. Bytes
+ * whose record stands while its bytes file is gone answer `removed`: a person
+ * took that source out of the store (docs/operations/runbook.md), and the
+ * same bytes are not kept again under a new id. A new source takes the number
+ * after the highest one the index or the folder has seen, so a bytes file a
+ * crash left without its record is stepped over and never replaced. The bytes
+ * are written to a name that must not exist, then the record is appended; if
+ * the append fails the bytes go, and nothing is kept. Throws
+ * `AppError.validation`, with the sentence an agent reads, when the task
+ * already keeps as many sources as it may or has no room left for these bytes.
  */
 export function writeTaskSource(
   slug: string,
@@ -226,17 +257,23 @@ export function writeTaskSource(
   const { sources } = parseIndex(before);
   const sha256 = sha256Hex(input.data);
   const already = sources.find((s) => s.sha256 === sha256);
-  if (already) return { already };
-  const full =
-    sources.length >= SOURCES_PER_TASK_MAX
-      ? `${SOURCES_PER_TASK_MAX} sources`
-      : sources.reduce((sum, s) => sum + s.bytes, 0) + input.data.length > SOURCES_TASK_MAX_BYTES
-        ? `${SOURCES_TASK_MAX_BYTES / 1024 / 1024} MB of sources`
-        : null;
-  if (full) {
+  if (already) return existsSync(path.join(dir, already.file)) ? { already } : { removed: already };
+  if (sources.length >= SOURCES_PER_TASK_MAX) {
     throw AppError.validation(
-      `${key} keeps ${full}, the most a task holds. Cite one already kept (\`read_task_source\` lists them), ` +
+      `${key} keeps ${SOURCES_PER_TASK_MAX} sources, the most a task holds. Cite one already kept (\`read_task_source\` lists them), ` +
         `or say in your result which claim has no kept source.`,
+    );
+  }
+  const keptBytes = sources.reduce((sum, s) => sum + s.bytes, 0);
+  if (keptBytes + input.data.length > SOURCES_TASK_MAX_BYTES) {
+    // What is left is rounded down and the file up, so the two figures never
+    // read as if the file fitted.
+    const left = Math.floor((Math.max(0, SOURCES_TASK_MAX_BYTES - keptBytes) / MB) * 10) / 10;
+    const size = Math.ceil((input.data.length / MB) * 10) / 10;
+    throw AppError.validation(
+      `${key} keeps ${(keptBytes / MB).toFixed(1)} MB of sources and a task may keep ${SOURCES_TASK_MAX_BYTES / MB} MB, ` +
+        `so ${left.toFixed(1)} MB is left and this file is ${size.toFixed(1)} MB. ` +
+        `Save the part your claim rests on as its own file and keep that, or cite a source already kept (\`read_task_source\` lists them).`,
     );
   }
   // Ruling 460: a plain directory of the server's, never handed to the agent
@@ -387,18 +424,38 @@ export function sourceFromShown(from: string): string {
 }
 
 /**
- * A task's sources as text: what each kept delivery rested on, then one block
- * a source with its id, the name it was saved under, its size and the start
- * of its hash, its title, where it came from, and when, by which agent and in
- * which run it was kept.
+ * Ruling 690: the ids of the sources a files delivery rested on. The line
+ * written when it was stamped decides. A delivery with no line (the task kept
+ * nothing then, so none was written, or the write failed) rested on what was
+ * kept at or before its stamp.
  */
-export function sourcesListing(read: TaskSourcesRead): string {
-  const deliveries = read.deliveries.map(
-    (d) => `Delivery ${d.deliveredAt} rested on: ${d.sources.join(", ")}`,
-  );
+export function deliverySourceIds(read: TaskSourcesRead, deliveredAt: string): string[] {
+  const recorded = read.deliveries.find((d) => d.deliveredAt === deliveredAt);
+  if (recorded) return recorded.sources;
+  const stamp = Date.parse(deliveredAt);
+  return read.sources.filter((s) => Date.parse(s.keptAt) <= stamp).map((s) => s.id);
+}
+
+/**
+ * A task's sources as text: what each delivery rested on, then one block a
+ * source with its id, the name it was saved under, its size and its SHA-256,
+ * its title, where it came from, and when, by which agent and in which run it
+ * was kept. `delivered` is the stamps of the task's kept deliveries (ruling
+ * 597), so one stamped while the task kept nothing is named too, as resting
+ * on no kept source, and a reader is not left to wonder which delivery a
+ * source kept later belongs under.
+ */
+export function sourcesListing(read: TaskSourcesRead, delivered: readonly string[] = []): string {
+  const stamps = [...new Set([...read.deliveries.map((d) => d.deliveredAt), ...delivered])].sort();
+  const deliveries = stamps.map((stamp) => {
+    const ids = deliverySourceIds(read, stamp);
+    return ids.length > 0
+      ? `Delivery ${stamp} rested on: ${ids.join(", ")}`
+      : `Delivery ${stamp} rested on no kept source`;
+  });
   const sources = read.sources.map(
     (s) =>
-      `${s.id} · ${s.name} · ${s.bytes.toLocaleString("en-US")} bytes · sha256 ${s.sha256.slice(0, 12)}\n` +
+      `${s.id} · ${s.name} · ${s.bytes.toLocaleString("en-US")} bytes · sha256 ${s.sha256}\n` +
       `title: ${s.title}\n` +
       `from: ${s.from}\n` +
       `kept: ${s.keptAt} by agent:${s.by.profileId}${s.runId ? ` (run ${s.runId})` : ""}`,

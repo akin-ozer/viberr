@@ -379,6 +379,7 @@ describe("report_outcome's evidence field (P13-D-26)", () => {
       outcomeKey,
       collab: { ...collab, githubRead: collab.githubRead ?? false },
       kb: [],
+      webEgress: true,
     })!;
     lastStore = store;
     return mountedTools.parse(built.mcpServers.viberr_agent);
@@ -404,6 +405,7 @@ describe("report_outcome's evidence field (P13-D-26)", () => {
         githubRead: collab.githubRead ?? false,
       },
       kb: [],
+      webEgress: true,
     })!;
     lastStore = store;
     return built.mcpServers.viberr_agent;
@@ -601,6 +603,7 @@ describe("report_outcome's evidence field (P13-D-26)", () => {
       outcomeKey: "oc_load",
       collab: { comment: true, ask: true, verdict: true, evidence: true, githubRead: true },
       kb: [],
+      webEgress: true,
     })!;
     const loading = toolLoading(built.mcpServers.viberr_agent);
     expect(loading.deferred).toEqual([]);
@@ -645,6 +648,7 @@ describe("report_outcome's evidence field (P13-D-26)", () => {
         githubRead: true,
       },
       kb: ["shopify-clone-conventions"],
+      webEgress: true,
     })!;
     const mounted = Object.keys(
       mountedTools.parse(built.mcpServers.viberr_agent),
@@ -906,12 +910,12 @@ describe("report_outcome's evidence field (P13-D-26)", () => {
     patchRun(store.db, "run_keep", { outcomeKey: "oc_keep" });
     const dir = taskAttachmentsDir(store.slug, "VIB-3", store.dataRoot);
     mkdirSync(dir, { recursive: true });
-    writeFileSync(path.join(dir, "advisory.json"), '{"id":"GHSA-xxxx","fixedIn":"4.2.1"}');
+    writeFileSync(path.join(dir, ".source-advisory.json"), '{"id":"GHSA-xxxx","fixedIn":"4.2.1"}');
 
     // SAFETY: the tool answers the text block `{ content: [{ type: "text", text }] }`.
     const out = (await tools.keep_source!.handler(
       {
-        file: "advisory.json",
+        file: ".source-advisory.json",
         from: "https://api.github.com/advisories/GHSA-xxxx",
         title: "The advisory for the pinned parser",
       } as never,
@@ -931,8 +935,15 @@ describe("report_outcome's evidence field (P13-D-26)", () => {
     // The reader the operator's, the controller's and the gateway's tools
     // answer with, unchanged. CANARY: resolve the bytes by the record's
     // `name` instead of its `file` and the read answers [noop] for a source
-    // the list just named.
+    // the list just named. List only the deliveries the index has a line for
+    // and the first delivery, stamped while the task kept nothing, is not
+    // named, so a reader cannot tell it rested on none. Print the start of
+    // the hash and the list does not carry the SHA-256 its description says.
     const { createHash } = await import("node:crypto");
+    const { mkdirSync, writeFileSync } = await import("node:fs");
+    const path = await import("node:path");
+    const { taskAttachmentsDir } = await import("~/server/files/file-store-root.server");
+    const { keepDelivery } = await import("~/server/files/kept-deliveries.server");
     const { readTaskSources, recordDeliverySources, writeTaskSource } = await import(
       "~/server/files/task-sources.server"
     );
@@ -944,6 +955,12 @@ describe("report_outcome's evidence field (P13-D-26)", () => {
     writeTask(store.dataRoot, store.slug, { frontmatter: baseTaskFrontmatter("VIB-9", { stage: "review" }) });
     rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
     const by = { backend: "codex", profileId: "researcher", roleHint: "Researcher" };
+    // A first delivery, kept before the task kept any source: no line was
+    // written for it, and it rested on none.
+    const dir = taskAttachmentsDir(store.slug, "VIB-9", store.dataRoot);
+    mkdirSync(dir, { recursive: true });
+    writeFileSync(path.join(dir, "estimate.md"), "The first estimate.");
+    keepDelivery(store.slug, "VIB-9", "2024-03-01T09:00:00.000Z", ["estimate.md"], store.dataRoot);
     // A page longer than one read, so the second half is only a page away.
     const page = `<html>${"t3.medium $0.0416 per hour. ".repeat(1500)}</html>`;
     const exportJson = '{"monthly":1234.56}';
@@ -986,12 +1003,13 @@ describe("report_outcome's evidence field (P13-D-26)", () => {
       kept: 2,
       truncated: false,
       text:
+        "Delivery 2024-03-01T09:00:00.000Z rested on no kept source\n" +
         "Delivery 2026-10-07T13:00:00.000Z rested on: S1\n\n" +
-        `S1 · aws-pricing.html · ${page.length.toLocaleString("en-US")} bytes · sha256 ${sha(page).slice(0, 12)}\n` +
+        `S1 · aws-pricing.html · ${page.length.toLocaleString("en-US")} bytes · sha256 ${sha(page)}\n` +
         "title: AWS EC2 on-demand pricing\n" +
         "from: https://aws.amazon.com/ec2/pricing/on-demand/\n" +
         `kept: ${first!.keptAt} by agent:researcher (run run_abc)\n\n` +
-        `S2 · calc-export.json · 19 bytes · sha256 ${sha(exportJson).slice(0, 12)}\n` +
+        `S2 · calc-export.json · 19 bytes · sha256 ${sha(exportJson)}\n` +
         "title: The calculator's export\n" +
         "from: curl -sS https://calculator.aws/pricing/2.0/export\n" +
         `kept: ${second!.keptAt} by agent:researcher`,
@@ -1281,6 +1299,7 @@ describe("report_outcome's evidence field (P13-D-26)", () => {
             githubRead: false,
           },
           kb: [],
+          webEgress: true,
         }),
       ).toBeNull();
 
@@ -1313,6 +1332,7 @@ describe("report_outcome's evidence field (P13-D-26)", () => {
           githubRead: false,
         },
         kb: ["shop-rulings"],
+        webEgress: true,
       });
       expect(built).not.toBeNull();
       const names = mountedTools.parse(built!.mcpServers.viberr_agent);
@@ -1379,6 +1399,7 @@ describe("report_outcome's evidence field (P13-D-26)", () => {
         outcomeKey: "oc_kb_propose",
         collab: { comment: true, ask: false, verdict: false, evidence: false, githubRead: false },
         kb: [kb.dir],
+        webEgress: true,
       })!;
       const [clientEnd, serverEnd] = InMemoryTransport.createLinkedPair();
       await built.mcpServers.viberr_agent.instance.connect(serverEnd);
@@ -1528,6 +1549,7 @@ describe("report_outcome's evidence field (P13-D-26)", () => {
         outcomeKey: "oc_gr_ok",
         collab: { comment: false, ask: false, verdict: false, evidence: false, githubRead: true },
         kb: [],
+        webEgress: true,
       })!;
       return { store, tools: mountedTools.parse(built.mcpServers.viberr_agent) };
     }

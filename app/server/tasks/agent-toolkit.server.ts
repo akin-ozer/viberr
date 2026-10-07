@@ -35,8 +35,7 @@ import {
 } from "~/server/files/kb-injection.server";
 import { KB_CORRECTION_FIELDS, KB_CORRECTION_SPECIALIST_DESCRIPTION } from "~/server/mcp-proxy/knowledge-tool.server";
 import {
-  KEEP_SOURCE_DESCRIPTION,
-  KEEP_SOURCE_FIELDS,
+  KEEP_SOURCE_NAME,
   READ_BOARD_DESCRIPTION,
   READ_BOARD_TASK_KEY_DESCRIPTION,
   READ_TASK_ATTACHMENT_DESCRIPTION,
@@ -46,6 +45,8 @@ import {
   READ_TIMELINE_ENTRY_AT_DESCRIPTION,
   READ_TIMELINE_ENTRY_DESCRIPTION,
   READ_TIMELINE_ENTRY_TASK_KEY_DESCRIPTION,
+  keepSourceDescription,
+  keepSourceFields,
 } from "~/server/mcp-proxy/board-tool.server";
 import {
   appendTimelineEvent,
@@ -148,6 +149,10 @@ interface AgentToolkitDeps {
    *  Their documents are indexed into the prompt, not injected, so the run
    *  needs a way to pull one — and may pull only from these. */
   kb: readonly string[];
+  /** Ruling 690: the run's `use-web-search-fetch` grant, for what
+   *  `keep_source` says a run can keep: a page it fetched, or only what a run
+   *  without the web can reach. */
+  webEgress: boolean;
 }
 
 const prose = normalizeEscapedNewlines;
@@ -729,14 +734,15 @@ export function buildAgentToolkit(deps: AgentToolkitDeps): AgentToolkit | null {
   // and the keep takes a file from there. The Codex twin is the gateway's
   // board server, whose mount carries the same grant.
   if (collab.evidence) {
+    const keepFields = keepSourceFields(deps.webEgress);
     tools.push(
       tool(
-        "keep_source",
-        KEEP_SOURCE_DESCRIPTION,
+        KEEP_SOURCE_NAME,
+        keepSourceDescription(deps.webEgress),
         {
-          file: z.string().describe(KEEP_SOURCE_FIELDS.file),
-          from: z.string().describe(KEEP_SOURCE_FIELDS.from),
-          title: z.string().describe(KEEP_SOURCE_FIELDS.title),
+          file: z.string().describe(keepFields.file),
+          from: z.string().describe(keepFields.from),
+          title: z.string().describe(keepFields.title),
         },
         // eslint-disable-next-line @typescript-eslint/require-await
         async (args) => {

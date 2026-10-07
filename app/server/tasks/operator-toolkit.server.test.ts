@@ -19,6 +19,7 @@ import type { TaskTook } from "./what-it-took.server";
 import { writeTaskAttachment } from "~/server/files/task-attachments.server";
 import { taskAttachmentsDir } from "~/server/files/file-store-root.server";
 import { keepDelivery } from "~/server/files/kept-deliveries.server";
+import { writeTaskSource } from "~/server/files/task-sources.server";
 import { readTaskFile } from "~/server/files/task-writer.server";
 import { saveMcpServer } from "~/server/org/resources.server";
 import { buildOperatorToolkit } from "./operator-toolkit.server";
@@ -1028,6 +1029,61 @@ describe("buildOperatorToolkit — open_decision_packet declares goalDraft (ruli
     expect(await text({ name: "summary.md", delivery: "2026-09-30T01:55:33.089Z" })).toContain(
       "[noop] VIB-1 kept no delivery at `2026-09-30T01:55:33.089Z`.",
     );
+  });
+
+  it("ruling 690: read_task_source lists and opens the sources of the operator's own task, and of another task with taskKey", async () => {
+    // The operator checks a result's claims against what its runs kept
+    // before it offers the result for acceptance. CANARY: read the toolkit's
+    // own task whatever `taskKey` says and VIB-2's source comes back as
+    // VIB-1's; drop `args.id` on the way to the reader and an id is answered
+    // with the list.
+    const store = setupTestStore(ctxDb);
+    for (const key of ["VIB-1", "VIB-2"]) {
+      writeTask(store.dataRoot, store.slug, { frontmatter: baseTaskFrontmatter(key, { stage: "review" }) });
+    }
+    rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
+    const keepOn = (key: string, name: string, body: string) =>
+      writeTaskSource(
+        store.slug,
+        key,
+        {
+          name,
+          data: Buffer.from(body),
+          title: `The page ${name}`,
+          from: `https://aws.amazon.com/${name}`,
+          by: { backend: "claude", profileId: "researcher", roleHint: "Researcher" },
+          runId: "run_abc",
+        },
+        store.dataRoot,
+      );
+    keepOn("VIB-1", "ec2-pricing.html", "t3.medium $0.0416 per hour");
+    keepOn("VIB-2", "rds-pricing.html", "db.t3.medium $0.068 per hour");
+    const toolkit = buildOperatorToolkit({
+      db: store.db,
+      ctx: { dataRoot: store.dataRoot },
+      projectSlug: store.slug,
+      taskKey: "VIB-1",
+      authority: authority([]),
+    });
+    // SAFETY: every answer here is `{ content: [{ type: "text", text }] }`.
+    const read = async (args: Record<string, string>) =>
+      z.record(z.string(), z.unknown()).parse(
+        JSON.parse(
+          ((await toolkit.tools.find((t) => t.name === "read_task_source")!.handler(args as never, {} as never)) as {
+            content: { text: string }[];
+          }).content[0]!.text,
+        ),
+      );
+    const own = await read({});
+    expect(own).toMatchObject({ task: "VIB-1", kept: 1 });
+    expect(own.text).toContain("S1 · ec2-pricing.html · 26 bytes");
+    expect(await read({ id: "S1" })).toMatchObject({ id: "S1", name: "ec2-pricing.html", text: "t3.medium $0.0416 per hour" });
+    expect(await read({ taskKey: "VIB-2" })).toMatchObject({ task: "VIB-2", kept: 1 });
+    expect(await read({ taskKey: "VIB-2", id: "S1" })).toMatchObject({
+      id: "S1",
+      name: "rds-pricing.html",
+      text: "db.t3.medium $0.068 per hour",
+    });
   });
 
   it("ruling 569: a verdict's report is read whole from its Review verdict comment, not the stored excerpt", async () => {

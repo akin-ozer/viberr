@@ -15,6 +15,8 @@ import {
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { z } from "zod";
+import { Client } from "@modelcontextprotocol/sdk/client/index.js";
+import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { logger } from "~/server/logging/logger.server";
 import {
@@ -58,6 +60,7 @@ import {
 import type {
   RunCallbacks,
   RunHandle,
+  RunMcpServerDeclaration,
   RunSpec,
   RuntimeAdapter,
 } from "~/server/runtimes/adapter.server";
@@ -3059,7 +3062,9 @@ describe("buildAnalyzePrompt — server-side delivery contract (both backends)",
     // What a run read to state a figure was kept nowhere, and a reviewer
     // checked the claim against the page as it read on the day of the review.
     // CANARY: build the line inside `if (input.repo)` only and the run on a
-    // board with no repository is told nothing about sources.
+    // board with no repository is told nothing about sources; pass `true`
+    // for the web in sourcesKeepLine and a profile whose web grant is
+    // withheld is told to `curl` a page.
     const dir = "/data/projects/aws-cost-calculator/tasks/AWSC-120/attachments";
     const base = {
       role: "Cost Researcher",
@@ -3072,25 +3077,42 @@ describe("buildAnalyzePrompt — server-side delivery contract (both backends)",
       delivery: { canBranch: false, canCommitPush: false, canOpenPr: false, repoWrite: false },
       delivers: true,
     };
+    const staged = "under a name that starts with `.source-`";
+    const kept =
+      "A file so named is listed, posted and delivered nowhere while it waits, so save it under that name from the start. " +
+      "The keep takes it out of the attachments folder and holds it with the task as a source (`S1`, `S2` and so on): " +
+      "it is never overwritten, it is not posted on your reply or counted in your delivery, and it stays when the browser's working files are cleared after a run. " +
+      "Cite the id beside the claim it supports. A claim with no kept source is read as unsupported, so keep the source or say in your result that the claim is unverified.";
     const keepLine =
       "- Sources: a fact your result states from outside (a figure, a quote, a date, what a page, a file, an API or a command said) rests on a source you opened in this run and kept. " +
-      "What a fetch or search tool answers is its summary of the page, not the page: save the page itself into the attachments folder above " +
-      `(\`curl -sSL -o "${dir}/<name>" "<url>"\`, a browser snapshot, a command's output redirected to a file there), ` +
+      `What a fetch or search tool answers is its summary of the page, not the page: save the page itself into the attachments folder above ${staged} ` +
+      `(\`curl -sSL -o "${dir}/.source-<name>" "<url>"\`, a browser snapshot copied to such a name, a command's output redirected to one), ` +
       "then call `keep_source` with that file's name, where it came from (the URL, the command, or `owner/repo@<commit>:path`) and a one-line title. " +
-      "The file then leaves the attachments folder and is kept with the task as a source (`S1`, `S2` and so on): " +
-      "it is never overwritten, it is not posted on your reply or counted in your delivery, and a browser snapshot kept this way is not removed after your run. " +
-      "Cite the id beside the claim it supports. A claim with no kept source is read as unsupported, so keep the source or say in your result that the claim is unverified.";
-    const listsFirst = " `read_task_source` lists what the task already keeps: cite one of those rather than keeping the same page again.";
+      kept;
+    // A profile whose web grant is withheld is told what it can keep, and is
+    // handed no way to the web: no page, no API, no `curl`.
+    const offlineLine =
+      "- Sources: a fact your result states from outside (a figure, a quote, a date, what a file or a command said) rests on a source you opened in this run and kept. " +
+      `Save what you read into the attachments folder above ${staged} ` +
+      `(a repository file copied at its commit, a command's output redirected to \`"${dir}/.source-<name>"\`), ` +
+      "then call `keep_source` with that file's name, where it came from (the command, or `owner/repo@<commit>:path`) and a one-line title. " +
+      'Your profile does not hold "Search & fetch from the web", so this run fetches no page and keeps none: a fact that rests on a web page has no kept source here, and your result says so. ' +
+      kept;
+    const listsFirst = (what: string) =>
+      ` \`read_task_source\` lists what the task already keeps: cite one of those rather than keeping the same ${what} again.`;
 
     for (const repo of [base.repo, null]) {
       const arm = repo ? "with a checkout" : "without one";
       const keeper = buildAnalyzePrompt({ ...base, repo, attachmentsDropDir: dir, sourceKeeper: true, taskFileReader: true });
-      expect(keeper, arm).toContain(`${keepLine}${listsFirst}\n`);
+      expect(keeper, arm).toContain(`${keepLine}${listsFirst("page")}\n`);
       // Right after the folder the source is kept from.
       expect(keeper.indexOf("- Sources:"), arm).toBeGreaterThan(keeper.indexOf("is yours to READ and to COPY files INTO"));
       expect(keeper.indexOf("- Sources:"), arm).toBeLessThan(keeper.indexOf("Your delivery is the files you save on the task"));
       // The way to see what is already kept is named only to a run that holds it.
       expect(buildAnalyzePrompt({ ...base, repo, attachmentsDropDir: dir, sourceKeeper: true }), arm).toContain(`${keepLine}\n`);
+      const offline = buildAnalyzePrompt({ ...base, repo, attachmentsDropDir: dir, sourceKeeper: true, taskFileReader: true, webWithheld: true });
+      expect(offline, arm).toContain(`${offlineLine}${listsFirst("file")}\n`);
+      expect(offline, arm).not.toContain("curl -sSL");
 
       // A run that cannot keep one is told so, and why: its profile lacks the
       // grant, or it holds the grant and the tool is not on this run (a Codex
@@ -5600,20 +5622,30 @@ describe("P19-G11 — the run records what it was given", () => {
     }
   });
 
-  it("ruling 690: a run that holds keep_source is told how to keep a source, and one that does not is told it cannot and why, on either backend", async () => {
-    // The prompt is true to the mount: a Claude run with the grant has the
-    // tool in its toolkit, a Codex run has it from the gateway's board
-    // server and only while that serves it. CANARY: never set the flag, or
-    // set it on a Codex run the gateway does not serve.
+  it("ruling 690: what a run is told about keeping a source is what it is offered: the tool where it is mounted, fresh and resumed, and a page only where it may fetch one", async () => {
+    // The prompt, the tool list and the tool's own description have to agree,
+    // on either backend, on a fresh run and on a resumed one. A Claude run
+    // with the grant has the tool in its toolkit; a Codex run has it from the
+    // gateway's board server and only while that serves it; and a profile
+    // whose web grant is withheld is handed no `curl`.
+    // CANARY: pass `keepsSources: false` to resolveBoardMcp at dispatch and
+    // the Codex run is told to call a tool its board server does not list;
+    // pass it on resume and the resumed mount carries no `sources`. Pass
+    // `webEgress: true` at either and a profile with the web withheld is
+    // offered a tool that tells it to fetch a page.
     const fm = readProjectFile({ projectSlug: store.slug, dataRoot: store.dataRoot })!.parsed.frontmatter;
-    const contract = async (backend: "claude" | "codex", mode: "direct" | "off" = "direct") => {
+    type Mode = "direct" | "off";
+    const deploy = (backend: "claude" | "codex", evidence: Mode, web: Mode) => {
       writeProject(store.dataRoot, {
         ...fm,
         repo: "acme/widgets",
         agents: [
           {
             profileId: "dev",
-            capabilities: [{ capabilityId: "attach-evidence-references", mode }],
+            capabilities: [
+              { capabilityId: "attach-evidence-references", mode: evidence },
+              { capabilityId: "use-web-search-fetch", mode: web },
+            ],
             extras: [],
             definition: {
               kind: "specialist" as const,
@@ -5627,24 +5659,127 @@ describe("P19-G11 — the run records what it was given", () => {
         ],
       });
       rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
-      await assignAndRun();
-      return lastRunSpec()!.prompt;
     };
+    const offeredSchema = z.array(z.object({ name: z.string(), description: z.string().optional() }));
+    /** What the Codex run's own board mount lists, asked while the run is live. */
+    const boardTools = async (mount: RunMcpServerDeclaration) => {
+      const board = z
+        .object({ url: z.string(), headers: z.object({ Authorization: z.string() }) })
+        .parse(mount);
+      const client = new Client({ name: "codex-cli", version: "1.0.0" });
+      await client.connect(new StreamableHTTPClientTransport(new URL(board.url), { requestInit: { headers: board.headers } }));
+      try {
+        return offeredSchema.parse((await client.listTools()).tools);
+      } finally {
+        await client.close();
+      }
+    };
+    /** The Claude toolkit's own registry, read as agent-toolkit's suite reads it. */
+    const toolkitTools = (mount: RunMcpServerDeclaration | undefined) => {
+      const registry = z
+        .object({ instance: z.object({ _registeredTools: z.record(z.string(), z.object({ description: z.string().optional() })) }) })
+        .parse(mount).instance._registeredTools;
+      return Object.entries(registry).map(([name, tool]) => ({ name, description: tool.description }));
+    };
+    /** Dispatch `dev` and read what the run was told and what it was offered. */
+    const dispatch = async (backend: "claude" | "codex", evidence: Mode = "direct", web: Mode = "direct") => {
+      deploy(backend, evidence, web);
+      queueFakeRun({ lines: [{ t: "1", ev: "text", tag: "assistant", text: "working" }], sessionId: "s", backend, keepRunning: true }, backend);
+      await assignSpecialist(store.db, { projectSlug: store.slug, taskKey: "VIB-1", profileId: "dev" }, actorOf(store.users.arda), { dataRoot: store.dataRoot });
+      const run = await startAgentRun(store.db, { projectSlug: store.slug, taskKey: "VIB-1", profileId: "dev" }, actorOf(store.users.arda), { dataRoot: store.dataRoot });
+      const spec = lastRunSpec()!;
+      const mounts = spec.mcpServers ?? {};
+      const offered =
+        backend === "claude"
+          ? mounts.viberr_agent
+            ? toolkitTools(mounts.viberr_agent)
+            : []
+          : mounts.viberr_board
+            ? await boardTools(mounts.viberr_board)
+            : null;
+      const { interruptRun } = await import("~/server/runtimes/run-service.server");
+      await interruptRun(store.db, { projectSlug: store.slug, taskKey: "VIB-1", runId: run.runId, dataRoot: store.dataRoot }, actorOf(store.users.arda));
+      return { prompt: spec.prompt, offered, keep: offered?.find((tool) => tool.name === "keep_source") ?? null };
+    };
+    /** The same profile's resumed turn. */
+    const resumed = async (backend: "claude" | "codex") =>
+      (await resolveResumeConfinement(store.db, { dataRoot: store.dataRoot }, { projectSlug: store.slug, taskKey: "VIB-1", profileId: "dev", backend, delivers: true })).mcpServers ?? {};
     const keeps = "then call `keep_source` with that file's name";
     const noTool = "this run cannot keep one (the tool that keeps one is not mounted on this run)";
-    expect(await contract("claude")).toContain(keeps);
-    const unserved = await contract("codex");
-    expect(unserved).toContain(noTool);
-    expect(unserved).not.toContain(keeps);
+    const noGrant = 'this run cannot keep one (your profile does not hold "Attach evidence references")';
+    const noWeb = 'Your profile does not hold "Search & fetch from the web"';
+    // The command the contract and the tool name to a run that may fetch.
+    const fetches = "curl -sSL -o";
+
+    // Claude: told, and the toolkit holds the tool, fresh and resumed.
+    const claude = await dispatch("claude");
+    expect(claude.prompt).toContain(keeps);
+    expect(claude.prompt).toContain(fetches);
+    expect(claude.keep?.description).toContain(fetches);
+    expect(toolkitTools((await resumed("claude")).viberr_agent).map((tool) => tool.name)).toContain("keep_source");
+
+    // Codex with no gateway: no board server, so no tool, and it is told so.
+    const unserved = await dispatch("codex");
+    expect(unserved.offered).toBeNull();
+    expect(unserved.prompt).toContain(noTool);
+    expect(unserved.prompt).not.toContain(keeps);
+
     await startMcpGateway({ port: 0 });
     try {
-      expect(await contract("codex")).toContain(keeps);
+      // Codex, served: told, and its own board mount lists the tool.
+      const served = await dispatch("codex");
+      expect(served.prompt).toContain(keeps);
+      expect(served.offered?.map((tool) => tool.name)).toEqual([
+        "read_board",
+        "read_timeline_entry",
+        "read_task_attachment",
+        "read_task_source",
+        "keep_source",
+      ]);
+      expect(served.keep?.description).toContain(fetches);
+      expect((await resumed("codex")).viberr_board).toMatchObject({
+        board: { sources: { agent: { profileId: "dev", roleHint: "developer" }, web: true } },
+      });
+
+      // Codex without the grant: told it cannot, and the mount agrees.
+      const reader = await dispatch("codex", "off");
+      expect(reader.prompt).toContain(noGrant);
+      expect(reader.prompt).not.toContain(keeps);
+      expect(reader.offered?.map((tool) => tool.name)).toEqual([
+        "read_board",
+        "read_timeline_entry",
+        "read_task_attachment",
+        "read_task_source",
+      ]);
+      const readerMount = z.object({ board: z.object({ sources: z.unknown().optional() }) }).parse((await resumed("codex")).viberr_board);
+      expect(readerMount.board.sources).toBeUndefined();
+
+      // The web grant withheld: the tool is still there, and neither the
+      // prompt nor the tool hands the run a way to fetch.
+      const offline = await dispatch("codex", "direct", "off");
+      expect(offline.prompt).toContain(keeps);
+      expect(offline.prompt).toContain(noWeb);
+      expect(offline.prompt).not.toContain(fetches);
+      expect(offline.keep?.description).toContain(noWeb);
+      expect(offline.keep?.description).not.toContain(fetches);
+      expect((await resumed("codex")).viberr_board).toMatchObject({ board: { sources: { web: false } } });
     } finally {
       await stopMcpGateway();
     }
-    const ungranted = await contract("claude", "off");
-    expect(ungranted).toContain('this run cannot keep one (your profile does not hold "Attach evidence references")');
-    expect(ungranted).not.toContain(keeps);
+
+    const offlineClaude = await dispatch("claude", "direct", "off");
+    expect(offlineClaude.prompt).toContain(noWeb);
+    expect(offlineClaude.prompt).not.toContain(fetches);
+    expect(offlineClaude.keep?.description).toContain(noWeb);
+    expect(offlineClaude.keep?.description).not.toContain(fetches);
+    const resumedOffline = toolkitTools((await resumed("claude")).viberr_agent).find((tool) => tool.name === "keep_source");
+    expect(resumedOffline?.description).toContain(noWeb);
+    expect(resumedOffline?.description).not.toContain(fetches);
+
+    const ungranted = await dispatch("claude", "off");
+    expect(ungranted.prompt).toContain(noGrant);
+    expect(ungranted.prompt).not.toContain(keeps);
+    expect(ungranted.keep).toBeNull();
   });
 
   it("ruling 596: a fresh run's anchor names the readers of the entries it leaves out, only for a run that holds them", async () => {

@@ -1,23 +1,20 @@
 import { unlinkSync } from "node:fs";
 import path from "node:path";
 import type { DatabaseSync } from "node:sqlite";
-import type { FileActorRef, TaskFileEvent } from "~/schemas/task-file.schema";
+import type { FileActorRef } from "~/schemas/task-file.schema";
 import { recordAudit } from "~/server/audit/audit-recorder.server";
 import { isAppError } from "~/server/errors/app-error.server";
 import { ERROR_CODES } from "~/server/errors/error-codes";
 import { encodeActorRef } from "~/server/files/actor-ref.server";
-import { storedNameAmong, taskAttachmentsDir } from "~/server/files/file-store-root.server";
-import {
-  attachmentClaimsInFlight,
-  readAttachmentBytes,
-  resolveTaskAttachment,
-} from "~/server/files/task-attachments.server";
+import { readAttachmentBytes, resolveTaskAttachment } from "~/server/files/task-attachments.server";
 import {
   SOURCE_FROM_MAX,
   SOURCE_MAX_BYTES,
+  SOURCE_STAGING_PREFIX,
   SOURCE_TITLE_MAX,
   readTaskSources,
   sourceFromShown,
+  stagedSourceName,
   writeTaskSource,
   type SourceKeeper,
   type TaskSource,
@@ -26,7 +23,6 @@ import { appendTimelineEvent, readTaskFile } from "~/server/files/task-writer.se
 import { logger } from "~/server/logging/logger.server";
 import { readsAsCredential } from "~/server/secrets/git-output-redact.server";
 import { toError } from "~/shared/errors";
-import { isGateLogName } from "~/shared/project-gates";
 import { reprojectTask, taskRef, type TaskMutationContext } from "./task-mutation.server";
 
 /**
@@ -34,20 +30,24 @@ import { reprojectTask, taskRef, type TaskMutationContext } from "./task-mutatio
  *
  * The run saves the bytes itself, with its own tools, as a file in the task's
  * attachments folder: the one task folder a run writes, and the one the
- * server reads without following a link (ruling 552). It then names that
- * file here. The server takes its own copy into the task's sources
- * (`files/task-sources.server.ts`), where no run can change it, and removes
- * the file from the attachments folder, so a source is never posted on the
- * run's reply, never counted in a delivery, and never left for the working
- * file prune to judge (rulings 549 and 570). The server fetches nothing and
- * runs nothing: it keeps what it was handed, and the record says where the
- * agent stated it came from.
+ * server reads without following a link (ruling 552). It saves them under a
+ * name that starts with `.source-` and then names that file here. The server
+ * takes its own copy into the task's sources (`files/task-sources.server.ts`),
+ * where no run can change it, and removes the staged file. The server fetches
+ * nothing and runs nothing: it keeps what it was handed, and the record says
+ * where the agent stated it came from.
  *
- * A keep moves a file out of a folder that also holds what people attached
- * and what earlier runs posted, so everything already claimed there is
- * refused: a name an entry on the timeline lists, a name a writer is putting
- * down right now (ruling 558) and a gate's log (ruling 482). What is left is
- * a file this run just saved.
+ * The staged name is what keeps a source out of the task's files. That folder
+ * also holds what people attached and what runs posted and delivered, and a
+ * completing run takes every file saved in its window as its own (rulings 593
+ * and 627), a deliverer as its delivery (ruling 610). A page a researcher had
+ * saved under an ordinary name and not yet kept was a deliverer's file the
+ * moment the deliverer finished beside it: delivered, copied into the kept
+ * delivery, and then refused as a source for being somebody's file. No lister
+ * of the folder returns a dot-name, so a staged file is nobody's file at any
+ * instant, and the keep takes nothing else: a file under any other name
+ * belongs to the task (a person's upload, a relay, a delivery, a gate's log,
+ * a name a writer holds in flight under ruling 558) and stays there.
  */
 
 /** A source's bytes are read for a credential only this far in. */
@@ -58,7 +58,7 @@ const TEXT_SNIFF_BYTES = 8_000;
 export interface KeepSourceInput {
   projectSlug: string;
   taskKey: string;
-  /** The file's name in the task's attachments folder. */
+  /** The staged file's name in the task's attachments folder. */
   file: string;
   /** Where the bytes came from, as the agent states it. */
   from: string;
@@ -68,37 +68,40 @@ export interface KeepSourceInput {
   runId: string | null;
 }
 
+/** What breaks a line or hides in one: a control character (a line feed, a
+ *  tab, an escape) and Unicode's own line and paragraph separators. A title,
+ *  an origin and a name are printed into the list every reader of the task's
+ *  sources is answered, one field a line. */
+const NOT_ONE_LINE_RE = /[\p{Cc}\p{Zl}\p{Zp}]/u;
+
 /** One line of at most `max` characters, or null. */
 function oneLine(value: string, max: number): string | null {
   const text = value.trim();
-  return text.length === 0 || text.length > max || /[\r\n]/.test(text) ? null : text;
-}
-
-/** Who wrote a timeline entry, as a refusal names them. */
-function entryAuthor(actor: TaskFileEvent["actor"]): string {
-  switch (actor.kind) {
-    case "agent":
-      return `agent:${actor.profileId}`;
-    case "human":
-      return actor.nameHint ?? "a person";
-    case "operator":
-      return "the operator";
-    default:
-      return "Viberr";
-  }
+  return text.length === 0 || text.length > max || NOT_ONE_LINE_RE.test(text) ? null : text;
 }
 
 const refused = (sentence: string): string => `[refused] ${sentence}`;
 
+/** Take a staged file out of the attachments folder; false when it stays. */
+function removeStaged(abs: string, what: string, at: { projectSlug: string; taskKey: string; file: string }): boolean {
+  try {
+    unlinkSync(abs);
+    return true;
+  } catch (error) {
+    logger.warn(what, { ...at, err: toError(error) });
+    return false;
+  }
+}
+
 /**
- * Keep the file `file` of the task's attachments folder as a source, and
- * answer the sentence the agent reads: `[kept]` with the new id, `[noop]`
+ * Keep the staged file `file` of the task's attachments folder as a source,
+ * and answer the sentence the agent reads: `[kept]` with the new id, `[noop]`
  * when the task already keeps those bytes, or `[refused]` with what to do
- * instead. A refusal writes nothing and leaves the file where it is.
+ * instead. A refusal writes nothing and leaves the staged file where it is,
+ * with one exception: a file that reads as holding a credential is removed.
  *
- * Synchronous from the first check to the move: nothing else in this process
- * can list or claim the file in between. An unexpected failure throws, and
- * the tool that called answers it.
+ * Synchronous from the first check to the move. An unexpected failure throws,
+ * and the tool that called answers it.
  */
 export function keepTaskSource(db: DatabaseSync, ctx: TaskMutationContext, input: KeepSourceInput): string {
   const { projectSlug, taskKey, actorRef } = input;
@@ -111,11 +114,15 @@ export function keepTaskSource(db: DatabaseSync, ctx: TaskMutationContext, input
 
   const title = oneLine(input.title, SOURCE_TITLE_MAX);
   if (title === null) {
-    return refused(`Give \`title\` as one line of at most ${SOURCE_TITLE_MAX.toLocaleString("en-US")} characters.`);
+    return refused(
+      `Give \`title\` as one line of at most ${SOURCE_TITLE_MAX.toLocaleString("en-US")} characters, with no line break or control character in it.`,
+    );
   }
   const from = oneLine(input.from, SOURCE_FROM_MAX);
   if (from === null) {
-    return refused(`Give \`from\` as one line of at most ${SOURCE_FROM_MAX.toLocaleString("en-US")} characters.`);
+    return refused(
+      `Give \`from\` as one line of at most ${SOURCE_FROM_MAX.toLocaleString("en-US")} characters, with no line break or control character in it.`,
+    );
   }
   if (readsAsCredential(from)) {
     return refused("`from` holds what reads as a token or a password. Give the URL or the command without it.");
@@ -125,42 +132,43 @@ export function keepTaskSource(db: DatabaseSync, ctx: TaskMutationContext, input
   }
 
   const wanted = input.file.trim();
-  const notOneName = refused(
-    `\`${wanted.replaceAll("\0", "")}\` is not one file name in the task's attachments folder. Give the file's name alone, with no folder.`,
-  );
-  if (!wanted || wanted.startsWith(".") || /[\\/\0]/.test(wanted)) return notOneName;
+  // What the reply echoes of the name: never the characters that would break its line.
+  const shown = wanted.replace(new RegExp(NOT_ONE_LINE_RE.source, "gu"), "");
+  if (!wanted || /[\\/\0]/.test(wanted)) {
+    return refused(
+      `\`${shown}\` is not one file name in the task's attachments folder. Give the file's name alone, with no folder.`,
+    );
+  }
+  if (NOT_ONE_LINE_RE.test(wanted)) {
+    return refused(
+      `\`${shown}\` holds a line break or a control character. Save the file under a plain name on one line and keep that.`,
+    );
+  }
+  if (stagedSourceName(wanted) === null) {
+    return refused(
+      `\`${wanted}\` is not a staged source. keep_source takes only a file saved in the task's attachments folder under a name that starts with ` +
+        `\`${SOURCE_STAGING_PREFIX}\`, which nothing lists, posts or delivers; a file under any other name belongs to the task and stays there. ` +
+        `Save the page or the output there as \`${SOURCE_STAGING_PREFIX}<name>\` (copy a browser snapshot to such a name), then call keep_source with that name.`,
+    );
+  }
   let abs: string;
   try {
     abs = resolveTaskAttachment(projectSlug, taskKey, wanted, ctx.dataRoot);
   } catch {
-    return notOneName;
+    return refused(
+      `\`${wanted}\` is not one file name in the task's attachments folder. Give the file's name alone, with no folder.`,
+    );
   }
   // Ruling 675: the folder's own entry, whichever Unicode form was typed.
   const stored = path.basename(abs);
-
-  // Everything already claimed in the folder is somebody's file, not a
-  // source this run just saved.
-  const claim = task.parsed.timeline.find((e) => storedNameAmong(e.attachments ?? [], stored) !== null);
-  const held = storedNameAmong([...attachmentClaimsInFlight(projectSlug, taskKey)], stored) !== null;
-  if (claim || held || isGateLogName(stored)) {
-    const whose = claim
-      ? `posted ${claim.occurredAt} by ${entryAuthor(claim.actor)}`
-      : held
-        ? "being posted right now by someone else"
-        : "the log of one of this project's gates";
-    return refused(
-      `\`${stored}\` is already a file on this task, ${whose}: a source is kept from a file your run just saved. ` +
-        `Save the page or the output under a new name and keep that.`,
-    );
-  }
+  const name = stagedSourceName(stored) ?? stored;
+  const staged = { projectSlug, taskKey, file: stored };
 
   // Ruling 552: never through a link.
   const read = readAttachmentBytes(abs, SOURCE_MAX_BYTES);
   if (!read) {
-    const dir = taskAttachmentsDir(projectSlug, taskKey, ctx.dataRoot);
     return refused(
-      `The task's attachments folder holds no \`${wanted}\`. Save the page or the output there first ` +
-        `(\`curl -sSL -o "${dir}/${wanted}" "<url>"\`, or redirect the command's output), then call keep_source with that name.`,
+      `The task's attachments folder holds no \`${wanted}\`. Save the page or the output there under that name first, then call keep_source again.`,
     );
   }
   if ("tooLarge" in read) {
@@ -176,15 +184,22 @@ export function keepTaskSource(db: DatabaseSync, ctx: TaskMutationContext, input
     );
   }
   // A command's output can print this instance's own credentials; a public
-  // page cannot, and its markup is full of words a token's prefix matches.
+  // page cannot. The file is the run's own and the server has just judged it
+  // unsafe to show, so it does not stay in a folder every agent on the task
+  // reads either.
   if (
     !/^https?:\/\//i.test(from) &&
     !data.subarray(0, TEXT_SNIFF_BYTES).includes(0) &&
     readsAsCredential(data.subarray(0, CREDENTIAL_SCAN_BYTES).toString("utf8"))
   ) {
+    const gone = removeStaged(abs, "a staged source that reads as holding a credential could not be removed", staged);
     return refused(
-      `\`${stored}\` holds what reads as an access token. A source is kept as it is and every project member can open it: ` +
-        `run the command again without printing the credential, save that output and keep it.`,
+      `\`${stored}\` holds what reads as an access token, so it is not kept` +
+        (gone
+          ? " and it was removed from the attachments folder. "
+          : ". It could not be removed from the attachments folder: delete it there yourself. ") +
+        `A source is kept as it is and every project member can open it: run the command again without printing the credential, ` +
+        `save that output and keep it. If this is a page you fetched and not a command's output, fetch it again and give its URL as \`from\`.`,
     );
   }
 
@@ -194,7 +209,7 @@ export function keepTaskSource(db: DatabaseSync, ctx: TaskMutationContext, input
       projectSlug,
       taskKey,
       {
-        name: stored,
+        name,
         data,
         title,
         from,
@@ -208,30 +223,24 @@ export function keepTaskSource(db: DatabaseSync, ctx: TaskMutationContext, input
     if (isAppError(error) && error.code === ERROR_CODES.VALIDATION_FAILED) return refused(error.userMessage);
     throw error;
   }
-
-  // The move: the file leaves the attachments folder, so no completion posts
-  // it on a reply or counts it in a delivery. A file that will not go stays
-  // an ordinary file of the run, and the source is kept all the same.
-  let left = true;
-  try {
-    unlinkSync(abs);
-  } catch (error) {
-    left = false;
-    logger.warn("a kept source's file could not be taken out of the attachments folder", {
-      projectSlug,
-      taskKey,
-      file: stored,
-      err: toError(error),
-    });
+  if ("removed" in written) {
+    const source = written.removed;
+    return refused(
+      `These bytes were kept as ${source.id} and that source has since been removed from the store, so they are not kept again. ` +
+        `Say in your result that the source for this claim was removed.`,
+    );
   }
+
+  // The staged file has done its work. One that will not go stays hidden
+  // where it is, posted nowhere, and the answer says so.
+  const gone = removeStaged(abs, "a kept source's staged file could not be removed from the attachments folder", staged);
+  const stuck = `The staged file \`${stored}\` could not be removed from the attachments folder; nothing posts it, and you may delete it.`;
 
   if ("already" in written) {
     const source = written.already;
     return (
-      `[noop] These bytes are already kept as ${source.id} ("${source.title}"). ` +
-      (left
-        ? `The file was taken out of the attachments folder; cite ${source.id}.`
-        : `The file could not be taken out of the attachments folder, so it is still a file of your run there; cite ${source.id}.`)
+      `[noop] These bytes are already kept as ${source.id} ("${source.title}"): cite ${source.id}. ` +
+      (gone ? "The staged file was removed from the attachments folder." : stuck)
     );
   }
   const source = written.kept;
@@ -254,9 +263,9 @@ export function keepTaskSource(db: DatabaseSync, ctx: TaskMutationContext, input
   });
   return (
     `[kept] ${source.id}: ${source.name}, ${source.bytes.toLocaleString("en-US")} bytes, sha256 ${source.sha256.slice(0, 12)}. ` +
-    (left
-      ? "It left the attachments folder: it is a source now, not a file of the result. "
-      : "It could not be taken out of the attachments folder, so it is also still a file of your run there. ") +
+    (gone
+      ? "The staged file left the attachments folder: it is a source now, not a file of the result. "
+      : `It is a source now, not a file of the result. ${stuck} `) +
     `Cite ${source.id} beside the claim it supports.`
   );
 }

@@ -2,6 +2,7 @@ import type { DatabaseSync } from "node:sqlite";
 import type { CallToolResult, Tool } from "@modelcontextprotocol/sdk/types.js";
 import { z } from "zod";
 import type { FileActorRef } from "~/schemas/task-file.schema";
+import { SOURCE_STAGING_PREFIX } from "~/server/files/task-sources.server";
 import { logger } from "~/server/logging/logger.server";
 import { toError } from "~/shared/errors";
 import { READ_PAGE_BYTES } from "~/server/runtimes/read-page-budget.server";
@@ -29,12 +30,16 @@ export const BOARD_MCP_NAME = "viberr_board";
 /** What a run's board mount carries to the gateway: the store the task files
  *  are in. The project and task are the run's own, which the gateway holds.
  *  Ruling 690: `sources` is set for a run that may save files on its task,
- *  with the agent a source is kept as; the board server then offers
- *  `keep_source` too. */
+ *  with the agent a source is kept as and whether the run may fetch from the
+ *  web (`use-web-search-fetch`); the board server then offers `keep_source`
+ *  too, described for what the run can reach. */
 export const boardMountSchema = z.object({
   dataRoot: z.string().optional(),
   sources: z
-    .object({ agent: z.object({ profileId: z.string(), roleHint: z.string().nullable() }) })
+    .object({
+      agent: z.object({ profileId: z.string(), roleHint: z.string().nullable() }),
+      web: z.boolean(),
+    })
     .optional(),
 });
 export type BoardMount = z.infer<typeof boardMountSchema>;
@@ -143,42 +148,80 @@ export const TASK_SOURCE_TOOL: Tool = {
   annotations: { title: "Read the sources a task keeps", ...READ_ONLY },
 };
 
+/** The tool's name, on either backend. */
+export const KEEP_SOURCE_NAME = "keep_source";
+
 /**
  * Ruling 690: what `keep_source` says it does, on either backend. A run that
  * may save files on its task holds it: on Claude in its toolkit, on Codex
  * from this board server. The run saves the bytes; Viberr keeps them.
+ *
+ * `web` is the run's `use-web-search-fetch` grant. A profile that grant is
+ * withheld from has no web tool and no browser, and the description does not
+ * hand it another way to the web: it names what such a run can reach (a file
+ * of the repository, a command's output) and says a page is not its to keep.
  */
-export const KEEP_SOURCE_DESCRIPTION =
-  "Keep ONE source this task's result rests on: a web page as you fetched it, a file from a repository at a commit, an API answer, the output of a command you ran. First save the bytes as a file in the task's attachments folder (`curl -sSL -o`, a browser snapshot, a redirected command output); then call this with that file's name, where it came from and a one-line title. Viberr fetches nothing itself: it keeps the file you saved. The file leaves the attachments folder and is kept as a source with an id (S1, S2 and so on), the time, your run and a SHA-256 of its bytes. It is never overwritten, it is not part of the delivery, and people open it under Sources on the task page. What a fetch or search tool answered is a summary, not the page: keep the page. Cite the id beside the claim it supports.";
+export function keepSourceDescription(web: boolean): string {
+  const staged = `under a name that starts with \`${SOURCE_STAGING_PREFIX}\``;
+  const kept =
+    "a file so named is listed, posted and delivered nowhere. Then call this with that file's name, where it came from and a one-line title. " +
+    "Viberr fetches nothing itself: it keeps the file you saved. The staged file leaves the attachments folder and is kept as a source with an id (S1, S2 and so on), the time, your run and a SHA-256 of its bytes. " +
+    "It is never overwritten, it is not part of the delivery, and people open it under Sources on the task page. ";
+  return web
+    ? "Keep ONE source this task's result rests on: a web page as you fetched it, a file from a repository at a commit, an API answer, the output of a command you ran. " +
+        `First save the bytes as a file in the task's attachments folder ${staged} (\`curl -sSL -o\`, a browser snapshot copied to such a name, a redirected command output); ` +
+        kept +
+        "What a fetch or search tool answered is a summary, not the page: keep the page. Cite the id beside the claim it supports."
+    : "Keep ONE source this task's result rests on: a file from a repository at a commit, the output of a command you ran. " +
+        `First save the bytes as a file in the task's attachments folder ${staged} (a copied file, a redirected command output); ` +
+        kept +
+        'Your profile does not hold "Search & fetch from the web", so this run fetches no page and keeps none. Cite the id beside the claim it supports.';
+}
 
-export const KEEP_SOURCE_FIELDS = {
-  file: "The file's name in the task's attachments folder, exactly as you saved it: one name, no folder.",
-  from: "Where the bytes came from, on one line: the URL you fetched, the command you ran, or `owner/repo@<commit>:path` for a repository file. Leave any token or password out of it.",
-  title: "One line saying what this source is, as a reader would name it.",
-} as const;
+/** What each of `keep_source`'s fields says it takes. */
+interface KeepSourceFields {
+  file: string;
+  from: string;
+  title: string;
+}
 
-export const KEEP_SOURCE_TOOL: Tool = {
-  name: "keep_source",
-  title: "Keep a source on the task",
-  description: KEEP_SOURCE_DESCRIPTION,
-  inputSchema: {
-    type: "object",
-    properties: {
-      file: { type: "string", description: KEEP_SOURCE_FIELDS.file },
-      from: { type: "string", description: KEEP_SOURCE_FIELDS.from },
-      title: { type: "string", description: KEEP_SOURCE_FIELDS.title },
-    },
-    required: ["file", "from", "title"],
-    additionalProperties: false,
-  },
-  annotations: {
+/** `keep_source`'s fields, for the same two readings of `web`. */
+export function keepSourceFields(web: boolean): KeepSourceFields {
+  return {
+    file: `The staged file's name in the task's attachments folder, exactly as you saved it, \`${SOURCE_STAGING_PREFIX}\` included: one name, no folder.`,
+    from: web
+      ? "Where the bytes came from, on one line: the URL you fetched, the command you ran, or `owner/repo@<commit>:path` for a repository file. Leave any token or password out of it."
+      : "Where the bytes came from, on one line: the command you ran, or `owner/repo@<commit>:path` for a repository file. Leave any token or password out of it.",
+    title: "One line saying what this source is, as a reader would name it.",
+  };
+}
+
+/** The tool as the board server lists it for a run that may keep a source. */
+export function keepSourceTool(web: boolean): Tool {
+  const fields = keepSourceFields(web);
+  return {
+    name: KEEP_SOURCE_NAME,
     title: "Keep a source on the task",
-    readOnlyHint: false,
-    destructiveHint: false,
-    idempotentHint: false,
-    openWorldHint: false,
-  },
-};
+    description: keepSourceDescription(web),
+    inputSchema: {
+      type: "object",
+      properties: {
+        file: { type: "string", description: fields.file },
+        from: { type: "string", description: fields.from },
+        title: { type: "string", description: fields.title },
+      },
+      required: ["file", "from", "title"],
+      additionalProperties: false,
+    },
+    annotations: {
+      title: "Keep a source on the task",
+      readOnlyHint: false,
+      destructiveHint: false,
+      idempotentHint: false,
+      openWorldHint: false,
+    },
+  };
+}
 
 /** The readers, in the order the gateway lists them. Ruling 690 adds
  *  `read_task_source`; `keep_source` follows them for a run that holds it. */

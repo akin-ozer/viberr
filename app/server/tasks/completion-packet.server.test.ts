@@ -536,7 +536,7 @@ describe("ruling 690: what the work under review rests on", () => {
     );
   }
 
-  it("counts a task's sources for the operator and, for the page, the ones its delivery recorded or the ones kept by then, and never one kept afterwards", async () => {
+  it("counts a task's sources for the operator and, for the page, the ones its delivery recorded or the ones kept by the time it was delivered, and never one kept afterwards", async () => {
     // A source a reviewer keeps while checking the work is on the task and
     // was not under what it checks. CANARY: count every kept source as rested
     // on and the snapshot says a result stood on a page nobody had read yet.
@@ -569,14 +569,35 @@ describe("ruling 690: what the work under review rests on", () => {
     expect(rested()).toEqual(["S1", "S2"]);
     expect(fact()).toEqual({ kept: 3, restedOn: 2 });
 
-    // A revision nobody has summarized rests on everything kept so far; once
-    // the operator has, on what was kept by then.
-    seed();
-    expect(rested()).toEqual(["S1", "S2", "S3"]);
-    vi.setSystemTime(new Date("2026-10-07T14:30:00.000Z"));
+    // A revision rests on what was kept by the instant it was minted, before
+    // the operator has summarized it and after: the packet is written once
+    // the reviews are in, and a page a reviewer fetched to check a claim is
+    // not what the developer's work stood on. CANARY: anchor a revision on
+    // the packet's time, or on nothing while there is no packet, and the
+    // card reads "This result rests on 3 kept sources" for a result whose
+    // developer kept two.
+    const revision = (createdAt: string) =>
+      seed({
+        workRevision: {
+          id: "rev_1",
+          headSha: SHA,
+          treeSha: "t".repeat(40),
+          branch: "vib-1-work",
+          createdAt,
+          sourceProfileId: "developer",
+        },
+      });
+    revision("2026-10-07T14:30:00.000Z");
+    expect(rested()).toEqual(["S1", "S2"]);
+    expect(fact()).toEqual({ kept: 3, restedOn: 2 });
+    // The operator's packet, written after the reviewer kept S3 at 14:59.
+    vi.setSystemTime(new Date("2026-10-07T16:00:00.000Z"));
     expect((await write({})).outcome).toBe("done");
     expect(rested()).toEqual(["S1", "S2"]);
     expect(fact()).toEqual({ kept: 3, restedOn: 2 });
+    // A rework mints a new revision, and what was kept by then is under it.
+    revision("2026-10-07T17:00:00.000Z");
+    expect(rested()).toEqual(["S1", "S2", "S3"]);
   });
 
   it("the page's card carries the count and the first twelve, says zero for a files result, and nothing for a revision that rests on none or a viewer who may not see", () => {

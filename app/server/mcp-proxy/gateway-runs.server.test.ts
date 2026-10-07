@@ -52,6 +52,7 @@ const SECRET = "cf-api-token-sentinel-runs";
  *  and may not save a file on its task. */
 const READS_ONLY = {
   keepsSources: false,
+  webEgress: true,
   agent: { profileId: "workflow-researcher", roleHint: "Workflow Researcher" },
 };
 let ctx: TestDbContext;
@@ -544,7 +545,7 @@ describe("ruling 690: a Codex run keeps and reads a task's sources through the b
     // tools/list has no keep_source for the granted run.
     const agent = { profileId: "cost-researcher", roleHint: "Cost Researcher" };
     const startCodexRun = async (taskKey: string, keepsSources: boolean) => {
-      const mount = resolveBoardMcp({ backend: "codex", collaborates: true, keepsSources, agent, dataRoot: store.dataRoot });
+      const mount = resolveBoardMcp({ backend: "codex", collaborates: true, keepsSources, webEgress: true, agent, dataRoot: store.dataRoot });
       queueFakeRun({ lines: [{ t: "1", ev: "text", tag: "assistant", text: "pricing" }], sessionId: "s", backend: "codex", keepRunning: true }, "codex");
       const { runId } = await startRun(store.db, {
         projectSlug: store.slug,
@@ -577,14 +578,14 @@ describe("ruling 690: a Codex run keeps and reads a task's sources through the b
       "read_task_source",
       "keep_source",
     ]);
-    // The run saved the page with its own shell; the server keeps it.
+    // The run staged the page with its own shell; the server keeps it.
     const dir = taskAttachmentsDir(store.slug, "VIB-1", store.dataRoot);
     mkdirSync(dir, { recursive: true });
-    writeFileSync(path.join(dir, "aws-pricing.html"), "<html>t3.medium $0.0416 per hour</html>");
+    writeFileSync(path.join(dir, ".source-aws-pricing.html"), "<html>t3.medium $0.0416 per hour</html>");
     const kept = await keeper.client.callTool({
       name: "keep_source",
       arguments: {
-        file: "aws-pricing.html",
+        file: ".source-aws-pricing.html",
         from: "https://aws.amazon.com/ec2/pricing/on-demand/",
         title: "AWS EC2 on-demand pricing",
       },
@@ -603,7 +604,7 @@ describe("ruling 690: a Codex run keeps and reads a task's sources through the b
     // An argument the tool does not declare is refused, as on Claude.
     const undeclared = await keeper.client.callTool({
       name: "keep_source",
-      arguments: { file: "aws-pricing.html", from: "x", title: "y", text: "the page said so" },
+      arguments: { file: ".source-aws-pricing.html", from: "x", title: "y", text: "the page said so" },
     });
     expect(undeclared.isError).toBe(true);
     expect(textOf(undeclared)).toBe("keep_source takes `file`, `from` and `title` as text, and nothing else. Nothing was kept.");
@@ -615,10 +616,10 @@ describe("ruling 690: a Codex run keeps and reads a task's sources through the b
     // and is offered no way to keep one.
     const reader = await startCodexRun("VIB-2", false);
     expect((await reader.client.listTools()).tools.map((tool) => tool.name)).not.toContain("keep_source");
-    writeFileSync(path.join(dir, "second.html"), "<html>db.t3.medium</html>");
+    writeFileSync(path.join(dir, ".source-second.html"), "<html>db.t3.medium</html>");
     const refused = await reader.client.callTool({
       name: "keep_source",
-      arguments: { file: "second.html", from: "https://aws.amazon.com/rds/pricing/", title: "RDS pricing" },
+      arguments: { file: ".source-second.html", from: "https://aws.amazon.com/rds/pricing/", title: "RDS pricing" },
     });
     expect(refused.isError).toBe(true);
     expect(textOf(refused)).toContain('"viberr_board" has no tool "keep_source"');

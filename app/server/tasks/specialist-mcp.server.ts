@@ -471,12 +471,14 @@ export function resolveKnowledgeMcp(input: {
  * Ruling 690: a run that may save files on its task (`keepsSources`, the
  * `attach-evidence-references` grant) also keeps sources there, so its mount
  * carries the agent a source is kept as and the board server offers
- * `keep_source`.
+ * `keep_source`. `webEgress` is the run's `use-web-search-fetch` grant: the
+ * tool a run is offered names fetching a page only to a run that may.
  */
 export function resolveBoardMcp(input: {
   backend: string | undefined;
   collaborates: boolean;
   keepsSources: boolean;
+  webEgress: boolean;
   agent: { profileId: string; roleHint: string | null };
   dataRoot?: string | undefined;
 }): HttpMcpServerConfig | null {
@@ -485,7 +487,7 @@ export function resolveBoardMcp(input: {
   if (!url) return null;
   const board: BoardMount = {};
   if (input.dataRoot) board.dataRoot = input.dataRoot;
-  if (input.keepsSources) board.sources = { agent: input.agent };
+  if (input.keepsSources) board.sources = { agent: input.agent, web: input.webEgress };
   return { type: "http", url, board };
 }
 

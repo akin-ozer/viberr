@@ -23,6 +23,7 @@ import { withheldAgentGrants } from "~/features/agents/capability-catalog";
 import { type AuditActor, OPERATOR_AUDIT_ACTOR } from "~/server/audit/audit-recorder.server";
 import { AppError } from "~/server/errors/app-error.server";
 import { readProjectFile } from "~/server/files/project-writer.server";
+import { SOURCE_STAGING_PREFIX } from "~/server/files/task-sources.server";
 import { readTaskFile } from "~/server/files/task-writer.server";
 import { mountGrantedSkills } from "~/server/runtimes/skill-mount.server";
 import { logger } from "~/server/logging/logger.server";
@@ -304,20 +305,35 @@ export const ATTACHMENTS_READ_SENTENCE =
  * changes, and a reviewer was left to check the claim against today's page.
  * The contract carries the whole move, because the keep takes a file from
  * the attachments folder the line above it hands the run: save the bytes
- * there, call the tool, cite the id. `dir` is that folder; `reader` adds the
- * way to see what the task already keeps.
+ * there under a staged name, call the tool, cite the id. `dir` is that
+ * folder; `reader` adds the way to see what the task already keeps.
+ *
+ * `web` is the run's `use-web-search-fetch` grant. Withholding it takes the
+ * web tools and the browser from a profile, and this line used to hand such a
+ * run `curl` in its first message all the same. A run without the grant is
+ * told what it can keep (a file of the repository, a command's output) and
+ * that a page is not among them.
  */
-export function sourcesKeepLine(dir: string, reader: boolean): string {
+export function sourcesKeepLine(dir: string, reader: boolean, web: boolean): string {
+  const staged = `under a name that starts with \`${SOURCE_STAGING_PREFIX}\``;
+  const how = web
+    ? `- Sources: a fact your result states from outside (a figure, a quote, a date, what a page, a file, an API or a command said) rests on a source you opened in this run and kept. ` +
+      `What a fetch or search tool answers is its summary of the page, not the page: save the page itself into the attachments folder above ${staged} ` +
+      `(\`curl -sSL -o "${dir}/${SOURCE_STAGING_PREFIX}<name>" "<url>"\`, a browser snapshot copied to such a name, a command's output redirected to one), ` +
+      `then call \`keep_source\` with that file's name, where it came from (the URL, the command, or \`owner/repo@<commit>:path\`) and a one-line title. `
+    : `- Sources: a fact your result states from outside (a figure, a quote, a date, what a file or a command said) rests on a source you opened in this run and kept. ` +
+      `Save what you read into the attachments folder above ${staged} ` +
+      `(a repository file copied at its commit, a command's output redirected to \`"${dir}/${SOURCE_STAGING_PREFIX}<name>"\`), ` +
+      `then call \`keep_source\` with that file's name, where it came from (the command, or \`owner/repo@<commit>:path\`) and a one-line title. ` +
+      `Your profile does not hold "Search & fetch from the web", so this run fetches no page and keeps none: a fact that rests on a web page has no kept source here, and your result says so. `;
   return (
-    `- Sources: a fact your result states from outside (a figure, a quote, a date, what a page, a file, an API or a command said) rests on a source you opened in this run and kept. ` +
-    `What a fetch or search tool answers is its summary of the page, not the page: save the page itself into the attachments folder above ` +
-    `(\`curl -sSL -o "${dir}/<name>" "<url>"\`, a browser snapshot, a command's output redirected to a file there), ` +
-    `then call \`keep_source\` with that file's name, where it came from (the URL, the command, or \`owner/repo@<commit>:path\`) and a one-line title. ` +
-    `The file then leaves the attachments folder and is kept with the task as a source (\`S1\`, \`S2\` and so on): ` +
-    `it is never overwritten, it is not posted on your reply or counted in your delivery, and a browser snapshot kept this way is not removed after your run. ` +
+    how +
+    `A file so named is listed, posted and delivered nowhere while it waits, so save it under that name from the start. ` +
+    `The keep takes it out of the attachments folder and holds it with the task as a source (\`S1\`, \`S2\` and so on): ` +
+    `it is never overwritten, it is not posted on your reply or counted in your delivery, and it stays when the browser's working files are cleared after a run. ` +
     `Cite the id beside the claim it supports. A claim with no kept source is read as unsupported, so keep the source or say in your result that the claim is unverified.` +
     (reader
-      ? ` \`read_task_source\` lists what the task already keeps: cite one of those rather than keeping the same page again.`
+      ? ` \`read_task_source\` lists what the task already keeps: cite one of those rather than keeping the same ${web ? "page" : "file"} again.`
       : ``) +
     `\n`
   );

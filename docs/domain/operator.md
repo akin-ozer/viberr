@@ -632,7 +632,10 @@ Details that matter:
   `screenshotCandidates`, the newest 20 image attachments, `resultFilesRequired` and
   `resultFileCandidates`, the delivered files a packet may name as the result (ruling
   668), `sources` (ruling 690: `kept`, how many sources the task keeps, and `restedOn`,
-  how many of them the delivery under review rests on, which `read_task_source` lists),
+  how many of them the delivery under review rests on: the ones a files delivery
+  recorded, or for a revision the ones kept by the time it was minted, so a source a
+  reviewer kept while checking the work is in `kept` and not in `restedOn`;
+  `read_task_source` lists them),
   and a `note` saying what to do). The packet carries no figure of what the task
   took: Viberr prints the runs, agent time, cost, questions and send-backs beside it
   from the record (ruling 693), as it prints the verdicts and the change.

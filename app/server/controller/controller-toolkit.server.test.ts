@@ -398,6 +398,55 @@ describe("list_decisions briefs the person and decides nothing (ruling 251)", ()
     }
   });
 
+  it("ruling 690: read_task_source lists and opens a task's kept sources for a member, and tells a non-member the project is not visible", async () => {
+    // The controller is who a person asks where a figure came from, and it
+    // answers under that person's membership. CANARY: drop `requireVisible`
+    // from the tool and a signed-in person who is no member of the project
+    // reads the titles, origins and bytes of what its agents kept; drop
+    // `args.id` on the way to the reader and an id is answered with the list.
+    const { taskSourcesDir, writeTaskSource } = await import("~/server/files/task-sources.server");
+    try {
+      writeTaskSource(
+        SLUG,
+        "VIB-148",
+        {
+          name: "ec2-pricing.html",
+          data: Buffer.from("<html>t3.medium $0.0416 per hour</html>"),
+          title: "AWS EC2 on-demand pricing",
+          from: "https://aws.amazon.com/ec2/pricing/on-demand/",
+          by: { backend: "claude", profileId: "developer", roleHint: "Implementation" },
+          runId: "run_build",
+        },
+        app.dataRoot,
+      );
+      const list = z
+        .object({ task: z.string(), kept: z.number(), text: z.string() })
+        .parse(JSON.parse(await call(ids.viewer, "read_task_source", { taskKey: "VIB-148" })));
+      expect(list).toMatchObject({ task: "VIB-148", kept: 1 });
+      expect(list.text).toContain("S1 · ec2-pricing.html · 39 bytes");
+      expect(list.text).toContain("from: https://aws.amazon.com/ec2/pricing/on-demand/");
+      const one = z
+        .object({ id: z.string(), title: z.string(), text: z.string() })
+        .parse(JSON.parse(await call(ids.viewer, "read_task_source", { taskKey: "VIB-148", id: "S1" })));
+      expect(one).toEqual({
+        id: "S1",
+        title: "AWS EC2 on-demand pricing",
+        text: "<html>t3.medium $0.0416 per hour</html>",
+      });
+
+      // R15-4: the same sentence an unknown slug gets, before the task is read.
+      const asks: Record<string, JsonValue>[] = [{ taskKey: "VIB-148" }, { taskKey: "VIB-148", id: "S1" }];
+      for (const args of asks) {
+        const denied = await call(ids.nonMember, "read_task_source", args);
+        expect(denied).toContain(`No project "${SLUG}" is visible to you`);
+        expect(denied).not.toContain("ec2-pricing");
+        expect(denied).not.toContain("t3.medium");
+      }
+    } finally {
+      rmSync(taskSourcesDir(SLUG, "VIB-148", app.dataRoot), { recursive: true, force: true });
+    }
+  });
+
   /**
    * Ruling 300 (pass 37, F37-135). The controller read three cards and worked
    * out by hand, across two turns, that five tasks sat behind them: "the one
