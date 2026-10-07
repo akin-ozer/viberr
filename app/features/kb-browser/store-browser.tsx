@@ -772,10 +772,12 @@ type DocSaveFields = {
  * It owns its OWN fetchers, separate from the file-op ones, so a read or a
  * rejected save never rides the generic store toast — the editor stays open and
  * says what went wrong.
+ *
+ * `onSaved` gets the toast and the folder the save was posted to.
  */
 function useDocEditor(
   resource: StoreBrowserResource,
-  onSaved: (path: string) => void,
+  onSaved: (toast: string, dir: string[]) => void,
 ) {
   const csrf = useCsrfToken();
   const readFetcher = useFetcher<StoreActionReply>();
@@ -783,6 +785,9 @@ function useDocEditor(
   const [doc, setDoc] = useState<DocDraft | null>(null);
   /** A save the user has confirmed will replace an existing file (UI-59). */
   const [confirmReplace, setConfirmReplace] = useState(false);
+  /** The folder the last save was posted to. Kept apart from `doc`, which an
+   *  Escape or another opened row can clear or replace before the answer. */
+  const savedDir = useRef<string[]>([]);
 
   const loading = readFetcher.state !== "idle";
   const saving = saveFetcher.state !== "idle";
@@ -808,7 +813,7 @@ function useDocEditor(
     if (d.ok) {
       setConfirmReplace(false);
       setDoc(null);
-      onSaved(d.toast ?? "Document saved");
+      onSaved(d.toast ?? "Document saved", savedDir.current);
       return;
     }
     // UI-60: keep the draft. The typed body is the only copy that exists.
@@ -871,6 +876,7 @@ function useDocEditor(
     if (overwrite) fields.overwrite = "1";
     // Ruling 663: an opened document is saved against the version it read.
     if (doc.version) fields.version = doc.version;
+    savedDir.current = doc.dir;
     saveFetcher.submit(fields, { method: "post", action: STORE_ACTION });
   };
 
@@ -1143,9 +1149,11 @@ export function StoreBrowser({
   const nodes = tree;
   const ops = useStoreOps(resource, expand);
   const push = useToast();
-  const editor = useDocEditor(resource, (toast) => {
+  // Reveal the folder the document was saved in: the "into" select may name
+  // another by now, and an opened document never set it.
+  const editor = useDocEditor(resource, (toast, dir) => {
     push(toast);
-    expand(dest);
+    expand(dir);
   });
   // Ruling 147: Save document stays enabled on a nameless draft and refuses the
   // click with the sentence `writeStoreDoc` would have thrown. Counted, so a

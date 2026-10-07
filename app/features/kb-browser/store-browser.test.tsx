@@ -347,6 +347,61 @@ describe("StoreBrowser document editor", () => {
     expect(lastForm?.overwrite).toBeUndefined();
   });
 
+  // A save reveals the folder the document was saved in, not the one the
+  // "into" select names by then: a new draft keeps the folder it opened with
+  // while the select moves on, and an opened document never sets the select at
+  // all. Both folders start collapsed by hand, so the tree's state after the
+  // save is the reveal's alone. CANARY: reveal the toolbar's destination on
+  // save and `decisions` stays shut while `notes` springs open.
+  it.each([
+    {
+      doc: "a new document, after the destination moved on",
+      open: (view: ReturnType<typeof renderBrowser>) => {
+        const dest = view.getByLabelText("Destination folder");
+        fireEvent.change(dest, { target: { value: "decisions" } });
+        fireEvent.click(view.getByText("New document"));
+        fireEvent.change(dest, { target: { value: "notes" } });
+        fireEvent.change(view.getByPlaceholderText("file-name.md"), {
+          target: { value: "adr-002" },
+        });
+      },
+    },
+    {
+      doc: "an opened document",
+      open: async (view: ReturnType<typeof renderBrowser>) => {
+        fireEvent.change(view.getByLabelText("Destination folder"), {
+          target: { value: "notes" },
+        });
+        fireEvent.click(view.getByLabelText("Open adr-001.md"));
+        await view.findByRole("region", { name: "Preview of adr-001.md" });
+        fireEvent.click(view.getByRole("button", { name: "Raw" }));
+      },
+    },
+  ])("saving $doc reveals the folder it was saved in", async ({ open }) => {
+    const view = renderBrowser({
+      tree: [...TREE, { type: "dir", name: "notes", children: [] }],
+      respond: (intent) =>
+        intent === "store-read-doc" ? { ok: true, text: "# ADR 1", truncated: false } : undefined,
+    });
+    await open(view);
+    const decisions = view.getByRole("button", { name: /^decisions/ });
+    const notes = view.getByRole("button", { name: /^notes/ });
+    fireEvent.click(decisions);
+    fireEvent.click(notes);
+    expect(decisions.getAttribute("aria-expanded")).toBe("false");
+    expect(notes.getAttribute("aria-expanded")).toBe("false");
+    fireEvent.change(view.getByLabelText("Document contents"), {
+      target: { value: "# ADR, edited" },
+    });
+    fireEvent.click(view.getByText("Save document"));
+    await waitFor(() =>
+      expect(lastForm).toMatchObject({ intent: "store-write-doc", path: JSON.stringify(["decisions"]) }),
+    );
+    await view.findByText("stub done");
+    expect(decisions.getAttribute("aria-expanded")).toBe("true");
+    expect(notes.getAttribute("aria-expanded")).toBe("false");
+  });
+
   it("ruling 149: the file name rides the shared .field chrome, and the raw text the card's (ruling 614)", () => {
     // Canary: unwrap the name and it paints in UA chrome inside a card whose
     // every other control wears the sheet's — the class this closes. Drop
