@@ -235,6 +235,12 @@ export const PRIOR_SHIPPED_HASHES: PriorShippedHashes = {
     "86f1e309de8bdb5393156fc6f12bc93a035597c43ae74c02b6b6f2c94c1b488b",
   ],
   [path.join("skills", "controller-guide", "SKILL.md")]: [
+    // Rulings 684 and 685 (owner, 2026-10-07: "why would controller make the
+    // template with data?"): before the guide said a template is made from an
+    // example and is never the example, that a flow names no task, and that
+    // the controller continues on a task's acceptance. It told the controller
+    // to copy the report a person liked into the knowledge base as it stood.
+    "e0635450d0c8c60a1a1086a3eb1d46a4ef5df8c64ecb80730daf857d13f03ca9",
     // Rulings 677 to 679 (2026-10-07): before "A board that delivers results"
     // said a file the result must follow is copied into a knowledge base with
     // `copy_task_file_to_knowledge_base` and that a skill stays within what a

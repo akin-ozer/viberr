@@ -5,7 +5,7 @@ import {
   setupAppTest,
   type AppTestContext,
 } from "../../../test-support/test-app";
-import { readFileSync, writeFileSync } from "node:fs";
+import { existsSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { listAuditEvents } from "../../../test-support/audit-log";
 import { connectFakeBackend } from "../../../test-support/backend-credentials";
@@ -374,7 +374,7 @@ describe("list_decisions briefs the person and decides nothing (ruling 251)", ()
   it("ruling 597: get_task lists a task's kept deliveries, and read_task_attachment reads a file as one held it", async () => {
     // CANARIES: leave `deliveries` off get_task and no stamp is offered; drop
     // `delivery` on the way to the reader and the rework comes back instead.
-    const { mkdirSync, rmSync } = await import("node:fs");
+    const { mkdirSync } = await import("node:fs");
     const { taskAttachmentsDir } = await import("~/server/files/file-store-root.server");
     const { keepDelivery, taskDeliveriesDir } = await import("~/server/files/kept-deliveries.server");
     const file = path.join(taskAttachmentsDir(SLUG, "VIB-148", app.dataRoot), "ruling-597-summary.md");
@@ -4266,7 +4266,9 @@ describe("save_knowledge_base's reply carries the id the next call needs (U36-4)
     });
     const kbId = /id (kb_[A-Za-z0-9_-]+)/.exec(made)![1]!;
     const folder = path.join(app.dataRoot, "kb", "template-home");
-    const copy = { kbId, taskKey: "VIB-142", name: "Teklif Şablonu.pdf", as: "proposal-template.pdf" };
+    // An asset: what this test is about is the copy, not what it is kept as
+    // (ruling 684's kinds have their own test below).
+    const copy = { kbId, kind: "asset", taskKey: "VIB-142", name: "Teklif Şablonu.pdf", as: "proposal-template.pdf" };
 
     // CANARY: drop `requireOrgAdmin` and a project member writes into a folder
     // every run on the instance may be given.
@@ -4291,7 +4293,14 @@ describe("save_knowledge_base's reply carries the id the next call needs (U36-4)
       subjectId: kbId,
       details: {
         count: 1,
-        copiedFrom: { projectSlug: SLUG, taskKey: "VIB-142", name: "Teklif Şablonu.pdf", as: "proposal-template.pdf", replaced: false },
+        copiedFrom: {
+          projectSlug: SLUG,
+          taskKey: "VIB-142",
+          name: "Teklif Şablonu.pdf",
+          as: "proposal-template.pdf",
+          replaced: false,
+          kind: "asset",
+        },
       },
     });
     // SAFETY: list_knowledge_bases answers `json()` over rows carrying `id`,
@@ -4336,6 +4345,7 @@ describe("save_knowledge_base's reply carries the id the next call needs (U36-4)
     expect(
       await call(ids.orgAdmin, "copy_task_file_to_knowledge_base", {
         kbId,
+        kind: "asset",
         taskKey: "VIB-142",
         name: "Teklif Şablonu.pdf",
         delivery: "2026-10-06T13:51:54.225Z",
@@ -4367,18 +4377,18 @@ describe("save_knowledge_base's reply carries the id the next call needs (U36-4)
     // CANARY: let a copy land on a document and it replaces the rulings with
     // no version check, the write rulings 257 and 305 refuse.
     expect(
-      await call(ids.orgAdmin, "copy_task_file_to_knowledge_base", { kbId, taskKey: "VIB-142", name: "notes.md", as: "rulings.md", replace: true }),
+      await call(ids.orgAdmin, "copy_task_file_to_knowledge_base", { kbId, kind: "asset", taskKey: "VIB-142", name: "notes.md", as: "rulings.md", replace: true }),
     ).toBe(
       "[noop] Template Home already holds the document `rulings.md`. Change a document with edit_knowledge_base_doc or " +
         "save_knowledge_base, which check what they replace, or copy this file under another name with `as`. Nothing was copied.",
     );
     expect(readFileSync(path.join(folder, "rulings.md"), "utf8")).toBe("# Rulings\n");
     // A document the folder does not hold is copied in as one.
-    expect(await call(ids.orgAdmin, "copy_task_file_to_knowledge_base", { kbId, taskKey: "VIB-142", name: "notes.md" })).toContain(
+    expect(await call(ids.orgAdmin, "copy_task_file_to_knowledge_base", { kbId, kind: "asset", taskKey: "VIB-142", name: "notes.md" })).toContain(
       "It is a document there: the knowledge base's index lists it with its sections",
     );
 
-    expect(await call(ids.orgAdmin, "copy_task_file_to_knowledge_base", { kbId, taskKey: "VIB-142", name: "missing.pdf" })).toMatch(
+    expect(await call(ids.orgAdmin, "copy_task_file_to_knowledge_base", { kbId, kind: "asset", taskKey: "VIB-142", name: "missing.pdf" })).toMatch(
       /^\[noop\] VIB-142 has no attachment `missing\.pdf`\. It holds: .*Teklif Şablonu\.pdf.*\. Nothing was copied\.$/,
     );
 
@@ -4403,6 +4413,185 @@ describe("save_knowledge_base's reply carries the id the next call needs (U36-4)
       "[noop] Template Home is private: its folder is closed to every agent's shell, and a run given it reads documents only, " +
         "so no run could open `second.pdf` there. Copy it into an open knowledge base. Nothing was copied.",
     );
+  });
+
+  /**
+   * Ruling 684 (owner, 2026-10-07: "why would controller make the template
+   * with data? ... Even if we manually fix Aidea, controller will still create
+   * wrong templates in the future"). The first template the controller made
+   * was the report itself: one customer's figures and sentences in the folder
+   * every run reads, and the next customer's proposal came back with one.
+   */
+  it("ruling 684: a copy says what it keeps: a template holds placeholders, a sample is named for its task, an asset is neither", async () => {
+    const { writeTaskAttachment } = await import("~/server/files/task-attachments.server");
+    const page = (body: string) => new TextEncoder().encode(`<!doctype html><html><body>${body}</body></html>`);
+    writeTaskAttachment(SLUG, "VIB-142", "report.html", page("<h1>Aidea | AWS Maliyet Teklifi</h1><p>13.381,01 USD</p>"), app.dataRoot);
+    writeTaskAttachment(
+      SLUG,
+      "VIB-142",
+      "skeleton.html",
+      page("<h1>[[Müşteri adı]] | AWS Maliyet Teklifi</h1><p>[[Aylık toplam]]</p><p>[[Müşteri adı]]</p>"),
+      app.dataRoot,
+    );
+    writeTaskAttachment(SLUG, "VIB-142", "logo.png", new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]), app.dataRoot);
+    const made = await call(ids.orgAdmin, "save_knowledge_base", { name: "Kinds Home", doc: { path: "rulings.md", content: "# Rulings\n" } });
+    const kbId = /id (kb_[A-Za-z0-9_-]+)/.exec(made)![1]!;
+    const folder = path.join(app.dataRoot, "kb", "kinds-home");
+    const copy = (args: Record<string, JsonValue>) =>
+      call(ids.orgAdmin, "copy_task_file_to_knowledge_base", { kbId, taskKey: "VIB-142", ...args });
+
+    // CANARY: take any file as a template and the report a person liked is
+    // kept as one, with its customer's name and figures in every run's reach.
+    const refused =
+      "[noop] `report.html` marks no place for a task's content. A template marks each one with a placeholder, " +
+      "`[[what goes here]]`: on one line, opening on a letter. What a page does not show (the code it runs, its style, " +
+      "its comments) is not read for them. " +
+      "So as it stands this is a finished result with VIB-142's content in it, " +
+      "or a template that marks those places some other way. A finished result kept as the template puts that content " +
+      "where every run reads it, and a result built from it can repeat it. " +
+      "Have an agent make the template first: file a task for the agent that makes such results, asking for the same layout " +
+      "with everything that belongs to that task replaced by a `[[what goes here]]` placeholder, and copy what it delivers " +
+      "once that task is accepted (`continue_when_done` leaves you that step, in a turn a person asked for). " +
+      'Only when the person asked to keep a worked example, copy this as `kind: "sample"`. Nothing was copied.';
+    expect(await copy({ kind: "template", name: "report.html", as: "proposal-template.html" })).toBe(refused);
+    // CANARY: read the file by the name the copy takes and a page renamed to
+    // .pdf is handed to the PDF reader, reads as nothing and is kept unchecked.
+    expect(await copy({ kind: "template", name: "report.html", as: "proposal-template.pdf" })).toBe(refused);
+    expect(readdirSync(folder)).toEqual(["rulings.md"]);
+    // What a finished report holds in double brackets, each kept out by its
+    // own part of the rule.
+    // CANARY: count anything in double brackets and a finished report passes
+    // on its numbered citations or a shell test in its notes.
+    // CANARY: read the code a page runs and its style and it passes on a
+    // chart library's arrays, which open on a name as often as on a number.
+    // CANARY: count a link's bracketed text and it passes on a cited source.
+    // CANARY: let a placeholder run on and it passes on a bracketed paragraph.
+    // CANARY: count a data format's own words and it passes on a table of
+    // flags in the data a page was drawn from.
+    // CANARY: read every script with a type as data and it passes on code in
+    // a language the list of script types never named.
+    // CANARY: read a page's comments and it passes on a note its author left.
+    const finished = [
+      "<p>See [[1]](https://example.test) and [[2]].</p><pre>if [[ -f x ]]; then</pre>",
+      '<script>new Map([[key,value]]);const s=[[a,b]];const t=[["acme",13381.01]]</script><STYLE media="print">.a{content:"[[x]]"}</STYLE >',
+      '<script type="text/javascript">const u=[[c,d]]</script><script type=module>export const v=[[e,f]]</script>',
+      "<p>Source: [[Gartner 2024]](https://example.test).</p>",
+      `<p>[[${"Aidea ".repeat(27)}]]</p>`,
+      "<p>Unclosed</p><script>const rows=[[a,b]];",
+      '<script type="application/json">{"visible":[[true,false]],"rows":[[null,1]],"on":[[ false ]],"names":[["acme",2]]}</script>',
+      '<script type="application/json">{"gaps":[[NaN, 1]],"none":[[None, 2]],"most":[[Infinity]],"flags":[[True, False]]}</script>',
+      '<script type="text/python">rows = [[a, b]]</script><script type="py">more = [[c, d]]</script>',
+      "<!-- [[left by its author]] --><p>Aidea</p><!-- and an open one [[to the end]]",
+    ];
+    for (const [at, body] of finished.entries()) {
+      writeTaskAttachment(SLUG, "VIB-142", `finished-${at}.html`, page(body), app.dataRoot);
+      expect(await copy({ kind: "template", name: `finished-${at}.html` }), body).toContain(
+        `[noop] \`finished-${at}.html\` marks no place for a task's content.`,
+      );
+    }
+    // A placeholder with blanks inside its brackets is one, and what a script
+    // holds beside it changes nothing.
+    // CANARY: refuse the blanks and a template an agent wrote as
+    // `[[ customer name ]]` is called a finished result.
+    writeTaskAttachment(
+      SLUG,
+      "VIB-142",
+      "spaced.html",
+      page("<script>const s=[[a,b]]</script><h1>[[ Müşteri adı ]]</h1><p>[[3-year total]] [[Aylık toplam]](USD)</p>"),
+      app.dataRoot,
+    );
+    expect(await copy({ kind: "template", name: "spaced.html" })).toContain("1 `[[placeholder]]` was counted in its text (");
+    // A script tag inside a comment opens nothing, as in a browser.
+    // CANARY: read a commented-out tag as a tag and the page after it is
+    // taken for a script that never closed.
+    writeTaskAttachment(
+      SLUG,
+      "VIB-142",
+      "commented.html",
+      page("<!-- <script src=old.js> --><h1>[[Müşteri adı]]</h1>"),
+      app.dataRoot,
+    );
+    expect(await copy({ kind: "template", name: "commented.html" })).toContain("1 `[[placeholder]]` was counted in its text (");
+    // Only a page is read as markup: a tag named in a document's prose opens nothing.
+    // CANARY: read every file as a page and a brief that says "do not paste
+    // a <script> tag" loses every placeholder after that sentence.
+    writeTaskAttachment(
+      SLUG,
+      "VIB-142",
+      "brief-template.md",
+      new TextEncoder().encode("Do not paste a <script> tag here.\n\nCustomer: [[customer name]]\n"),
+      app.dataRoot,
+    );
+    expect(await copy({ kind: "template", name: "brief-template.md" })).toContain("1 `[[placeholder]]` was counted in its text (");
+    // A page drawn from a block of data is marked in that block.
+    // CANARY: leave every script unread and a template that keeps its
+    // content in a data block is called a finished result, with no way to
+    // mark it that would be read.
+    writeTaskAttachment(
+      SLUG,
+      "VIB-142",
+      "drawn.html",
+      page(
+        '<script type="application/json" id="data">{"customer":"[[Müşteri adı]]","total":"[[Aylık toplam]]"}</script>' +
+          "<script>render([[a,b]])</script><div id=app></div>",
+      ),
+      app.dataRoot,
+    );
+    expect(await copy({ kind: "template", name: "drawn.html" })).toContain("2 `[[placeholder]]`s were counted in its text (");
+
+    // The one an agent made is a template, and the reply says what was found.
+    // CANARY: say it holds no task's content and the reply vouches for what
+    // nothing here can tell.
+    expect(await copy({ kind: "template", name: "skeleton.html", as: "proposal-template.html" })).toContain(
+      "It is kept as a template: 3 `[[placeholder]]`s were counted in its text " +
+        "(what a page does not show, its code, style and comments, is not read for them), which a result built from it fills, leaving none. " +
+        "Whether anything of a task's own content is left beside them is a reviewer's check: nothing here tells a customer's sentence from the organisation's own. ",
+    );
+    expect(existsSync(path.join(folder, "proposal-template.html"))).toBe(true);
+    expect(listAuditEvents(app.db, { action: "org.store.files_added" })[0]!.details).toMatchObject({
+      copiedFrom: { as: "proposal-template.html", kind: "template" },
+    });
+
+    // CANARY: keep a sample under the name it had and nothing in the folder,
+    // or in the index every run reads, says it is one customer's document.
+    expect(await copy({ kind: "sample", name: "report.html" })).toContain(
+      "into Kinds Home as `sample-vib-142-report.html`. It is not a document, so the index names it",
+    );
+    expect(listAuditEvents(app.db, { action: "org.store.files_added" })[0]!.details).toMatchObject({
+      copiedFrom: { as: "sample-vib-142-report.html", kind: "sample" },
+    });
+    expect(await copy({ kind: "sample", name: "report.html", as: "sample-vib-142-good.html" })).toContain(
+      "as `sample-vib-142-good.html`.",
+    );
+    expect(await copy({ kind: "sample", name: "report.html", as: "liked.html" })).toContain(
+      "It is kept as a sample, with VIB-142's content in it, which every run given this knowledge base can read: " +
+        "say in the rule that it shows what a good result looks like and that nothing in it carries over to another task. ",
+    );
+    expect(readdirSync(folder).sort()).toEqual([
+      "brief-template.md",
+      "commented.html",
+      "drawn.html",
+      "proposal-template.html",
+      "rulings.md",
+      "sample-vib-142-good.html",
+      "sample-vib-142-liked.html",
+      "sample-vib-142-report.html",
+      "spaced.html",
+    ]);
+
+    // A picture has no text to hold a placeholder: kept, and said unchecked.
+    expect(await copy({ kind: "template", name: "logo.png" })).toContain(
+      "It is kept as a template, and nothing here read its text (a picture or another kind no reader here takes as text, " +
+        "or a PDF whose text could not be read), " +
+        "so nothing checked it for placeholders or for a task's content: if it is a result a task delivered and not a template made from one, replace it. ",
+    );
+    // An asset is copied as it is, with nothing said about its kind.
+    const asset = await copy({ kind: "asset", name: "logo.png", as: "letterhead.png" });
+    expect(asset).toContain("this copy no longer depends on it. No run is told to use it yet:");
+    // The audit row keeps the kind.
+    expect(listAuditEvents(app.db, { action: "org.store.files_added" })[0]!.details).toMatchObject({
+      copiedFrom: { as: "letterhead.png", kind: "asset" },
+    });
   });
 
   /**
@@ -5338,6 +5527,231 @@ describe("ruling 296: every published controller schema refuses unknown keys", (
     expect(published).toBeGreaterThan(40);
     // CANARY: change one nested `z.strictObject` back to `z.object`.
     expect(leaky, `these still strip unknown keys: ${leaky.join(", ")}`).toEqual([]);
+  });
+});
+
+/**
+ * Ruling 685 (owner, 2026-10-07): the controller leaves itself the next step
+ * for when a task is accepted. Asked for a content-free template, it filed the
+ * task that makes one and ended with "tell me when it is approved": the second
+ * half of one request, left for the person to remember. What an acceptance
+ * does with the step is `controller-continuation.server.test.ts`'s.
+ */
+describe("ruling 685: continue_when_done", () => {
+  async function callAs(
+    userId: string,
+    conversationId: string | null,
+    args: Record<string, JsonValue>,
+    /** The user message the calling turn answers: one a person wrote, unless a test says otherwise. */
+    answering: string | null = "cmsg_a_person_wrote",
+  ): Promise<string> {
+    const { buildControllerToolkit } = await import("./controller-toolkit.server");
+    const { findUserById } = await import("~/server/auth/user-store.server");
+    const user = findUserById(app.db, userId)!;
+    const toolkit = buildControllerToolkit({
+      db: app.db,
+      ctx: { dataRoot: app.dataRoot },
+      user: { id: user.id, email: user.email, name: user.name },
+      projectSlug: SLUG,
+      conversationId,
+      answering,
+    });
+    return callToolText(toolkit.tools, "continue_when_done", args);
+  }
+  const STEP = "Copy proposal-template.html from this task into the rulings knowledge base as a template, then write the rule";
+
+  it("leaves one step a conversation and task, says so on the task, and takes a correction or a withdrawal", async () => {
+    const { createConversation } = await import("./controller-conversations.server");
+    const { openFollowUps } = await import("./controller-follow-ups.server");
+    const { readTaskFile } = await import("~/server/files/task-writer.server");
+    const conversationId = createConversation(app.db, { userId: ids.contributor, userLabel: "selin", projectSlug: SLUG }).id;
+    const made = await call(ids.contributor, "create_task", { title: "Make the proposal template", goal: "A layout-only template." });
+    const key = /^\[done\] (VIB-\d+) created/.exec(made)![1]!;
+    const notes = () =>
+      readTaskFile({ projectSlug: SLUG, taskKey: key, dataRoot: app.dataRoot })!
+        .parsed.timeline.filter((event) => event.title?.startsWith("Controller follow-up"))
+        .map((event) => [event.title, event.text]);
+
+    // CANARY: keep the step in the reply alone and the turn that ends takes
+    // it with it: nothing is left for the acceptance to start.
+    expect(await callAs(ids.contributor, conversationId, { taskKey: key, next: STEP })).toBe(
+      `[done] When ${key} is accepted, Viberr starts your next turn in this conversation with that step. ` +
+        "It runs as Selin Aksoy, with their permissions as they stand then. " +
+        "Tell them you will continue on your own then, and that nothing happens before the task is accepted.",
+    );
+    expect(openFollowUps(app.db, SLUG, key)).toMatchObject([
+      { conversationId, userId: ids.contributor, projectSlug: SLUG, taskKey: key, text: STEP },
+    ]);
+    // CANARY: drop the note and whoever accepts the task starts a controller
+    // turn they were never told about.
+    expect(notes()).toEqual([
+      ["Controller follow-up", `When this task is accepted, the controller continues in Selin Aksoy's conversation: ${STEP}.`],
+    ]);
+    expect(listAuditEvents(app.db, { action: "controller.follow_up.set" })[0]).toMatchObject({
+      actorUserId: ids.contributor,
+      taskKey: key,
+      details: { conversationId, replaced: false },
+    });
+
+    // CANARY: add a second step beside the first and one acceptance starts
+    // two turns, the stale one among them.
+    expect(await callAs(ids.contributor, conversationId, { taskKey: key, next: "Only tell me it is done." })).toContain(
+      "with that step, in place of the one you left before.",
+    );
+    expect(openFollowUps(app.db, SLUG, key).map((f) => f.text)).toEqual(["Only tell me it is done."]);
+
+    // An empty step withdraws it, and the task says that too.
+    expect(await callAs(ids.contributor, conversationId, { taskKey: key, next: " " })).toBe(
+      `[done] Dropped: nothing starts in this conversation when ${key} is accepted.`,
+    );
+    expect(openFollowUps(app.db, SLUG, key)).toEqual([]);
+    expect(notes()[0]).toEqual([
+      "Controller follow-up dropped",
+      "Selin Aksoy's controller conversation no longer continues when this task is accepted.",
+    ]);
+    expect(listAuditEvents(app.db, { action: "controller.follow_up.dropped" })[0]).toMatchObject({
+      actorUserId: ids.contributor,
+      taskKey: key,
+      details: { conversationId },
+    });
+    expect(await callAs(ids.contributor, conversationId, { taskKey: key, next: "" })).toBe(
+      `[noop] This conversation left no step on ${key}.`,
+    );
+  });
+
+  it("refuses a step nothing could start, and a task the person cannot see", async () => {
+    const { createConversation } = await import("./controller-conversations.server");
+    const { openFollowUps } = await import("./controller-follow-ups.server");
+    const conversationId = createConversation(app.db, { userId: ids.contributor, userLabel: "selin", projectSlug: SLUG }).id;
+    // CANARY: accept a step with no conversation to continue and it is stored
+    // for a turn that can never be started.
+    expect(await callAs(ids.contributor, null, { taskKey: "VIB-142", next: STEP })).toBe(
+      "[unavailable] This turn answers no conversation, so there is nothing for an acceptance to continue.",
+    );
+    // CANARY: take a turn that cannot say which message it answers and it is
+    // never known as one a follow-up started: each such turn may leave the next.
+    expect(await callAs(ids.contributor, conversationId, { taskKey: "VIB-142", next: STEP }, null)).toContain("[unavailable]");
+    // CANARY: leave a step on a task that is already accepted and it waits
+    // for an acceptance that has happened.
+    expect(await callAs(ids.contributor, conversationId, { taskKey: "VIB-139", next: STEP })).toBe(
+      "[noop] VIB-139 is already accepted: take that step now, in this turn. Nothing was left on it.",
+    );
+    expect(await callAs(ids.contributor, conversationId, { taskKey: "VIB-142", next: "x".repeat(2_001) })).toBe(
+      "[noop] That step is 2,001 characters and one carries at most 2,000. Say what you will do, not how each call goes. Nothing was left on VIB-142.",
+    );
+    expect(await callAs(ids.contributor, conversationId, { taskKey: "VIB-9999", next: STEP })).toContain("No task VIB-9999");
+    // CANARY: leave a step on an archived task and it waits on a task nobody
+    // can accept.
+    const shelved = /^\[done\] (VIB-\d+) created/.exec(
+      await call(ids.contributor, "create_task", { title: "A shelved idea", goal: "Nothing yet." }),
+    )![1]!;
+    const { setTaskArchived } = await import("~/server/tasks/task-archive.server");
+    await setTaskArchived(
+      app.db,
+      { projectSlug: SLUG, taskKey: shelved, archived: true },
+      { userId: ids.maintainer, label: "maintainer" },
+      { dataRoot: app.dataRoot },
+    );
+    expect(await callAs(ids.contributor, conversationId, { taskKey: shelved, next: STEP })).toBe(
+      `[noop] ${shelved} is archived, so nobody will accept it. Nothing was left on it.`,
+    );
+    expect(openFollowUps(app.db, SLUG, shelved)).toEqual([]);
+    // A person outside the project learns nothing about its tasks.
+    const outside = createConversation(app.db, { userId: ids.nonMember, userLabel: "deniz", projectSlug: SLUG }).id;
+    expect(await callAs(ids.nonMember, outside, { taskKey: "VIB-142", next: STEP })).toContain("[denied]");
+    expect(openFollowUps(app.db, SLUG, "VIB-142")).toEqual([]);
+    expect(openFollowUps(app.db, SLUG, "VIB-139")).toEqual([]);
+  });
+
+  it("leaves no further step from the turn a follow-up started, and only from that turn", async () => {
+    // On a board whose operator accepts by itself, a turn that leaves the next
+    // step each time is work with no person in it, for as long as it goes on.
+    const { appendMessage, createConversation } = await import("./controller-conversations.server");
+    const { claimFollowUp, openFollowUps, recordFollowUpOutcome } = await import("./controller-follow-ups.server");
+    const conversationId = createConversation(app.db, { userId: ids.contributor, userLabel: "selin", projectSlug: SLUG }).id;
+    const say = (text: string) => appendMessage(app.db, { conversationId, author: "user", userId: ids.contributor, text }).id;
+    const asked = say("Make the template content-free.");
+    expect(await callAs(ids.contributor, conversationId, { taskKey: "VIB-142", next: STEP }, asked)).toContain("[done]");
+    // The task is accepted while Selin's turn still works: Viberr's message
+    // opens the next turn, and waits behind this one.
+    const [waiting] = openFollowUps(app.db, SLUG, "VIB-142");
+    claimFollowUp(app.db, waiting!.id);
+    const opened = say("VIB-142 was accepted. …");
+    recordFollowUpOutcome(app.db, waiting!.id, "queued", opened);
+    // CANARY: judge by the conversation's newest message and the turn Selin
+    // asked for is refused a step over a message it has not read.
+    expect(await callAs(ids.contributor, conversationId, { taskKey: "VIB-142", next: "Tell me it is done." }, asked)).toContain(
+      "[done]",
+    );
+    // CANARY: drop the check and a conversation continues on its own again
+    // and again.
+    expect(await callAs(ids.contributor, conversationId, { taskKey: "VIB-142", next: "And then the next thing." }, opened)).toBe(
+      "[noop] This turn was itself started by a follow-up, and a turn started that way leaves no further step. " +
+        "Say what is left to do and why, and Selin Aksoy asks for it. Nothing was left on VIB-142.",
+    );
+    // The step her own turn left stands.
+    expect(openFollowUps(app.db, SLUG, "VIB-142").map((f) => f.text)).toEqual(["Tell me it is done."]);
+    await callAs(ids.contributor, conversationId, { taskKey: "VIB-142", next: "" }, asked);
+  });
+
+  it("leaves no step the task could not be told of", async () => {
+    // CANARY: keep the step when its note fails and an acceptance starts a
+    // turn the task never said it would.
+    // CANARY: drop the step it replaced as well and the task goes on saying
+    // the controller continues with a step that is gone.
+    const { createConversation } = await import("./controller-conversations.server");
+    const { openFollowUps } = await import("./controller-follow-ups.server");
+    const { resolveTaskFilePath } = await import("~/server/files/task-writer.server");
+    const conversationId = createConversation(app.db, { userId: ids.contributor, userLabel: "selin", projectSlug: SLUG }).id;
+    const made = await call(ids.contributor, "create_task", { title: "Make the summary template", goal: "A layout-only template." });
+    const key = /^\[done\] (VIB-\d+) created/.exec(made)![1]!;
+    const steps = () => openFollowUps(app.db, SLUG, key).map((f) => f.text);
+    // The task's file is gone from the disk while the board still lists it.
+    const file = resolveTaskFilePath({ projectSlug: SLUG, taskKey: key, dataRoot: app.dataRoot });
+    const held = readFileSync(file);
+    const withoutItsFile = async (next: string) => {
+      rmSync(file);
+      try {
+        return await callAs(ids.contributor, conversationId, { taskKey: key, next });
+      } finally {
+        writeFileSync(file, held);
+      }
+    };
+    expect(await withoutItsFile(STEP)).toContain("[error]");
+    expect(steps()).toEqual([]);
+    expect(await callAs(ids.contributor, conversationId, { taskKey: key, next: STEP })).toContain("[done]");
+    expect(await withoutItsFile("Only tell me it is done.")).toContain("[error]");
+    // The step the task does say is the one still left.
+    expect(steps()).toEqual([STEP]);
+    // CANARY: drop a step whose "dropped" note failed and the task goes on
+    // saying the controller continues, with nothing left to start.
+    expect(await withoutItsFile("")).toContain("[error]");
+    expect(steps()).toEqual([STEP]);
+  });
+
+  it("writes nothing into a project that is archived", async () => {
+    // CANARY: drop the guard and this is the one door that writes a note into
+    // a frozen project's timeline.
+    const { createConversation } = await import("./controller-conversations.server");
+    const { openFollowUps } = await import("./controller-follow-ups.server");
+    const { updateProjectFile } = await import("~/server/files/project-writer.server");
+    const { rebuildProject } = await import("~/server/projections/rebuilder.server");
+    const setArchived = async (archived: boolean) => {
+      await updateProjectFile({ projectSlug: SLUG, dataRoot: app.dataRoot }, (project) => {
+        project.frontmatter.archived = archived;
+      });
+      rebuildProject(app.db, SLUG, { dataRoot: app.dataRoot });
+    };
+    const conversationId = createConversation(app.db, { userId: ids.contributor, userLabel: "selin", projectSlug: SLUG }).id;
+    await setArchived(true);
+    try {
+      expect(await callAs(ids.contributor, conversationId, { taskKey: "VIB-142", next: STEP })).toBe(
+        "[error] This project is archived (read-only). Restore it before you wait for this task.",
+      );
+      expect(openFollowUps(app.db, SLUG, "VIB-142")).toEqual([]);
+    } finally {
+      await setArchived(false);
+    }
   });
 });
 

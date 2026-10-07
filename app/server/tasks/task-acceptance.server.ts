@@ -37,6 +37,7 @@ import {
   verdictGateReason,
 } from "~/server/github/pr-human-approval.server";
 import { roleCan } from "~/shared/rbac";
+import { maybeContinueController } from "./controller-continuation.server";
 import { maybeReleaseDependents } from "./dependencies.server";
 import { canAcceptFromStage } from "~/shared/workflow/stage-roles";
 import {
@@ -1800,6 +1801,72 @@ interface ClosedDecisionRef {
 }
 
 /**
+ * A9 (pass 23): what a completion record says when a merge closed the task on
+ * a pull-request head that could NOT be verified against the delivered
+ * revision (GitHub unreachable, or the compare failed). The head gate refuses
+ * a KNOWN mismatch; an UNVERIFIABLE head is allowed through (the merge's own
+ * honesty covers unreachability), but the record must SAY the containment
+ * check did not run, or a verified accept and an unverified one read
+ * identically on the most consequential action the product has. Only when a
+ * merge actually landed: an "accepted, merge pending" outcome already
+ * discloses the unreachability itself. Empty otherwise.
+ *
+ * Ruling 226: two different things reach this, and they are not the same
+ * admission. A9's original case is GitHub being unreachable, and its sentence
+ * is right for that. The other is a maintainer who was shown the refusal and
+ * took the merge anyway: there the record names what was risked, not the
+ * procedure that was skipped, and names who decided. "The check did not run"
+ * reads as a formality; "code no reviewer approved may be on the base branch"
+ * is what it means.
+ *
+ * Ruling 686: both writers of the last stage append it. The decision packet's
+ * "accept completion" option made the same check and said nothing of it on
+ * the record.
+ */
+export function unverifiedHeadNote(fm: TaskFrontmatter, headCheck: AcceptancePrHeadCheck): string {
+  if (headCheck.verification !== "unverifiable" || headCheck.prNumber === null || fm.pr?.state !== "merged") {
+    return "";
+  }
+  const waiver = fm.headCheckWaiver ?? null;
+  const waived =
+    waiver !== null && waiver.prNumber === headCheck.prNumber && waiver.liveHeadSha === headCheck.liveHeadSha;
+  return waived
+    ? `\n\nNote: PR #${headCheck.prNumber} was merged at head ` +
+        `\`${(headCheck.liveHeadSha ?? "").slice(0, 7)}\` without confirming it contains the ` +
+        `reviewed revision \`${(headCheck.revisionHeadSha ?? "").slice(0, 7)}\`. GitHub ` +
+        `refused the comparison and ${waiver.byLabel || waiver.byUserId} accepted it anyway. ` +
+        `Code no reviewer approved may be on the base branch.`
+    : `\n\nNote: PR #${headCheck.prNumber}'s head could not be verified against the ` +
+        `delivered revision before the merge (GitHub could not be reached for the check). ` +
+        `It was accepted without that containment check.`;
+}
+
+/**
+ * Ruling 686: what follows every acceptance, once the task stands at the
+ * board's last stage. Two writes set that stage: `applyAcceptanceWrite` below
+ * (a person's Accept or board move, a recommendation card, a force-accept,
+ * the operator's own acceptance) and the decision packet's "accept
+ * completion" option, which writes the stage itself. Both end here, so a
+ * step added for one is not forgotten for the other: the packet's option ran
+ * none of these until ruling 685 gave it the third, and an epic whose last
+ * task was accepted from a decision was never told it was done.
+ *
+ * Each is fire-and-forget and reads the store as it stands, so a call that
+ * finds nothing to do writes nothing (the release reads every held task of
+ * the project to find that out).
+ */
+export function afterAcceptance(db: DatabaseSync, ctx: TaskActionContext, projectSlug: string, taskKey: string): void {
+  // Ruling 503: an acceptance is the usual way an epic's last task is done.
+  maybeNoteEpicComplete(db, ctx, projectSlug, taskKey);
+  // Ruling 131(e): and the usual way a waited-on task is done. The runner's
+  // minute tick would release its dependents too; this does it now.
+  maybeReleaseDependents(db, ctx, projectSlug);
+  // Ruling 685: and the moment a controller conversation that waited for
+  // this task takes its next step.
+  maybeContinueController(db, ctx, projectSlug, taskKey);
+}
+
+/**
  * The ONE Done write every acceptance path shares (B-WF6). Exported for
  * `operatorAcceptCompletion`, whose full-autonomy branch historically
  * re-implemented this block inline and drifted gate by gate.
@@ -2011,42 +2078,7 @@ export async function applyAcceptanceWrite(
       });
     }
     parsed.packet = null;
-    // A9 (pass 23): the PR head could NOT be verified against the delivered
-    // revision (GitHub unreachable / the compare failed), yet an irreversible
-    // merge still closed this task. The head gate refuses a KNOWN mismatch; an
-    // UNVERIFIABLE head is allowed through (the merge's own honesty covers
-    // unreachability) — but the completion record must SAY the containment check
-    // did not run, or a verified accept and an unverified one read identically on
-    // the most consequential action the product has. Only when a merge actually
-    // landed (an "accepted, merge pending" outcome already discloses the
-    // unreachability itself, so no double note).
-    if (
-      headCheck.verification === "unverifiable" &&
-      headCheck.prNumber !== null &&
-      parsed.frontmatter.pr?.state === "merged"
-    ) {
-      // Ruling 226: two different things reach this line now, and they are not
-      // the same admission. A9's original case is GitHub being unreachable, and
-      // its sentence is right for that. The other is a maintainer who was shown
-      // the refusal and took the merge anyway — there the record must name what
-      // was risked, not the procedure that was skipped, and it must name who
-      // decided. "The check did not run" reads as a formality; "code no
-      // reviewer approved may be on the base branch" is what it means.
-      const waiver = parsed.frontmatter.headCheckWaiver ?? null;
-      const waived =
-        waiver !== null &&
-        waiver.prNumber === headCheck.prNumber &&
-        waiver.liveHeadSha === headCheck.liveHeadSha;
-      input.event.text += waived
-        ? `\n\nNote: PR #${headCheck.prNumber} was merged at head ` +
-          `\`${(headCheck.liveHeadSha ?? "").slice(0, 7)}\` without confirming it contains the ` +
-          `reviewed revision \`${(headCheck.revisionHeadSha ?? "").slice(0, 7)}\`. GitHub ` +
-          `refused the comparison and ${waiver.byLabel || waiver.byUserId} accepted it anyway. ` +
-          `Code no reviewer approved may be on the base branch.`
-        : `\n\nNote: PR #${headCheck.prNumber}'s head could not be verified against the ` +
-          `delivered revision before the merge (GitHub could not be reached for the check). ` +
-          `It was accepted without that containment check.`;
-    }
+    input.event.text += unverifiedHeadNote(parsed.frontmatter, headCheck);
     parsed.timeline.unshift(input.event);
     accepted = true;
   });
@@ -2101,10 +2133,7 @@ export async function applyAcceptanceWrite(
     // operator's "Accept completion" card; its row stayed unread, and every
     // tab's title counted that decision for a day and a half.
     markTaskPacketApprovalRead(db, input.projectSlug, input.taskKey);
-    // Ruling 503: an acceptance is the usual way an epic's last task is done.
-    maybeNoteEpicComplete(db, ctx, input.projectSlug, input.taskKey);
-    // Ruling 131(e): an acceptance is the usual way a waited-on task is done.
-    maybeReleaseDependents(db, ctx, input.projectSlug);
+    afterAcceptance(db, ctx, input.projectSlug, input.taskKey);
   }
   // U3: `false` means a concurrent acceptance had already closed this task —
   // the caller's audit row and follow-up effects belong to THAT write, not to

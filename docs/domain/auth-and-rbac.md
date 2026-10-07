@@ -377,6 +377,7 @@ reconcile, workspace, scope violations, repository bootstrap), `runtime.run.*`,
 (ruling 207(a)), `controller.authority.denied`, the controller's audited reads
 `controller.ops.read`, `controller.repo.read` and `controller.github.read`,
 `controller.resource_grant.requested|granted|declined` (ruling 390),
+`controller.follow_up.set|dropped|started|not_started` (ruling 685),
 `projection.rescan|rebuild`, `seed.*`, `secrets.resealed`, `store.restored`.
 
 **`profile.backend.*` (ruling 127).** Connecting or dropping a personal agent account
