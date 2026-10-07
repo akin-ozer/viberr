@@ -7,11 +7,8 @@ import { inFlightIntent } from "~/ui/in-flight";
 import { Pill } from "~/ui/pill";
 import { useToast } from "~/ui/toast";
 import { useActionToast } from "~/ui/use-action-toast";
-import {
-  CredentialCard,
-  CredentialManageActions,
-  replaceTokenHref,
-} from "./credential-card";
+import { CredentialCard, CredentialManageActions } from "./credential-card";
+import { replaceTokenHref } from "./replace-token-href";
 import { RECONCILE_START_TOAST } from "./github-copy";
 import {
   checksPill,

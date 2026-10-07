@@ -5,14 +5,12 @@ import { afterEach, describe, expect, it } from "vitest";
 import { cleanup, fireEvent, render } from "@testing-library/react";
 import { renderToString } from "react-dom/server";
 import { createRoutesStub } from "react-router";
+import { ActivityPage } from "./activity-page";
 import {
-  ActivityPage,
   actIcon,
+  auditTimeLabel,
   compactAuditEntries,
   isRuntimeSessionOpen,
-} from "./activity-page";
-import {
-  auditTimeLabel,
   matchesActorFilter,
   type ActivityStreamRowView,
   type AuditLogEntryView,

@@ -12,9 +12,9 @@ import {
   EpicDialog,
   EpicProgressBar,
   EpicStatusPill,
-  archivableTasks,
   useArchiveEpicTasks,
 } from "./epic-parts";
+import { archivableTasks } from "./epic-helpers";
 import type { EpicMemberView, EpicStageView } from "./epics-query.server";
 
 /**

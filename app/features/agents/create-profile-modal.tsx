@@ -19,6 +19,7 @@ import { AgentGlyph } from "~/ui/identity";
 import { RadioSeg, RadioSegOption } from "~/ui/radio-seg";
 import { useDialog } from "~/ui/use-dialog";
 import type { AgentProfileView } from "./agent-types";
+import { effortLabel } from "./effort-label";
 import type { CapabilityGrant } from "~/schemas/project-file.schema";
 import type { CatalogModel, ModelCatalog } from "~/server/runtimes/model-catalog.server";
 import {
@@ -94,22 +95,6 @@ const BACKENDS: { id: "codex" | "claude"; label: string }[] = [
   { id: "codex", label: BACKEND_LABEL.codex },
   { id: "claude", label: BACKEND_LABEL.claude },
 ];
-
-const EFFORT_LABEL = new Map<string, string>([
-  ["minimal", "Minimal"],
-  ["low", "Low"],
-  ["medium", "Medium"],
-  ["high", "High"],
-  ["xhigh", "Extra high"],
-  ["max", "Maximum"],
-]);
-
-/** An effort tier's display name, as the picker offers it. Exported for the
- *  profile panel's runtime row (ruling 479(e)), which names the stored tier in
- *  the same words; the two modules already share one route chunk. */
-export function effortLabel(id: string): string {
-  return EFFORT_LABEL.get(id) ?? id;
-}
 
 /**
  * Model + effort catalog state for one backend, shared by this modal and the

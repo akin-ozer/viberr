@@ -16,10 +16,11 @@ import { GlyphSwap } from "~/ui/copy-glyph";
 import { useCsrfToken } from "~/ui/csrf-input";
 import { DatePicker } from "~/ui/date-picker";
 import { Icon } from "~/ui/icon";
-import { Pill, type PillKind } from "~/ui/pill";
+import { Pill } from "~/ui/pill";
 import { useToast } from "~/ui/toast";
 import { useDialog } from "~/ui/use-dialog";
 import { useFetcherResult } from "~/ui/use-fetcher-result";
+import { EPIC_STATUS_PILL } from "./epic-helpers";
 import type { EpicMemberView, EpicStageView } from "./epics-query.server";
 
 /**
@@ -46,21 +47,6 @@ export function useEpicActionToast(fetcher: ReturnType<typeof useFetcher<EpicAct
   });
 }
 
-/**
- * The status as a pill. `in_progress` takes the board's "waiting on you" blue
- * rather than the agents' purple: an epic in progress is a plan being worked,
- * not a run. Paused is amber like everything parked on purpose; done is the
- * accepted green; planned and cancelled are quiet. The epic page's status
- * select draws its dot in the same tone (ruling 615).
- */
-export const EPIC_STATUS_PILL = {
-  planned: "neutral",
-  in_progress: "info",
-  paused: "input",
-  done: "done",
-  cancelled: "neutral",
-} satisfies Record<EpicStatus, PillKind>;
-
 export function EpicStatusPill({ status, sm }: { status: EpicStatus; sm?: boolean }) {
   return (
     <span className="epic-status" data-epic-status={status}>
@@ -72,7 +58,7 @@ export function EpicStatusPill({ status, sm }: { status: EpicStatus; sm?: boolea
 }
 
 /** "3 of 7 done", with the held and archived counts when there are any. */
-export function epicProgressLine(progress: EpicProgress): string {
+function epicProgressLine(progress: EpicProgress): string {
   if (progress.total === 0) {
     return progress.archived > 0 ? `No open tasks · ${progress.archived} archived` : "No tasks yet";
   }
@@ -110,14 +96,6 @@ export function EpicProgressBar({
       <span className="epic-progress-line">{epicProgressLine(progress)}</span>
     </div>
   );
-}
-
-/** Ruling 651: how many tasks "Archive tasks" files away: the epic's live
- *  tasks, when it is Done and every one of them is done; otherwise none. */
-export function archivableTasks(epic: Pick<EpicSummary, "status" | "progress">): number {
-  const { total, done, archivedDone } = epic.progress;
-  const live = total - archivedDone;
-  return epic.status === "done" && live > 0 && done === total ? live : 0;
 }
 
 /** Ruling 651: the trigger, on an Epics row and in an epic's Tasks head. */
@@ -193,11 +171,6 @@ export function ArchiveEpicTasksConfirm({
       onConfirm={onConfirm}
     />
   );
-}
-
-/** The share of an epic's tasks that are done, as a whole percent. */
-export function epicDonePercent(progress: EpicProgress): number {
-  return progress.total === 0 ? 0 : Math.round((progress.done / progress.total) * 100);
 }
 
 /** The epic fields a create or an edit posts. */

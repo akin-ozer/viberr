@@ -29,10 +29,10 @@ import type {
 import { ReleaseConfirm } from "./release-confirm";
 import {
   OperatorRecommendations,
-  reachesAcceptance,
   type RecommendationInFlight,
   type RecommendationView,
 } from "./operator-recommendations";
+import { reachesAcceptance } from "./reaches-acceptance";
 import type { TaskRunPrincipalView } from "./run-principal-view";
 import { AttachmentsPanel } from "./attachments-panel";
 import { ChangesPanel } from "./changes-slot";

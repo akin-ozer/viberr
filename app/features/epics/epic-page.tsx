@@ -26,16 +26,14 @@ import { useFetcherResult } from "~/ui/use-fetcher-result";
 import {
   ArchiveEpicTasksButton,
   ArchiveEpicTasksConfirm,
-  EPIC_STATUS_PILL,
   EpicDialog,
   EpicProgressBar,
   EpicStatusPill,
-  archivableTasks,
-  epicDonePercent,
   useArchiveEpicTasks,
   useEpicActionToast,
   type EpicActionResult,
 } from "./epic-parts";
+import { EPIC_STATUS_PILL, archivableTasks, epicDonePercent } from "./epic-helpers";
 import type { EpicPageView, EpicTaskView } from "./epics-query.server";
 
 /**

@@ -212,17 +212,6 @@ function RemoveCredentialDialog({
 }
 
 /**
- * Ruling 480 (F40-45): where an instance admin replaces the token a project's
- * credential is bound to: its connection's Update token in Instance settings.
- * Null when no connection holds the token.
- */
-export function replaceTokenHref(connectionId: string | undefined): string | null {
-  return connectionId
-    ? `/org/settings?tab=connections&update=${encodeURIComponent(connectionId)}`
-    : null;
-}
-
-/**
  * The attach / re-attach / remove manage row shared by the GitHub view and
  * project Settings (finding #13). `configured` (a real PAT is bound) shows
  * Re-attach + Remove; otherwise a single Attach. admin|maintainer only — the

@@ -15,9 +15,8 @@ import {
   RequiredReviewersPanel,
   SettingsPage,
   StagesPanel,
-  resolveStageOrder,
-  stageMoveOptions,
 } from "./settings-page";
+import { resolveStageOrder, stageMoveOptions } from "./stage-order";
 import { roleCan, type ProjectRole } from "~/shared/rbac";
 import type { RequiredReviewerView } from "~/server/tasks/required-reviewers.server";
 import { ToastProvider } from "~/ui/toast";

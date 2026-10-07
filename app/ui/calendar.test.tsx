@@ -1,7 +1,8 @@
 // @vitest-environment jsdom
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { cleanup, fireEvent, render } from "@testing-library/react";
-import { Calendar, fromISODate, toISODate } from "./calendar";
+import { Calendar } from "./calendar";
+import { fromISODate, toISODate } from "./iso-date";
 
 afterEach(cleanup);
 

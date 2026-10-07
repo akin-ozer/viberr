@@ -3,7 +3,7 @@ import {
   setupAppTest,
   type AppTestContext,
 } from "../../../test-support/test-app";
-import { isRuntimeSessionOpen } from "./activity-page";
+import { isRuntimeSessionOpen } from "./feed-helpers";
 
 /**
  * Route-level tests for /projects/:slug/activity against the seeded demo

@@ -5,6 +5,7 @@ import { Pill } from "~/ui/pill";
 import { RichText } from "~/ui/rich-text";
 import { useRefusalShake } from "~/ui/use-refusal-shake";
 import { TASK_RECOMMENDATIONS_ANCHOR } from "~/shared/page-anchors";
+import { reachesAcceptance } from "./reaches-acceptance";
 
 /**
  * Operator recommendations panel — a SUPERVISED operator recommends governed
@@ -62,24 +63,6 @@ const KIND_LABEL = {
   accept_completion: "Completion",
   delivery: "Delivery",
 } as const satisfies Record<RecommendationView["kind"], string>;
-
-/**
- * F19-3 + F19-26 — does APPLYING this recommendation reach acceptance? The
- * page routes such an Apply through the accept confirm, and ruling 162 has the
- * card print the gate's refusal on it.
- *
- * Gate on the recommendation's TARGET, never on its `kind`. A supervised
- * operator can recommend a plain `transition` to the terminal stage; applying it
- * runs the identical full acceptance contract (transitionStage → acceptCompletion
- * → the real PR merge) under a label that says only "Move the task to Done".
- * A kind-only test would let that one through the ceremony it needs most.
- */
-export function reachesAcceptance(r: RecommendationView, terminalStageId: string | null): boolean {
-  return (
-    r.kind === "accept_completion" ||
-    (r.kind === "transition" && terminalStageId !== null && r.toStageId === terminalStageId)
-  );
-}
 
 /** Ruling 368: the one recommendation whose Apply or Dismiss is in flight. */
 export interface RecommendationInFlight {

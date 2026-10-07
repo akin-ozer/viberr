@@ -43,9 +43,9 @@ import {
 import { CapabilityMatrixModal } from "./capability-matrix-modal";
 import {
   CreateProfileModal,
-  effortLabel,
   type ProfileFormPayload,
 } from "./create-profile-modal";
+import { effortLabel } from "./effort-label";
 
 /**
  * Agent profile and deployment view:

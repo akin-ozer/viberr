@@ -8,11 +8,8 @@ import type { TimelineEventRender } from "~/shared/mapping/task-event.server";
 import type { LogLine, RunView } from "~/features/runtime/runtime-types";
 import { NO_RUN_CACHE } from "../../../test-support/run-view";
 import { ToastProvider } from "~/ui/toast";
-import {
-  ContinuityRecoveryPanel,
-  EXECUTION_PANEL_LABEL,
-  deriveContinuityLoss,
-} from "./continuity-recovery";
+import { ContinuityRecoveryPanel, EXECUTION_PANEL_LABEL } from "./continuity-recovery";
+import { deriveContinuityLoss } from "./continuity-loss";
 import { TaskDetailPage } from "./task-detail-page";
 import { taskDetail } from "../../../test-support/task-detail";
 
