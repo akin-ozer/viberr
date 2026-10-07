@@ -7,7 +7,6 @@ import { renderToString } from "react-dom/server";
 import { createRoutesStub, data, Link, useFetcher, useRouteLoaderData } from "react-router";
 import type { Route } from "./+types/root";
 import App, { ErrorBoundary, Layout, type loader } from "./root";
-import { THEME_FLIP_MS } from "./features/shell/theme-preference";
 import type { ThemePreference } from "./server/theme/theme-cookie.server";
 
 /**
@@ -264,14 +263,12 @@ describe("root Layout: setDocumentTheme is the one writer of data-theme (ruling 
     // every rule on its own clock, and setDocumentTheme then found nothing to do.
     expect(read()).toEqual(["fade", "dark"]);
     // The override lifts once the colours have landed.
-    await waitFor(
-      () =>
-        expect(
-          [...document.head.querySelectorAll("style")].filter((s) =>
-            (s.textContent ?? "").startsWith("*,*::before,*::after{transition:"),
-          ),
-        ).toEqual([]),
-      { timeout: THEME_FLIP_MS * 8 },
+    await waitFor(() =>
+      expect(
+        [...document.head.querySelectorAll("style")].filter((s) =>
+          (s.textContent ?? "").startsWith("*,*::before,*::after{transition:"),
+        ),
+      ).toEqual([]),
     );
   });
 
