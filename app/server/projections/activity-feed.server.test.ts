@@ -22,6 +22,7 @@ import { encodeActorRef } from "~/server/files/actor-ref.server";
 import { saveGlobalAgentProfile } from "~/server/org/gagents.server";
 import {
   editKbPassage,
+  editSkillPassage,
   mergeKbCorrection,
   undoKbCorrection,
 } from "~/server/org/kb-corrections.server";
@@ -1194,6 +1195,13 @@ describe("ruling 681: the instance writes to what a board's runs are given", () 
     setKnowledgeBasePrivacy(store.db, { id: facts.id, private: true }, actor, where);
     setKnowledgeBasePrivacy(store.db, { id: facts.id, private: false }, actor, where);
     await saveKnowledgeBase(store.db, { id: facts.id, name: "True facts", refresh: "manual" }, actor, where);
+    // Ruling 680's edit of one passage of a skill is a store write like any other.
+    const passage = await editSkillPassage(
+      store.db,
+      { id: skill.id, was: "# v1", now: "# v1, checked", actor },
+      where,
+    );
+    expect(passage.ok).toBe(true);
     await saveSkill(
       store.db,
       { id: skill.id, name: "pricing", summary: "How to price.", body: "# v2" },
@@ -1218,6 +1226,7 @@ describe("ruling 681: the instance writes to what a board's runs are given", () 
       "changed which tools of the MCP server **aws-pricing**, which Judge uses, are marked as writes.",
       "changed the MCP server **aws-pricing**, which Judge uses.",
       "renamed the skill **estimating**, which Operator and 4 others use, to **pricing** and rewrote it.",
+      "edited a passage of **SKILL.md** in the skill **estimating**, which Operator and 4 others use.",
       `renamed ${facts2}, to **true-facts**.`,
       `made ${facts2}, open again.`,
       `made ${facts2}, private.`,

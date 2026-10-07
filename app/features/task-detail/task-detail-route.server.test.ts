@@ -2024,6 +2024,21 @@ describe("attach-file (F39-6) — the human writer, end to end through the route
     );
     expect(readTaskFile(ref)!.parsed.timeline[0]!.title).not.toBe("Attachment added");
 
+    // Ruling 675: the same name in the other Unicode form is still the
+    // agent's file, now that the store finds a file by either form.
+    // CANARY: compare the names byte for byte and a Mac's upload of
+    // "Çıktı.md", sent decomposed, replaces the report an agent saved under it.
+    writeTaskAttachment("viberr-core", "VIB-141", "Çıktı.md", new TextEncoder().encode("the agent's output"), app.dataRoot);
+    await updateTaskFile(ref, (parsed) => {
+      parsed.timeline[0]!.attachments = ["report.md", "Çıktı.md"];
+    });
+    // SAFETY: a refused write throws AppError, rendered by the refusal arm.
+    const twin = (await postFile("VIB-141", ids.selin, "Çıktı.md".normalize("NFD"), "mine")) as ActionRefusal;
+    expect(twin.data.error).toContain("an agent run saved");
+    expect(JSON.stringify(readTaskAttachment("viberr-core", "VIB-141", "Çıktı.md", app.dataRoot))).toContain(
+      "the agent's output",
+    );
+
     await postFile("VIB-141", ids.selin, "notes.md", "first");
     const again = await postFile("VIB-141", ids.selin, "notes.md", "second");
     expect(again).toMatchObject({ ok: true, intent: "attach-file" });

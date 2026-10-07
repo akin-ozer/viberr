@@ -380,6 +380,9 @@ export function writeStoreFiles(
   dirPath: string[],
   files: UploadFileInput[],
   actor: AuditActor,
+  /** Ruling 678: the task whose file this is a copy of, the name it took here
+   *  and whether it took a file's place, for the audit row. */
+  copiedFrom?: { projectSlug: string; taskKey: string; name: string; as: string; replaced: boolean },
 ): UploadResult {
   const base = sanitizeDirPath(dirPath);
   const cleaned = files
@@ -424,10 +427,13 @@ export function writeStoreFiles(
 
   if (cleaned.length > 0) {
     touchResource(db, target);
-    recordStoreWrite(db, target, "org.store.files_added", actor, {
+    // Ruling 678: a copy of a task's file says which task it was copied from.
+    const details: AuditDetails & { path?: string } = {
       path: base.join("/"),
       count: cleaned.length,
-    });
+    };
+    if (copiedFrom) details.copiedFrom = copiedFrom;
+    recordStoreWrite(db, target, "org.store.files_added", actor, details);
   }
   return {
     added: cleaned.length,

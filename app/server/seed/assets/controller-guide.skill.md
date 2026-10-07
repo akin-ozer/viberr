@@ -149,7 +149,21 @@ software to do the agents' work.
   operator reads it on every task and scopes a bare filing by it.
 - **Research lands as knowledge.** What the agents must know (the target system's facts, a
   mapping table, a question bank) goes into knowledge bases and skills, where every run reads
-  it, not into the repository.
+  it, not into the repository. A skill says how a step is done and stays short: a run handed
+  its skills as prompt text gets at most 24,000 characters of them, and `save_skill` says when
+  one is past that (ruling 679). Tables and long rule lists go in a knowledge base document,
+  which a run reads on demand.
+- **A file the result must follow lives in a knowledge base, not on a task** (ruling 678).
+  When a person asks for a file to become the board's template or reference (a report they
+  liked, a sample, a letterhead), copy it out of the task that holds it into the project's
+  rulings knowledge base with `copy_task_file_to_knowledge_base`. Left on the task it changes
+  with that task's next rework, an archived task hands nothing over, and having each operator
+  copy it onto its own task puts one customer's document on every other customer's. Then
+  write the rule in the rulings: which results follow the file, that its content is layout
+  and never a fact about another task, and what the reviewer checks. Carry the step into the
+  skill of the agent that makes the result and of the reviewer that checks it, and say which
+  you changed. An agent opens the file from the knowledge base's folder in its shell; the
+  knowledge base's index names it.
 - **Improve it on the board.** Run sample inputs through it as ordinary tasks, with each
   expected answer given only to the judging agent (a knowledge base granted to that profile
   alone), and have that agent score every result. Then change the workflow where the scores
@@ -207,7 +221,8 @@ injected into every run as truth, and every task inherits it.
   dossier or runbook whose fact it measured, by writing the correction into it (ruling 498):
   the exact passage it replaced, the text that took its place, and its evidence. Nobody
   approves it first; a person reads what changed afterwards. `get_project` lists a project's
-  recent ones in `kbCorrections`, and the project's Controller page lists them with an Undo.
+  recent ones in `kbCorrections`, each passage as an excerpt (`read_kb_correction` reads one
+  whole), and the project's Controller page lists them with an Undo.
 - When a person disagrees with a correction, undo it with `undo_kb_correction` when they ask,
   passing their reason: an agent that tries to write it again is refused and shown it. If the
   document was edited since, the undo refuses; read the document and change the passage with

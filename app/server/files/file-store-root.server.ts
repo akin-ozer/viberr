@@ -1,4 +1,4 @@
-import { mkdirSync } from "node:fs";
+import { mkdirSync, readdirSync } from "node:fs";
 import path from "node:path";
 import { getEnv } from "../config/env.server";
 
@@ -186,6 +186,62 @@ export function resolveStoreSegment(root: string, name: string): string {
     throw new Error(`Store resource escapes its root: ${JSON.stringify(name)}`);
   }
   return resolved;
+}
+
+/**
+ * Ruling 675: the name a file is stored under, whatever form it arrived in.
+ *
+ * A browser on macOS sends a file's name decomposed ("İ" as "I" and a
+ * combining dot above it), a Linux directory holds names byte for byte, and a
+ * model types the composed form. So an upload is stored composed (NFC), the
+ * form every reader types.
+ */
+export function storedFileName(name: string): string {
+  return name.normalize("NFC");
+}
+
+/**
+ * Ruling 675: {@link resolveStoreSegment} for a name somebody typed, which
+ * finds the file whichever Unicode form it was stored in.
+ *
+ * Live on AWSC-117 the task's own input, a PDF uploaded from a Mac, was
+ * stored decomposed. The operator, the Inventory Analyst and the Estimate
+ * Judge each asked for it by the name the listing showed and were answered
+ * "AWSC-117 has no attachment X. It holds: X.", with two names no reader can
+ * tell apart. The folder's own listing decides, so the answer is the same on
+ * a disk that folds the two forms together and on one that does not: an entry
+ * of exactly that name wins; otherwise the one entry that composes to the same
+ * name is the file meant. No such entry, or more than one, leaves the name as
+ * it was typed, and the caller finds nothing there.
+ */
+export function resolveStoredSegment(root: string, name: string): string {
+  const exact = resolveStoreSegment(root, name);
+  let entries: string[];
+  try {
+    entries = readdirSync(root);
+  } catch {
+    return exact;
+  }
+  const stored = storedNameAmong(entries, name);
+  return stored === null ? exact : resolveStoreSegment(root, stored);
+}
+
+/**
+ * Ruling 675: the one of `entries` a written name means, by the rule
+ * {@link resolveStoredSegment} states: the entry of exactly that name, else
+ * the single entry that composes to the same name. Null when none does, or
+ * when two do and the name is neither of them.
+ *
+ * Every place that matches a name somebody wrote down (a typed file name, a
+ * claim on a task's timeline, a hold) against names a folder holds asks this,
+ * so a folder that holds both forms as two files keeps them apart: a name
+ * means the entry spelled exactly so before it means its twin.
+ */
+export function storedNameAmong(entries: readonly string[], name: string): string | null {
+  if (entries.includes(name)) return name;
+  const wanted = storedFileName(name);
+  const same = entries.filter((entry) => storedFileName(entry) === wanted);
+  return same.length === 1 ? same[0]! : null;
 }
 
 /** Knowledge-base store root: ${DATA_ROOT}/kb (store://kb/…). Phase 9B. */

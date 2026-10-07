@@ -235,6 +235,13 @@ export const PRIOR_SHIPPED_HASHES: PriorShippedHashes = {
     "86f1e309de8bdb5393156fc6f12bc93a035597c43ae74c02b6b6f2c94c1b488b",
   ],
   [path.join("skills", "controller-guide", "SKILL.md")]: [
+    // Rulings 677 to 679 (2026-10-07): before "A board that delivers results"
+    // said a file the result must follow is copied into a knowledge base with
+    // `copy_task_file_to_knowledge_base` and that a skill stays within what a
+    // run is given, and before the rulings section named `read_kb_correction`.
+    // Asked to make a delivered report a board's template, the controller left
+    // it on the task that made it.
+    "a79f832fe1ac95d577e0a8a6915126558a5ff5516347fb87c16afacb03cb70fd",
     // Ruling 672 (owner, 2026-10-06): before "Bringing up a new project" said
     // a software board can start without its repository, and before
     // "Switching a board to pull requests" existed.

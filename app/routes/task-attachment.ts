@@ -1,7 +1,9 @@
+import path from "node:path";
 import type { Route } from "./+types/task-attachment";
 import { requireProjectMember } from "~/server/auth/require-project.server";
 import {
   attachmentContentType,
+  attachmentDisposition,
   readAttachmentBytes,
   resolveTaskAttachment,
 } from "~/server/files/task-attachments.server";
@@ -50,14 +52,12 @@ export async function loader({ request, params }: Route.LoaderArgs) {
   // URL with `?download=1` — force the save dialog instead of inline render.
   const forceDownload =
     new URL(request.url).searchParams.get("download") === "1";
-  // The filename survived resolveTaskAttachment (no separators/quotes beyond
-  // ordinary characters); strip the two characters that could break the header.
-  const safeName = params.file.replace(/["\\]/g, "_");
   return new Response(new Uint8Array(read.bytes), {
     headers: {
       "content-type": type,
       "content-length": String(read.bytes.length),
-      "content-disposition": `${inline && !forceDownload ? "inline" : "attachment"}; filename="${safeName}"`,
+      // Ruling 675: a name outside Latin-1 cannot stand in a header as it is.
+      "content-disposition": attachmentDisposition(path.basename(abs), inline && !forceDownload),
       "x-content-type-options": "nosniff",
       // Even the inline types render inert: no scripts, no plugins reaching
       // back into the origin. Browsers that refuse to show a sandboxed PDF

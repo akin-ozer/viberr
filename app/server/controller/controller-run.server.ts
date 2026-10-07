@@ -15,7 +15,7 @@ import {
   attachedResourcesBlock,
   readKbIndexes,
 } from "~/server/files/kb-injection.server";
-import { readSkillBodies } from "~/server/files/skill-body.server";
+import { CONTROLLER_SKILL_BUDGET, controllerSkillDrawOrder, readSkillBodies } from "~/server/files/skill-body.server";
 import { getMaxRunSpendUsd } from "~/server/settings/instance-settings.server";
 import {
   recordRunInputs,
@@ -1509,7 +1509,10 @@ export function buildControllerSystemPrompt(input: SystemPromptInput): Controlle
   const configSkills = sortedNames(input.config.skills);
   const mountedMcps = sortedNames(input.mountedMcps);
   const unresolvedMcps = sortedBy(input.unresolvedMcps, (u) => u.name);
-  const skillSet = readSkillBodies(configSkills, input.dataRoot);
+  // Ruling 679: the controller's own budget, its guide drawn from it first.
+  // The block still renders sorted.
+  const drawn = readSkillBodies(controllerSkillDrawOrder(configSkills), input.dataRoot, CONTROLLER_SKILL_BUDGET);
+  const skillSet = { parts: sortedBy(drawn.parts, (part) => part.name), unresolved: drawn.unresolved };
   // Ruling 239: a controller conversation SCOPED to a project reads that
   // project's rulings, like every agent the project runs. The controller is
   // where a project's stages, profiles, grants and knowledge bases are set up,

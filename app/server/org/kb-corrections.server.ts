@@ -1,16 +1,19 @@
 import { readFileSync } from "node:fs";
+import path from "node:path";
 import type { DatabaseSync } from "node:sqlite";
 import { z } from "zod";
 import { recordAudit, type AuditActor } from "~/server/audit/audit-recorder.server";
+import { isAppError } from "~/server/errors/app-error.server";
 import { sha256Hex } from "~/server/files/content-hash.server";
 import { withFileLock } from "~/server/files/file-mutex.server";
 import { kbDirPath } from "~/server/files/file-store-root.server";
 import { collectKbDocs, resolveKbDocPath } from "~/server/files/kb-injection.server";
+import { resolveContainedSkillFile } from "~/server/files/skill-body.server";
 import { fenceFor } from "~/shared/text/fence";
 import { legacyProposalsSpan, looseText } from "./kb-proposals.server";
 import { publishResourceUpdated } from "./resource-events.server";
-import { kbStoreTargetForDir } from "./resources.server";
-import { utf8Bytes, writeStoreDoc } from "./store-files.server";
+import { kbStoreTargetForDir, resolveStoreTarget } from "./resources.server";
+import { type StoreTarget, utf8Bytes, writeStoreDoc } from "./store-files.server";
 
 /**
  * Ruling 498: a correction an agent PROVED, written straight into the
@@ -667,22 +670,107 @@ export async function editKbPassage(
   input: EditKbPassageInput,
   ctx: { dataRoot?: string } = {},
 ): Promise<EditKbPassageResult> {
-  if (utf8Bytes(input.was) > KB_CORRECTION_MAX_BYTES || utf8Bytes(input.now) > KB_CORRECTION_MAX_BYTES) {
-    return {
+  const found = locateKbDoc(db, input.kb, input.doc, ctx);
+  if (!found.ok) return found;
+  const { located, target, where } = found;
+  const segments = located.rel.split("/");
+  const name = segments.pop()!;
+  return replacePassage(db, {
+    abs: located.abs,
+    dir: segments,
+    name,
+    target,
+    where,
+    reader: "read_knowledge_base_doc",
+    was: input.was,
+    now: input.now,
+    actor: input.actor,
+  });
+}
+
+export interface EditSkillPassageInput {
+  /** The skill's id. */
+  id: string;
+  /** The passage to replace, exactly as its SKILL.md has it. */
+  was: string;
+  /** What takes its place; empty deletes the passage. */
+  now: string;
+  actor: AuditActor;
+}
+
+export type EditSkillPassageResult =
+  | { ok: true; name: string; bytes: number; previousBytes: number }
+  | { ok: false; message: string };
+
+/**
+ * Ruling 680: {@link editKbPassage} for a skill's SKILL.md.
+ *
+ * A skill could only be saved whole. Live on 2026-10-07, to add one section
+ * to the Calculator Builder's skill and one check to the Estimate Judge's, the
+ * controller typed both back in full, 16,981 and 31,289 characters: two of its
+ * turn's three minutes, and every line of both now the model's copy of what
+ * it had read. One passage is replaced under the same rules, and the body
+ * that results is judged as every SKILL.md write is (ruling 183).
+ */
+export async function editSkillPassage(
+  db: DatabaseSync,
+  input: EditSkillPassageInput,
+  ctx: { dataRoot?: string } = {},
+): Promise<EditSkillPassageResult> {
+  const target = resolveStoreTarget(db, "skill", input.id, { dataRoot: ctx.dataRoot });
+  // The contained resolver every reader of a SKILL.md uses: a folder or a
+  // file that is a link out of the store is not read, so a missed passage
+  // never answers with another file's lines.
+  const contained = target ? resolveContainedSkillFile(path.basename(target.rootAbs), ctx.dataRoot) : null;
+  if (!target || !contained || "reason" in contained) {
+    return { ok: false, message: `No skill with id ${input.id} holds a SKILL.md. Nothing was written. list_skills names them.` };
+  }
+  const abs = contained.file;
+  const edited = await replacePassage(db, {
+    abs,
+    dir: [],
+    name: "SKILL.md",
+    target,
+    where: `${target.name}'s SKILL.md`,
+    reader: "read_store_doc",
+    was: input.was,
+    now: input.now,
+    actor: input.actor,
+  });
+  return edited.ok ? { ...edited, name: path.basename(target.rootAbs) } : edited;
+}
+
+/** One document's passage, replaced in place under the document's own lock. */
+function replacePassage(
+  db: DatabaseSync,
+  doc: {
+    abs: string;
+    dir: string[];
+    name: string;
+    target: StoreTarget;
+    /** What the refusals call the document. */
+    where: string;
+    /** The tool that returns its text, for the refusal that says to copy from it. */
+    reader: string;
+    was: string;
+    now: string;
+    actor: AuditActor;
+  },
+): Promise<EditKbPassageResult> {
+  if (utf8Bytes(doc.was) > KB_CORRECTION_MAX_BYTES || utf8Bytes(doc.now) > KB_CORRECTION_MAX_BYTES) {
+    return Promise.resolve({
       ok: false,
       message:
         `An edit replaces a passage: \`was\` and \`now\` are each at most ${KB_CORRECTION_MAX_BYTES} bytes. ` +
         "Nothing was written. Change a long section in more than one edit.",
-    };
+    });
   }
-  const found = locateKbDoc(db, input.kb, input.doc, ctx);
-  if (!found.ok) return found;
-  const { located, target, where } = found;
-  return withFileLock(`kb-doc:${located.abs}`, () => {
-    const raw = readFileSync(located.abs, "utf8");
+  const { where } = doc;
+  return withFileLock(`kb-doc:${doc.abs}`, () => {
+    const raw = readFileSync(doc.abs, "utf8");
     const eol = eolOf(raw);
-    const was = asDocText(input.was, eol);
-    const now = asDocText(input.now, eol);
+    const was = asDocText(doc.was, eol);
+    const now = asDocText(doc.now, eol);
     if (!was.trim()) {
       return {
         ok: false as const,
@@ -697,7 +785,7 @@ export async function editKbPassage(
         ok: false as const,
         message:
           `The passage you sent as \`was\` is not in ${where} exactly as you sent it. Nothing was written. ` +
-          "Copy it character for character from the document (read_knowledge_base_doc returns it), list marker and emphasis included" +
+          `Copy it character for character from the document (${doc.reader} returns it), list marker and emphasis included` +
           (near.length > 0
             ? `; the lines closest to it read:\n${fenceFor(near.join("\n"))}\n${near.join("\n")}\n${fenceFor(near.join("\n"))}`
             : ". No line of the document is close to it."),
@@ -717,13 +805,19 @@ export async function editKbPassage(
     }
     const at = raw.indexOf(was);
     const next = raw.slice(0, at) + now + raw.slice(at + was.length);
-    const segments = located.rel.split("/");
-    const name = segments.pop()!;
-    const written = writeStoreDoc(db, target, segments, name, next, input.actor, {
-      overwrite: true,
-      edit: { replaced: was, text: now },
-    });
-    publishResourceUpdated("kb", target.id);
+    let written: ReturnType<typeof writeStoreDoc>;
+    try {
+      written = writeStoreDoc(db, doc.target, doc.dir, doc.name, next, doc.actor, {
+        overwrite: true,
+        edit: { replaced: was, text: now },
+      });
+    } catch (error) {
+      // Ruling 183: a SKILL.md the edit would leave malformed is refused by
+      // the writer, in its own sentence.
+      if (isAppError(error)) return { ok: false as const, message: `${error.userMessage} Nothing was written.` };
+      throw error;
+    }
+    publishResourceUpdated(doc.target.kind, doc.target.id);
     return { ok: true as const, bytes: written.bytes, previousBytes: written.previousBytes ?? 0 };
   });
 }

@@ -1711,7 +1711,11 @@ runtime's answer for a missing grant.
 - **Skills as prompt text**: on Codex, for the operator and the controller, for a Claude
   run with no checkout, and for a skill whose name the SDK would not accept
   (`isSdkSkillName`), bodies are injected into the prompt under a shared 24 000-char
-  budget (`skill-body.server.ts`); symlinked folders or files are refused.
+  budget (`skill-body.server.ts`); symlinked folders or files are refused. A body past the
+  budget is cut with a line at its foot, and the controller's `save_skill` and `edit_skill`
+  tell whoever wrote it how much reaches no such run (ruling 679). The controller's own turn
+  reads its skills under 40 000 (`CONTROLLER_SKILL_BUDGET`) and draws its guide from that
+  first, so the guide this repository ships arrives whole whatever is attached beside it.
 - **The writing guide** (ruling 502): the operator's and the controller's prompts close
   their static block with `HUMANIZER_PROMPT_SECTION`, the Humanizer skill vendored
   unchanged in `app/server/runtimes/humanizer/` (MIT, pinned by hash,

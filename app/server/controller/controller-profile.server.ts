@@ -18,6 +18,7 @@ import {
   agentDefinitionFilePath,
   agentProfileFilePath,
 } from "~/server/files/file-store-root.server";
+import { CONTROLLER_GUIDE_SKILL } from "~/server/files/skill-body.server";
 import {
   splitFrontmatter,
   yamlMappingSchema,
@@ -166,7 +167,7 @@ const NO_MODEL_PLACEHOLDER = "orchestration runtime";
  *  `resources.skills` is empty (or missing) runs with exactly this guide. The
  *  runtime used to substitute it privately while the panel rendered "none
  *  granted" — under a skills lock an admin could not even see the mismatch. */
-const CONTROLLER_DEFAULT_SKILLS: readonly string[] = ["controller-guide"];
+const CONTROLLER_DEFAULT_SKILLS: readonly string[] = [CONTROLLER_GUIDE_SKILL];
 
 /** The controller's display name: the profile's `name`, else "Controller". */
 function controllerNameOf(fm: AgentProfileFrontmatter | undefined): string {
