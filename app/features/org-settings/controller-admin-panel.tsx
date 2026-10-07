@@ -6,7 +6,7 @@ import {
 } from "~/features/agents/create-profile-modal";
 import { Icon } from "~/ui/icon";
 import { LocalDayDotTime } from "~/ui/local-time";
-import { MissingChips } from "./agent-template-modal";
+import { MissingChips } from "./agent-template-fields";
 import { kbDirsOf, kbLegacyOf } from "./kb-grants";
 import { useOrgAction } from "./use-org-action";
 
