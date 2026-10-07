@@ -59,6 +59,18 @@ export function openFollowUps(db: DatabaseSync, projectSlug: string, taskKey: st
     .map((row) => followUpRowSchema.parse(row));
 }
 
+/** The steps one conversation has left that no acceptance has claimed. */
+export function openFollowUpsOf(db: DatabaseSync, conversationId: string): ControllerFollowUp[] {
+  return db
+    .prepare(
+      `SELECT ${OPEN_COLUMNS} FROM controller_follow_ups
+        WHERE conversation_id = ? AND fired_at IS NULL
+        ORDER BY created_at, rowid`,
+    )
+    .all(conversationId)
+    .map((row) => followUpRowSchema.parse(row));
+}
+
 export interface SetFollowUpInput {
   conversationId: string;
   userId: string;
@@ -115,7 +127,45 @@ export function claimFollowUp(db: DatabaseSync, id: string): boolean {
   return Number(done.changes) === 1;
 }
 
-/** What became of a claimed follow-up: the turn's state, or why none started. */
-export function recordFollowUpOutcome(db: DatabaseSync, id: string, outcome: string): void {
-  db.prepare(`UPDATE controller_follow_ups SET outcome = ? WHERE id = ?`).run(outcome, id);
+/**
+ * What became of a claimed follow-up: the turn's state, or why none started,
+ * and the message Viberr sent to open the turn when it sent one.
+ */
+export function recordFollowUpOutcome(
+  db: DatabaseSync,
+  id: string,
+  outcome: string,
+  messageId: string | null = null,
+): void {
+  db.prepare(`UPDATE controller_follow_ups SET outcome = ?, message_id = ? WHERE id = ?`).run(outcome, messageId, id);
+}
+
+/**
+ * Whether the conversation's newest message from its person is one Viberr
+ * sent on a follow-up: the conversation continued on its own, and nobody has
+ * written in it since. A turn opened that way leaves no further step, so a
+ * conversation never continues twice in a row with no person in between.
+ */
+export function continuedOnItsOwnLast(db: DatabaseSync, conversationId: string): boolean {
+  const opened = db
+    .prepare(
+      `SELECT 1 FROM controller_follow_ups
+        WHERE conversation_id = ?
+          AND message_id = (SELECT id FROM controller_messages
+                             WHERE conversation_id = ? AND author = 'user'
+                             ORDER BY seq DESC LIMIT 1)
+        LIMIT 1`,
+    )
+    .get(conversationId, conversationId);
+  return opened !== undefined;
+}
+
+/**
+ * Drop every follow-up of a project that is being deleted, as its other
+ * app-owned rows are (ruling 274): a project of the same name gives the slug
+ * and its task keys back, and an acceptance there must not start a step left
+ * for the project that is gone. Returns how many were dropped.
+ */
+export function dropProjectFollowUps(db: DatabaseSync, projectSlug: string): number {
+  return Number(db.prepare(`DELETE FROM controller_follow_ups WHERE project_slug = ?`).run(projectSlug).changes);
 }

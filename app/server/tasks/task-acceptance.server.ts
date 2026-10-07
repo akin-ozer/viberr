@@ -2107,9 +2107,10 @@ export async function applyAcceptanceWrite(
     // Ruling 131(e): an acceptance is the usual way a waited-on task is done.
     maybeReleaseDependents(db, ctx, input.projectSlug);
     // Ruling 683: and the moment a controller conversation that waited for
-    // this task takes its next step. Every move into the last stage is this
-    // write (a person's Accept or board drag, a force-accept, a full-autonomy
-    // operator's acceptance), so this is the one place that starts it.
+    // this task takes its next step. This write is one of the two that set
+    // the last stage (a person's Accept or board drag, a recommendation card,
+    // a force-accept, the operator's own acceptance); the other is the
+    // decision packet's "accept completion" option, which calls the hook too.
     maybeContinueController(db, ctx, input.projectSlug, input.taskKey);
   }
   // U3: `false` means a concurrent acceptance had already closed this task —

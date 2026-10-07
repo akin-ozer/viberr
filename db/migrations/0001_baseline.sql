@@ -642,8 +642,10 @@ CREATE INDEX idx_controller_message_files__message
 -- the next step here, and the acceptance that moves the task to its last stage
 -- starts the conversation's next turn with it, as the person who asked.
 -- `fired_at` is set once, by the acceptance that claims the row, so two
--- concurrent ones start one turn; `outcome` says what became of it. One open
--- row a conversation and task: setting it again replaces the text.
+-- concurrent ones start one turn; `outcome` says what became of it, and
+-- `message_id` is the message Viberr sent to open the turn, which is how a
+-- turn opened this way is told from one a person asked for. One open row a
+-- conversation and task: setting it again replaces the text.
 CREATE TABLE controller_follow_ups (
   id TEXT PRIMARY KEY,
   conversation_id TEXT NOT NULL
@@ -654,7 +656,8 @@ CREATE TABLE controller_follow_ups (
   text TEXT NOT NULL,
   created_at TEXT NOT NULL,
   fired_at TEXT,
-  outcome TEXT
+  outcome TEXT,
+  message_id TEXT
 );
 CREATE INDEX idx_controller_follow_ups__task
   ON controller_follow_ups (project_slug, task_key, fired_at);

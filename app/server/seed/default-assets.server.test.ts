@@ -1111,8 +1111,10 @@ describe("the seeded-prompt sweep: the shipped prompts say what the code does", 
     const results = markdownSection(guide, "A board that delivers results");
     expect(results).toContain("**A file the result must follow lives in a knowledge base, not on a task** (ruling 678).");
     expect(results).toContain("rulings knowledge base with `copy_task_file_to_knowledge_base`");
-    expect(results).toContain("an archived task hands nothing\n  over");
-    expect(results).toContain("carry the step into the skill of the agent that makes the result\n  and of the reviewer that checks it");
+    // Read as sentences: where a line wraps is not what the guide says.
+    const said = results.replace(/\s+/g, " ");
+    expect(said).toContain("an archived task hands nothing over");
+    expect(said).toContain("carry the step into the skill of the agent that makes the result and of the reviewer that checks it");
     // The number is the budget's own, so a change to one is a change to both.
     expect(results).toContain(
       `gets at most ${SKILL_INJECTION_BUDGET.toLocaleString("en-US")} characters of them, and \`save_skill\` says when\n  one is past that (ruling 679)`,
@@ -1139,21 +1141,27 @@ describe("the seeded-prompt sweep: the shipped prompts say what the code does", 
     // tool's name or the outgoing hash.
     const { PRIOR_SHIPPED_HASHES, shippedCopyIsUnedited } = await import("./default-assets.server");
     const guide = read("controller-guide.skill.md");
-    const results = markdownSection(guide, "A board that delivers results");
+    // Read as sentences: where a line wraps is not what the guide says.
+    const said = (section: string) => markdownSection(guide, section).replace(/\s+/g, " ");
+    const results = said("A board that delivers results");
     expect(results).toContain("**A template is made from an example. It is never the example** (ruling 682).");
-    expect(results).toContain("with a `[[what goes here]]` placeholder\n  wherever that task's content stood");
+    expect(results).toContain("with a `[[what goes here]]` placeholder wherever that task's content stood");
     expect(results).toContain("You cannot write files, so an agent makes it.");
-    expect(results).toContain("Leave\n  yourself `continue_when_done` on that task");
-    expect(results).toContain('copy the files as `kind: "template"`');
+    expect(results).toContain("Leave yourself `continue_when_done` on that task");
+    expect(results).toContain('copy the template\'s files as `kind: "template"` and the list as an `asset`');
     expect(results).toContain('kept only when the person asks for a sample, as `kind: "sample"`');
+    expect(results).toContain("The copy and the skills are an org admin's to change");
     expect(results).toContain("**The same holds for a flow.**");
     expect(results).toContain("It names no task.");
     // The sentence that made the first template a customer's report is gone.
     expect(guide).not.toContain("that its content is layout");
     expect(guide).not.toContain("copy it out of the task that holds it");
-    expect(markdownSection(guide, "Working with operators and agents")).toContain(
+    const agents = said("Working with operators and agents");
+    expect(agents).toContain(
       "**When a request needs a task's work before you can finish it, continue on its acceptance** (ruling 683).",
     );
+    expect(agents).toContain("When the task is accepted (by a person, or by the operator on a board that lets it accept)");
+    expect(agents).toContain("A turn started that way finishes the request and leaves no further step");
     const rel = path.join("skills", "controller-guide", "SKILL.md");
     expect(
       shippedCopyIsUnedited(rel, "e0635450d0c8c60a1a1086a3eb1d46a4ef5df8c64ecb80730daf857d13f03ca9", {}),

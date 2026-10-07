@@ -69,8 +69,13 @@ function unfitName(name: string): string | null {
  */
 export type KeptFileKind = "template" | "sample" | "asset";
 
-/** A placeholder as a template marks one: `[[what goes here]]`, on one line. */
-const TEMPLATE_PLACEHOLDER = /\[\[[^[\]\r\n]{1,160}\]\]/g;
+/**
+ * A placeholder as a template marks one: `[[what goes here]]`, on one line,
+ * opening on a letter. That keeps out what only looks like one in a finished
+ * result: a numbered citation (`[[1]](https://…)`), an array in a page's
+ * script (`[["acme",13381.01]]`, `[[10,20,30]]`), a shell test (`[[ -f x ]]`).
+ */
+const TEMPLATE_PLACEHOLDER = /\[\[\p{L}[^[\]"\r\n]{0,159}\]\](?!\()/gu;
 
 /** Ruling 682: the name a sample is kept under: it says what it is and whose. */
 function sampleName(taskKey: string, name: string): string {
@@ -200,12 +205,15 @@ export function copyTaskFileToKnowledgeBase(
   // content to go is a finished result.
   let placeholders: number | null = null;
   if (input.kind === "template") {
-    const text = attachmentWholeText(stored, read.bytes);
+    // Read as the file it is on the task, whatever name the copy takes.
+    const text = attachmentWholeText(path.basename(source), read.bytes);
     placeholders = text === null ? null : (text.match(TEMPLATE_PLACEHOLDER)?.length ?? 0);
     if (placeholders === 0) {
       return refuse(
-        `\`${wanted}\` holds no \`[[placeholder]]\`, so it is a finished result with ${input.taskKey}'s content in it, not a template: ` +
-          "every run given this knowledge base would read that content, and a result built from it can repeat it. " +
+        `\`${wanted}\` holds no \`[[placeholder]]\`. A template marks each place a task's content goes with one ` +
+          `(\`[[what goes here]]\`, on one line), so as it stands this is a finished result with ${input.taskKey}'s content in it, ` +
+          "or a template that marks those places some other way. A finished result kept as the template puts that content " +
+          "where every run reads it, and a result built from it can repeat it. " +
           "Have an agent make the template first: file a task for the agent that makes such results, asking for the same layout " +
           "with everything that belongs to that task replaced by a `[[what goes here]]` placeholder, and leave yourself " +
           "`continue_when_done` to copy what it delivers. Only when the person asked to keep a worked example, " +

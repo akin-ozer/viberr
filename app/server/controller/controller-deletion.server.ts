@@ -4,6 +4,11 @@ import { recordAudit, type AuditEventInput } from "~/server/audit/audit-recorder
 import { assertProjectAction, isOrgAdmin } from "~/server/auth/project-authority.server";
 import { withTransaction } from "~/server/db/transaction.server";
 import { AppError } from "~/server/errors/app-error.server";
+import { findUserById } from "~/server/auth/user-store.server";
+import { logger } from "~/server/logging/logger.server";
+import { appendPolicyNote } from "~/server/tasks/task-mutation.server";
+import { toError } from "~/shared/errors";
+import { openFollowUpsOf } from "./controller-follow-ups.server";
 import { interruptRunOnConversationDeletion } from "~/server/runtimes/run-service.server";
 import { roleCan, type ProjectRole } from "~/shared/rbac";
 import {
@@ -140,12 +145,25 @@ export function deleteControllerConversation(
       )
       .get(conversation.id, conversation.id),
   );
+  // Ruling 683: the steps it left on tasks go with it (their rows follow the
+  // conversation's), and each of those tasks still says the controller will
+  // continue on its acceptance, so each is told it will not.
+  const waiting = openFollowUpsOf(db, conversation.id);
   // No queued message may start a turn in it from here on.
   dropConversationLease(conversation.id);
   withTransaction(db, () => {
     db.prepare(`DELETE FROM controller_messages WHERE conversation_id = ?`).run(conversation.id);
     db.prepare(`DELETE FROM controller_conversations WHERE id = ?`).run(conversation.id);
   });
+  const owner = findUserById(db, conversation.userId)?.name ?? conversation.userLabel;
+  for (const followUp of waiting) {
+    void appendPolicyNote(db, input.dataRoot ? { dataRoot: input.dataRoot } : {}, followUp.projectSlug, followUp.taskKey, {
+      title: "Controller follow-up dropped",
+      text: `${owner}'s controller conversation was deleted, so it no longer continues when this task is accepted.`,
+    }).catch((error) => {
+      logger.warn("could not note a dropped controller follow-up", { taskKey: followUp.taskKey, err: toError(error) });
+    });
+  }
   // A running turn stops now. It settles into a conversation that is gone,
   // which purges the lines it writes on its way out (`settleTurn`).
   const live = liveTurnSchema.parse(

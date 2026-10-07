@@ -226,7 +226,7 @@ import {
   type CreateTaskInput,
 } from "~/server/tasks/task-edits.server";
 import { appendPolicyNote, loadProjectContext, terminalStageIdFor } from "~/server/tasks/task-mutation.server";
-import { clearFollowUp, FOLLOW_UP_MAX_CHARS, setFollowUp } from "./controller-follow-ups.server";
+import { clearFollowUp, continuedOnItsOwnLast, FOLLOW_UP_MAX_CHARS, setFollowUp } from "./controller-follow-ups.server";
 import { endSentence } from "~/shared/text/sentence";
 import { requireProjectMutable } from "~/server/auth/project-authority.server";
 import { userDisplayName } from "~/server/tasks/user-display-name.server";
@@ -468,13 +468,16 @@ interface TimelineWindowNote {
 /**
  * Ruling 682: what a copy's reply says about the kind it was kept as. A
  * template says how many placeholders its text holds, or that nothing here
- * could read it; a sample says whose content it carries.
+ * could read it, and in neither case that it is free of a task's content,
+ * which nothing here can tell; a sample says whose content it carries.
  */
 function keptAs(kind: KeptFileKind, taskKey: string, placeholders: number | null): string {
   if (kind === "template") {
     return placeholders === null
-      ? "It is kept as a template, and its bytes are not text a reader takes, so nothing here checked that it holds no task's content: that is the check of the reviewer who approved it. "
-      : `It is kept as a template: its text holds ${placeholders.toLocaleString("en-US")} \`[[placeholder]]\`${placeholders === 1 ? "" : "s"}, and a result built from it fills every one and leaves none. `;
+      ? "It is kept as a template, and nothing here could read its text (a picture, a Word or PowerPoint file, a PDF with no text layer), " +
+          "so nothing checked it for placeholders or for a task's content: if it is a result a task delivered and not a template made from one, replace it. "
+      : `It is kept as a template: its text holds ${placeholders.toLocaleString("en-US")} \`[[placeholder]]\`${placeholders === 1 ? "" : "s"}, which a result built from it fills, leaving none. ` +
+          "Whether anything of a task's own content is left beside them is a reviewer's check: nothing here tells a customer's sentence from the organisation's own. ";
   }
   if (kind === "sample") {
     return (
@@ -2676,7 +2679,7 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
   add(
     tool(
       "continue_when_done",
-      "Leave THIS conversation its next step for when a task is accepted (ruling 683). Your turn ends long before an agent's work on a task does. So when a request needs that work first (a template an agent has to make, a study you will set the board up from), file or name the task, then write here what you will do once it is accepted. When a person accepts the task, Viberr starts your next turn in this conversation with that step, as the person you are answering and with their permissions: nobody has to come back and ask. Tell the person you will continue on your own when the task is accepted. One step a task: calling it again replaces it, and an empty `next` drops it. Any member of the task's project.",
+      "Leave THIS conversation its next step for when a task is accepted (ruling 683). Your turn ends long before an agent's work on a task does. So when a request needs that work first (a template an agent has to make, a study you will set the board up from), file or name the task, then write here what you will do once it is accepted. When the task is accepted (by a person, or by the operator on a board that lets it accept), Viberr starts your next turn in this conversation with that step, as the person you are answering and with their permissions as they stand then: nobody has to come back and ask, and a step that needs an org admin is refused then if they are not one. The step is written on the task, where every member and every run on it reads it, so whoever accepts knows what accepting starts. Tell the person you will continue on your own when the task is accepted. One step a task: calling it again replaces it, and an empty `next` drops it. A turn that was itself started this way leaves no further step: say what is left, and the person asks for it. Any member of the task's project.",
       {
         projectSlug: z.string().optional(),
         taskKey: z.string().optional().describe("The task you are waiting for. Defaults to this conversation's task."),
@@ -2693,6 +2696,9 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
         const slug = slugOf(args.projectSlug);
         const key = keyOf(args.taskKey, slug);
         requireVisible(slug, "wait for this task");
+        // Like a comment, this names no RbacAction, so nothing else stops it
+        // writing into the timeline of a project that is archived.
+        requireProjectMutable(loadProjectContext({ dataRoot }, slug), "wait for this task");
         const summary = getTaskSummary(db, slug, key);
         if (!summary) throw AppError.notFound(`No task ${key} in ${slug}.`);
         const next = prose(args.next).trim();
@@ -2702,6 +2708,15 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
           await appendPolicyNote(db, { dataRoot }, slug, key, {
             title: "Controller follow-up dropped",
             text: `${user.name}'s controller conversation no longer continues when this task is accepted.`,
+          });
+          recordAudit(db, {
+            action: "controller.follow_up.dropped",
+            actor,
+            subjectKind: "task",
+            subjectId: key,
+            projectSlug: slug,
+            taskKey: key,
+            details: { conversationId: deps.conversationId },
           });
           return `[done] Dropped: nothing starts in this conversation when ${key} is accepted.`;
         }
@@ -2716,6 +2731,16 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
         }
         if (summary.stage === terminalStageIdFor({ dataRoot }, slug)) {
           return `[noop] ${key} is already accepted: take that step now, in this turn. Nothing was left on it.`;
+        }
+        // One hop: a conversation that continued on its own and has heard from
+        // nobody since does not arrange to do so again. On a board whose
+        // operator accepts by itself that would be work with no person in it,
+        // for as long as each turn left the next.
+        if (continuedOnItsOwnLast(db, deps.conversationId)) {
+          return (
+            `[noop] This turn was itself started by a follow-up, and a conversation continues on its own once. ` +
+            `Say what is left to do and why, and ${user.name} asks for it. Nothing was left on ${key}.`
+          );
         }
         const replaced = setFollowUp(db, { ...where, userId: user.id, text: next });
         // On the task, where whoever accepts it reads what accepting starts.
@@ -2733,8 +2758,8 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
           details: { conversationId: deps.conversationId, replaced },
         });
         return (
-          `[done] When a person accepts ${key}, Viberr starts your next turn in this conversation with that step` +
-          `${replaced ? ", in place of the one you left before" : ""}. It runs as ${user.name}, with their permissions. ` +
+          `[done] When ${key} is accepted, Viberr starts your next turn in this conversation with that step` +
+          `${replaced ? ", in place of the one you left before" : ""}. It runs as ${user.name}, with their permissions as they stand then. ` +
           "Tell them you will continue on your own then, and that nothing happens before the task is accepted."
         );
       }),

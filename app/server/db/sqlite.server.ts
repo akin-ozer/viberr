@@ -664,8 +664,9 @@ const BASELINE_TABLES: readonly string[] = [
      UNIQUE (conversation_id, name)
    )`,
   // Ruling 683: what a controller conversation left itself to do when a task
-  // is accepted. Every acceptance reads it, so a root that predates it would
-  // fail them all. Same DDL as the baseline.
+  // is accepted. Every acceptance reads it and the controller's tool writes
+  // it: on a root that predates it the read would be logged and skipped, and
+  // the tool would fail. Same DDL as the baseline.
   `CREATE TABLE IF NOT EXISTS controller_follow_ups (
      id TEXT PRIMARY KEY,
      conversation_id TEXT NOT NULL
@@ -676,7 +677,8 @@ const BASELINE_TABLES: readonly string[] = [
      text TEXT NOT NULL,
      created_at TEXT NOT NULL,
      fired_at TEXT,
-     outcome TEXT
+     outcome TEXT,
+     message_id TEXT
    )`,
 ];
 

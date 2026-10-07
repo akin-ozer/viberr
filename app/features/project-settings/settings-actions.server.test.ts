@@ -1446,6 +1446,15 @@ describe("deleteProject releases the conversations bound to it (ruling 274)", ()
       userLabel: "arda@viberr.dev",
       projectSlug: null,
     });
+    // Ruling 683: the bound conversation waits on one of the project's tasks.
+    const { openFollowUps, setFollowUp } = await import("~/server/controller/controller-follow-ups.server");
+    setFollowUp(store.db, {
+      conversationId: bound.id,
+      userId: store.users.arda.id,
+      projectSlug: store.slug,
+      taskKey: "VIB-1",
+      text: "Install the template.",
+    });
 
     const name = readProjectFile({
       projectSlug: store.slug,
@@ -1475,6 +1484,10 @@ describe("deleteProject releases the conversations bound to it (ruling 274)", ()
     expect(last.text).toContain("instance conversation");
     // Untouched, because it was never bound to this project.
     expect(listMessages(store.db, instance.id)).toEqual([]);
+    // CANARY: drop `dropProjectFollowUps` from deleteProject and the step
+    // outlives the project with its released conversation: a project created
+    // under the same name gets VIB-1 back, and accepting it starts this step.
+    expect(openFollowUps(store.db, store.slug, "VIB-1")).toEqual([]);
   });
 });
 
