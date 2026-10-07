@@ -314,6 +314,57 @@ describe("controller mounts (ruling 107)", () => {
     expect(built.prefix.dynamic.join("")).toContain("kb-architecture (not registered)");
   });
 
+  /**
+   * Ruling 679: the guide this repository ships is the controller's doctrine,
+   * and it reaches the turn whole. Ruling 672's section took it past the 24,000
+   * characters an agent's skills share, and every turn after that deploy read
+   * it without its last sections.
+   */
+  it("ruling 679: the shipped guide reaches the controller's turn whole, with room left beside it", async () => {
+    const { seedDefaultAgentAssets } = await import("~/server/seed/default-assets.server");
+    const { CONTROLLER_SKILL_BUDGET, readSkillBodies } = await import("~/server/files/skill-body.server");
+    const { resolveControllerConfig } = await import("./controller-profile.server");
+    const { mkdirSync, writeFileSync } = await import("node:fs");
+    const path = await import("node:path");
+    seedDefaultAgentAssets(app.dataRoot);
+    const { prompt } = await build({});
+    // CANARY: read the controller's skills under the shared 24,000 again and
+    // the guide ends in "(skill truncated: …)" with "Answer style" gone.
+    expect(prompt).not.toContain("skill truncated");
+    expect(prompt).toContain("When you acted, list what changed as short factual lines. When you were refused, the refusal is the answer.");
+    // CANARY: let the guide grow to the budget's edge and the next section
+    // written into it is the one a turn never reads; a tenth is kept free.
+    const [guide] = readSkillBodies(["controller-guide"], app.dataRoot, Number.MAX_SAFE_INTEGER).parts;
+    expect(guide!.body.length).toBeLessThanOrEqual(CONTROLLER_SKILL_BUDGET * 0.9);
+
+    // CANARY: draw the skills in name order and a skill an org admin attached
+    // that sorts ahead of the guide takes its share first, so the guide is
+    // the one cut and "Answer style" is gone again.
+    const ahead = path.join(app.dataRoot, "skills", "brand-voice");
+    mkdirSync(ahead, { recursive: true });
+    writeFileSync(path.join(ahead, "SKILL.md"), `---\nname: brand-voice\ndescription: Voice.\n---\n\n${"v".repeat(20_000)}`);
+    const config = resolveControllerConfig(app.dataRoot);
+    const crowded = await build({}, { config: { ...config, skills: ["brand-voice", "controller-guide"] } });
+    expect(crowded.prompt).toContain("When you acted, list what changed as short factual lines. When you were refused, the refusal is the answer.");
+    // The other skill is the one that gives way, and it says so, by the
+    // controller's own figure.
+    expect(crowded.prompt).toContain(`_(skill truncated: SKILL.md is 20000 chars and exceeds the ${CONTROLLER_SKILL_BUDGET - guide!.body.length}-char injection budget)_`);
+    // Rendered in name order all the same (ruling 370).
+    expect(crowded.prompt.indexOf("vvvvvvvv")).toBeLessThan(crowded.prompt.indexOf("# Viberr controller playbook"));
+
+    // CANARY: name the agents' figure in the reason and a skill left out of a
+    // controller turn is disclosed as not fitting a budget of 24,000 that this
+    // turn never had.
+    const late = path.join(app.dataRoot, "skills", "zz-late");
+    mkdirSync(late, { recursive: true });
+    writeFileSync(path.join(late, "SKILL.md"), "---\nname: zz-late\ndescription: Late.\n---\n\nA rule.");
+    const full = await build({}, { config: { ...config, skills: ["brand-voice", "controller-guide", "zz-late"] } });
+    expect(full.inputs.unresolvedResources).toContainEqual({
+      name: "zz-late",
+      reason: `it did not fit the shared ${CONTROLLER_SKILL_BUDGET}-char skill budget; none of its content reached this run`,
+    });
+  });
+
   it("tells the model the diagnostics are attached, on every turn", async () => {
     // No org MCP mounted: the sentence is not conditional on grants.
     const { prompt } = await build({}, { mountedMcps: [] });

@@ -1,5 +1,6 @@
 import type { DatabaseSync } from "node:sqlite";
 import { OPERATOR_AUDIT_ACTOR, recordAudit } from "~/server/audit/audit-recorder.server";
+import { storedNameAmong } from "~/server/files/file-store-root.server";
 import { listKeptDeliveries } from "~/server/files/kept-deliveries.server";
 import {
   isBrowserWorkingArtifact,
@@ -375,8 +376,10 @@ export async function writeCompletionPacket(
         message: `Name at most ${COMPLETION_FILES_MAX} result files: the ones a person takes away.`,
       };
     }
-    const allowed = new Set(candidates);
-    const unknown = files.filter((f) => !allowed.has(f.name)).map((f) => f.name);
+    // Ruling 675: a name is matched to the delivered file in either Unicode
+    // form, and the packet keeps the file's own spelling, the one its card
+    // opens. A result a script named after a decomposed input is stored so.
+    const unknown = files.filter((f) => storedNameAmong(candidates, f.name) === null).map((f) => f.name);
     if (unknown.length > 0) {
       return {
         written: false,
@@ -385,6 +388,12 @@ export async function writeCompletionPacket(
           `delivered, which is what the reviewers judged.${offer}`,
       };
     }
+    const asStored = new Map<string, CompletionPacket["files"][number]>();
+    for (const file of files) {
+      const stored = storedNameAmong(candidates, file.name) ?? file.name;
+      if (!asStored.has(stored)) asStored.set(stored, { name: stored, caption: file.caption });
+    }
+    files.splice(0, files.length, ...asStored.values());
   }
 
   const seen = new Set<string>();

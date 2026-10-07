@@ -16,6 +16,8 @@ import {
 import { AppError } from "~/server/errors/app-error.server";
 import { resolveStoreTarget } from "~/server/org/resources.server";
 import { readStoreDoc } from "~/server/org/store-files.server";
+import { KB_DOC_OFFSET_DESCRIPTION } from "~/server/files/kb-injection.server";
+import { pageEnd } from "~/server/runtimes/read-page-budget.server";
 import {
   healthSnapshot,
   type HealthSnapshot,
@@ -116,20 +118,65 @@ const CONTROLLER_OPS_INSTRUCTIONS =
  * is the natural shape for "why did that run fail", and a run's `display` bodies
  * run to kilobytes each (run-projection measured ~2.2 KB/line), so an unbounded
  * default is megabytes of tool result in a context window. Bounded by DEFAULT,
- * like `inspect_audit_log` (`?? 50`) and `read_store_doc` (256 KB + `truncated`)
+ * like `inspect_audit_log` (`?? 50`) and `read_store_doc` (a page + `truncated`)
  * — a max the caller has to opt into protects the call nobody makes.
  *
  * 200 is `RUN_LOG_PAGE_LINES`, the same page the console takes when it names no
  * size, for the same reason: it is a readable page rather than a history.
  */
 const DEFAULT_LOG_LINES = 200;
-const MAX_LOG_LINES = 500;
+const MAX_LOG_LINES = 250;
+
+/**
+ * Ruling 677: the most a page's lines come to, in UTF-8 bytes as the reply
+ * prints them. A count alone bounds nothing: a line's `display` runs from a
+ * few bytes to kilobytes, and 500 of the smallest already printed as 82 KB,
+ * more than a turn carries. Under the reply's own cap of 50,000 characters,
+ * with room for the run and page blocks above the lines.
+ */
+const RUN_LOG_PAGE_BYTES = 44_000;
+
+/**
+ * The lines of `page` that fit {@link RUN_LOG_PAGE_BYTES}, kept from the end
+ * the cursor reads from: the newest of a backward page, the oldest of a
+ * forward one. The page's position is computed from what is kept, so its
+ * cursors lead to the lines left out. One line is always kept.
+ */
+function linesThatFit<T>(page: readonly T[], keep: "newest" | "oldest"): T[] {
+  const ordered = keep === "newest" ? [...page].reverse() : [...page];
+  const kept: T[] = [];
+  let bytes = 0;
+  for (const line of ordered) {
+    const printed = JSON.stringify(line, null, 1);
+    // As `json` prints it inside the `lines` array: two more spaces a row,
+    // and the comma and newline that separate it from the next.
+    const size = Buffer.byteLength(printed, "utf8") + 2 * printed.split("\n").length + 2;
+    if (kept.length > 0 && bytes + size > RUN_LOG_PAGE_BYTES) break;
+    bytes += size;
+    kept.push(line);
+  }
+  return keep === "newest" ? kept.reverse() : kept;
+}
 
 /** Ruling 265: page bounds for `list_runs`. A live listing on a busy instance
  *  is tens of rows, not thousands, and a task's whole run history is the other
  *  arm — both are summaries, so the default is generous and the max is a stop. */
 const DEFAULT_RUN_ROWS = 50;
 const MAX_RUN_ROWS = 200;
+
+/** One page of a store document, as `read_store_doc` answers it. */
+interface StoreDocPage {
+  resource: { kind: "kb" | "skill"; id: string; name: string };
+  path: string[];
+  truncated: boolean;
+  /** The document's length, in the characters `offset` counts. */
+  characters: number;
+  text: string;
+  /** Where this page starts, when it is not the first. */
+  offset?: number;
+  /** The offset the next page starts at, when one follows. */
+  nextOffset?: number;
+}
 
 /** Ruling 302: present on a `list_runs` reply ONLY when rows were left out,
  *  naming how many and the argument that returns them. */
@@ -439,7 +486,7 @@ export function buildControllerOpsMcp(deps: ControllerOpsDeps): ControllerOpsMcp
   add(
     tool(
       "read_run_log",
-      `One PAGE of an agent run's log lines, newest page by default (which is where a failure is). Readable by a member of the run's project; a controller conversation's own turns are readable by the person whose conversation it is (and by org admins). Two ways to move: \`before\` pages BACKWARD (the lines older than that sequence number) and \`since\` pages FORWARD (the lines after it). Name only one of them. Every call returns at most \`limit\` lines (${DEFAULT_LOG_LINES} by default, ${MAX_LOG_LINES} at most), so read \`page\` to see where you are: it reports whether older or newer lines exist and hands you the exact argument for the next call. \`run.logLines\` is the run's total.`,
+      `One PAGE of an agent run's log lines, newest page by default (which is where a failure is). Readable by a member of the run's project; a controller conversation's own turns are readable by the person whose conversation it is (and by org admins). Two ways to move: \`before\` pages BACKWARD (the lines older than that sequence number) and \`since\` pages FORWARD (the lines after it). Name only one of them. Every call returns at most \`limit\` lines (${DEFAULT_LOG_LINES} by default, ${MAX_LOG_LINES} at most), and fewer when they are long (ruling 677: a page's lines come to at most 44,000 bytes, kept from the end the cursor reads from), so read \`page\` to see where you are: it reports whether older or newer lines exist and hands you the exact argument for the next call. \`run.logLines\` is the run's total.`,
       {
         runId: z
           .string()
@@ -510,14 +557,21 @@ export function buildControllerOpsMcp(deps: ControllerOpsDeps): ControllerOpsMcp
             page = runLogPage(db, row, { since: args.since, forwardLimit: limit }).lines;
           }
 
+          // Ruling 677: and to what a reply carries. The lines are shaped as
+          // the reply prints them first, so the measure is of the reply.
+          const lines = linesThatFit(
+            page.map((line) => ({ seq: line.seq, at: line.occurredAt, display: line.display })),
+            args.since === undefined ? "newest" : "oldest",
+          );
+
           // Page position, computed against the RUN's real bounds. `runLogPage`'s
           // own headSeq/oldestSeq/hasMore are page-local cursors for a stateful
           // console (headSeq is this page's last line, hasMore means "older
           // lines exist"), and a model with no second source reads them as facts
           // about the run — so they are not relayed at all.
           const stats = runLineStats(db, args.runId);
-          const firstSeq = page.length ? page[0]!.seq : null;
-          const lastSeq = page.length ? page[page.length - 1]!.seq : null;
+          const firstSeq = lines.length ? lines[0]!.seq : null;
+          const lastSeq = lines.length ? lines[lines.length - 1]!.seq : null;
           // C03-OC2 (pass 32): an EMPTY page is a cursor that overshot, and
           // the flags still have to tell the truth about the RUN. A `since`
           // past the end means every logged line is older than the cursor; a
@@ -525,8 +579,8 @@ export function buildControllerOpsMcp(deps: ControllerOpsDeps): ControllerOpsMcp
           // Answering `olderExist: false` there told a model "nothing older
           // exists" about a run with thousands of lines, and handed it no
           // cursor to recover with.
-          const overshotForward = page.length === 0 && stats.count > 0 && args.since !== undefined;
-          const overshotBackward = page.length === 0 && stats.count > 0 && args.before !== undefined;
+          const overshotForward = lines.length === 0 && stats.count > 0 && args.since !== undefined;
+          const overshotBackward = lines.length === 0 && stats.count > 0 && args.before !== undefined;
           const olderExist =
             firstSeq !== null ? firstSeq > stats.minSeq : overshotForward;
           const newerExist =
@@ -537,7 +591,7 @@ export function buildControllerOpsMcp(deps: ControllerOpsDeps): ControllerOpsMcp
           auditRead("read_run_log", row.id, {
             project: row.project_slug,
             task: row.task_key,
-            lines: page.length,
+            lines: lines.length,
           });
           return json({
             run: {
@@ -568,11 +622,7 @@ export function buildControllerOpsMcp(deps: ControllerOpsDeps): ControllerOpsMcp
                 newer: newerExist ? { since: newerCursor } : null,
               },
             },
-            lines: page.map((line) => ({
-              seq: line.seq,
-              at: line.occurredAt,
-              display: line.display,
-            })),
+            lines,
           });
         },
       ),
@@ -583,15 +633,16 @@ export function buildControllerOpsMcp(deps: ControllerOpsDeps): ControllerOpsMcp
   add(
     tool(
       "read_store_doc",
-      "Read one text document out of a knowledge base or skill folder in the org store. Org admins only, like the store browser itself. Give the resource kind and id, then the file path as its segments, e.g. [\"notes\", \"api.md\"].",
+      "Read one text document out of a knowledge base or skill folder in the org store. Org admins only, like the store browser itself. Give the resource kind and id, then the file path as its segments, e.g. [\"notes\", \"api.md\"]. Ruling 677: a read returns one page of at most 32,000 bytes; `truncated` is true while more follows, `nextOffset` is the `offset` that reads on, and `characters` is the document's length.",
       {
         kind: z.enum(["kb", "skill"]).describe("Which store the document lives in."),
         id: z.string().describe("The knowledge base or skill id."),
         path: z
           .array(z.string())
           .describe("Path segments inside the folder, file name last."),
+        offset: z.number().int().min(0).optional().describe(KB_DOC_OFFSET_DESCRIPTION),
       },
-      runWith((args: { kind: "kb" | "skill"; id: string; path: string[] }) => {
+      runWith((args: { kind: "kb" | "skill"; id: string; path: string[]; offset?: number }) => {
         requireOrgAdmin("read store documents");
         const target = resolveStoreTarget(db, args.kind, args.id, { dataRoot });
         if (!target) throw AppError.notFound("That resource no longer exists.");
@@ -610,18 +661,36 @@ export function buildControllerOpsMcp(deps: ControllerOpsDeps): ControllerOpsMcp
               "ask an agent on a task with a checkout.",
           );
         }
+        // Ruling 677: one page at a time, like every other document read. It
+        // returned up to 256 KB in one reply, which no turn receives: a skill
+        // or a document past about 60 KB could not be read at all.
+        const start = args.offset ?? 0;
+        if (start > 0 && start >= doc.text.length) {
+          throw AppError.validation(
+            `\`${args.path.join("/")}\` reads as ${doc.text.length.toLocaleString("en-US")} characters; ` +
+              `offset ${start.toLocaleString("en-US")} is past its end.`,
+          );
+        }
+        const end = pageEnd(doc.text, start);
+        const more = end < doc.text.length;
         auditRead("read_store_doc", `${target.kind}/${target.id}`, {
           path: args.path.join("/"),
-          truncated: doc.truncated,
+          truncated: doc.truncated || more,
         });
-        return json({
+        const page: StoreDocPage = {
           resource: { kind: target.kind, id: target.id, name: target.name },
           path: args.path,
           // Reported, never hidden: a clipped document that reads as complete
-          // is how a model states a half-read file as fact.
-          truncated: doc.truncated,
-          text: doc.text,
-        });
+          // is how a model states a half-read file as fact. True while a page
+          // follows this one, and on the last page of a document longer than
+          // this reader takes.
+          truncated: doc.truncated || more,
+          characters: doc.text.length,
+          text: doc.text.slice(start, end),
+        };
+        if (start > 0) page.offset = start;
+        if (more) page.nextOffset = end;
+        return json(page);
       }),
     ),
     "read_store_doc",

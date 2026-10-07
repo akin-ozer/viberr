@@ -5,9 +5,12 @@
  */
 
 import { lstatSync, unlinkSync } from "node:fs";
+import path from "node:path";
+import { storedFileName, storedNameAmong } from "~/server/files/file-store-root.server";
 import {
   checkAttachmentBatch,
   checkAttachmentUpload,
+  listTaskAttachmentNames,
   resolveTaskAttachment,
   withAttachmentClaims,
   writeTaskAttachment,
@@ -601,9 +604,11 @@ export async function attachTaskFile(
   // a review to a deliverer's saved files by WHEN they were saved, not by
   // their bytes), so a person's upload never overwrites one: the approval
   // would stand on content no reviewer read. Their own files they may replace.
-  const name = input.name.trim();
+  // Ruling 675: compared composed, as the store resolves the name, so the
+  // same name sent in the other Unicode form is still the agent's file.
+  const name = storedFileName(input.name.trim());
   const agentSaved = existing.parsed.timeline.some(
-    (e) => e.actor.kind === "agent" && (e.attachments ?? []).includes(name),
+    (e) => e.actor.kind === "agent" && (e.attachments ?? []).some((held) => storedFileName(held) === name),
   );
   // Ruling 558: the name is held from before the file lands until the note
   // claims it, so a run completing meanwhile never takes it as its own, and a
@@ -692,9 +697,17 @@ export async function removeTaskAttachment(
     throw missing();
   }
   const reason = input.reason?.trim() || null;
+  // Ruling 675: a claim is this file's when it names it as the store finds it,
+  // in either Unicode form, so no tile is left that opens nothing. A folder
+  // that holds both forms as two files keeps the other one's claims.
+  const stored = path.basename(abs);
+  const held = [...new Set([...listTaskAttachmentNames(input.projectSlug, input.taskKey, ctx.dataRoot), stored])];
+  const claimsIt = (claim: string) => storedNameAmong(held, claim) === stored;
   await updateTaskFile(taskRef(ctx, input.projectSlug, input.taskKey), (parsed) => {
     for (const event of parsed.timeline) {
-      if (event.attachments?.includes(name)) event.attachments = event.attachments.filter((n) => n !== name);
+      if (event.attachments?.some(claimsIt)) {
+        event.attachments = event.attachments.filter((claim) => !claimsIt(claim));
+      }
     }
     parsed.timeline.unshift({
       occurredAt: new Date().toISOString(),

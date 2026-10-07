@@ -27,7 +27,8 @@ import {
 import path from "node:path";
 import { isGateLogName } from "~/shared/project-gates";
 import {
-  resolveStoreSegment,
+  resolveStoredSegment,
+  storedFileName,
   taskAttachmentsDir,
 } from "./file-store-root.server";
 import { resolveKeptDeliveryFile } from "./kept-deliveries.server";
@@ -374,14 +375,15 @@ export function findStrayAttachmentsFolder(
 }
 
 /** Absolute path of one attachment, traversal-contained. Throws on an unsafe
- *  name (the route maps that to 404). */
+ *  name (the route maps that to 404). Ruling 675: a name typed in another
+ *  Unicode form than the file was stored in finds that file. */
 export function resolveTaskAttachment(
   slug: string,
   key: string,
   name: string,
   dataRoot?: string,
 ): string {
-  return resolveStoreSegment(taskAttachmentsDir(slug, key, dataRoot), name);
+  return resolveStoredSegment(taskAttachmentsDir(slug, key, dataRoot), name);
 }
 
 /** True when the task's attachments store holds a file by this name. An
@@ -425,15 +427,30 @@ export interface WrittenAttachment {
 }
 
 /**
+ * Ruling 675: the `content-disposition` of a served file, whatever its name
+ * holds. A header value is Latin-1, so a name with a letter outside it made
+ * `new Response` throw: the task's own input on AWSC-117, a PDF named in
+ * Turkish, answered 500 to the person who attached it. The quoted name is the
+ * ASCII fallback and `filename*` carries the real one (RFC 6266).
+ */
+export function attachmentDisposition(name: string, inline: boolean): string {
+  const ascii = name.replace(/[^\x20-\x7e]/g, "_").replace(/["\\]/g, "_");
+  const encoded = encodeURIComponent(name).replace(/['()*]/g, (c) => `%${c.charCodeAt(0).toString(16).toUpperCase()}`);
+  return `${inline ? "inline" : "attachment"}; filename="${ascii}"; filename*=UTF-8''${encoded}`;
+}
+
+/**
  * The refusals every person's upload meets, before anything is written: an
  * empty or dot-prefixed name the store scanner would then hide, a name that
  * is not one path segment, and anything over {@link MAX_UPLOAD_BYTES}. Ruling
- * 574: any kind is stored; the serving route decides what renders inline. Returns the name as it will be stored. Ruling 533:
+ * 574: any kind is stored; the serving route decides what renders inline. Returns the name as it will be stored: trimmed,
+ * and composed (ruling 675), so the name a Mac sends decomposed is stored the
+ * way every reader types it. Ruling 533:
  * a task filed with its input checks every file here before its key is
  * allocated, so a refused file costs no key.
  */
 export function checkAttachmentUpload(name: string, byteLength: number): string {
-  const cleaned = name.trim();
+  const cleaned = storedFileName(name.trim());
   if (!cleaned) {
     throw AppError.validation("Give the file a name.");
   }
@@ -603,11 +620,14 @@ function landTaskAttachment(
   dataRoot: string | undefined,
   refuseReplace: string | null,
 ): LandedAttachment {
-  const cleaned = checkAttachmentUpload(name, data.byteLength);
+  const checked = checkAttachmentUpload(name, data.byteLength);
   const dir = taskAttachmentsDir(slug, key, dataRoot);
   // The SAME traversal-refusing resolver the serving route uses, so a name
-  // this accepts is a name that route can serve and vice versa.
-  const abs = resolveStoreSegment(dir, cleaned);
+  // this accepts is a name that route can serve and vice versa. Ruling 675: a
+  // file already here under the same name in another Unicode form is the file
+  // this replaces, never a second one no reader could tell from it.
+  const abs = resolveStoredSegment(dir, checked);
+  const cleaned = path.basename(abs);
   const replaced = existsSync(abs);
   if (replaced && refuseReplace) throw AppError.validation(refuseReplace);
   // Ruling 460: the same directory agents drop evidence into, as their users.
@@ -688,6 +708,63 @@ export interface TaskAttachmentRead {
   offset?: number;
   /** Ruling 551: the offset the next page starts at, on a truncated read. */
   nextOffset?: number;
+  /** Ruling 676: what this text leaves out of the file, when it embeds
+   *  files a reader takes nothing from. Offsets count the text as returned. */
+  leftOut?: string;
+}
+
+/** Ruling 676: a text with its embedded files left out, and the sentence that
+ *  says so; `leftOut` is null when it embedded none. */
+interface EmbeddedFilesLeftOut {
+  text: string;
+  leftOut: string | null;
+}
+
+/** Ruling 676: an embedded file shorter than this stays in the text: a
+ *  favicon or a one-pixel spacer costs a reader nothing. */
+const EMBEDDED_FILE_MIN_CHARS = 256;
+
+/**
+ * A `data:` URI carrying a file in base64: its head, then the payload. The
+ * payload is a counted run and then a starred one: a single `{256,}` run
+ * overflows the engine's stack on a payload past about 5.5 million
+ * characters, one embedded 4 MB picture, and the file then reads as an error
+ * at every offset.
+ */
+const EMBEDDED_FILE_RE = new RegExp(
+  `(data:[\\w.+-]*(?:\\/[\\w.+-]+)?(?:;[\\w.+-]+=[\\w.+-]*)*;base64,)([A-Za-z0-9+/]{${EMBEDDED_FILE_MIN_CHARS}}[A-Za-z0-9+/]*={0,2})`,
+  "g",
+);
+
+/**
+ * Ruling 676: a text file as a reader takes it, with the files embedded in it
+ * named instead of spelled out.
+ *
+ * A self-contained HTML page carries its images as `data:` URIs. Live on
+ * AWSC-117 the controller, asked to make the report that task delivered the
+ * board's template, opened the report's 606 KB source twice: both times its
+ * first page was 32,000 characters of a PNG in base64, and the styles and
+ * structure it opened the file for lay eighteen pages further on. Base64
+ * tells a reader nothing, so each embedded file is replaced where it stands
+ * by its length, and the read says how many were left out. The file is
+ * untouched: a run's shell still reads its bytes.
+ */
+export function withoutEmbeddedFiles(text: string): EmbeddedFilesLeftOut {
+  let files = 0;
+  let chars = 0;
+  const kept = text.replace(EMBEDDED_FILE_RE, (_whole, head: string, payload: string) => {
+    files += 1;
+    chars += payload.length;
+    return `${head}[${payload.length.toLocaleString("en-US")} base64 characters left out]`;
+  });
+  if (files === 0) return { text, leftOut: null };
+  return {
+    text: kept,
+    leftOut:
+      `${files === 1 ? "1 embedded file is" : `${files.toLocaleString("en-US")} embedded files are`} left out of this text ` +
+      `(${chars.toLocaleString("en-US")} base64 characters in all), each marked where it stands. ` +
+      "Offsets count the text as it is returned here; the file on disk is whole.",
+  };
 }
 
 /**
@@ -895,9 +972,11 @@ function decodeAttachment(name: string, ext: string, bytes: Buffer, offset: numb
   ) {
     return binaryFile(name, ext, bytes.length, where);
   }
-  const raw = bytes.toString("utf8");
+  const { text: raw, leftOut } = withoutEmbeddedFiles(bytes.toString("utf8"));
   if (offset > 0 && offset >= raw.length) return pastTheEnd(name, raw.length, offset);
-  return { kind: "text", name, bytes: bytes.length, ...textPage(raw, false, offset) };
+  const read: AttachmentContent = { kind: "text", name, bytes: bytes.length, ...textPage(raw, false, offset) };
+  if (leftOut) read.leftOut = leftOut;
+  return read;
 }
 
 /**

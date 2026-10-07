@@ -40,6 +40,55 @@ import { toError } from "~/shared/errors";
 /** Shared character budget across ALL of an agent's declared skills. */
 export const SKILL_INJECTION_BUDGET = 24_000;
 
+/**
+ * Ruling 679: how many characters of its skills a controller turn is given.
+ *
+ * An agent's skills share 24,000 characters when they arrive as prompt text.
+ * The controller's own skill is the guide this repository ships, which gains
+ * a section with most rulings that teach it something: ruling 672's took its
+ * body to 25,766 characters, and from that deploy every turn read the guide
+ * with its end cut off ("Answer style", and that a run is never claimed
+ * started unless the tool said so), told only by a line at the foot of the
+ * text. The guide is the controller's doctrine, so its turn is given room for
+ * it whole and for what an org admin attaches beside it; a test holds the
+ * shipped guide inside this.
+ */
+export const CONTROLLER_SKILL_BUDGET = 40_000;
+
+/** The controller's own guide, the one skill it holds unless its stored list
+ *  leaves it out. It draws from the controller's budget before any skill an
+ *  org admin attached beside it. */
+export const CONTROLLER_GUIDE_SKILL = "controller-guide";
+
+/**
+ * Ruling 679: the order a controller turn draws its skills in, from the list
+ * as its turn sorts it: the guide first, whatever its name sorts behind, so a
+ * skill an org admin attached is never what cuts the doctrine short. One
+ * home, so the turn and the size a save reports cannot disagree.
+ */
+export function controllerSkillDrawOrder(names: readonly string[]): string[] {
+  return [
+    ...names.filter((name) => name === CONTROLLER_GUIDE_SKILL),
+    ...names.filter((name) => name !== CONTROLLER_GUIDE_SKILL),
+  ];
+}
+
+/**
+ * Ruling 679: how many characters of a controller turn's budget are left for
+ * `name` when its turn to draw comes: the budget, less the bodies of the
+ * skills drawn before it. Null when `names`, the controller's own list, does
+ * not hold it.
+ */
+export function controllerSkillRoom(names: readonly string[], name: string, dataRoot?: string): number | null {
+  if (!names.includes(name)) return null;
+  let room = CONTROLLER_SKILL_BUDGET;
+  for (const drawn of controllerSkillDrawOrder(names)) {
+    if (drawn === name) break;
+    room = Math.max(0, room - (skillBodyOverBudget(drawn, dataRoot)?.chars ?? 0));
+  }
+  return room;
+}
+
 /** A declared skill that reached the run with less (or none) of its content. */
 export interface UnresolvedSkillGrant {
   name: string;
@@ -141,6 +190,8 @@ export function readSkillBodyDetailed(
   name: string,
   dataRoot?: string,
   budgetChars: number = SKILL_INJECTION_BUDGET,
+  /** The whole budget this skill shares, for the sentence that names it. */
+  sharedBudget: number = SKILL_INJECTION_BUDGET,
 ): SkillInjection {
   let resolved: ReturnType<typeof resolveContainedSkillFile>;
   try {
@@ -192,7 +243,7 @@ export function readSkillBodyDetailed(
       body: `_(skill omitted entirely: SKILL.md is ${trimmed.length} chars and none of the shared skill budget was left)_`,
       unresolved: {
         name,
-        reason: `it did not fit the shared ${SKILL_INJECTION_BUDGET}-char skill budget; none of its content reached this run`,
+        reason: `it did not fit the shared ${sharedBudget}-char skill budget; none of its content reached this run`,
       },
     };
   }
@@ -204,6 +255,41 @@ export function readSkillBodyDetailed(
   return {
     body: `${trimmed.slice(0, budgetChars)}\n\n_(skill truncated: SKILL.md is ${trimmed.length} chars and exceeds the ${budgetChars}-char injection budget)_`,
   };
+}
+
+/** A skill body's length, and how much of it is past what its holder is given. */
+export interface SkillBodySize {
+  chars: number;
+  over: number;
+}
+
+/**
+ * Ruling 679: how much of a skill a run handed its skills as prompt text
+ * cannot be given: the characters of its SKILL.md body past
+ * {@link SKILL_INJECTION_BUDGET}, 0 when it fits, null when it has no readable
+ * body. An agent that holds other skills ahead of this one is given less.
+ *
+ * A clipped skill says so to the run that received it and to a server log, and
+ * to nobody who could shorten it. Live on the AWS calculator board the
+ * controller, told to carry each round's rules into the agents' skills, grew
+ * the Estimate Judge's to 31,289 characters and the Cloud Solutions
+ * Architect's to 30,575; every save answered "updated", and the last 7,289 and
+ * 6,575 characters of them reached no run, the newest rules among them.
+ */
+export function skillBodyOverBudget(name: string, dataRoot?: string): SkillBodySize | null {
+  let resolved: ReturnType<typeof resolveContainedSkillFile>;
+  try {
+    resolved = resolveContainedSkillFile(name, dataRoot);
+  } catch {
+    return null;
+  }
+  if ("reason" in resolved) return null;
+  try {
+    const chars = splitFrontmatter(readFileSync(resolved.file, "utf8")).body.trim().length;
+    return { chars, over: Math.max(0, chars - SKILL_INJECTION_BUDGET) };
+  } catch {
+    return null;
+  }
 }
 
 export interface SkillInjectionSet {
@@ -228,7 +314,7 @@ export function readSkillBodies(
   const unresolved: UnresolvedSkillGrant[] = [];
   let budget = budgetChars;
   for (const name of names) {
-    const injection = readSkillBodyDetailed(name, dataRoot, Math.max(0, budget));
+    const injection = readSkillBodyDetailed(name, dataRoot, Math.max(0, budget), budgetChars);
     if (injection.unresolved) unresolved.push(injection.unresolved);
     if (injection.body) {
       parts.push({ name, body: injection.body });

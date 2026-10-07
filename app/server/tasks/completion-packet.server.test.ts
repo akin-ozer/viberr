@@ -1,3 +1,5 @@
+import { writeFileSync } from "node:fs";
+import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { createTestDbContext, type TestDbContext } from "../../../test-support/test-db";
 import {
@@ -7,6 +9,7 @@ import {
   writeTask,
   type TestStore,
 } from "../../../test-support/test-store";
+import { taskAttachmentsDir } from "~/server/files/file-store-root.server";
 import { keepDelivery } from "~/server/files/kept-deliveries.server";
 import { readProjectFile } from "~/server/files/project-writer.server";
 import { writeTaskAttachment } from "~/server/files/task-attachments.server";
@@ -395,6 +398,31 @@ describe("ruling 668: the packet names the result of a task delivered as files",
     expect(result.outcome).toBe("noop");
     expect(result.message).toContain(sentence);
     expect(parsed().frontmatter.completionPacket).toBeUndefined();
+  });
+
+  it("ruling 675: names a result stored decomposed by its composed name, and keeps the file's own spelling", async () => {
+    // A deliverer's script names its output after a decomposed input, so the
+    // result is stored decomposed and the operator types what it reads.
+    // CANARY: match the typed name byte for byte and the packet is refused as
+    // "X is not among the files VIB-1 delivered. The delivered files: X.".
+    const composed = "Müşteri Teklifi.pdf";
+    const decomposed = composed.normalize("NFD");
+    expect(decomposed).not.toBe(composed);
+    seed({ workRevision: null, branch: null, github: null, deliveredAt: STAMP });
+    attach("summary.md");
+    // As a run's shell writes it: under the name it was given, not composed.
+    writeFileSync(path.join(taskAttachmentsDir(store.slug, "VIB-1", store.dataRoot), decomposed), "%PDF-1.4");
+    keepDelivery(store.slug, "VIB-1", STAMP, [decomposed, "summary.md"], store.dataRoot);
+    const result = await write({
+      summary: "The proposal is ready.",
+      // Both spellings of one file are one result.
+      files: [{ name: composed, caption: "The proposal" }, { name: decomposed }, { name: "summary.md" }],
+    });
+    expect(result.outcome).toBe("done");
+    expect(parsed().frontmatter.completionPacket!.files).toEqual([
+      { name: decomposed, caption: "The proposal" },
+      { name: "summary.md", caption: "" },
+    ]);
   });
 
   it("tells the operator which files it may name: the kept delivery's, or the task's when none was kept", () => {

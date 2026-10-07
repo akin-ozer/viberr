@@ -1,6 +1,7 @@
 import type { DatabaseSync } from "node:sqlite";
 import { z } from "zod";
 import { AppError } from "~/server/errors/app-error.server";
+import { storedFileName, storedNameAmong } from "~/server/files/file-store-root.server";
 import { isOrgAdmin } from "~/server/auth/project-authority.server";
 import { publishSseEvent } from "~/server/events/sse-broker.server";
 import { newId } from "~/shared/ids/new-id.server";
@@ -622,7 +623,9 @@ function storeMessageFiles(
   const taken = new Set(
     (db.prepare(`SELECT name FROM controller_message_files WHERE conversation_id = ?`).all(conversationId) as {
       name: string;
-    }[]).map((f) => f.name.toLowerCase()),
+      // Ruling 675: by composed name, so a file sent before names were stored
+      // composed and one sent now never read as the same name twice.
+    }[]).map((f) => storedFileName(f.name).toLowerCase()),
   );
   const insert = db.prepare(
     `INSERT INTO controller_message_files (id, message_id, conversation_id, name, bytes, data, created_at)
@@ -680,12 +683,21 @@ export function findMessageFile(
   conversationId: string,
   name: string,
 ): StoredMessageFile | null {
-  const row = db
-    .prepare(
-      `SELECT id, message_id, conversation_id, name, data FROM controller_message_files
-        WHERE conversation_id = ? AND name = ? COLLATE NOCASE`,
-    )
-    .get(conversationId, name.trim());
+  const named = (wanted: string) =>
+    db
+      .prepare(
+        `SELECT id, message_id, conversation_id, name, data FROM controller_message_files
+          WHERE conversation_id = ? AND name = ? COLLATE NOCASE`,
+      )
+      .get(conversationId, wanted);
+  const wanted = name.trim();
+  let row = named(wanted);
+  if (!row) {
+    // Ruling 675: a file sent before names were stored composed is found by
+    // the name as a reader types it.
+    const stored = storedNameAmong(listConversationFileNames(db, conversationId), wanted);
+    if (stored !== null) row = named(stored);
+  }
   return row ? storedFileSchema.parse(row) : null;
 }
 
