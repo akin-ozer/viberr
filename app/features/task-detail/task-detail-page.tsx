@@ -918,6 +918,11 @@ export function TaskDetailPage({
           data-targeted={regionMark === TASK_DECISION_ANCHOR || undefined}
         >
           <DecisionPacket
+            // F10-09: a packet can be replaced while its card is open, and the
+            // revalidation hands the page the new one in place. Keyed on its
+            // id, the new card opens fresh instead of keeping the old one's
+            // choice, note and open ask-first step.
+            key={task.packet.id}
             packet={task.packet}
             busy={resolveBusy}
             completion={acceptanceDecision ? completionPacket : null}

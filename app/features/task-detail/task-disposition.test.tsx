@@ -1,6 +1,7 @@
 // @vitest-environment jsdom
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { act, cleanup, fireEvent, render, waitFor } from "@testing-library/react";
+import { useState } from "react";
 import { createRoutesStub } from "react-router";
 import type {
   DeployedSpecialistView,
@@ -98,44 +99,50 @@ function renderPage(props: {
   filesDeliveredAt?: string | null;
 }) {
   const submitted: Record<string, string>[] = [];
+  // A revalidation that hands the mounted page a new read of the task.
+  let revalidateWith: (task: Partial<TaskDetail>) => void = () => {};
   const Stub = createRoutesStub([
     {
       path: "/",
-      Component: () => (
-        <ToastProvider>
-          <TaskDetailPage
-            task={detail(props.task ?? {})}
-            runtime={props.runtime ?? []}
-            deployedSpecialists={props.deployedSpecialists ?? []}
-            operatorBackend="claude"
-            operatorAutonomy="supervised"
-            runPrincipal={CONNECTED_PRINCIPAL}
-            liveAgentRuns={props.liveAgentRuns ?? []}
-            timelineHasMore={false}
-            timelineRemaining={0}
-            timelineNextLimit={50}
-            tlDefault="all"
-            members={[
-              { userId: "u-arda", role: "admin", user: { name: "Arda Kaya", initials: "AK", tone: "" } },
-              { userId: "u-selin", role: "contributor", user: { name: "Selin Aksoy", initials: "SA", tone: "" } },
-            ]}
-            me={{ id: props.meId ?? "u-arda", name: "Arda Kaya" }}
-            myRole={props.myRole ?? "admin"}
-            mentionables={{ agents: [], users: [], reserved: [] }}
-            recommendations={props.recommendations ?? []}
-            schedules={props.schedules ?? []}
-            archived={props.archived ?? false}
-            acceptance={{ ...ACCEPTANCE, ...props.acceptance }}
-            githubHost="https://github.com"
-            workRevisionSha={props.workRevisionSha ?? null}
-            canDeliver={props.canDeliver ?? false}
-            baseBehindBy={props.baseBehindBy ?? null}
-            changesUrl={props.changesUrl ?? null}
-            completion={props.completion ?? null}
-            filesDeliveredAt={props.filesDeliveredAt ?? null}
-          />
-        </ToastProvider>
-      ),
+      Component: function Page() {
+        const [task, setTask] = useState(props.task ?? {});
+        revalidateWith = setTask;
+        return (
+          <ToastProvider>
+            <TaskDetailPage
+              task={detail(task)}
+              runtime={props.runtime ?? []}
+              deployedSpecialists={props.deployedSpecialists ?? []}
+              operatorBackend="claude"
+              operatorAutonomy="supervised"
+              runPrincipal={CONNECTED_PRINCIPAL}
+              liveAgentRuns={props.liveAgentRuns ?? []}
+              timelineHasMore={false}
+              timelineRemaining={0}
+              timelineNextLimit={50}
+              tlDefault="all"
+              members={[
+                { userId: "u-arda", role: "admin", user: { name: "Arda Kaya", initials: "AK", tone: "" } },
+                { userId: "u-selin", role: "contributor", user: { name: "Selin Aksoy", initials: "SA", tone: "" } },
+              ]}
+              me={{ id: props.meId ?? "u-arda", name: "Arda Kaya" }}
+              myRole={props.myRole ?? "admin"}
+              mentionables={{ agents: [], users: [], reserved: [] }}
+              recommendations={props.recommendations ?? []}
+              schedules={props.schedules ?? []}
+              archived={props.archived ?? false}
+              acceptance={{ ...ACCEPTANCE, ...props.acceptance }}
+              githubHost="https://github.com"
+              workRevisionSha={props.workRevisionSha ?? null}
+              canDeliver={props.canDeliver ?? false}
+              baseBehindBy={props.baseBehindBy ?? null}
+              changesUrl={props.changesUrl ?? null}
+              completion={props.completion ?? null}
+              filesDeliveredAt={props.filesDeliveredAt ?? null}
+            />
+          </ToastProvider>
+        );
+      },
       action: async ({ request }) => {
         const fd = await request.formData();
         const row: Record<string, string> = {};
@@ -147,7 +154,8 @@ function renderPage(props: {
     },
   ]);
   const utils = render(<Stub initialEntries={[props.entry ?? "/"]} />);
-  return { ...utils, submitted };
+  const revalidate = (task: Partial<TaskDetail>) => act(() => revalidateWith(task));
+  return { ...utils, submitted, revalidate };
 }
 
 /**
@@ -368,6 +376,55 @@ describe("ruling 529: a question asked while an agent works reads as not blockin
       );
       unmount();
     }
+  });
+});
+
+/**
+ * F10-09: the operator can replace an open packet, and the revalidation that
+ * follows hands the mounted page the new packet in place of the old one.
+ */
+describe("F10-09: a replacement packet opens as a fresh card", () => {
+  const first: PacketRender = {
+    id: "pkt-first",
+    type: "input",
+    kind: "Decision required",
+    from: "Operator",
+    title: "Which estimate shape should the research recommend?",
+    body: "",
+    observations: [],
+    options: [
+      { kind: "request_edit", t: "Adopt B", d: "", rec: true },
+      { kind: "request_edit", t: "Adopt A", d: "", rec: false },
+    ],
+  };
+  const replacement: PacketRender = {
+    ...first,
+    id: "pkt-replacement",
+    title: "Which backend should the follow-up run on?",
+    options: [
+      { kind: "request_edit", t: "Keep Claude", d: "", rec: true },
+      { kind: "request_edit", t: "Switch to Codex", d: "", rec: false },
+    ],
+  };
+  const checked = (container: HTMLElement) =>
+    Array.from(container.querySelectorAll('.detail-packet [role="radio"]'))
+      .filter((o) => o.getAttribute("aria-checked") === "true")
+      .map((o) => o.textContent);
+
+  it("keeps nothing the person chose or typed on the packet it replaced", () => {
+    // CANARY: drop the `key` on the page's DecisionPacket and the replacement
+    // opens with the old card's second choice selected (here "Switch to
+    // Codex", which nobody picked) and its note typed.
+    const { container, revalidate } = renderPage({ task: { packet: first } });
+    fireEvent.click(findButton(container, "Adopt A")!);
+    const note = container.querySelector<HTMLTextAreaElement>("#pkt-note")!;
+    fireEvent.change(note, { target: { value: "One estimate per service." } });
+    expect(checked(container)).toEqual([expect.stringContaining("Adopt A")]);
+
+    revalidate({ packet: replacement });
+    expect(container.textContent).toContain(replacement.title);
+    expect(checked(container)).toEqual([expect.stringContaining("Keep Claude")]);
+    expect(container.querySelector<HTMLTextAreaElement>("#pkt-note")!.value).toBe("");
   });
 });
 
