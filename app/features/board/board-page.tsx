@@ -1,7 +1,6 @@
 import {
   Fragment,
   memo,
-  useCallback,
   useEffect,
   useLayoutEffect,
   useMemo,
@@ -9,20 +8,16 @@ import {
   useState,
   type CSSProperties,
   type KeyboardEvent as ReactKeyboardEvent,
+  type ReactElement,
 } from "react";
 import {
   Link,
   useFetcher,
   useParams,
-  useSearchParams,
 } from "react-router";
 import {
   DragDropProvider,
   useDroppable,
-  type DragEndEvent,
-  type DragMoveEvent,
-  type DragOverEvent,
-  type DragStartEvent,
 } from "@dnd-kit/react";
 import { useSortable } from "@dnd-kit/react/sortable";
 import { OptimisticSortingPlugin } from "@dnd-kit/dom/sortable";
@@ -30,22 +25,17 @@ import {
   Accessibility,
   defaultPreset,
   Feedback,
-  type DragDropManager,
   type DropAnimationFunction,
 } from "@dnd-kit/dom";
 import { DRAG_SENSORS } from "~/ui/drag-sensors";
-import { laneAt, resolveBoardDrop, slotInLane, type LaneBlock } from "./board-dnd";
+import { resolveBoardDrop } from "./board-dnd";
 import { FiledFiles } from "./filed-files";
 import { FILING_BATCH } from "~/shared/attachment-kinds";
 import { addPickedFiles, filesFromPaste } from "~/ui/picked-files";
 import { cardProblems, cardStatus, PROBLEM_CAP } from "./card-status";
 import type { BoardCard } from "./board-card";
 import {
-  archivedTaskBlockedReason,
-  closedPrBlockedReason,
   coercePriority,
-  conflictingPrBlockedReason,
-  unpushedRevisionBlockedReason,
   PRIORITY_VALUES,
   type TaskPriority,
 } from "~/schemas/task-file.schema";
@@ -55,35 +45,42 @@ import { EPIC_STATUS_LABEL, isEpicOpen } from "~/shared/task-refs";
 import { createVelocityTracker, springFrames, springProgress, type Spring } from "~/ui/spring";
 import { useCsrfToken } from "~/ui/csrf-input";
 import { DatePicker } from "~/ui/date-picker";
-import { Icon, type IconName } from "~/ui/icon";
+import { Icon } from "~/ui/icon";
 import { LabelInput } from "~/ui/label-input";
 import { LocalDayDotTime } from "~/ui/local-time";
 import { AgentBadge, AgentGlyph } from "~/ui/identity";
 import { connectionPill } from "~/features/github/github-pills";
 import type { RepoAccessResult } from "~/server/github/repo-access-check.server";
-import { AcceptConfirm } from "~/features/task-detail/accept-confirm";
-import { mergeCollisions, type PrOverlap } from "~/shared/pr-overlaps";
-import { MoveBackConfirm } from "~/features/task-detail/move-back-confirm";
-import { setDisclosure, type AcceptanceDisclosure } from "~/shared/acceptance-disclosure";
 import { stageLabel } from "~/shared/workflow/stage-label";
-import { countLabel, pluralNoun } from "~/shared/text/plural";
+import { countLabel } from "~/shared/text/plural";
 import { StageMenu } from "~/ui/stage-menu";
 import { useToast } from "~/ui/toast";
 import { useDialog } from "~/ui/use-dialog";
-import { useFetcherResult } from "~/ui/use-fetcher-result";
 import { useStableRows } from "~/ui/use-stable-rows";
 import {
-  boardEmptyCopy,
   countArchived,
   isArchived,
   EPIC_FILTER_NONE,
-  isBoardFilterId,
-  matchesBoardFilter,
-  matchesEpicFilter,
-  matchesLabelFilter,
-  matchesSearch,
   type BoardFilterId,
 } from "./board-filters";
+import {
+  useBoardDrag,
+  useBoardKeyboard,
+  useBoardMoves,
+  useBoardQuery,
+  useMoveConfirms,
+  useRescan,
+  useRescanAnswer,
+} from "./board-page-actions";
+import {
+  emptyCopyIn,
+  FILTERS,
+  isVirginBoard,
+  labelVocabulary,
+  newTaskEpic,
+  showsFilterBar,
+  visibleIn,
+} from "./board-page-derive";
 
 /**
  * Board view over the task projections. Stage transitions are governed
@@ -100,7 +97,13 @@ import {
  *     header count agrees with the columns, and one `Clear` chip resets both;
  *   - P13-D-10: failure toasts carry `kind: "error"`;
  *   - D19 (ruling R19-10): arrow-key traversal over the cards, on a roving tab
- *     stop, in both layouts — see `onCardKeyDown` in `BoardPage`.
+ *     stop, in both layouts — see `onCardKeyDown` in `useBoardKeyboard`
+ *     (board-page-actions.tsx).
+ *
+ * Ruling 689(e) split the page along the task-page recipe: its state and posts
+ * are hooks in `board-page-actions.tsx`, what it derives from its props and
+ * URL is `board-page-derive.ts`, and the acceptance ceremony is
+ * `board-accept-confirm.tsx`.
  */
 
 export interface BoardStage {
@@ -168,7 +171,8 @@ const BOARD_PLUGINS = defaultPreset.plugins.filter(
  *  the default UI range, so the flight stays quick. */
 const DROP_SPRING: Spring = { dampingRatio: 1, response: 0.3 };
 /** The pointer's velocity through the drag, read by the flight at release.
- *  One board drags at a time, so one tracker serves the module. */
+ *  One board drags at a time, so one tracker serves the module; the page hands
+ *  it to the drag that samples it (`useBoardDrag`). */
 const dragVelocity = createVelocityTracker();
 const boardDropAnimation: DropAnimationFunction = async ({ feedbackElement, placeholder }) => {
   // Only the card that was lifted flies. When the server's answer re-renders
@@ -508,7 +512,8 @@ const TaskCard = memo(function TaskCard({
   onNudgeTask: (taskKey: string, stageId: string, dir: -1 | 1) => void;
   canMoveUp: boolean;
   canMoveDown: boolean;
-  /** D19: this card holds the board's single tab stop (see `onCardKeyDown`). */
+  /** D19: this card holds the board's single tab stop (see `onCardKeyDown`,
+   *  board-page-actions.tsx). */
   roving: boolean;
 }) {
   const moveRef = useRovingStageMenu(roving);
@@ -553,10 +558,11 @@ const TaskCard = memo(function TaskCard({
       className={wrapCls.join(" ")}
       ref={ref}
       role="listitem"
-      /* The slot rule reads the lane's flow from the DOM (`laneBlocks`): this
-         names the card each block stands for. dnd-kit's placeholder — the hole
-         a lifted card leaves — is a clone of this element, so it carries the
-         key too and stands in the flow for the card. */
+      /* The slot rule reads the lane's flow from the DOM (`laneBlocks`,
+         board-page-actions.tsx): this names the card each block stands for.
+         dnd-kit's placeholder — the hole a lifted card leaves — is a clone of
+         this element, so it carries the key too and stands in the flow for
+         the card. */
       data-card-key={task.key}
     >
       <Link
@@ -639,21 +645,6 @@ function CardFace({ task }: { task: BoardTask }) {
  * board never commits a move client-side, so this is the request, not the
  * result (owner, 2026-09-08).
  */
-/** A lane's flow as drawn, top to bottom, for `slotInLane`: every `.card-wrap`
- *  in the column body except the lifted card itself, which follows the pointer
- *  (its hole — the placeholder dnd-kit leaves, `data-card-key` and all — stands
- *  in the flow for it). The drop preview and a landing preview carry no key. */
-function laneBlocks(body: Element): LaneBlock[] {
-  const blocks: LaneBlock[] = [];
-  for (const el of body.children) {
-    if (!(el instanceof HTMLElement) || !el.classList.contains("card-wrap")) continue;
-    if (el.hasAttribute("data-dnd-dragging")) continue;
-    const r = el.getBoundingClientRect();
-    blocks.push({ key: el.dataset.cardKey ?? null, top: r.top, bottom: r.bottom });
-  }
-  return blocks;
-}
-
 /** Where a move's landing preview stands in a lane drawn as `keys`: before the
  *  card the drop asked for — or at the lane's end once that card has left the
  *  lane, which is where the server appends the move then (`reorderTask`). */
@@ -676,6 +667,63 @@ function DropPreview({ task, landing = false }: { task: BoardTask; landing?: boo
       </div>
     </div>
   );
+}
+
+/**
+ * An empty lane's one child (ruling 689(e), split out of `Column`): the drop
+ * preview while a drag hovers the lane, else the landing of a move awaiting the
+ * server, else the empty copy — with, in a virgin board's entry lane, its call
+ * to action. `Column` renders it only while its lane draws no cards.
+ */
+function EmptyLane({
+  preview,
+  landing,
+  emptyCopy,
+  createCta,
+  isEntry,
+  canCreate,
+  onNew,
+}: {
+  /** The drop preview, while a drag hovers this lane. */
+  preview: ReactElement | null;
+  /** The landing preview of a move into this lane awaiting the server. */
+  landing: ReactElement | null;
+  emptyCopy: string;
+  createCta: boolean;
+  isEntry: boolean;
+  canCreate: boolean;
+  onNew: () => void;
+}) {
+  if (preview) return preview;
+  if (landing) return landing;
+  return (
+    <div className="empty">
+      {emptyCopy}
+      {/* Pass 30: the teaching moment gets its call to action IN the
+          empty lane (diagnose: headline + emphasized CTA), not only up
+          in the header. Virgin boards only — a busy board already has
+          two create affordances. */}
+      {createCta && isEntry && canCreate && (
+        <button
+          type="button"
+          className="btn primary sm empty-cta"
+          onClick={onNew}
+        >
+          <Icon name="plus" />
+          New task
+        </button>
+      )}
+    </div>
+  );
+}
+
+/** D19: a lane drawing cards is a list of them, named for its stage and
+ *  reachable by Tab; a lane drawing none is none of the three (the lane body's
+ *  comment in `Column` says why each). */
+function laneList(stageName: string, cardCount: number) {
+  return cardCount > 0
+    ? { role: "list", label: `${stageName} tasks`, tabIndex: 0 }
+    : { role: undefined, label: undefined, tabIndex: undefined };
 }
 
 function Column({
@@ -733,9 +781,9 @@ function Column({
   onNudgeTask: (taskKey: string, stageId: string, dir: -1 | 1) => void;
 }) {
   // The lane is a droppable for two reasons that are not its collisions: the
-  // slot rule (`refineSlot`) finds the lanes' live rectangles through dnd-kit's
-  // registry by this id, and `dragover` fires when the pointer crosses into an
-  // empty lane. Which droppable dnd-kit calls the target no longer decides
+  // slot rule (`refineSlot`, `useBoardDrag`) finds the lanes' live rectangles
+  // through dnd-kit's registry by this id, and `dragover` fires when the
+  // pointer crosses into an empty lane. Which droppable dnd-kit calls the target no longer decides
   // anything — the lane comes from the pointer (`laneAt`), the slot from the
   // lane's flow (`slotInLane`). Priority 1 (Low) keeps dnd-kit's own target
   // sensible: an over-card collision (Normal, 2) wins over its column.
@@ -775,6 +823,7 @@ function Column({
     for (const block of body.children) ro.observe(block);
     return () => ro.disconnect();
   }, [tasks, showPreview, beforeKey, landing]);
+  const list = laneList(stage.name, tasks.length);
   return (
     <section
       className={"column" + (dropTarget ? " drop-over" : "")}
@@ -819,34 +868,20 @@ function Column({
       <div
         ref={bodyRef}
         className={"col-body" + (overflows ? " overflows" : "")}
-        role={tasks.length > 0 ? "list" : undefined}
-        aria-label={tasks.length > 0 ? `${stage.name} tasks` : undefined}
-        tabIndex={tasks.length > 0 ? 0 : undefined}
+        role={list.role}
+        aria-label={list.label}
+        tabIndex={list.tabIndex}
       >
         {tasks.length === 0 ? (
-          showPreview ? (
-            preview
-          ) : landing ? (
-            landingEl
-          ) : (
-            <div className="empty">
-              {emptyCopy}
-              {/* Pass 30: the teaching moment gets its call to action IN the
-                  empty lane (diagnose: headline + emphasized CTA), not only up
-                  in the header. Virgin boards only — a busy board already has
-                  two create affordances. */}
-              {createCta && isEntry && canCreate && (
-                <button
-                  type="button"
-                  className="btn primary sm empty-cta"
-                  onClick={onNew}
-                >
-                  <Icon name="plus" />
-                  New task
-                </button>
-              )}
-            </div>
-          )
+          <EmptyLane
+            preview={preview}
+            landing={landingEl}
+            emptyCopy={emptyCopy}
+            createCta={createCta}
+            isEntry={isEntry}
+            canCreate={canCreate}
+            onNew={onNew}
+          />
         ) : (
           <>
             {tasks.map((t, i) => (
@@ -1008,166 +1043,6 @@ function ListView({
 }
 
 /* ---------- New task modal (board spec §4.6) ---------- */
-
-/**
- * D3 (rulings 14 + 53) — as much of `acceptanceRefusalReason`
- * (task-acceptance.server.ts) as a board SUMMARY can answer, composed into the one
- * `blockedReason` the shared ceremony renders.
- *
- * `blockReason` alone is not "the" refusal: it is the projected revision gate
- * (`acceptanceBlockReason`, rebuilder.server.ts), whose own docstring names the
- * refusals it leaves OUT because they are per-reader state its consumers filter
- * on first — the ARCHIVED task and the STAGE boundary. This dialog can rely on
- * neither filter (it re-reads its task from the live payload, and the Move menu
- * offers the terminal stage from ANY stage), so it asks them here, through the
- * server's own shared predicates so the sentence cannot drift:
- *   - `archivedTaskBlockedReason` — the SAME function the server calls;
- *   - `closedPrBlockedReason` — asked ahead of `blockReason` only for R16-3
- *     precedence (a terminal GitHub fact outranks every process gate);
- *   - the STAGE gate — `acceptanceStageBlockedReason`, the one the task file
- *     cannot answer (it turns on the PROJECT's workflow edges). Not guessed from
- *     column ORDER (rulings 12/14): `TaskSummary.atAcceptanceBoundary` carries
- *     the graph's answer, derived server-side through the same `resolveStageRoles`;
- *   - the blocked-packet and conflicting-PR gates — belt-and-braces so a stale
- *     projection fails CLOSED rather than opening a confident dialog on a click
- *     the server refuses.
- *
- * A refusal shown here is final — the board has no force-accept to bypass it.
- */
-function boardAcceptRefusal(
-  task: BoardTask,
-  fromStageName: string,
-  terminalName: string,
-): string | null {
-  return (
-    archivedTaskBlockedReason(task, task.key) ??
-    closedPrBlockedReason(task, task.key) ??
-    (task.atAcceptanceBoundary
-      ? null
-      : // The server's own sentence names the resolved review stage; a summary
-        // holds no stage roles, and "the boundary" is the truer phrasing anyway
-        // for a graph with several edges into the terminal stage.
-        `${task.key} is at ${fromStageName}, not the boundary the workflow puts before ${terminalName}. A completion can only be accepted from there. Move the task through the workflow first.`) ??
-    task.blockReason ??
-    (task.readiness === "blocked" && task.packet?.type === "blocked"
-      ? "An open blocked decision is holding this task."
-      : null) ??
-    // Ruling 135: the delivered revision is not on the PR, above the conflict.
-    unpushedRevisionBlockedReason(task.pr, task.workRevisionSha ?? null, task.key) ??
-    conflictingPrBlockedReason(task, task.key)
-  );
-}
-
-/**
- * D3 (rulings 14 + 53) — the board's acceptance ceremony.
- *
- * A human moving a card into the FINAL stage is not a bare move: the server
- * routes it through the full acceptance contract, which attempts a real PR
- * merge (`reorderTask` → `acceptCompletion`, task-transitions.server.ts and
- * task-acceptance.server.ts). Ruling 53 (R18-7) required this confirmation to
- * "match the task-detail dialog"; ruling 14 forbids forking a shared surface
- * per screen. The board nonetheless carried `AcceptOnBoardConfirm`, its OWN
- * dialog, disclosing LESS than the task page: no merge target, no
- * delivered-revision row, no verdict attribution, no no-change disposition.
- *
- * This renders the ONE shared `AcceptConfirm` (task-detail/accept-confirm), in
- * its `stage-move` ceremony mode — the mode written for exactly this path (a
- * human move into the terminal stage IS accepting completion, F19-37). The board
- * maps its projection summary onto the component's structural `task` shape and
- * supplies the stage list from its columns. The task-FILE facts a board summary
- * does not carry are passed honestly rather than invented:
- *   - `defaultBranch` → the merge target, threaded from the project record —
- *     the fact the fork could not name and sent people to the task page for;
- *   - `noChanges` / `noPullRequest: false` → the board cannot run the accept-time
- *     branch re-probe the task-detail loader drives, so it keeps the plain no-PR
- *     sentence rather than promising an auto-detect it can't perform.
- * The refusals a board summary CAN answer are composed by `boardAcceptRefusal`.
- *
- * The delivered REVISION used to be in that list — hardcoded `null`, so the
- * ceremony always drew "No delivered revision recorded." — and once ruling 88
- * made the confirmed click echo its own disclosure back, that hardcoded absence
- * stopped being merely a thinner disclosure and became a dead door: the server
- * compares the echo against the live task, so every board drop onto the terminal
- * stage of a task that had actually DELIVERED was refused as stale. The revision
- * is projected now (`TaskSummary.workRevisionSha`) and disclosed like every
- * other fact — which is also what ruling 53 asked for. `?? null` keeps the
- * honest-absence row for a task with nothing delivered.
- */
-function AcceptOnBoardConfirm({
-  task,
-  stages,
-  fromStageName,
-  defaultBranch,
-  mergeCollisions,
-  busy,
-  onCancel,
-  onConfirm,
-}: {
-  task: BoardTask;
-  /** Ruling 475 (F40-55 (c)): the other open PRs on this board that change a
-   *  path this task's PR changes, from the cards the board already holds. */
-  mergeCollisions: readonly PrOverlap[];
-  /** Project stages in order — supplies the shared ceremony's stage list and
-   *  names the terminal (merge) stage. */
-  stages: BoardStage[];
-  /** The stage the card is leaving — named in the ceremony's Moving row. */
-  fromStageName: string;
-  /** The merge target (project default branch) — the fact a board summary lacks
-   *  and the fork could not name. */
-  defaultBranch: string;
-  busy: boolean;
-  onCancel: () => void;
-  /** Ruling 88: the shared ceremony hands the confirmed click its own
-   *  disclosure — the board POSTs it, exactly like the task page. */
-  onConfirm: (disclosure: AcceptanceDisclosure) => void;
-}) {
-  const terminalName = stages[stages.length - 1]?.name ?? "Done";
-  return (
-    <AcceptConfirm
-      task={{
-        key: task.key,
-        title: task.title,
-        stage: task.stage,
-        stages: stages.map((s) => ({ id: s.id, name: s.name })),
-        validation: task.validation,
-        branch: task.branch,
-        pr: task.pr,
-        // Ruling 304: the board summary carries the checks too, so the same
-        // dialog says the same thing from either door.
-        prChecks: task.prChecks ?? null,
-      }}
-      workRevisionSha={task.workRevisionSha ?? null}
-      mergeCollisions={mergeCollisions}
-      noChanges={false}
-      noPullRequest={false}
-      // F32-11: the board summary carries the open packet too.
-      openPacketTitle={task.packet?.title ?? null}
-      // Ruling 471: and, from the loader, the option this move answers it with.
-      answersWith={task.packet?.acceptAnswersWith ?? null}
-      defaultBranch={defaultBranch}
-      // The STAGE gate the summary CAN answer (F19-27). The board never
-      // force-accepts, so this jumps no stage on its own — the off-boundary
-      // sentence rides `blockedReason` below — but it keeps the shared
-      // component's own boundary reasoning honest.
-      atBoundary={task.atAcceptanceBoundary}
-      ceremony={{
-        mode: "stage-move",
-        label: `${fromStageName} → ${terminalName}`,
-      }}
-      verdictSatisfiedBy={null}
-      blockedReason={boardAcceptRefusal(task, fromStageName, terminalName)}
-      // Ruling 162's interlock is for the refusal the server re-decides. This
-      // one is composed from a projection SUMMARY on purpose (see
-      // `boardAcceptRefusal`), so it is a disclosure, not a verdict: the board
-      // discloses it and lets the confirmed move be answered by the server,
-      // which is also the only door here — the board has no force-accept.
-      blockedReasonAuthoritative={false}
-      busy={busy}
-      onCancel={onCancel}
-      onConfirm={onConfirm}
-    />
-  );
-}
 
 function NewTaskModal({
   entryStageName,
@@ -1431,48 +1306,80 @@ function NewTaskModal({
           </div>
         )}
       </div>
-      <div className="modal-foot">
-        <span
-          id="new-task-hint"
-          className={"foot-hint" + (serverError || titleError ? " err" : "")}
-          // UX-coherence: announce the server/validation error to screen
-          // readers — the same role=alert idiom the Home "New project" modal
-          // got in the Pass-19 audit; this modal (same fetcher/serverError
-          // shape) was missed. Condition mirrors the className ternary above so
-          // the announce state can never desync from the visible error. The
-          // title requirement outranks a stale server refusal: the field's
-          // describedby points here, so the text must be about the title
-          // whenever the title is what is wrong.
-          role={serverError || titleError ? "alert" : undefined}
-        >
-          {/* Interface review 2026-09-24 (writ-4): "A title is required." said
-              nothing to someone who had typed "QA"; the rule is the length. */}
-          {titleError
-            ? "A title needs at least 3 characters."
-            : serverError
-              ? serverError
-              : "The task key is assigned automatically."}
-        </span>
-        <div className="foot-actions">
-          <button type="button" className="btn ghost" onClick={close}>
-            Cancel
-          </button>
-          {/* Enabled until the request starts: an invalid submit is refused
-              with the hint above, the field marked and focused (submit()).
-              Only `busy` disables, and the aria-busy sheet rule paints it. */}
-          <button
-            type="button"
-            className="btn primary"
-            onClick={submit}
-            disabled={busy}
-            aria-busy={busy}
-          >
-            <Icon name="plus" />
-            Create task
-          </button>
-        </div>
-      </div>
+      <NewTaskFoot
+        titleError={titleError}
+        serverError={serverError}
+        busy={busy}
+        onCancel={close}
+        onSubmit={submit}
+      />
     </dialog>
+  );
+}
+
+/**
+ * The new-task dialog's foot (ruling 689(e), split out of `NewTaskModal`): the
+ * one hint line — the title's length rule once it is unmet, else the server's
+ * refusal, else how the key is assigned — and the two actions. The modal owns
+ * the form and the post and hands this what it shows.
+ */
+function NewTaskFoot({
+  titleError,
+  serverError,
+  busy,
+  onCancel,
+  onSubmit,
+}: {
+  /** The title's length rule is unmet, and the field was left or submitted. */
+  titleError: boolean;
+  /** The server's refusal of the last create, if it refused. */
+  serverError: string | null | undefined;
+  busy: boolean;
+  onCancel: () => void;
+  onSubmit: () => void;
+}) {
+  return (
+    <div className="modal-foot">
+      <span
+        id="new-task-hint"
+        className={"foot-hint" + (serverError || titleError ? " err" : "")}
+        // UX-coherence: announce the server/validation error to screen
+        // readers — the same role=alert idiom the Home "New project" modal
+        // got in the Pass-19 audit; this modal (same fetcher/serverError
+        // shape) was missed. Condition mirrors the className ternary above so
+        // the announce state can never desync from the visible error. The
+        // title requirement outranks a stale server refusal: the field's
+        // describedby points here, so the text must be about the title
+        // whenever the title is what is wrong.
+        role={serverError || titleError ? "alert" : undefined}
+      >
+        {/* Interface review 2026-09-24 (writ-4): "A title is required." said
+            nothing to someone who had typed "QA"; the rule is the length. */}
+        {titleError
+          ? "A title needs at least 3 characters."
+          : serverError
+            ? serverError
+            : "The task key is assigned automatically."}
+      </span>
+      <div className="foot-actions">
+        <button type="button" className="btn ghost" onClick={onCancel}>
+          Cancel
+        </button>
+        {/* Enabled until the request starts: an invalid submit is refused
+            with the hint above, the field marked and focused (submit()).
+            Only `busy` disables, and the aria-busy sheet rule paints it. */}
+        <button
+          type="button"
+          className="btn primary"
+          onClick={onSubmit}
+          disabled={busy}
+          aria-busy={busy}
+        >
+          <Icon name="plus" />
+          Create task
+        </button>
+      </div>
+    </div>
   );
 }
 
@@ -1480,35 +1387,6 @@ function NewTaskModal({
 
 /** Visible label filter chips before the "+N more" overflow chip. */
 const LABEL_CHIP_CAP = 6;
-
-const FILTERS: { id: BoardFilterId; label: string; icon: IconName }[] = [
-  { id: "all", label: "All tasks", icon: "board" },
-  { id: "human", label: "Waiting on me", icon: "hand" },
-  { id: "agent", label: "Agent working", icon: "cpu" },
-  // R16-2: "Needs attention" read as a danger filter and matched only alarming
-  // states; the owner ruling renames it to what it selects — work that cannot
-  // proceed (blocked, waiting on an answer, failing validation, urgent, or a
-  // rejected PR). See matchesBoardFilter.
-  { id: "risk", label: "Blocked or waiting", icon: "alert" },
-  // Gap-10: the board is a triage console whose job is to say what needs a
-  // human, and a task that stopped producing events looked exactly like one
-  // being worked — right down to the pulsing "agent working" dot. This chip is
-  // the way to ask for them. Named for what it selects (R16-2), and named
-  // "quiet" rather than "stalled" because the detector observes an absence of
-  // events; it does not diagnose a fault.
-  { id: "quiet", label: "No activity", icon: "clock" },
-  // D4: the UX spec names "degraded continuity" a default filter, so a supervisor
-  // scanning the board can find the tasks whose provider session was lost — the
-  // Murat journey the spec tests begins "a continuity warning appears on the task
-  // OR board". Named for what it selects (R16-2). Like the Archived chip it only
-  // renders when the project has any such task (or the filter is active), because
-  // degraded continuity is rare and an always-empty chip on every board is the
-  // clutter the board's density rules fight (see FilterBar).
-  { id: "continuity", label: "Degraded continuity", icon: "refresh" },
-  // R14-3: archived tasks are out of every other view; this is the way back to
-  // them. The chip only renders when the project has any (see FilterBar).
-  { id: "archived", label: "Archived", icon: "archive" },
-];
 
 function BoardHeader({
   shownCount,
@@ -1771,32 +1649,10 @@ function FilterBar({
           </button>
         )}
       </div>
-      {/* Ruling 503: one epic's tasks, or those in none. A select rather than
-          chips: a project can hold many epics, and their names are long. Only
-          when the project has epics, or the filter is already on. */}
+      {/* Ruling 503: only when the project has epics, or the filter is
+          already on (`EpicFilter`). */}
       {(epics.length > 0 || epicFilter) && (
-        <label className={"board-epic-filter" + (epicFilter ? " on" : "")}>
-          <Icon name="epic" />
-          <select
-            value={epicFilter ?? ""}
-            aria-label="Show one epic's tasks"
-            onChange={(e) => setParam("epic", e.target.value || null)}
-          >
-            <option value="">All epics</option>
-            <option value={EPIC_FILTER_NONE}>No epic</option>
-            {epics.map((epic) => (
-              <option key={epic.id} value={epic.id}>
-                {epic.title}
-                {isEpicOpen(epic.status) ? "" : ` (${EPIC_STATUS_LABEL[epic.status]})`}
-              </option>
-            ))}
-            {epicFilter &&
-              epicFilter !== EPIC_FILTER_NONE &&
-              !epics.some((epic) => epic.id === epicFilter) && (
-                <option value={epicFilter}>{epicFilter}</option>
-              )}
-          </select>
-        </label>
+        <EpicFilter epicFilter={epicFilter} epics={epics} setParam={setParam} />
       )}
       {/* P13-D-34: the board's clear-filter affordance. "All tasks" resets the
           filter but NOT `?q=`, so a board hidden by a stale term needs one
@@ -1814,6 +1670,47 @@ function FilterBar({
         </button>
       )}
     </div>
+  );
+}
+
+/**
+ * Ruling 503: one epic's tasks, or those in none. A select rather than chips: a
+ * project can hold many epics, and their names are long. Split out of
+ * `FilterBar` by ruling 689(e); the bar draws it only when the project has
+ * epics, or the filter is already on.
+ */
+function EpicFilter({
+  epicFilter,
+  epics,
+  setParam,
+}: {
+  epicFilter: string | null;
+  epics: readonly EpicOption[];
+  setParam: (key: string, value: string | null) => void;
+}) {
+  return (
+    <label className={"board-epic-filter" + (epicFilter ? " on" : "")}>
+      <Icon name="epic" />
+      <select
+        value={epicFilter ?? ""}
+        aria-label="Show one epic's tasks"
+        onChange={(e) => setParam("epic", e.target.value || null)}
+      >
+        <option value="">All epics</option>
+        <option value={EPIC_FILTER_NONE}>No epic</option>
+        {epics.map((epic) => (
+          <option key={epic.id} value={epic.id}>
+            {epic.title}
+            {isEpicOpen(epic.status) ? "" : ` (${EPIC_STATUS_LABEL[epic.status]})`}
+          </option>
+        ))}
+        {epicFilter &&
+          epicFilter !== EPIC_FILTER_NONE &&
+          !epics.some((epic) => epic.id === epicFilter) && (
+            <option value={epicFilter}>{epicFilter}</option>
+          )}
+      </select>
+    </label>
   );
 }
 
@@ -1963,11 +1860,12 @@ export function StageBoard({
     stageIdOf,
   );
   // The slot a drop would submit RIGHT NOW — the same resolution `onDragEnd`
-  // runs, so the preview shows exactly what the drop would ask for, and shows
-  // nothing where a drop would change nothing (the card's own slot in its own
-  // lane: before itself, before the card that already follows it). Before this
-  // the preview drew "before itself" over the hole the card had just left, so a
-  // card looked movable above and below its own ghost (owner, 2026-09-08).
+  // (`useBoardDrag`) runs, so the preview shows exactly what the drop would ask
+  // for, and shows nothing where a drop would change nothing (the card's own
+  // slot in its own lane: before itself, before the card that already follows
+  // it). Before this the preview drew "before itself" over the hole the card
+  // had just left, so a card looked movable above and below its own ghost
+  // (owner, 2026-09-08).
   const slot =
     drag && overStage
       ? resolveBoardDrop({
@@ -2091,16 +1989,7 @@ export function StageBoard({
   );
 }
 
-export function BoardPage({
-  columns,
-  orphanTasks,
-  canCreate,
-  canTransition,
-  canRescan,
-  defaultBranch = "main",
-  repoAccess,
-  epics = [],
-}: {
+interface BoardPageProps {
   columns: BoardColumnData[];
   orphanTasks: BoardTask[];
   canCreate: boolean;
@@ -2125,332 +2014,30 @@ export function BoardPage({
   /** Ruling 503: the project's epics, for the epic filter and the New-task
    *  Epic pick. */
   epics?: readonly EpicOption[];
-}) {
+}
+
+export function BoardPage({
+  columns,
+  orphanTasks,
+  canCreate,
+  canTransition,
+  canRescan,
+  defaultBranch = "main",
+  repoAccess,
+  epics = [],
+}: BoardPageProps) {
   const { slug: projectSlug } = useParams();
-  const [searchParams, setSearchParams] = useSearchParams();
-  const rawFilter = searchParams.get("filter");
-  const filter: BoardFilterId = isBoardFilterId(rawFilter) ? rawFilter : "all";
-  const group = searchParams.get("view") === "list" ? "list" : "stage";
-  const query = searchParams.get("q") ?? "";
-  // F26-12 / R26-2: the active label filter (`?label=`), or null when off.
-  const labelFilter = searchParams.get("label");
-  // Ruling 503: the active epic filter (`?epic=`), or null when off.
-  const epicFilter = searchParams.get("epic");
+  const { view, setParam, clearFilters } = useBoardQuery();
+  const { filter, group, query, labelFilter, epicFilter } = view;
   const openEpics = useMemo(() => epics.filter((e) => isEpicOpen(e.status)), [epics]);
   // R19-14: creation always lands at the entry stage, so this is a plain
   // open/closed flag — no per-lane stage rides along any more.
   const [creating, setCreating] = useState(false);
-  const rescanFetcher = useFetcher<{ ok: boolean; error?: string; errors?: number }>();
   const csrf = useCsrfToken();
   const push = useToast();
-
-  // Drag-and-drop stage moves. `drag` is the card in flight; `overStage` is the
-  // lane under the pointer. While a card is dragged across lanes, its own slot
-  // shows a hole (dnd-kit's placeholder) and the target lane the drop preview
-  // + a +1 count; a drop fires the governed transition and the card pulses on
-  // arrival (`arrivedKey`). One fetcher per board.
-  const transitionFetcher = useFetcher<{
-    ok: boolean;
-    toast?: string;
-    error?: string;
-  }>();
-  const [drag, setDrag] = useState<{ key: string; fromStage: string } | null>(
-    null,
-  );
-  const [overStage, setOverStage] = useState<string | null>(null);
-  // The card the dropped card should land immediately BEFORE (null = column end).
-  const [beforeKey, setBeforeKey] = useState<string | null>(null);
-  const [arrivedKey, setArrivedKey] = useState<string | null>(null);
-  /** The move awaiting the server's answer: the card hides in its lane and the
-   *  landing preview stands in the requested slot until the answer renders the
-   *  real card there — or refuses, and the card comes back with the toast. */
-  const [inFlight, setInFlight] = useState<{
-    key: string;
-    from: string;
-    to: string;
-    beforeKey: string | null;
-  } | null>(null);
-  /** D19: the card the roving tab stop sits on. Null until an arrow moves it —
-   *  the resting stop is then the first card the layout draws (`rovingKey`). */
-  const [focusKey, setFocusKey] = useState<string | null>(null);
-  /** Ruling 381: a backward drag waiting on its reason. */
-  const [pendingMoveBack, setPendingMoveBack] = useState<{
-    taskKey: string;
-    from: string;
-    to: string;
-    beforeKey: string;
-  } | null>(null);
-  /** B1: a move into the final stage waits here for an explicit confirmation. */
-  const [pendingAccept, setPendingAccept] = useState<{
-    taskKey: string;
-    to: string;
-    beforeKey: string;
-  } | null>(null);
-  const finalStageId = columns[columns.length - 1]?.stage.id;
-  /**
-   * D9 (WCAG 2.2 / UX spec §Accessibility Strategy) — the board's polite
-   * announcement region. Board drag is pointer-only and keyboard users move via
-   * the StageMenu (ruling 64 built the traversal half), but nothing ever spoke
-   * a requested move, a completed one, or a server refusal — including the 409
-   * the server answers an off-boundary move with, since the board is
-   * authoritative and never commits a move client-side. `announceMove` speaks
-   * the request; the transition-fetcher effect below speaks the outcome, reusing
-   * the server's own honest sentence (`d.toast` / `d.error`).
-   */
-  const [announce, setAnnounce] = useState("");
-  const announceMove = (taskKey: string, toStageId: string) => {
-    const name =
-      columns.find((c) => c.stage.id === toStageId)?.stage.name ?? toStageId;
-    setAnnounce(`Move requested: ${taskKey} to ${name}.`);
-  };
-
-  // dnd-kit event flow → the same drag state machine the visuals always used.
-  // The slot is GEOMETRY, not dnd-kit's collision target: `laneAt` names the
-  // lane under the pointer and `slotInLane` reads the pointer against that
-  // lane's flow as drawn — the cards, the dragged card's hole AND the preview
-  // already standing there (board-dnd.ts says why the preview must count).
-  // The target dnd-kit reports was the loop the owner saw (2026-09-08): the
-  // preview drawn above a card pushed the card from under the pointer, the
-  // next collision pass found the column, the old rule read that as "end",
-  // the preview moved below the card and the card came back up under the
-  // pointer — every hand tremor walked it, ~10 times a second, top half only.
-  // Both hover events run the same rule (`dragover` fires when the target
-  // changes, `dragmove` when the pointer moves); state updates only when the
-  // answer changes.
-  const onDragStart = (event: DragStartEvent) => {
-    const key = String(event.operation.source?.id ?? "");
-    const t = allTasks.find((x) => x.key === key);
-    if (!t) return;
-    setDrag({ key, fromStage: t.stage });
-    dragVelocity.reset();
-    setOverStage(t.stage);
-    // "Before itself": the slot the card already holds, so nothing previews
-    // until the pointer moves (null would preview the lane's END on lift).
-    setBeforeKey(key);
-  };
-  const refineSlot = (event: DragOverEvent | DragMoveEvent, manager: DragDropManager) => {
-    const { x, y } = event.operation.position.current;
-    const lanes: { stageId: string; element: Element }[] = [];
-    for (const droppable of manager.registry.droppables) {
-      const id = String(droppable.id);
-      if (id.startsWith("stage:") && droppable.element) {
-        lanes.push({ stageId: id.slice("stage:".length), element: droppable.element });
-      }
-    }
-    const stage = laneAt(
-      lanes.map(({ stageId, element }) => {
-        const r = element.getBoundingClientRect();
-        return { stageId, left: r.left, right: r.right, top: r.top, bottom: r.bottom };
-      }),
-      x,
-      y,
-    );
-    if (!stage) {
-      setOverStage(null);
-      setBeforeKey(null);
-      return;
-    }
-    const body = lanes
-      .find((l) => l.stageId === stage)
-      ?.element.querySelector(":scope > .col-body");
-    const before = slotInLane(body ? laneBlocks(body) : [], y);
-    setOverStage(stage);
-    setBeforeKey((prev) => (prev === before ? prev : before));
-  };
-  const onDragOver = refineSlot;
-  // Only a MOVE is a velocity sample: `dragover` repeats the last position
-  // under a later clock, which would read as the pointer slowing down.
-  const onDragMove = (event: DragMoveEvent, manager: DragDropManager) => {
-    const { x, y } = event.operation.position.current;
-    dragVelocity.push(x, y, performance.now());
-    refineSlot(event, manager);
-  };
-  // Fires on drop AND cancel (Escape, released outside a column). The server
-  // stays authoritative: nothing commits client-side; a resolved drop submits
-  // the governed reorder and revalidation applies the server's order.
-  const onDragEnd = (event: DragEndEvent) => {
-    const active = drag;
-    setDrag(null);
-    setOverStage(null);
-    setBeforeKey(null);
-    if (!active || event.canceled) return;
-    const resolution = resolveBoardDrop({
-      dragKey: active.key,
-      fromStage: active.fromStage,
-      overStage,
-      beforeKey,
-      columns: columns.map((c) => ({
-        stageId: c.stage.id,
-        keys: visible(c.tasks).map((t) => t.key),
-      })),
-    });
-    if (!resolution) return;
-    // B1: landing in the FINAL stage is an acceptance (real merge attempt), not
-    // a move — confirm before committing it, like every other acceptance path.
-    if (resolution.to === finalStageId && active.fromStage !== finalStageId) {
-      setPendingAccept({
-        taskKey: active.key,
-        to: resolution.to,
-        beforeKey: resolution.beforeKey ?? "",
-      });
-      return;
-    }
-    // Ruling 381: dragging a card BACK is the same act as picking an earlier
-    // stage from the task page's menu, and the server requires a reason for
-    // either. Without this the drag would simply be refused, with nowhere to
-    // type the answer.
-    const fromIdx = columns.findIndex((c) => c.stage.id === active.fromStage);
-    const toIdx = columns.findIndex((c) => c.stage.id === resolution.to);
-    if (toIdx >= 0 && fromIdx >= 0 && toIdx < fromIdx) {
-      setPendingMoveBack({
-        taskKey: active.key,
-        from: active.fromStage,
-        to: resolution.to,
-        beforeKey: resolution.beforeKey ?? "",
-      });
-      return;
-    }
-    submitReorder(active.key, resolution.to, resolution.beforeKey ?? "");
-  };
-
-  const submitReorder = (
-    taskKey: string,
-    to: string,
-    beforeKey: string,
-    // Ruling 88 (F21-2): set ONLY for a move onto the FINAL column, which the
-    // server reads as an acceptance (`reorderTask` → `transitionStage` →
-    // `acceptCompletion` — the real merge). It is the echo of what the ceremony
-    // above just displayed; without it the server refuses the acceptance.
-    disclosure?: AcceptanceDisclosure,
-    // Ruling 381: why the card went back. Required by the server for a
-    // backward move; collected by `MoveBackConfirm` before this is called.
-    reason?: string,
-  ) => {
-    // The request is drawn at once (landing preview in the target lane, the
-    // card hidden in its own); the arrival pulse waits for the server's yes.
-    const from = allTasks.find((t) => t.key === taskKey)?.stage;
-    if (from) {
-      setInFlight({ key: taskKey, from, to, beforeKey: beforeKey === "" ? null : beforeKey });
-    }
-    announceMove(taskKey, to); // D9
-    const fd = new FormData();
-    fd.set("_csrf", csrf);
-    fd.set("intent", "reorder");
-    fd.set("taskKey", taskKey);
-    fd.set("to", to);
-    fd.set("beforeKey", beforeKey);
-    if (reason) fd.set("reason", reason);
-    setDisclosure(fd, disclosure);
-    transitionFetcher.submit(fd, { method: "post" });
-  };
-
-  // F10-25: keyboard-accessible move — the SAME governed transition the drop
-  // uses, appending to the end of the target stage. A no-op when unchanged.
-  const onMoveTask = (taskKey: string, toStageId: string) => {
-    const fromStage = columns.find((c) =>
-      c.tasks.some((t) => t.key === taskKey),
-    )?.stage.id;
-    if (fromStage === toStageId) return;
-    // B1: the keyboard path reaches the same acceptance the drag does.
-    if (toStageId === finalStageId) {
-      setPendingAccept({ taskKey, to: toStageId, beforeKey: "" });
-      return;
-    }
-    // Ruling 381: and the same reason dialog. A keyboard user who skipped this
-    // would meet a bare 400 with no field to answer it in — the drag's own
-    // dead end, one door over.
-    const fromIdx = columns.findIndex((c) => c.stage.id === fromStage);
-    const toIdx = columns.findIndex((c) => c.stage.id === toStageId);
-    if (toIdx >= 0 && fromIdx >= 0 && toIdx < fromIdx && fromStage) {
-      setPendingMoveBack({ taskKey, from: fromStage, to: toStageId, beforeKey: "" });
-      return;
-    }
-    submitReorder(taskKey, toStageId, "");
-  };
-  // Ruling 457: every card and list row takes the move callback, so it keeps
-  // one identity and runs the latest render's `onMoveTask` (which reads the
-  // current columns); a fresh closure per render re-rendered every card.
-  const latestMoveTask = useRef(onMoveTask);
-  useLayoutEffect(() => {
-    latestMoveTask.current = onMoveTask;
-  });
-  const moveTask = useCallback(
-    (taskKey: string, toStageId: string) => latestMoveTask.current(taskKey, toStageId),
-    [],
-  );
-
-  // Interface review 2026-09-24 (acce-17): the card menu's Move up / Move down,
-  // the keyboard and single-pointer way to a slot within the lane, which only
-  // the drag offered. The SAME governed reorder the drop submits, read against
-  // the same visible() order: up lands before the card above, down before the
-  // card two below, or at the lane's end.
-  const refocusKey = useRef<string | null>(null);
-  const nudgeTaskNow = (taskKey: string, stageId: string, dir: -1 | 1) => {
-    const keys = visible(columns.find((c) => c.stage.id === stageId)?.tasks ?? []).map(
-      (t) => t.key,
-    );
-    const i = keys.indexOf(taskKey);
-    if (i < 0 || (dir > 0 && i === keys.length - 1)) return;
-    const beforeKey = dir < 0 ? keys[i - 1] : (keys[i + 2] ?? "");
-    if (beforeKey === undefined) return;
-    refocusKey.current = taskKey;
-    submitReorder(taskKey, stageId, beforeKey);
-  };
-  // Ruling 457: the memoised cards take this as a prop, so it keeps one
-  // identity and runs the latest render's nudge, as `moveTask` does above.
-  const latestNudgeTask = useRef(nudgeTaskNow);
-  useLayoutEffect(() => {
-    latestNudgeTask.current = nudgeTaskNow;
-  });
-  const onNudgeTask = useCallback(
-    (taskKey: string, stageId: string, dir: -1 | 1) =>
-      latestNudgeTask.current(taskKey, stageId, dir),
-    [],
-  );
-  // The card hides while its move is in flight (`.in-flight`), which drops the
-  // focus the menu handed back to its trigger. Once the answer is in, a nudge
-  // puts it back there, so the next nudge is one keystroke away. Only when
-  // focus really was dropped: a person who moved on meanwhile keeps their place.
-  useEffect(() => {
-    const key = refocusKey.current;
-    if (inFlight || !key) return;
-    refocusKey.current = null;
-    if (document.activeElement && document.activeElement !== document.body) return;
-    const card = [...document.querySelectorAll<HTMLElement>(".card-wrap[data-card-key]")].find(
-      (el) => el.dataset.cardKey === key,
-    );
-    const trigger = card?.querySelector<HTMLButtonElement>("button.stage-menu-btn");
-    if (!trigger) return;
-    setFocusKey(key);
-    trigger.focus();
-  }, [inFlight]);
-
-  // Toast on completion (and drop the pulse if the move was rejected).
-  useFetcherResult(transitionFetcher, (d) => {
-    // The answer is in and the loader has revalidated: the real card stands
-    // where the landing preview stood (and pulses), or is back in its lane.
-    setInFlight(null);
-    if (d.ok) setArrivedKey(inFlight?.key ?? null);
-    if (d.ok && d.toast) {
-      push(d.toast);
-      setAnnounce(d.toast); // D9: the completed move, in the server's own words.
-    } else if (!d.ok && d.error) {
-      // P13-D-10: a REJECTED stage transition is the worst place to render a
-      // success tick — the card snaps back and the toast said "done".
-      push(d.error, "error");
-      setArrivedKey(null);
-      // D9: the refusal (incl. the server's 409 on an off-boundary move) is a
-      // consequential state change a screen-reader user must hear, not only see.
-      setAnnounce(`Move refused: ${d.error}`);
-    }
-  });
-
-  // Retire the arrival pulse after it plays.
-  useEffect(() => {
-    if (!arrivedKey) return;
-    const t = window.setTimeout(() => setArrivedKey(null), 1500);
-    return () => window.clearTimeout(t);
-  }, [arrivedKey]);
+  // The page's two posts, in the order their fetchers always registered: the
+  // re-scan's here, the moves' below.
+  const rescan = useRescan(csrf);
 
   // One array while the stages are unchanged (ruling 457): every list row takes it.
   const stages = useStableRows(
@@ -2462,29 +2049,34 @@ export function BoardPage({
     () => [...columns.flatMap((c) => c.tasks), ...orphanTasks],
     [columns, orphanTasks],
   );
-  // Distinct labels already used on this board, sorted, as New-task
-  // autocomplete — so a project's label vocabulary stays consistent instead of
-  // every task inventing its own spelling of the same tag.
-  //
-  // F26-15: mirror the server's `listProjectLabels` contract EXACTLY — exclude
-  // archived tasks (`allTasks` carries them; they are hidden only per-filter) and
-  // dedupe case-insensitively, first spelling wins — so the New-task modal and the
-  // task Details panel (which reads `listProjectLabels`) offer the SAME vocabulary
-  // rather than two subtly different lists.
-  const labelSuggestions = useMemo(() => {
-    const seen = new Set<string>();
-    const out: string[] = [];
-    for (const t of allTasks) {
-      if (t.archived) continue;
-      for (const l of t.labels) {
-        const key = l.toLowerCase();
-        if (seen.has(key)) continue;
-        seen.add(key);
-        out.push(l);
-      }
-    }
-    return out.sort((a, b) => a.localeCompare(b));
-  }, [allTasks]);
+  const visible = visibleIn(view);
+  // The all-tasks filter feeds the roving tab stop, the "N shown" count and the
+  // list view; run it once per render rather than three times (each pass
+  // rebuilds a per-task search haystack).
+  const visibleAllTasks = visible(allTasks);
+
+  const moves = useBoardMoves(columns, allTasks, csrf);
+  const keyboard = useBoardKeyboard(
+    columns,
+    visible,
+    // D19: the cards the layout draws, in order (the roving stop's resting place).
+    group === "stage"
+      ? columns.flatMap((c) => visible(c.tasks).map((t) => t.key))
+      : visibleAllTasks.map((t) => t.key),
+    moves,
+  );
+  const confirms = useMoveConfirms({ columns, stages, allTasks, defaultBranch, moves });
+  const dnd = useBoardDrag({
+    columns,
+    allTasks,
+    visible,
+    velocity: dragVelocity,
+    moves,
+    confirms,
+  });
+  useRescanAnswer(rescan.fetcher);
+
+  const labelSuggestions = useMemo(() => labelVocabulary(allTasks), [allTasks]);
   // Subtitle stat: project-wide "waiting on a human decision" (the subtitle
   // labels that scope — P14-WL-04). Archived tasks are a terminal disposition
   // and never wait on anyone, so they are out of both counts (R14-3).
@@ -2503,257 +2095,11 @@ export function BoardPage({
     (t) => t.continuity === "degraded",
   ).length;
   const archivedCount = countArchived(allTasks);
-  // The card in flight (for the drop-preview shown in the hovered column).
-  const draggedTask = drag
-    ? (allTasks.find((t) => t.key === drag.key) ?? null)
-    : null;
-  const inFlightTask = inFlight
-    ? (allTasks.find((t) => t.key === inFlight.key) ?? null)
-    : null;
-  // F19-27: the summary the acceptance confirm discloses from. Resolved here
-  // rather than captured into `pendingAccept` so it re-reads on every
-  // revalidation — a stale snapshot is exactly the failure ruling 42 is about.
-  const pendingAcceptTask = pendingAccept
-    ? (allTasks.find((t) => t.key === pendingAccept.taskKey) ?? null)
-    : null;
-  // …and the price of resolving it late: a revalidation between the gesture and
-  // the render can drop the task from the payload (someone archived it, the
-  // task file was deleted, a rescan reprojected it away), and the dialog then
-  // renders NOTHING while `pendingAccept` stays set — no dialog, no toast, no
-  // cancel, the human's drag simply gone, and the state wedged until they drag
-  // again. A gesture that cannot be completed is abandoned OUT LOUD: the same
-  // rule P13-D-10 applies to a refused transition, which is what this is (the
-  // acceptance did not happen), so it carries the same error kind.
-  useEffect(() => {
-    if (!pendingAccept || pendingAcceptTask) return;
-    setPendingAccept(null);
-    push(
-      `${pendingAccept.taskKey} left the board before its acceptance was confirmed. Nothing was accepted.`,
-      "error",
-    );
-  }, [pendingAccept, pendingAcceptTask, push]);
-
-  const visible = (tasks: BoardTask[]) =>
-    tasks.filter(
-      (t) =>
-        matchesBoardFilter(t, filter) &&
-        matchesLabelFilter(t, labelFilter) &&
-        matchesEpicFilter(t, epicFilter) &&
-        matchesSearch(t, query),
-    );
-  // The all-tasks filter feeds the roving tab stop, the "N shown" count and the
-  // list view; run it once per render rather than three times (each pass
-  // rebuilds a per-task search haystack).
-  const visibleAllTasks = visible(allTasks);
-
-  /* ---------- D19 / ruling R19-10: arrow-key traversal ----------
-   *
-   * The UX spec put full arrow traversal on the Task Status Card and it was
-   * never built: before this the board's ONLY `onKeyDown` was the new-task
-   * dialog's Enter, and a keyboard user met one tab stop per card face plus one
-   * per Move trigger — 2N stops to cross a five-lane board, with no way to move
-   * sideways at all. INTENT §4 asks for "keyboard access to every packet
-   * action" on the grounds that inaccessible state is untrustworthy state.
-   *
-   * The model is the standard roving tab stop: ONE card is tabbable
-   * (`rovingKey`), the arrows move it, and Tab leaves the board rather than
-   * walking it. The lanes are read back off the DOM (`data-board-lane` /
-   * `data-board-card`) rather than recomputed here, so the traversal order is
-   * by construction the order the human SEES — filters, the archived view, the
-   * list layout and any future ordering all come along for free, and an empty
-   * lane simply is not in the model, which is what makes Left/Right unable to
-   * strand focus on one.
-   *
-   * How this coexists with the dnd-kit drag (@dnd-kit/dom 0.5.0, verified in
-   * `index.js`, not assumed):
-   *   - `KeyboardSensor.bind` puts its keydown listener on `source.handle ??
-   *     source.element` — here the `.card-wrap` div `useSortable` refs — and its
-   *     default `preventActivation` is `event.target !== target`. The roving
-   *     focus lands on the card's `<a>` FACE, a descendant, so Space/Enter here
-   *     can never start a keyboard drag: the two never contend for the same key
-   *     on the same element.
-   *   - The sensor's own arrow handling does not exist until a drag is running;
-   *     `handleStart` binds it on `document` in the CAPTURE phase and
-   *     `handleMove` calls `preventDefault()`. Capture on document runs before
-   *     React's root listener, so the `defaultPrevented` guard below hands the
-   *     arrows to a drag in flight without either side knowing about the other.
-   */
-  const visibleKeys =
-    group === "stage"
-      ? columns.flatMap((c) => visible(c.tasks).map((t) => t.key))
-      : visibleAllTasks.map((t) => t.key);
-  // Re-anchors when the card the stop was on leaves the layout (filtered away,
-  // archived, reprojected off the board) — a tab stop pinned to a card that is
-  // no longer drawn is a board with no way in.
-  const rovingKey =
-    focusKey && visibleKeys.includes(focusKey)
-      ? focusKey
-      : (visibleKeys[0] ?? null);
-
-  const onCardKeyDown = (event: ReactKeyboardEvent<HTMLDivElement>) => {
-    // A keyboard drag in flight owns the arrows (see the note above); a
-    // modifier means the human is asking the browser for something else.
-    if (
-      event.defaultPrevented ||
-      event.altKey ||
-      event.ctrlKey ||
-      event.metaKey
-    )
-      return;
-    const target = event.target;
-    if (!(target instanceof HTMLElement)) return;
-    // Anything that is not a card face — the Move trigger (whose own menu owns
-    // Arrow Up/Down), the filter box, the header — is not traversal.
-    const from = target.closest<HTMLElement>("[data-board-card]");
-    if (!from) return;
-
-    if (event.key === "Enter" || event.key === " ") {
-      // The card face is an anchor, so Enter would activate natively but Space
-      // would only scroll. Both are answered the same way instead of one each:
-      // suppress the default and re-issue the activation as a click, which is
-      // the event `Link` navigates on.
-      event.preventDefault();
-      from.click();
-      return;
-    }
-
-    // Lanes in DOM order, cards in visual order within each.
-    const lanes = new Map<string, HTMLElement[]>();
-    for (const el of event.currentTarget.querySelectorAll<HTMLElement>(
-      "[data-board-card]",
-    )) {
-      const lane = el.dataset.boardLane ?? "";
-      const bucket = lanes.get(lane);
-      if (bucket) bucket.push(el);
-      else lanes.set(lane, [el]);
-    }
-    const laneList = [...lanes.values()];
-    const laneIndex = laneList.findIndex((lane) => lane.includes(from));
-    if (laneIndex < 0) return;
-    const lane = laneList[laneIndex]!;
-    const index = lane.indexOf(from);
-
-    let next: HTMLElement | undefined;
-    switch (event.key) {
-      case "ArrowDown":
-        next = lane[index + 1];
-        break;
-      case "ArrowUp":
-        next = lane[index - 1];
-        break;
-      case "ArrowRight":
-      case "ArrowLeft": {
-        const neighbour =
-          laneList[laneIndex + (event.key === "ArrowRight" ? 1 : -1)];
-        // Nearest by index, and the lane's FIRST card when that lane is
-        // shorter — never a dead end, and never a landing the human has to
-        // scroll to find.
-        next = neighbour ? (neighbour[index] ?? neighbour[0]) : undefined;
-        break;
-      }
-      default:
-        return;
-    }
-    // Claimed even at the edges of the board: an ArrowDown on the last card of
-    // a lane must not fall through to scrolling the column out from under the
-    // focus ring.
-    event.preventDefault();
-    if (!next) return;
-    next.focus();
-    setFocusKey(next.dataset.boardCard ?? null);
-  };
-
-  // P13-D-34: what the board actually draws, and why anything is missing.
-  const shownCount = visibleAllTasks.length;
-  const readinessFilterLabel =
-    filter === "all"
-      ? null
-      : (FILTERS.find((f) => f.id === filter)?.label ?? null);
-  // Ruling 503: an epic filter hides cards too, so the empty copy names it.
-  const epicFilterLabel = !epicFilter
-    ? null
-    : epicFilter === EPIC_FILTER_NONE
-      ? "No epic"
-      : `Epic: ${epics.find((e) => e.id === epicFilter)?.title ?? epicFilter}`;
-  const filterLabel =
-    [readinessFilterLabel, epicFilterLabel].filter((l) => l !== null).join(" · ") || null;
-  // R15-10: `boardTotal` lets the copy tell "this column is empty" apart from
-  // "this project has nothing yet"; only the latter teaches, and only once.
-  const emptyCopyFor = (total: number, isEntryColumn = false) =>
-    boardEmptyCopy({
-      total,
-      filterLabel,
-      query,
-      // LIVE, not all: archived tasks render on no column under any normal
-      // filter, so counting them makes an empty board look occupied — which is
-      // exactly what a strict project holding one archived task did.
-      boardTotal: liveTasks.length,
-      isEntryColumn,
-    });
-
-  const setParam = (key: string, value: string | null) => {
-    setSearchParams(
-      (prev) => {
-        const next = new URLSearchParams(prev);
-        if (value === null) next.delete(key);
-        else next.set(key, value);
-        return next;
-      },
-      { replace: true, preventScrollReset: true },
-    );
-  };
-
-  // P13-D-34: reset BOTH hiding mechanisms in one history entry.
-  const clearFilters = () => {
-    setSearchParams(
-      (prev) => {
-        const next = new URLSearchParams(prev);
-        next.delete("filter");
-        next.delete("q");
-        next.delete("label"); // F26-12: Clear resets the label filter too.
-        next.delete("epic"); // Ruling 503: and the epic filter.
-        return next;
-      },
-      { replace: true, preventScrollReset: true },
-    );
-  };
-
-  const rescan = () => {
-    if (rescanFetcher.state !== "idle") return;
-    push("Re-scanning the task store…");
-    const fd = new FormData();
-    fd.set("_csrf", csrf);
-    fd.set("intent", "rescan");
-    rescanFetcher.submit(fd, { method: "post" });
-  };
-  const rescanDone = useRef(false);
-  useEffect(() => {
-    if (rescanFetcher.state === "submitting") rescanDone.current = false;
-    if (rescanFetcher.state === "idle" && rescanFetcher.data && !rescanDone.current) {
-      rescanDone.current = true;
-      const { ok, errors } = rescanFetcher.data;
-      // Interface review 2026-09-24 (writ-2): a file the re-scan could not
-      // project comes back as `errors` on an ok answer, and this said the
-      // board matched the store. Same sentence as Home's re-scan.
-      if (ok && errors) {
-        push(
-          `Re-scan finished, but ${countLabel(errors, "file")} could not be read. The server log names each one. Fix ${pluralNoun(errors, "it", "them")} and re-scan.`,
-          "error",
-        );
-        return;
-      }
-      // Surface BOTH outcomes — a swallowed {ok:false} (e.g. a role 403) used to
-      // leave the "Re-scanning…" toast as the last word (MU-3).
-      push(
-        rescanFetcher.data.ok
-          ? "Re-scan complete. The board matches the file-native store"
-          : (rescanFetcher.data.error ?? "Re-scan failed."),
-        // P13-D-10: same handler, both outcomes — the failure branch used to
-        // borrow the success glyph.
-        rescanFetcher.data.ok ? "success" : "error",
-      );
-    }
-  }, [rescanFetcher.state, rescanFetcher.data, push]);
+  // P13-D-34: what the board actually draws, and why anything is missing. The
+  // board total is LIVE, not all: archived tasks render on no column under any
+  // normal filter, so counting them makes an empty board look occupied — which
+  // is exactly what a strict project holding one archived task did.
+  const emptyCopyFor = emptyCopyIn(view, epics, liveTasks.length);
 
   return (
     <div className="board-wrap" data-screen-label="Board">
@@ -2762,10 +2108,10 @@ export function BoardPage({
           tech, which the pointer-only drag and the toast never gave a keyboard
           user. Visually hidden but kept in the DOM (see SR_ONLY). */}
       <div style={SR_ONLY} role="status" aria-live="polite">
-        {announce}
+        {moves.announce}
       </div>
       <BoardHeader
-        shownCount={shownCount}
+        shownCount={visibleAllTasks.length}
         // R14-3: the denominator follows the view. On the Archived filter the
         // population IS the archived set, so "2 of 2" reads true instead of
         // measuring archived cards against a live-task total they left.
@@ -2774,9 +2120,9 @@ export function BoardPage({
         group={group}
         canCreate={canCreate}
         canRescan={canRescan}
-        scanning={rescanFetcher.state !== "idle"}
+        scanning={rescan.scanning}
         setParam={setParam}
-        onRescan={rescan}
+        onRescan={rescan.rescan}
         // UI-58: `?? "triage"` was a magic literal for a project with no stages
         // — a create that could only fail server-side. With no stages there is
         // nothing to create INTO. D3 (pass 23): a silent no-op broke the
@@ -2801,15 +2147,8 @@ export function BoardPage({
         <RepoAccessBanner slug={projectSlug} access={repoAccess} />
       )}
 
-      {/* A brand-new board has nothing to filter or search — the machinery
-          renders once there is anything for it to act on (the Archived chip is
-          the only road back, so any archived count keeps the bar). */}
-      {(allTasks.length > 0 ||
-        archivedCount > 0 ||
-        filter !== "all" ||
-        query !== "" ||
-        labelFilter != null ||
-        epicFilter != null) && (
+      {/* Only once there is anything for the filters to act on (`showsFilterBar`). */}
+      {showsFilterBar(view, allTasks.length, archivedCount) && (
         <FilterBar
           filter={filter}
           query={query}
@@ -2843,10 +2182,10 @@ export function BoardPage({
         <DragDropProvider
           sensors={DRAG_SENSORS}
           plugins={BOARD_PLUGINS}
-          onDragStart={onDragStart}
-          onDragOver={onDragOver}
-          onDragMove={onDragMove}
-          onDragEnd={onDragEnd}
+          onDragStart={dnd.onDragStart}
+          onDragOver={dnd.onDragOver}
+          onDragMove={dnd.onDragMove}
+          onDragEnd={dnd.onDragEnd}
         >
           <StageBoard
             columns={columns}
@@ -2854,26 +2193,20 @@ export function BoardPage({
             emptyCopyFor={emptyCopyFor}
             doneStageId={doneStageId}
             canCreate={canCreate}
-            createCta={
-              liveTasks.length === 0 &&
-              filter === "all" &&
-              query === "" &&
-              labelFilter == null &&
-              epicFilter == null
-            }
+            createCta={isVirginBoard(view, liveTasks.length)}
             canTransition={canTransition}
             onNew={() => setCreating(true)}
-            drag={drag}
-            overStage={overStage}
-            beforeKey={beforeKey}
-            arrivedKey={arrivedKey}
-            draggedTask={draggedTask}
-            inFlight={inFlight}
-            inFlightTask={inFlightTask}
-            onMoveTask={moveTask}
-            onNudgeTask={onNudgeTask}
-            rovingKey={rovingKey}
-            onCardKeyDown={onCardKeyDown}
+            drag={dnd.drag}
+            overStage={dnd.overStage}
+            beforeKey={dnd.beforeKey}
+            arrivedKey={moves.arrivedKey}
+            draggedTask={dnd.draggedTask}
+            inFlight={moves.inFlight}
+            inFlightTask={moves.inFlightTask}
+            onMoveTask={confirms.moveTask}
+            onNudgeTask={keyboard.onNudgeTask}
+            rovingKey={keyboard.rovingKey}
+            onCardKeyDown={keyboard.onCardKeyDown}
           />
         </DragDropProvider>
       ) : (
@@ -2881,10 +2214,10 @@ export function BoardPage({
           tasks={visibleAllTasks}
           stages={stages}
           canTransition={canTransition}
-          onMoveTask={moveTask}
+          onMoveTask={confirms.moveTask}
           emptyCopy={emptyCopyFor(allTasks.length, true)}
-          rovingKey={rovingKey}
-          onCardKeyDown={onCardKeyDown}
+          rovingKey={keyboard.rovingKey}
+          onCardKeyDown={keyboard.onCardKeyDown}
         />
       )}
 
@@ -2893,74 +2226,15 @@ export function BoardPage({
           entryStageName={stages[0].name}
           labelSuggestions={labelSuggestions}
           epics={openEpics}
-          initialEpic={
-            epicFilter && epicFilter !== EPIC_FILTER_NONE && openEpics.some((e) => e.id === epicFilter)
-              ? epicFilter
-              : null
-          }
+          initialEpic={newTaskEpic(epicFilter, openEpics)}
           onClose={() => setCreating(false)}
         />
       )}
 
-      {pendingMoveBack && (
-        <MoveBackConfirm
-          taskKey={pendingMoveBack.taskKey}
-          taskTitle={
-            allTasks.find((t) => t.key === pendingMoveBack.taskKey)?.title ?? ""
-          }
-          fromStageName={
-            columns.find((c) => c.stage.id === pendingMoveBack.from)?.stage.name ??
-            pendingMoveBack.from
-          }
-          toStageName={
-            columns.find((c) => c.stage.id === pendingMoveBack.to)?.stage.name ??
-            pendingMoveBack.to
-          }
-          busy={transitionFetcher.state !== "idle"}
-          onCancel={() => setPendingMoveBack(null)}
-          onConfirm={(reason) =>
-            submitReorder(
-              pendingMoveBack.taskKey,
-              pendingMoveBack.to,
-              pendingMoveBack.beforeKey,
-              undefined,
-              reason,
-            )
-          }
-        />
-      )}
-      {/* B1 / D3: the acceptance a board move really performs, confirmed
-          through the ONE shared ceremony. F19-27: the card's own summary is what
-          the dialog discloses from — looked up fresh so a revalidation between
-          the gesture and the confirmation shows the CURRENT PR head, not the one
-          the drag started on. A lookup that MISSES is handled by the effect
-          above (clear + toast), never by this silent `&&`. */}
-      {pendingAccept && pendingAcceptTask && (
-        <AcceptOnBoardConfirm
-          task={pendingAcceptTask}
-          stages={stages}
-          fromStageName={
-            // `stageName`'s fallback, spelled here: importing stage-roles.ts
-            // would put its whole chunk on the board for this one line
-            // (ruling 457).
-            stages.find((s) => s.id === pendingAcceptTask.stage)?.name ??
-            pendingAcceptTask.stage
-          }
-          defaultBranch={defaultBranch}
-          // Ruling 475 (F40-55 (c)): the same disclosure the task page's
-          // dialog makes, from the board's own cards (`pr.paths` rides them).
-          mergeCollisions={mergeCollisions(pendingAcceptTask, allTasks)}
-          busy={transitionFetcher.state !== "idle"}
-          onCancel={() => setPendingAccept(null)}
-          onConfirm={(disclosure) => {
-            const p = pendingAccept;
-            // Ruling 88: the drop commits with the ceremony's own echo of what
-            // it disclosed — the same acknowledgment the task page's stage move
-            // sends, on the same server contract.
-            submitReorder(p.taskKey, p.to, p.beforeKey, disclosure);
-          }}
-        />
-      )}
+      {/* Ruling 381 and B1 / D3: the move-back reason and the acceptance
+          ceremony, each while its move waits on it (`useMoveConfirms`). */}
+      {confirms.moveBackDialog}
+      {confirms.acceptDialog}
     </div>
   );
 }

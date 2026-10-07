@@ -85,7 +85,7 @@ type EpicRow = {
  * it and ranked a just-archived task FIRST (updated_at DESC), indistinguishable
  * from live work. It is not excluded — the palette is a legitimate way back to
  * archived work, the same reason the board keeps its Archived filter
- * (`FILTERS` in board-page.tsx) — it is LABELLED, with the board's own word.
+ * (`FILTERS` in board-page-derive.ts) — it is LABELLED, with the board's own word.
  */
 function archivedSub(sub: string, row: TaskRow): string {
   return withArchived(sub, row.archived !== 0);
