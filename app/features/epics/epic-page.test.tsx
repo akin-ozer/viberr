@@ -624,7 +624,7 @@ describe("ruling 503(e): the Tasks section", () => {
     expect(folded?.querySelector("summary")?.textContent).toBe("1 archived task");
     const archived = folded?.querySelector<HTMLElement>('li[data-task="VIB-139"]');
     expect(archived?.querySelector(".chip.st")?.textContent).toBe("archived");
-    // CANARY: pass `canRemove={canEditTasks}` to the archived rows and a task
+    // CANARY: drop `&& !task.archived` from EpicTasks' `onRemove` and a task
     // whose planning metadata is frozen is offered a Remove the server refuses.
     expect(screen.queryByRole("button", { name: "Take VIB-139 out of epic-3" })).toBeNull();
     expect(screen.getByRole("button", { name: "Take VIB-151 out of epic-3" })).toBeTruthy();
