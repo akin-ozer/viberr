@@ -663,6 +663,21 @@ const BASELINE_TABLES: readonly string[] = [
      created_at TEXT NOT NULL,
      UNIQUE (conversation_id, name)
    )`,
+  // Ruling 683: what a controller conversation left itself to do when a task
+  // is accepted. Every acceptance reads it, so a root that predates it would
+  // fail them all. Same DDL as the baseline.
+  `CREATE TABLE IF NOT EXISTS controller_follow_ups (
+     id TEXT PRIMARY KEY,
+     conversation_id TEXT NOT NULL
+       REFERENCES controller_conversations (id) ON DELETE CASCADE,
+     user_id TEXT NOT NULL,
+     project_slug TEXT NOT NULL,
+     task_key TEXT NOT NULL,
+     text TEXT NOT NULL,
+     created_at TEXT NOT NULL,
+     fired_at TEXT,
+     outcome TEXT
+   )`,
 ];
 
 /** Indexes the baseline gained after a root applied it. `IF NOT EXISTS` makes
@@ -689,6 +704,9 @@ const BASELINE_INDEXES: readonly string[] = [
   // table above.
   `CREATE INDEX IF NOT EXISTS idx_controller_message_files__message
      ON controller_message_files (message_id)`,
+  // Ruling 683: a task's open follow-ups, for the acceptance that claims them.
+  `CREATE INDEX IF NOT EXISTS idx_controller_follow_ups__task
+     ON controller_follow_ups (project_slug, task_key, fired_at)`,
 ];
 
 export function ensureBaselineColumns(db: DatabaseSync): void {

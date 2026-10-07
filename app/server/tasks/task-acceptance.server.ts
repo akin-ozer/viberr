@@ -37,6 +37,7 @@ import {
   verdictGateReason,
 } from "~/server/github/pr-human-approval.server";
 import { roleCan } from "~/shared/rbac";
+import { maybeContinueController } from "./controller-continuation.server";
 import { maybeReleaseDependents } from "./dependencies.server";
 import { canAcceptFromStage } from "~/shared/workflow/stage-roles";
 import {
@@ -2105,6 +2106,11 @@ export async function applyAcceptanceWrite(
     maybeNoteEpicComplete(db, ctx, input.projectSlug, input.taskKey);
     // Ruling 131(e): an acceptance is the usual way a waited-on task is done.
     maybeReleaseDependents(db, ctx, input.projectSlug);
+    // Ruling 683: and the moment a controller conversation that waited for
+    // this task takes its next step. Every move into the last stage is this
+    // write (a person's Accept or board drag, a force-accept, a full-autonomy
+    // operator's acceptance), so this is the one place that starts it.
+    maybeContinueController(db, ctx, input.projectSlug, input.taskKey);
   }
   // U3: `false` means a concurrent acceptance had already closed this task —
   // the caller's audit row and follow-up effects belong to THAT write, not to

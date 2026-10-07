@@ -873,13 +873,18 @@ export function attachmentImageHeader(taskKey: string, image: TaskAttachmentImag
   return `\`${image.name}\` (${kb} KB, ${image.mimeType}), attached to ${taskKey}. The image follows.`;
 }
 
+/** A sentence saying what a file is and why this channel does not carry it. */
+interface UnreadableFile {
+  unreadable: string;
+}
+
 /** What a reader gets for one file: its text (a page of it), the picture
  *  itself, or a sentence saying what the file is and why this channel does
  *  not carry it. */
 export type AttachmentContent =
   | ({ kind: "text" } & TaskAttachmentRead)
   | ({ kind: "image" } & TaskAttachmentImage)
-  | { unreadable: string };
+  | UnreadableFile;
 
 /** The bytes a reader of `ext` takes at most. */
 function readCap(ext: string): number {
@@ -891,7 +896,7 @@ const BINARY_SNIFF_BYTES = 8_000;
 
 /** Ruling 574: a file whose bytes are not text, named with what a reader
  *  takes instead of guessed at from its name. */
-function binaryFile(name: string, ext: string, bytes: number, where: string): AttachmentContent {
+function binaryFile(name: string, ext: string, bytes: number, where: string): UnreadableFile {
   return {
     unreadable:
       `\`${name}\` is a binary ${ext || "typeless"} file (${bytes.toLocaleString("en-US")} bytes): its bytes are not text. ` +
@@ -945,13 +950,33 @@ function decodeAttachment(name: string, ext: string, bytes: Buffer, offset: numb
     }
     return { kind: "image", name, bytes: bytes.length, mimeType, data: bytes.toString("base64") };
   }
+  const whole = wholeText(name, ext, bytes, where);
+  if ("unreadable" in whole) return whole;
+  if (offset > 0 && offset >= whole.text.length) return pastTheEnd(name, whole.text.length, offset);
+  const read: AttachmentContent = { kind: "text", name, bytes: bytes.length, ...textPage(whole.text, whole.truncated, offset) };
+  if (whole.leftOut) read.leftOut = whole.leftOut;
+  return read;
+}
+
+/** A file's whole text as a reader takes it, before it is cut into pages. */
+interface WholeText {
+  text: string;
+  /** Whether the renderer stopped before the file's end. */
+  truncated: boolean;
+  /** Ruling 676: what was left out of it, when anything was. */
+  leftOut: string | null;
+}
+
+/** The whole text of a file that is not a picture: a workbook as its sheets
+ *  in CSV, a PDF as its text layer, any other file as its own text unless its
+ *  bytes are binary. */
+function wholeText(name: string, ext: string, bytes: Buffer, where: string): WholeText | UnreadableFile {
   if (ext === ".xlsx") {
     const text = xlsxToText(bytes, RENDERED_TEXT_MAX_CHARS);
     if ("unreadable" in text) {
       return { unreadable: `\`${name}\` ${text.unreadable}` };
     }
-    if (offset > 0 && offset >= text.text.length) return pastTheEnd(name, text.text.length, offset);
-    return { kind: "text", name, bytes: bytes.length, ...textPage(text.text, text.truncated, offset) };
+    return { text: text.text, truncated: text.truncated, leftOut: null };
   }
   // Ruling 629: a PDF reads as its text, through the poppler ruling 566 put in
   // the image, paged like any text.
@@ -960,8 +985,7 @@ function decodeAttachment(name: string, ext: string, bytes: Buffer, offset: numb
     if ("unreadable" in text) {
       return { unreadable: `\`${name}\` ${text.unreadable} Open it ${where} rather than describing it from its name.` };
     }
-    if (offset > 0 && offset >= text.text.length) return pastTheEnd(name, text.text.length, offset);
-    return { kind: "text", name, bytes: bytes.length, ...textPage(text.text, text.truncated, offset) };
+    return { text: text.text, truncated: text.truncated, leftOut: null };
   }
   // Ruling 574: any other name reads as text unless it names a binary kind
   // or its bytes say otherwise: a NUL in its head (git's own `-text` test,
@@ -972,11 +996,21 @@ function decodeAttachment(name: string, ext: string, bytes: Buffer, offset: numb
   ) {
     return binaryFile(name, ext, bytes.length, where);
   }
-  const { text: raw, leftOut } = withoutEmbeddedFiles(bytes.toString("utf8"));
-  if (offset > 0 && offset >= raw.length) return pastTheEnd(name, raw.length, offset);
-  const read: AttachmentContent = { kind: "text", name, bytes: bytes.length, ...textPage(raw, false, offset) };
-  if (leftOut) read.leftOut = leftOut;
-  return read;
+  const { text, leftOut } = withoutEmbeddedFiles(bytes.toString("utf8"));
+  return { text, truncated: false, leftOut };
+}
+
+/**
+ * Ruling 682: the whole text of a file as a reader takes it, for a check that
+ * must see all of it and not a page. Null for a file no reader takes as text:
+ * a picture, a binary kind, a PDF with no text layer, one over its reader's
+ * cap.
+ */
+export function attachmentWholeText(name: string, bytes: Buffer): string | null {
+  const ext = path.extname(name).toLowerCase();
+  if (IMAGE_READ_TYPES.has(ext) || bytes.length > readCap(ext)) return null;
+  const whole = wholeText(name, ext, bytes, "elsewhere");
+  return "unreadable" in whole ? null : whole.text;
 }
 
 /**

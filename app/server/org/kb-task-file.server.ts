@@ -7,6 +7,7 @@ import { isInjectableKbDoc, isPrivateKbFolder } from "~/server/files/kb-injectio
 import { resolveStoredSegment } from "~/server/files/file-store-root.server";
 import { keptDeliveryMiss, resolveKeptDeliveryFile } from "~/server/files/kept-deliveries.server";
 import {
+  attachmentWholeText,
   checkAttachmentUpload,
   listTaskAttachmentNames,
   readAttachmentBytes,
@@ -56,9 +57,32 @@ function unfitName(name: string): string | null {
   return null;
 }
 
+/**
+ * Ruling 682: what a file copied into a knowledge base is kept as.
+ *
+ * - `template`: later results are filled into it, so it holds none of any
+ *   task's content, only `[[what goes here]]` placeholders where content goes.
+ * - `sample`: a worked example with one task's content in it, kept because a
+ *   person asked for it, under a name that says so.
+ * - `asset`: a file that is no task's work: a logo, a letterhead, a price
+ *   list, the notes that go with a template.
+ */
+export type KeptFileKind = "template" | "sample" | "asset";
+
+/** A placeholder as a template marks one: `[[what goes here]]`, on one line. */
+const TEMPLATE_PLACEHOLDER = /\[\[[^[\]\r\n]{1,160}\]\]/g;
+
+/** Ruling 682: the name a sample is kept under: it says what it is and whose. */
+function sampleName(taskKey: string, name: string): string {
+  const prefix = `sample-${taskKey.toLowerCase()}-`;
+  return name.toLowerCase().startsWith(prefix) ? name : `${prefix}${name}`;
+}
+
 export interface CopyTaskFileToKbInput {
   /** The knowledge base's id. */
   kbId: string;
+  /** What the copy is kept as (ruling 682). */
+  kind: KeptFileKind;
   projectSlug: string;
   taskKey: string;
   /** The attachment's name on the task. */
@@ -84,6 +108,9 @@ export type CopyTaskFileToKbResult =
       replaced: boolean;
       /** It is a document: indexed with its sections, read with the knowledge tool. */
       document: boolean;
+      /** Ruling 682: a template's placeholders, counted in its text; null for
+       *  any other kind, and for a template no reader takes as text. */
+      placeholders: number | null;
     }
   | { ok: false; message: string };
 
@@ -106,6 +133,13 @@ export type CopyTaskFileToKbResult =
  * the folder already holds, unless `replace`; a document already there, whose
  * own doors check what they replace; and a file that is not a document for a
  * private knowledge base, where no run could open it.
+ *
+ * Ruling 682: the copy says what it is kept as. The first template the
+ * controller made was the report itself, one customer's figures and sentences
+ * in the folder every run reads, and the next customer's proposal came back
+ * with one of them. So a `template` whose text holds no `[[placeholder]]` is
+ * refused as the result it is, and a `sample` takes a name that says whose
+ * example it is.
  */
 export function copyTaskFileToKnowledgeBase(
   db: DatabaseSync,
@@ -141,7 +175,8 @@ export function copyTaskFileToKnowledgeBase(
   let name: string;
   try {
     // The upload's own rules for a name and a size, and its stored form.
-    name = checkAttachmentUpload(input.as?.trim() || path.basename(source), size);
+    const asked = input.as?.trim() || path.basename(source);
+    name = checkAttachmentUpload(input.kind === "sample" ? sampleName(input.taskKey, asked) : asked, size);
   } catch (error) {
     return refuse(isAppError(error) ? error.userMessage : `\`${wanted}\` cannot be copied.`);
   }
@@ -159,6 +194,24 @@ export function copyTaskFileToKnowledgeBase(
       `${target.name} is private: its folder is closed to every agent's shell, and a run given it reads documents only, ` +
         `so no run could open \`${stored}\` there. Copy it into an open knowledge base.`,
     );
+  }
+  // Ruling 682: a template is read whole, as a reader takes it (a PDF's text
+  // layer, a page with its embedded pictures left out). Text with nowhere for
+  // content to go is a finished result.
+  let placeholders: number | null = null;
+  if (input.kind === "template") {
+    const text = attachmentWholeText(stored, read.bytes);
+    placeholders = text === null ? null : (text.match(TEMPLATE_PLACEHOLDER)?.length ?? 0);
+    if (placeholders === 0) {
+      return refuse(
+        `\`${wanted}\` holds no \`[[placeholder]]\`, so it is a finished result with ${input.taskKey}'s content in it, not a template: ` +
+          "every run given this knowledge base would read that content, and a result built from it can repeat it. " +
+          "Have an agent make the template first: file a task for the agent that makes such results, asking for the same layout " +
+          "with everything that belongs to that task replaced by a `[[what goes here]]` placeholder, and leave yourself " +
+          "`continue_when_done` to copy what it delivers. Only when the person asked to keep a worked example, " +
+          'copy this as `kind: "sample"`.',
+      );
+    }
   }
   const there = existsSync(into) ? statSync(into) : null;
   if (there?.isFile() && document) {
@@ -181,6 +234,7 @@ export function copyTaskFileToKnowledgeBase(
       name: path.basename(source),
       as: stored,
       replaced: there?.isFile() === true,
+      kind: input.kind,
     }).added;
   } catch (error) {
     if (isAppError(error)) return refuse(error.userMessage);
@@ -202,5 +256,6 @@ export function copyTaskFileToKnowledgeBase(
     bytes: read.bytes.byteLength,
     replaced: there?.isFile() === true,
     document,
+    placeholders,
   };
 }
