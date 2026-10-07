@@ -39,7 +39,7 @@ const ICON_PATHS = {
   cpu: '<rect x="7" y="7" width="10" height="10" rx="1.5"/><path d="M9 1.5v3M15 1.5v3M9 19.5v3M15 19.5v3M1.5 9h3M1.5 15h3M19.5 9h3M19.5 15h3"/>',
   message:
     '<path d="M21 12a8 8 0 0 1-11.5 7.2L4 20l1-4.8A8 8 0 1 1 21 12z"/>',
-  // Ruling 459, a departure from the mock (design/html-app/app/ui.jsx): sparkle,
+  // Ruling 459, a departure from the design mock: sparkle,
   // hand and flag are recentred on the 24px box. The mock drew the sparkle 2
   // units high, the hand 2 left and 1 high and the flag 2 left, so each sat off
   // centre in every round badge, tile and icon-only button that shows it alone.

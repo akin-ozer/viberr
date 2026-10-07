@@ -6,9 +6,9 @@ import { describe, expect, it } from "vitest";
 /**
  * F18-14 — the "govern / governor / governance / governed" copy ban.
  *
- * design/CONVERSATION-SUMMARY.md line 22: *"govern/governor/governance is BANNED
- * — use Maintainer (human role), Permissions (panel), 'managed'."* Line 81 calls
- * it out for the Policy page specifically. The ban is about the copy a HUMAN
+ * The design brief: *"govern/governor/governance is BANNED — use Maintainer
+ * (human role), Permissions (panel), 'managed'."*, called out for the Policy
+ * page specifically. The ban is about the copy a HUMAN
  * READS — NOT agent system prompts (an agent may legitimately be told it
  * operates under governed delivery; no end user sees that text).
  *
@@ -147,8 +147,8 @@ const BANNED = /\bgovern(ance|ed|or|ors|ing|s)?\b/i;
  * rendered. Each entry exempts ITSELF, not the line it sits on (see `redact`).
  *
  * There is NO rendered-copy exception. The login tagline had "governed" removed
- * at design time (design/CONVERSATION-SUMMARY.md L182: *"'Self-hosted ·
- * collaborative agentic AI delivery' (word 'governed' removed)"*), so the login
+ * at design time (*"'Self-hosted · collaborative agentic AI delivery' (word
+ * 'governed' removed)"*), so the login
  * hero is subject to the ban like every other surface — not allowlisted.
  *
  * Five entries were deleted when the stale check went in, and WHY they were

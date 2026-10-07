@@ -395,8 +395,8 @@ describe("runtime-registry", () => {
  * factory, with the provider SDKs faked so nothing bills — from ONE spec that
  * differs only in `backend`, and assert the EFFECT is the same even where the
  * mechanism is not (Claude tool denylist vs Codex's own switches). They replace
- * the two-legged live run in `planning/discovery-2026-08-06-pass19/runbooks/UC-16.md`,
- * which needs a real repo, real PRs and 20 minutes of provider time.
+ * the two-legged UC-16 live run, which needs a real repo, real PRs and 20
+ * minutes of provider time.
  */
 describe("UC-16 backend parity (claude ↔ codex, one spec, two adapters)", () => {
   /** The task identity every run carries: same key, same branch checkout. */

@@ -690,7 +690,7 @@ Guards (`controller-tool-guards.server.ts`, shared with `viberr_ops`):
   `[error] …`. The doctrine tells the model a `[denied]` is final and must be relayed.
 - Every tool refuses an argument it does not declare (`strictTool`, ruling 296).
 
-**58 tools**: 57 registered on every turn (`grep -c "^  add(" controller-toolkit.server.ts`
+**63 tools**: 62 registered on every turn (`grep -c "^  add(" controller-toolkit.server.ts`
 counts them) plus `read_knowledge_doc`, registered (indented, inside a condition) only when
 the turn holds at least one knowledge base, which is every turn while the controller keeps
 its `controller-handbook` grant. `projectSlug` defaults to the bound project and, on a

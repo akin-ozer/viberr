@@ -17,7 +17,7 @@ db/migrations/       0001_baseline.sql — the whole SQLite schema, squashed
 scripts/             operational CLIs run with tsx (seed, seed-demo, rescan, store-check, backup,
                      restore, secret-keys, deploy, e2e) plus two node scripts (anti-slop-manifest.mjs,
                      measure-routes.mjs); no docker-entrypoint.sh: the image declares no ENTRYPOINT
-e2e/                 Playwright specs (9) + the login fixture (auth.setup.ts)
+e2e/                 Playwright specs (11) + the login fixture (auth.setup.ts)
 test-support/        vitest setup and harnesses: hermetic env + <dialog> polyfill, test app/db/store,
                      fake runtime, fake GitHub fetch, a local git origin, fake vendor binaries
                      (writeFakeVendorBinaries, the sign-in driver's real child process), backend
@@ -30,23 +30,22 @@ test-support/        vitest setup and harnesses: hermetic env + <dialog> polyfil
                      walker and the app.css rule parser
 tools/oxlint/        the vendored anti-slop lint plugin (15 rules) and its pinned manifest
 tools/viberr-launch/ the setuid agent launcher (C) the image compiles, root:node 4750 (ruling 460)
-design/              the HTML/JSX prototype the UI was ported from, the design system, a PRD mirror
-planning/            canon (planning-artifacts/: prd, architecture, UX spec) and the discovery-pass
-                     ledgers, plans and probes
-qa/                  smoke-run evidence notes written by agents during live passes
-test-artifacts/      captured pass-20 canary transcripts and controller live-run screenshots
-docs/                this documentation set
+docs/                this documentation set, the PRD (docs/product/prd.md) included
 public/              favicon.svg
 .github/workflows/   ci.yml: lint, typecheck, test, build; then the e2e job
 compose.yml          production-shaped single container (init: true, hostname viberr, healthcheck on
                      /resources/health); compose.e2e.yml is the isolated e2e stack
-Dockerfile           three stages: prod-deps, build, runtime (node:26-slim + git + make + curl + pnpm +
-                     chromium + uv); no ENTRYPOINT, no backend credential, no runtime home baked in
+Dockerfile           four stages: prod-deps, build, launcher (compiles tools/viberr-launch), runtime
+                     (node:26-slim + git + make + curl + pnpm + chromium + uv); no ENTRYPOINT, no backend credential, no runtime home baked in
                      (ruling 127); CMD runs node directly
 .claude/launch.json  three launchers: dev on docker-data, dev on the hermetic ./data (port 5174), and the
                      production build on ./data (port 5175) for measuring
 .claude/skills/, .agents/skills/
-                     agent skills for coding sessions (skills-lock.json pins their sources)
+                     agent skills for coding sessions on this repository (test-audit,
+                     react-doctor, ponytail, and the animation and design-review skills)
+README.md, AGENTS.md, CLAUDE.md, CONTRIBUTING.md
+                     entry points for people and coding agents; THIRD_PARTY_NOTICES.md the vendored
+                     code's licences; .env.example the documented environment template
 config               vite.config.ts, vitest.config.ts, playwright.config.ts, react-router.config.ts,
                      tsconfig.json, .oxlintrc.json, doctor.config.ts + .react-doctor/ (react-doctor)
 ```
@@ -196,10 +195,10 @@ actors, notifications; `deriveDisplayReadiness` and the live-backend overlay liv
 the viewer's zone for the controller's prose), `ids/` (`newId` in `new-id.server.ts`,
 `slugify`), `text/` (`plural`, store text extensions, `BACKEND_LABEL` (ruling 92),
 `escapeRegExp`, `endSentence`, `wholeThousands`, `prettySize` (a byte count as people read it, ruling 573)), `auth/` (auth paths, password
-policy), `docs/` (six tests: `design/prd.md` against the canon PRD, `file-formats.md`
-against `PACKET_OPTION_KINDS`, the rulings supersession markers, the runbook's
-database-read rules, the vendored anti-slop tree against its manifest, the vitest
-per-test budget).
+policy), `docs/` (six tests: `file-formats.md` against `PACKET_OPTION_KINDS`, the
+rulings supersession markers, the runbook's database-read rules, the vendored anti-slop
+tree against its manifest, every performance budget measured by some test, and
+`vite.config.ts`'s font and chunk rules).
 
 ## 7. `app/schemas/`
 

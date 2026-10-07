@@ -558,8 +558,8 @@ export function WorkflowRules({
           <Icon name="alert" />
           <span>
             {/* F18-14: the "govern/governance/governed" copy ban applies to
-                rendered UI (design/CONVERSATION-SUMMARY line 81 calls it out for
-                THIS page specifically) — say "workflow path". */}
+                rendered UI (the design brief calls it out for THIS page
+                specifically, copy-ban.test.ts) — say "workflow path". */}
             Off the workflow path:{" "}
             <strong>{offChain.map((id) => S(id).name).join(", ")}</strong>. No
             transition rule reaches{" "}

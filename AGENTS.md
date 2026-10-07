@@ -50,12 +50,14 @@ npm run deploy         # Docker deployment: stamp the build from git, build, up,
   owns goes with its `rmdir` (ruling 495).
 - `npm run lint` has no suppression list: fix findings, never allowlist.
 - Docs pinned by tests are listed in `docs/development/contributing.md` §5: among them
-  `design/prd.md` (a byte-for-byte mirror of the canon PRD), `docs/architecture/file-formats.md`
-  (its key lists and the `## Packet` kinds), `docs/architecture/decisions.md` (a ruling a
+  `docs/architecture/file-formats.md` (its key lists and the `## Packet` kinds), `docs/architecture/decisions.md` (a ruling a
   later one supersedes says so, ruling 341), the operations pages (never a second connection
   to a live projection, ruling 158) and `.env.example`.
 - When you change behaviour, update the matching page under `docs/` in the same change,
   and record any owner decision as the next numbered ruling.
+- The repository holds the app, its tests, its tooling and `docs/` (ruling 682). Planning
+  notes, pass ledgers, QA evidence and design mocks do not go back into the tree: the
+  outcome belongs in the code, a `docs/` page or a ruling, and the working notes in the PR.
 
 ## Do not
 
@@ -66,7 +68,7 @@ npm run deploy         # Docker deployment: stamp the build from git, build, up,
   it names the contract it owns and the edit that breaks it, lives at the one boundary that
   owns that contract, and needs no export, flag or `*ForTests` hook that only a test calls.
 - Run `npx shadcn add` (or paste a shadcn/ReUI component). A registry component is a design
-  reference, read the way `design/html-app` is — never an install. Ruling 166 permits only
+  reference, never an install. Ruling 166 permits only
   UNSTYLED primitive packages, rendered with class names `app/app.css` already defines and
   placed behind an `app/ui/*` boundary; `app.css.test.ts` fails the build on a utility class
   or a Tailwind toolchain in `package.json`.
