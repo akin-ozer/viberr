@@ -136,6 +136,39 @@ function recorder(reply: EpicActionResult) {
   return { posted, action };
 }
 
+/** The page under a loader, as the route serves it: a POST answers `reply`,
+ *  and the reload after it, which the route runs after every write, reads
+ *  `after`. */
+function renderReloading(first: EpicPageView, after: EpicPageView, reply: EpicActionResult) {
+  let view = first;
+  const Stub = createRoutesStub([
+    {
+      id: "root",
+      path: "/",
+      loader: () => ({ csrf: "tok", theme: "system" }),
+      children: [
+        {
+          path: "projects/:slug/epics/:epicId",
+          loader: () => view,
+          action: () => {
+            view = after;
+            return reply;
+          },
+          Component: function Loaded() {
+            const data = useLoaderData<EpicPageView>();
+            return (
+              <ToastProvider>
+                <EpicPage view={data} projectSlug="viberr-core" canManage canEditTasks canCreateTask canArchive />
+              </ToastProvider>
+            );
+          },
+        },
+      ],
+    },
+  ]);
+  return render(<Stub initialEntries={["/projects/viberr-core/epics/epic-3"]} />);
+}
+
 /** A section of the page, by its heading. */
 async function section(name: string): Promise<HTMLElement> {
   const heading = await screen.findByRole("heading", { name, level: 2 });
@@ -288,6 +321,33 @@ describe("ruling 503(e): About, History and Details", () => {
     fireEvent.click(within(panel).getByRole("button", { name: "Show 2 more" }));
     expect(panel.querySelectorAll("li")).toHaveLength(10);
     expect(within(panel).getByRole("button", { name: "Show less" })).toBeTruthy();
+  });
+
+  it("a new line leaves the rows already drawn in place, so a task chip in them keeps the focus", async () => {
+    // Local hours of one fixed past day, so every zone reads one day.
+    const at = (hour: number) => new Date(2024, 8, 20, hour).toISOString();
+    const earlier = [
+      { occurredAt: at(11), text: "Arda Kaya added VIB-151." },
+      { occurredAt: at(10), text: "Created by Arda Kaya." },
+    ];
+    const latest = { occurredAt: at(12), text: "Arda Kaya set the status to Paused." };
+    const taskLinks = { "VIB-151": "/projects/viberr-core/tasks/VIB-151" };
+    renderReloading(
+      pageView({ epic: detail({ history: earlier }), taskLinks }),
+      pageView({ epic: detail({ status: "paused", history: [latest, ...earlier] }), taskLinks }),
+      { ok: true },
+    );
+    const panel = await section("History");
+    const chip = within(panel).getByRole("link", { name: "VIB-151" });
+    chip.focus();
+    // The line reaches the open page the way every write does, by the reload;
+    // a change event leaves the focus on the chip.
+    fireEvent.change(screen.getByRole("combobox", { name: "Status" }), { target: { value: "paused" } });
+    expect(await within(panel).findByText(latest.text)).toBeTruthy();
+    // CANARY: key a row by its place in its day again and the new line re-keys
+    // the two under it: the chip's row remounts and the focus falls to <body>.
+    expect(chip.isConnected).toBe(true);
+    expect(document.activeElement).toBe(chip);
   });
 
   it("Details names the status, the lead, the dates and the creator", async () => {
@@ -622,35 +682,13 @@ describe("ruling 651: archiving from the epic page", () => {
   });
 
   it("the row's answer is toasted after the row moves into the fold", async () => {
-    // The page reloads after the action, as the route's loader does: the
-    // archived row leaves the live list for the fold, a new element.
-    let view = pageView({ tasks: [DONE] });
-    const Stub = createRoutesStub([
-      {
-        id: "root",
-        path: "/",
-        loader: () => ({ csrf: "tok", theme: "system" }),
-        children: [
-          {
-            path: "projects/:slug/epics/:epicId",
-            loader: () => view,
-            action: () => {
-              view = pageView({ tasks: [{ ...DONE, archived: true, status: FILED.status }] });
-              return { ok: true, toast: "VIB-160 archived. Find it under Archived on the board." };
-            },
-            Component: function Loaded() {
-              const data = useLoaderData<EpicPageView>();
-              return (
-                <ToastProvider>
-                  <EpicPage view={data} projectSlug="viberr-core" canManage canEditTasks canCreateTask canArchive />
-                </ToastProvider>
-              );
-            },
-          },
-        ],
-      },
-    ]);
-    render(<Stub initialEntries={["/projects/viberr-core/epics/epic-3"]} />);
+    // The page reloads after the action: the archived row leaves the live
+    // list for the fold, a new element.
+    renderReloading(
+      pageView({ tasks: [DONE] }),
+      pageView({ tasks: [{ ...DONE, archived: true, status: FILED.status }] }),
+      { ok: true, toast: "VIB-160 archived. Find it under Archived on the board." },
+    );
     fireEvent.click(await screen.findByRole("button", { name: "Archive VIB-160" }));
     // CANARY: give `EpicTaskRow` its own fetcher again and the toast is lost
     // when the row unmounts into the fold.

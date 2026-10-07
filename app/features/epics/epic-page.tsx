@@ -296,7 +296,7 @@ export function EpicPage({
               {epic.history.length === 0 ? (
                 <p className="empty sm">Nothing recorded yet.</p>
               ) : (
-                <EpicHistory entries={history} taskLinks={view.taskLinks} />
+                <EpicHistory entries={history} total={epic.history.length} taskLinks={view.taskLinks} />
               )}
               {olderHistory > 0 && (
                 <button
@@ -417,20 +417,28 @@ export function EpicPage({
  *  chips every other feed links a task with. */
 function EpicHistory({
   entries,
+  total,
   taskLinks,
 }: {
   entries: EpicPageView["epic"]["history"];
+  /** The whole history's length; `entries` is its newest-first front slice. */
+  total: number;
   taskLinks: EpicPageView["taskLinks"];
 }) {
   const local = useHydrated();
+  // A new line lands at the head (`updateEpicFile` unshifts), so a row's
+  // place moves with every write while its number counted from the oldest
+  // stays. Keyed by its place in the day, a line written today re-keyed the
+  // rest of today, and a focused task chip in them fell to <body>.
+  const rows = entries.map((entry, n) => ({ entry, line: total - n }));
   return (
     <div className="epic-history">
-      {daySections(entries, (entry) => entry.occurredAt, local).map((day) => (
+      {daySections(rows, (row) => row.entry.occurredAt, local).map((day) => (
         <div key={day.key}>
           <p className="epic-history-day">{day.day}</p>
           <ol className="epic-history-list">
-            {day.rows.map((entry, i) => (
-              <li key={`${entry.occurredAt}-${i}`}>
+            {day.rows.map(({ entry, line }) => (
+              <li key={line}>
                 <span className="epic-history-text">
                   <RichText text={entry.text} taskLinks={taskLinks} />
                 </span>
