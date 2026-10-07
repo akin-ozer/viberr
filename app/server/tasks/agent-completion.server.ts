@@ -16,6 +16,7 @@ import { BACKEND_LABEL } from "~/shared/text/backend-label";
 import { endSentence } from "~/shared/text/sentence";
 import { countLabel } from "~/shared/text/plural";
 import { VERDICT_NOTE_TITLE, verdictNoteText } from "~/shared/verdict-note";
+import { QUESTION_LEAD } from "~/shared/timeline-leads";
 import { isRelayComment } from "./task-relay.server";
 // Ruling 489: where a react chain's work stands, read from the server's record.
 import {
@@ -998,7 +999,7 @@ export async function recordAgentCompletion(
           type: "blocked",
           actor: actorRef,
           title: null,
-          text: askedEntryText(`**Question for a human:** ${asked.title}`, asked),
+          text: askedEntryText(`${QUESTION_LEAD} ${asked.title}`, asked),
           toAgent: false,
           evidence: null,
         });

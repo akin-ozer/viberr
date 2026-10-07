@@ -186,7 +186,10 @@ import-free, because that schema reaches every page, ruling 457), `file-leases.t
 (one title grammar), `errors.ts` (`toError` / `errorMessage`, the one normalization of a
 caught value), `packet-goal-draft.ts` (ruling 138), `packet-server-outcome.ts`
 (ruling 136(a)), `provider-marker.ts`, `revision-drift.ts` (ruling 132), `run-failure.ts`
-(the failed-run vocabulary, ruling 130(a)), `task-key-links.ts`,
+(the failed-run vocabulary, ruling 130(a)), `task-key-links.ts`, `timeline-leads.ts`
+(ruling 693: the opening words of the timeline entries a count is read from, a decision,
+an agent's question, a stage move and the declined-recommendation title, imported by
+their writers and by the reader),
 `workflow/` (templates, transitions chain maintenance, stage roles, stage eligibility,
 stage colour presets (ruling 364), packet option kinds (ruling 164), the re-verdict stage
 (ruling 163), guardrail labels),
@@ -195,7 +198,7 @@ actors, notifications; `deriveDisplayReadiness` and the live-backend overlay liv
 `task.server.ts`), `dates/` (`format.ts`, the one timestamp formatter; `time-zone.ts`,
 the viewer's zone for the controller's prose), `ids/` (`newId` in `new-id.server.ts`,
 `slugify`), `text/` (`plural`, store text extensions, `BACKEND_LABEL` (ruling 92),
-`escapeRegExp`, `endSentence`, `wholeThousands`, `prettySize` (a byte count as people read it, ruling 573)), `auth/` (auth paths, password
+`escapeRegExp`, `endSentence`, `wholeThousands`, `prettySize` (a byte count as people read it, ruling 573), `figures` (`formatCost` and `formatDuration`, a dollar total and a span of time as Insights and the completion card print them, ruling 693)), `auth/` (auth paths, password
 policy), `docs/` (six tests: `file-formats.md` against `PACKET_OPTION_KINDS`, the
 rulings supersession markers, the runbook's database-read rules, the vendored anti-slop
 tree against its manifest, every performance budget measured by some test, and

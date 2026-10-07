@@ -16,6 +16,7 @@ import type { CapabilityGrant, ProjectGate } from "~/schemas/project-file.schema
 import { withheldAgentGrants } from "~/features/agents/capability-catalog";
 import { effectiveCollabMode } from "./agent-outcome.server";
 import { PLAN_NOT_CARRIED_OUT_RE, RUN_DID_NOT_COMPLETE_RE } from "~/shared/run-failure";
+import { DECISION_LEAD } from "~/shared/timeline-leads";
 import { type EpicStatus, isEpicOpen } from "~/schemas/epic-file.schema";
 import { epicTaskRows, listEpics } from "~/server/projections/epic-query.server";
 import { acceptanceBoundaryRefusal } from "~/server/github/acceptance-boundary.server";
@@ -828,9 +829,6 @@ export const AGENT_REPORT_CAP_TOOLLESS = 16000;
 /** Ruling 503: the snapshot carries the task's epic's description up to this;
  *  the epic's page has the rest. */
 const EPIC_DESCRIPTION_CAP = 2000;
-/** Every packet resolution a person makes is written with this label. */
-const DECISION_LEAD = "**Decision:**";
-
 /**
  * Ruling 415 (F39-41): the decisions a person made on this task, newest
  * first, over the WHOLE timeline rather than the snapshot's window.
