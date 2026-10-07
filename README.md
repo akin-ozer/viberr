@@ -159,7 +159,8 @@ Most other settings live in the app, not the environment:
 ## Operating it
 
 - **Production.** The app speaks plain HTTP. Put a TLS-terminating reverse proxy in
-  front and set `BETTER_AUTH_URL` and `VIBERR_TRUST_PROXY=1`; without them, sign-in loops.
+  front and set `BETTER_AUTH_URL` and `VIBERR_TRUST_PROXY=1`; without the first, sign-in
+  answers 403 behind the proxy, and without the proxy, sign-in loops.
   [Deployment guide](docs/operations/deployment.md#tls-and-the-reverse-proxy).
 - **Health.** `GET /resources/health` is an unauthenticated probe: `200` while the process
   answers, and `503` with `?probe=readiness` while any subsystem (watcher, lock, disk,

@@ -695,6 +695,43 @@ describe("ensureBaselineColumns — baseline TABLES a pre-existing root lacks", 
     }
   });
 
+  it("creates controller_follow_ups on a root that predates ruling 685", () => {
+    // 0001 never re-runs, so a root created before the ruling boots without
+    // the table: the controller's `continue_when_done` would fail on its
+    // insert, and every acceptance would log a failed read and continue
+    // nobody. CANARY: drop the table from BASELINE_TABLES and this fails.
+    const dir = mkdtempSync(path.join(tmpdir(), "viberr-cfu-"));
+    try {
+      const db = openDatabase(path.join(dir, "old.sqlite"));
+      db.exec(`CREATE TABLE users (id TEXT PRIMARY KEY)`);
+      const has = (type: string, name: string) =>
+        db.prepare(`SELECT name FROM sqlite_master WHERE type = ? AND name = ?`).get(type, name) !== undefined;
+      expect(has("table", "controller_follow_ups"), "the old root starts without it").toBe(false);
+      ensureBaselineColumns(db);
+      expect(has("table", "controller_follow_ups"), "the healer must create it").toBe(true);
+      expect(has("index", "idx_controller_follow_ups__task")).toBe(true);
+      // The columns the store names, and idempotent on the next boot.
+      // SAFETY: `PRAGMA table_info` always yields rows with a TEXT `name`.
+      const columns = (db.prepare(`PRAGMA table_info(controller_follow_ups)`).all() as { name: string }[]).map((c) => c.name);
+      expect(columns).toEqual([
+        "id",
+        "conversation_id",
+        "user_id",
+        "project_slug",
+        "task_key",
+        "text",
+        "created_at",
+        "fired_at",
+        "outcome",
+        "message_id",
+      ]);
+      ensureBaselineColumns(db);
+      db.close();
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
   it("rebuilds the one-account shape into the several-accounts shape, carrying every row (ruling 507)", () => {
     // A root created before ruling 507 has `UNIQUE (user_id, backend)`, which
     // refuses a person's second Claude account at its INSERT, and ALTER TABLE

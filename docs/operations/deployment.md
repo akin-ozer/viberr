@@ -124,11 +124,12 @@ BETTER_AUTH_URL=https://viberr.example.com   # the PUBLIC https origin, no trail
 ```
 
 That variable is what makes the proxied topology work. better-auth builds OAuth callback
-URLs and cookie attributes from it, and PR bodies link back to tasks through it; unset
-behind a proxy, `trustedOrigins` collapses to `[]` and the OAuth flow breaks. Boot logs
-two warnings about it: when an OAuth client id is configured and `BETTER_AUTH_URL` is
-not, and when `NODE_ENV=production` and it is an `http://` origin on a non-loopback host
-(session cookies would then be issued without `Secure`).
+URLs and cookie attributes from it, the app accepts form posts from its origin (below), and
+PR bodies link back to tasks through it; unset behind a proxy, `trustedOrigins` collapses
+to `[]` and the OAuth flow breaks. Boot logs two warnings about it: when an OAuth client id
+is configured and `BETTER_AUTH_URL` is not, and when `NODE_ENV=production` and it is an
+`http://` origin on a non-loopback host (session cookies would then be issued without
+`Secure`).
 
 **The failure mode if you skip the proxy.** The image sets `NODE_ENV=production`, and with
 no explicit origin better-auth falls through to its production defaults: it issues
@@ -157,6 +158,27 @@ Three proxy details worth getting right:
   and every request then hangs with no error (ruling 301; a hidden tab closes its
   streams). The app serves HTTP/1.1; a proxy that speaks HTTP/2 to the browser
   multiplexes the streams over one connection.
+
+**Form posts and the origin check.** `react-router-serve` builds `request.url` from the
+socket and never reads `X-Forwarded-Proto` or `X-Forwarded-Host` (`VIBERR_TRUST_PROXY` above
+is the app's own setting and does not reach it), so behind this proxy every `request.url` is
+`http://` while the browser sends an `https://` `Origin`. The app's origin check,
+`assertTrustedOrigin` in `app/server/auth/csrf.server.ts`, runs before the login and every
+form, fetcher and resource action changes anything, and it accepts two origins: the
+request's own and `BETTER_AUTH_URL`'s. The request's own does not count when it is the
+public host over `http://`, which is what it reads behind a proxy that forwards `Host`: no
+page a person uses lives there. So the variable above is also the origin the app accepts
+sign-ins and form submissions from. Unset behind the proxy, a sign-in answers 403
+"Cross-origin request rejected." and a form or fetcher post answers 403 "That request
+expired (security token mismatch). Try again." React Router's own action-origin check, which
+from 8.3.1 compares the whole origin the same way and cannot see the public one, is off
+(`allowedActionOrigins: ["**"]` in `react-router.config.ts`, ruling 683), which leaves the
+app's guard as the one origin check. The exception is `/api/auth/*` (the OAuth start and
+callbacks): it never runs the app's guard, and better-auth checks it against its own
+`trustedOrigins`, which it builds from the same `BETTER_AUTH_URL`. Do not make the server
+trust `X-Forwarded-Proto` or `X-Forwarded-Host` to get past a 403: any client can send them,
+and the public origin is already configured. The e2e stack (`compose.e2e.yml`) has no proxy,
+so the e2e suite does not exercise this path.
 
 HSTS, certificate renewal and redirect-to-https all belong to the proxy layer.
 
@@ -315,11 +337,11 @@ rulings 182(b), 191 and 196):
 ```bash
 curl -s localhost:${PORT:-3000}/resources/health | jq .toolchain
 # {"node":"26.8.2","npm":"11.19.1","git":"2.47.3","python3":null,"go":null,
-#  "make":"4.4.1","docker":null,"pnpm":"12.4.1","yarn":null,"curl":"8.14.1",
-#  "codexCli":"0.156.0","claudeAgentSdk":"0.3.280"}
+#  "make":"4.4.1","docker":null,"pnpm":"12.9.1","yarn":null,"curl":"8.14.1",
+#  "codexCli":"0.160.1","claudeAgentSdk":"0.3.292"}
 ```
 
-`make`, `curl` and a pinned `pnpm` (`12.4.1`) ship in the image (ruling 196); `docker` is
+`make`, `curl` and a pinned `pnpm` (`12.9.1`) ship in the image (ruling 196); `docker` is
 `null` deliberately and is not coming — an agent holding the daemon socket controls every
 container on the host. The same reading is injected into every specialist, operator and
 controller prompt (ruling 191), so an agent plans around what is present instead of

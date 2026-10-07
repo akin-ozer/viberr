@@ -11,7 +11,7 @@
 
 ## 1. Authentication
 
-Viberr runs on **better-auth 1.6.25 with no plugins**. better-auth owns
+Viberr runs on **better-auth 1.7.7 with no plugins**. better-auth owns
 credentials, sessions and the OAuth handshake; the app's `users` table stays the
 canonical profile and org-role store. The one invariant binding them is that the
 better-auth `user.id` equals `users.id`; `provisionIdentity` writes the identity at
@@ -38,9 +38,19 @@ only in `users.role`.
 
 Two independent layers, both required (`app/server/auth/csrf.server.ts`):
 
-1. **Origin proof**: `Sec-Fetch-Site` must be `same-origin` or `none`; `Origin`
-   must match; a `Referer`, if present, must be same-origin; **a request with none
-   of the three is refused** (fails closed).
+1. **Origin proof** (`assertTrustedOrigin`): `Sec-Fetch-Site` must be `same-origin`
+   or `none`; `Origin: null` is refused; `Origin` must be one of two accepted
+   origins, the request's own or `BETTER_AUTH_URL`'s; a `Referer`, if present, must
+   have one of them too; **a request with none of the three is refused** (fails
+   closed). Behind the TLS proxy the request's own origin is the plain-HTTP upstream
+   and the browser sends `BETTER_AUTH_URL`'s. When `BETTER_AUTH_URL` is `https://`,
+   the request's own origin does not count if it is that host over `http://`: behind
+   a proxy that forwards `Host` that is the proxy's plain listener, where no page a
+   person uses lives. `X-Forwarded-Proto` and `X-Forwarded-Host` are never read, and
+   with `BETTER_AUTH_URL` unset the whole origin, scheme included, must be the
+   request's. This is the app's one origin check for every app action but
+   `/api/auth/*` (below): React Router's own is off (`allowedActionOrigins: ["**"]`,
+   ruling 683; [deployment.md §TLS and the reverse proxy](../operations/deployment.md#tls-and-the-reverse-proxy)).
 2. **Double-submit token**: `HMAC-SHA256(VIBERR_SESSION_SECRET, "viberr-csrf:" +
    sessionId)`, issued by the root loader and rendered by `<CsrfInput />` as
    `_csrf` (or the `X-Csrf-Token` header), compared with `timingSafeEqual`.
@@ -60,7 +70,10 @@ origin check only (`assertTrustedOrigin`, there is no session yet), and its
 ## 2. OAuth sign-in and the whitelist
 
 Providers are GitHub (`read:user user:email`, `githubHandle` captured) and Google
-(offline access, account chooser). Callback path: `/api/auth/callback/<provider>`.
+(offline access, account chooser). Callback path: `/api/auth/callback/<provider>`. The
+Sign-in & SSO card shows the full callback, and Google's credential test sends it (GitHub's
+probe sends none), under the origin of `BETTER_AUTH_URL`, else of the request, which is
+the callback better-auth sends (`publicOrigin` in `csrf.server.ts`, ruling 683).
 Configuration has two sources with a clear precedence (ruling 72):
 
 - **The deployment env** (`GITHUB_OAUTH_*`, `GOOGLE_OAUTH_*`) is the bootstrap default.
@@ -377,6 +390,7 @@ reconcile, workspace, scope violations, repository bootstrap), `runtime.run.*`,
 (ruling 207(a)), `controller.authority.denied`, the controller's audited reads
 `controller.ops.read`, `controller.repo.read` and `controller.github.read`,
 `controller.resource_grant.requested|granted|declined` (ruling 390),
+`controller.follow_up.set|dropped|started|not_started` (ruling 685),
 `projection.rescan|rebuild`, `seed.*`, `secrets.resealed`, `store.restored`.
 
 **`profile.backend.*` (ruling 127).** Connecting or dropping a personal agent account

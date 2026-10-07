@@ -659,6 +659,30 @@ CREATE TABLE controller_message_files (
 );
 CREATE INDEX idx_controller_message_files__message
   ON controller_message_files (message_id);
+-- What a controller conversation left itself to do when a task is accepted
+-- (ruling 685). The controller cannot wait for a task: its turn ends. It writes
+-- the next step here, and the acceptance that moves the task to its last stage
+-- starts the conversation's next turn with it, as the person who asked.
+-- `fired_at` is set once, by the acceptance that claims the row, so two
+-- concurrent ones start one turn; `outcome` says what became of it, and
+-- `message_id` is the message Viberr sent to open the turn, which is how a
+-- turn opened this way is told from one a person asked for. One open row a
+-- conversation and task: setting it again replaces the text.
+CREATE TABLE controller_follow_ups (
+  id TEXT PRIMARY KEY,
+  conversation_id TEXT NOT NULL
+    REFERENCES controller_conversations (id) ON DELETE CASCADE,
+  user_id TEXT NOT NULL,
+  project_slug TEXT NOT NULL,
+  task_key TEXT NOT NULL,
+  text TEXT NOT NULL,
+  created_at TEXT NOT NULL,
+  fired_at TEXT,
+  outcome TEXT,
+  message_id TEXT
+);
+CREATE INDEX idx_controller_follow_ups__task
+  ON controller_follow_ups (project_slug, task_key, fired_at);
 CREATE TABLE "agent_runs" (
   id TEXT PRIMARY KEY,
   task_key TEXT NOT NULL,
@@ -810,10 +834,12 @@ CREATE TABLE run_log_lines (
   created_at TEXT NOT NULL
 );
 -- ---------------------------------------------------------------------------
--- better-auth core tables (better-auth 1.6.25), hand-inlined.
+-- better-auth core tables (better-auth 1.7.7), hand-inlined.
 --
--- PROVENANCE: these four statements are `npx @better-auth/cli@1.6.25 generate`
--- output for app/lib/auth.server.ts's `buildAuthOptions`, pasted verbatim —
+-- PROVENANCE: these four statements are better-auth 1.6.25's generated schema
+-- for app/lib/auth.server.ts's `buildAuthOptions`, pasted verbatim, and 1.7.7
+-- generates them unchanged (its `getMigrations()` for the same options, diffed
+-- 2026-10-07: the four tables and three indexes below, byte for byte) —
 -- hence the lower-case `not null` / quoted identifiers, which match nothing
 -- else in this file. The CLI is deliberately NOT a dependency: it is a codegen
 -- tool run by hand at version-bump time, and adding it would put better-auth's
@@ -821,9 +847,10 @@ CREATE TABLE run_log_lines (
 -- year.
 --
 -- REFRESH RECIPE, after bumping the better-auth version in package.json:
---   1. npx @better-auth/cli@<new-version> generate \
+--   1. npx auth@<new-version> generate \
 --        --config app/lib/auth.server.ts --output /tmp/ba-schema.sql -y
---      (check `generate --help` first — the flag names have moved across
+--      (the CLI is the `auth` package now; `@better-auth/cli` stops at 1.4.
+--      Check `generate --help` first — the flag names have moved across
 --      better-auth majors; the shape is always config-in, SQL-out.)
 --   2. Diff /tmp/ba-schema.sql against this block. Column ADDITIONS and NEW
 --      tables (a plugin's) get pasted in; better-auth never renames a core
@@ -864,10 +891,10 @@ CREATE TABLE "account" ("id" text not null primary key, "accountId" text not nul
 -- `isStateful` is just `!!options.database` — we pass one, so the strategy is
 -- "database": `generateGenericState` INSERTs the signed state here at
 -- /sign-in/social and `parseGenericState` reads then deletes it at /callback/:id
--- (better-auth 1.6.25, dist/state.mjs). Dropping the table makes every GitHub /
--- Google login fail with better-auth's own "there is a verification table in the
--- database" error. `verification_identifier_idx` below is the lookup that read
--- path uses.
+-- (better-auth 1.6.25, dist/state.mjs; unchanged in 1.7.7). Dropping the table
+-- makes every GitHub / Google login fail with better-auth's own "there is a
+-- verification table in the database" error. `verification_identifier_idx`
+-- below is the lookup that read path uses.
 CREATE TABLE "verification" ("id" text not null primary key, "identifier" text not null, "value" text not null, "expiresAt" date not null, "createdAt" date not null, "updatedAt" date not null);
 
 -- ============================ indexes ===========================

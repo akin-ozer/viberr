@@ -3,7 +3,7 @@ import { mkdirSync, realpathSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { PassThrough } from "node:stream";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { z } from "zod";
 import { createTempDirs } from "../../../test-support/temp-dirs";
 import { resetEnvCacheForTests } from "../config/env.server";
@@ -1723,6 +1723,211 @@ describe("claude CLI process lifecycle (ruling 174)", () => {
     }
   });
 
+  /**
+   * Ruling 683: Claude Code 2.1.292 keeps an SDK run open after its final
+   * result while a command the agent backgrounded still runs, and a dev server
+   * never ends. The run used to sit past its result for the whole idle window
+   * and then settle `run·error·idle_timeout`, holding its slot, and a run cut
+   * off by a cap or failed by its provider lost that class to the hang. A line
+   * that still arrives after the result is read as before, and does not extend
+   * the grace.
+   */
+  describe("ruling 683: a CLI still open after the run's result", () => {
+    const INIT = { type: "system", subtype: "init", session_id: "s-683", model: "claude-opus-5-5", tools: ["Bash"], mcp_servers: [] };
+    /** Well short of the default 15-minute idle window. */
+    const A_MINUTE = 60_000;
+
+    /** A line a CLI that waits on a background command may still send. */
+    const RATE_LIMIT = { type: "rate_limit_event", rate_limit_info: { status: "allowed", rateLimitType: "five_hour", resetsAt: 1_791_400_000 } };
+    /** A line the CLI sends, after a pause in ms. */
+    type Step = readonly [pause: number, line: object];
+    /** That line once a second for ten seconds. */
+    const CHATTER: Step[] = Array.from({ length: 10 }, () => [1_000, RATE_LIMIT]);
+    /** Ruling 175: the turn cap's cut-off. */
+    const MAX_TURNS = { type: "result", subtype: "error_max_turns", is_error: true, num_turns: 2000, usage: {} };
+    /** A failure only the result's own words classify: the abort's throw names none. */
+    const QUOTA = { type: "result", subtype: "error_during_execution", is_error: true, num_turns: 9, usage: {}, result: "429 too many requests" };
+
+    beforeEach(() => {
+      vi.useFakeTimers();
+      // An idle window shorter than the grace: past a result the grace
+      // decides, not the idle guard.
+      process.env.VIBERR_CLAUDE_IDLE_TIMEOUT_MS = "500";
+      resetEnvCacheForTests();
+    });
+    afterEach(() => {
+      vi.useRealTimers();
+      delete process.env.VIBERR_CLAUDE_IDLE_TIMEOUT_MS;
+      resetEnvCacheForTests();
+    });
+
+    /**
+     * Start a run on a CLI that sends `script` and stops sending once the
+     * abort lands. Its stream then ends where the script does (`closes`),
+     * throws on the abort as the SDK's does (`throws`), stays open past it
+     * (`hangs`), or ends or throws 30 s after it (`ends-late`,
+     * `throws-late`). `late` is whatever reached the run's callbacks after it
+     * exited; `interrupts` counts the cooperative requests the run sent.
+     */
+    function startOnOpenCli(
+      script: readonly Step[],
+      ending: "closes" | "throws" | "hangs" | "ends-late" | "throws-late",
+    ) {
+      const h = harness();
+      let signal: AbortSignal | undefined;
+      let interrupts = 0;
+      const queryFn: ClaudeQueryFn = ({ options }) => {
+        h.spawnThrough(options);
+        signal = options?.abortController?.signal;
+        const gen = (async function* () {
+          for (const [pause, line] of script) {
+            if (pause > 0) await new Promise((r) => setTimeout(r, pause));
+            if (signal?.aborted) break;
+            yield line;
+          }
+          if (ending === "closes") return;
+          if (ending === "hangs") await new Promise(() => {});
+          if (!signal?.aborted) await new Promise((r) => signal?.addEventListener("abort", r));
+          if (ending !== "throws") await new Promise((r) => setTimeout(r, 30_000));
+          if (ending === "ends-late") return;
+          throw new Error("Claude Code process aborted by user");
+        })();
+        return Object.assign(gen, {
+          interrupt: async () => {
+            interrupts += 1;
+          },
+        });
+      };
+      const lines: EmittedLine[] = [];
+      const late: string[] = [];
+      let exit: RunExit | null = null;
+      const handle = createClaudeAdapter({ ...h.deps, queryFn }).start(
+        { ...SPEC, runId: "run_683", env: { VIBERR_RUN_ID: "run_683" } },
+        {
+          onLine: (l) => {
+            if (exit) late.push(`line ${l.display?.tag ?? ""}`);
+            lines.push(l);
+          },
+          onPhase: (name) => {
+            if (exit) late.push(`phase ${name}`);
+          },
+          onExit: (e) => (exit = e),
+        },
+      );
+      return {
+        h,
+        handle,
+        lines,
+        late,
+        exit: () => exit,
+        aborted: () => signal?.aborted,
+        interrupts: () => interrupts,
+        /** Ruling 174: the stop reached the CLI's whole group. */
+        groupSignalled: () => h.signals.some(([pid, sig]) => pid === -CLI_PID && sig === "SIGTERM"),
+      };
+    }
+
+    it.each([
+      ["closes on its own 4 s after it", "closes"],
+      ["stays open until the abort ends its stream, as the SDK's does", "throws"],
+      ["stays open even past the abort", "hangs"],
+    ] as const)("a successful result, and a CLI that %s: the CLI gets 5 s from the result and the run settles `finished`", async (_, ending) => {
+      // CANARY: drop `armResultGrace()` and the run settles idle_timeout;
+      // settle at the result itself and the run has exited before the late
+      // line arrives; skip `stoppedAfterResult` in the catch and a transport
+      // line reports a drop that was Viberr's own stop; let a late line re-arm
+      // the idle guard and the short window settles idle_timeout; extend the
+      // grace on each line and a chatty CLI is never stopped; a grace of 4 s
+      // or less stops the CLI that was closing, and one past 6 s has not
+      // stopped the others when checked.
+      // The result, then a line every second until the CLI closes or the
+      // abort lands.
+      const run = startOnOpenCli([[0, INIT], [0, SUCCESS], ...(ending === "closes" ? CHATTER.slice(0, 4) : CHATTER)], ending);
+
+      await vi.advanceTimersByTimeAsync(1_000);
+      expect(run.exit()).toBeNull();
+      expect(run.aborted()).toBe(false);
+      expect(run.lines.map((l) => JSON.parse(l.raw).type)).toEqual(["system", "result", "rate_limit_event"]);
+
+      // 6 s after the result: a CLI still open has been stopped, and one
+      // that closed inside the grace never was.
+      await vi.advanceTimersByTimeAsync(5_000);
+      const stopped = ending !== "closes";
+      expect(run.aborted()).toBe(stopped);
+      expect(run.groupSignalled()).toBe(stopped);
+
+      await vi.advanceTimersByTimeAsync(A_MINUTE);
+      expect(run.exit()).toMatchObject({ outcome: "finished", sessionId: "s-683" });
+      // Nothing but the CLI's own lines: no err line, no transport line.
+      expect(new Set(run.lines.map((l) => l.raw && JSON.parse(l.raw).type))).toEqual(
+        new Set(["system", "result", "rate_limit_event"]),
+      );
+      // Ruling 174: the settle sweep takes what the run left running.
+      expect(run.h.reaped).toEqual([{ runIds: ["run_683"], groupLeader: CLI_PID }]);
+    });
+
+    it.each([
+      ["a cut-off (ruling 175), and a CLI that throws on the abort", [[0, MAX_TURNS]], "throws", "error", ["run·error·max_turns"]],
+      ["a failure only its words name, and a CLI that throws on the abort", [[0, QUOTA]], "throws", "error", ["run·error·quota"]],
+      ["a success, that failure 2 s later, and a CLI that throws on the abort", [[0, SUCCESS], [2_000, QUOTA]], "throws", "error", ["run·error·quota"]],
+      ["that failure, a success 2 s later, and a CLI that throws on the abort", [[0, QUOTA], [2_000, SUCCESS]], "throws", "finished", []],
+      ["a cut-off, and a CLI whose stream ends 30 s after the abort", [[0, MAX_TURNS]], "ends-late", "error", ["run·error·max_turns"]],
+      ["a cut-off, and a CLI whose stream throws 30 s after the abort", [[0, MAX_TURNS]], "throws-late", "error", ["run·error·max_turns"]],
+    ] as const)("%s: the CLI gets 5 s from the first result, and the run settles from the last one, once", async (_, results, ending, outcome, tags) => {
+      // CANARY: arm the grace for a successful result only and every row but
+      // the third settles idle_timeout; skip `stoppedAfterResult` in the
+      // catch and the failure is classified from the abort's throw (`unknown`)
+      // and the late throw writes the cut-off a second time; settle from the
+      // first result and the third row is `finished` and the fourth `error`;
+      // keep an error result once a later success has come and the fourth row
+      // is `error`; drop the settle-once check from `settleEnded` and the late
+      // throw writes a second cut-off line; drop the `settled` check before
+      // the Finishing phase and the late end puts that phase on a settled run.
+      const run = startOnOpenCli([[0, INIT], ...results], ending);
+
+      await vi.advanceTimersByTimeAsync(4_000);
+      expect(run.exit()).toBeNull();
+      expect(run.aborted()).toBe(false);
+
+      await vi.advanceTimersByTimeAsync(2_000);
+      expect(run.aborted()).toBe(true);
+      expect(run.groupSignalled()).toBe(true);
+
+      // 16 s: settled by the abort's throw, or by the backstop 10 s after it.
+      await vi.advanceTimersByTimeAsync(10_000);
+      expect(run.exit()).toMatchObject({ outcome, sessionId: "s-683" });
+
+      // A late end or throw has come and gone, and added nothing.
+      await vi.advanceTimersByTimeAsync(A_MINUTE);
+      const viberrLines = run.lines.filter((l) => (l.display?.tag ?? "").startsWith("run·"));
+      expect(viberrLines.map((l) => l.display?.tag)).toEqual(tags);
+      expect(run.late).toEqual([]);
+      expect(run.h.reaped).toEqual([{ runIds: ["run_683"], groupLeader: CLI_PID }]);
+    });
+
+    it("a Stop pressed inside the grace asks the CLI to stop and keeps the grace's clock: the CLI is stopped 5 s after the result and the run settles `interrupted`", async () => {
+      // CANARY: let the Stop arm the 20 s cooperative window in place of the
+      // grace and the CLI is still running 6 s after the result; abort on the
+      // Stop itself and the CLI is stopped 1 s after the result, with no time
+      // to answer the request; skip the cooperative request inside the grace
+      // and the CLI is never asked.
+      const run = startOnOpenCli([[0, INIT], [0, SUCCESS], ...CHATTER], "throws");
+      await vi.advanceTimersByTimeAsync(1_000);
+      run.handle.interrupt();
+      expect(run.interrupts()).toBe(1);
+
+      // 4 s after the result the CLI may still stop on its own.
+      await vi.advanceTimersByTimeAsync(3_000);
+      expect(run.aborted()).toBe(false);
+      expect(run.exit()).toBeNull();
+
+      await vi.advanceTimersByTimeAsync(2_000);
+      expect(run.aborted()).toBe(true);
+      expect(run.groupSignalled()).toBe(true);
+      expect(run.exit()).toMatchObject({ outcome: "interrupted", sessionId: "s-683" });
+    });
+  });
+
   it("classifies a CLI exit by the stderr the SDK no longer sees: a vanished resume session is `session_missing`", async () => {
     // With the SDK's own spawn, the exit error read "…exited with code 1.
     // stderr: No conversation found…", and the classifier routed it to
@@ -2602,8 +2807,9 @@ describe("claude adapter compact() (ruling 376)", () => {
  * gate here had the same shape: a terminal non-error `result` followed by a
  * thrown stream error fell straight through to `settleError`, and the run that
  * the SDK had just told us succeeded was reported as a failure. `sawResult` is
- * the stronger evidence of the two — Claude emits exactly one result, at the
- * end of the whole query, so nothing can be in flight behind it.
+ * the stronger evidence of the two: the result closes the run's own work, and a
+ * turn a background command's completion wakes behind it (Claude Code 2.1.292)
+ * is cut by the result grace (ruling 683).
  */
 describe("ruling 394: the stream threw after the query's own result", () => {
   const MESSAGES = [

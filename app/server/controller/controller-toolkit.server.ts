@@ -7,7 +7,7 @@ import {
 import type { DatabaseSync } from "node:sqlite";
 import { KB_DOC_OFFSET_DESCRIPTION, isInjectableKbDoc, readKbDocForRun } from "~/server/files/kb-injection.server";
 import { pageEnd } from "~/server/runtimes/read-page-budget.server";
-import { type CopyTaskFileToKbInput, copyTaskFileToKnowledgeBase } from "~/server/org/kb-task-file.server";
+import { type CopyTaskFileToKbInput, type KeptFileKind, copyTaskFileToKnowledgeBase } from "~/server/org/kb-task-file.server";
 import {
   CONTROLLER_GUIDE_SKILL,
   CONTROLLER_SKILL_BUDGET,
@@ -225,7 +225,15 @@ import {
   updateTaskTitle,
   type CreateTaskInput,
 } from "~/server/tasks/task-edits.server";
-import { loadProjectContext } from "~/server/tasks/task-mutation.server";
+import { appendPolicyNote, loadProjectContext, terminalStageIdFor } from "~/server/tasks/task-mutation.server";
+import {
+  clearFollowUp,
+  FOLLOW_UP_MAX_CHARS,
+  openFollowUpsOf,
+  setFollowUp,
+  turnOpenedByFollowUp,
+} from "./controller-follow-ups.server";
+import { endSentence } from "~/shared/text/sentence";
 import { requireProjectMutable } from "~/server/auth/project-authority.server";
 import { userDisplayName } from "~/server/tasks/user-display-name.server";
 import { setTaskDependencies } from "~/server/tasks/dependencies.server";
@@ -321,6 +329,9 @@ export interface ControllerToolkitDeps {
    *  records it on the epic (ruling 503), so the epic's page can link back to
    *  where it was planned. */
   conversationId?: string | null;
+  /** Ruling 685: the user message this turn answers. A turn that answers the
+   *  message a follow-up sent leaves no further step. */
+  answering?: string | null;
   /** Ruling 283: the knowledge bases this turn's prompt INDEXED. The pull tool
    *  is mounted over exactly these — `controllerKbNames` builds the list once
    *  so the prompt and the tool cannot name different sets. */
@@ -461,6 +472,31 @@ interface SkillSizeAsHeld extends SkillBodySize {
  *  naming the count and both ways to reach them. */
 interface TimelineWindowNote {
   timelineOlder?: string;
+}
+
+/**
+ * Ruling 684: what a copy's reply says about the kind it was kept as. A
+ * template says how many placeholders its text holds, or that nothing here
+ * could read it, and in neither case that it is free of a task's content,
+ * which nothing here can tell; a sample says whose content it carries.
+ */
+function keptAs(kind: KeptFileKind, taskKey: string, placeholders: number | null): string {
+  if (kind === "template") {
+    return placeholders === null
+      ? "It is kept as a template, and nothing here read its text (a picture or another kind no reader here takes as text, " +
+          "or a PDF whose text could not be read), " +
+          "so nothing checked it for placeholders or for a task's content: if it is a result a task delivered and not a template made from one, replace it. "
+      : `It is kept as a template: ${placeholders.toLocaleString("en-US")} \`[[placeholder]]\`${placeholders === 1 ? " was" : "s were"} counted in its text ` +
+          "(what a page does not show, its code, style and comments, is not read for them), which a result built from it fills, leaving none. " +
+          "Whether anything of a task's own content is left beside them is a reviewer's check: nothing here tells a customer's sentence from the organisation's own. ";
+  }
+  if (kind === "sample") {
+    return (
+      `It is kept as a sample, with ${taskKey}'s content in it, which every run given this knowledge base can read: ` +
+      "say in the rule that it shows what a good result looks like and that nothing in it carries over to another task. "
+    );
+  }
+  return "";
 }
 
 /** Build the toolkit for one controller turn. */
@@ -1216,9 +1252,14 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
   add(
     tool(
       "copy_task_file_to_knowledge_base",
-      "Copy ONE file from a task's attachments into a knowledge base's folder, bytes and all (ruling 678). Org admins only. This is how a file a board's work must FOLLOW gets a home of its own: a report a person liked and wants every later result laid out like, a sample, a letterhead, a logo. Use it when a person asks for a file on a task to become the project's template or reference, and copy it into the knowledge base every run on that project reads (its `rulingsKb`, from get_project) unless they name another; then name the file in the rulings and in the skill of each agent that uses it, and say which you changed. Never leave such a file on the task and tell operators to copy it over each time: a task's files change with its next rework, an archived task hands nothing over (take_from_task refuses it), and every task that took a copy carries another customer's document. A file that is not a document (.html, .pdf, .xlsx, an image) is named in the knowledge base's index to every run given it and opened from the run's shell in the folder the reply names; a document (.md, .txt, .json, .yaml) becomes one of the knowledge base's documents. Refused, with nothing written: a name the folder already holds unless you pass `replace: true`; a document the knowledge base already holds (change that with edit_knowledge_base_doc); a file that is not a document for a PRIVATE knowledge base, where no run could open it; and a file over 10 MB.",
+      "Copy ONE file from a task's attachments into a knowledge base's folder, bytes and all (rulings 678 and 684). Org admins only. This is how a file a board's work must FOLLOW gets a home of its own, in the knowledge base every run on the project reads (its `rulingsKb`, from get_project) unless the person names another. Say what you are keeping, in `kind`. A `template` is what later results are filled into, so it holds NONE of any task's content, only `[[what goes here]]` placeholders where content goes: a result a task delivered is an example, never a template. You cannot write files, so an agent makes the template: file a task for the agent that makes such results (the same layout, everything that belongs to that task replaced by placeholders, and a list of them), leave yourself `continue_when_done`, and copy what it delivered when the task is accepted. A template whose text holds no placeholder is refused. A `sample` is a worked example kept WITH one task's content: only when the person asks for exactly that; it is stored under a name that says whose example it is. An `asset` is no task's work: a logo, a letterhead, a price list, the notes that go with a template. Then name the file in the rulings and in the skill of each agent that uses it, and say which you changed. Never leave such a file on the task and tell operators to copy it over each time: a task's files change with its next rework, an archived task hands nothing over (take_from_task refuses it), and every task that took a copy carries another customer's document. A file that is not a document (.html, .pdf, .xlsx, an image) is named in the knowledge base's index to every run given it and opened from the run's shell in the folder the reply names; a document (.md, .txt, .json, .yaml) becomes one of the knowledge base's documents. Refused, with nothing written: a name the folder already holds unless you pass `replace: true`; a document the knowledge base already holds (change that with edit_knowledge_base_doc); a file that is not a document for a PRIVATE knowledge base, where no run could open it; and a file over 10 MB.",
       {
         kbId: z.string().describe("The knowledge base's id, from list_knowledge_bases."),
+        kind: z
+          .enum(["template", "sample", "asset"])
+          .describe(
+            "What the copy is kept as. `template`: later results are filled into it, and it holds only `[[placeholders]]` where content goes. `sample`: a worked example with one task's content, kept because the person asked for one. `asset`: no task's work (a logo, a letterhead, a template's notes).",
+          ),
         projectSlug: z.string().optional(),
         taskKey: z.string().optional().describe("The task that holds the file; defaults to this conversation's task. It may be Done."),
         name: z.string().describe("The attachment's file name, exactly as the task lists it."),
@@ -1232,6 +1273,7 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
       runWith(
         (args: {
           kbId: string;
+          kind: KeptFileKind;
           projectSlug?: string;
           taskKey?: string;
           name: string;
@@ -1243,7 +1285,14 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
           const slug = slugOf(args.projectSlug);
           const key = keyOf(args.taskKey, slug);
           requireVisible(slug, "read this task");
-          const copy: CopyTaskFileToKbInput = { kbId: args.kbId, projectSlug: slug, taskKey: key, name: args.name, actor };
+          const copy: CopyTaskFileToKbInput = {
+            kbId: args.kbId,
+            kind: args.kind,
+            projectSlug: slug,
+            taskKey: key,
+            name: args.name,
+            actor,
+          };
           if (args.delivery) copy.delivery = args.delivery;
           if (args.as) copy.as = args.as;
           if (args.replace) copy.replace = true;
@@ -1257,6 +1306,7 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
               ? "It is a document there: the knowledge base's index lists it with its sections, and a run given the knowledge base reads it with its knowledge tool. "
               : `It is not a document, so the index names it under the folder's other files and a run opens it from its shell at \`${path.join(copied.folder, copied.path)}\`. `) +
             `${key}'s own file is untouched, and this copy no longer depends on it. ` +
+            keptAs(args.kind, key, copied.placeholders) +
             "No run is told to use it yet: name it in the rulings and in the skill of each agent that must follow it."
           );
         },
@@ -2635,6 +2685,119 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
       }),
     ),
     "read_message_file",
+  );
+
+  add(
+    tool(
+      "continue_when_done",
+      "Leave THIS conversation its next step for when a task is accepted (ruling 685). Your turn ends long before an agent's work on a task does. So when a request needs that work first (a template an agent has to make, a study you will set the board up from), file or name the task, then write here what you will do once it is accepted. When the task is accepted (by a person, or by the operator on a board that lets it accept), Viberr starts your next turn in this conversation with that step, as the person you are answering and with their permissions as they stand then: nobody has to come back and ask, and a step that needs an org admin is refused then if they are not one. The step is written on the task, where every member and every run on it reads it, so whoever accepts knows what accepting starts. Tell the person you will continue on your own when the task is accepted. One step a task: calling it again replaces it, and an empty `next` drops it. A turn that was itself started this way leaves no further step: say what is left, and the person asks for it. Any member of the task's project.",
+      {
+        projectSlug: z.string().optional(),
+        taskKey: z.string().optional().describe("The task you are waiting for. Defaults to this conversation's task."),
+        next: z
+          .string()
+          .describe(
+            `What you will do when it is accepted, at most ${FOLLOW_UP_MAX_CHARS.toLocaleString("en-US")} characters, written so a turn that remembers nothing else can do it: which files go where, which rules and skills change. Empty drops the step.`,
+          ),
+      },
+      runWith(async (args: { projectSlug?: string; taskKey?: string; next: string }) => {
+        // Both or neither: a turn that could not say which message it answers
+        // could not be told from one a follow-up started.
+        if (!deps.conversationId || !deps.answering) {
+          return "[unavailable] This turn answers no conversation, so there is nothing for an acceptance to continue.";
+        }
+        const slug = slugOf(args.projectSlug);
+        const key = keyOf(args.taskKey, slug);
+        requireVisible(slug, "wait for this task");
+        // Like a comment, this names no RbacAction, so nothing else stops it
+        // writing into the timeline of a project that is archived.
+        requireProjectMutable(loadProjectContext({ dataRoot }, slug), "wait for this task");
+        const summary = getTaskSummary(db, slug, key);
+        if (!summary) throw AppError.notFound(`No task ${key} in ${slug}.`);
+        const next = prose(args.next).trim();
+        const where = { conversationId: deps.conversationId, projectSlug: slug, taskKey: key };
+        // The step this conversation has on the task now. What the task says
+        // and what the store holds change together: when the note cannot be
+        // written, the store is put back as it was.
+        const before = openFollowUpsOf(db, deps.conversationId).find((f) => f.projectSlug === slug && f.taskKey === key);
+        const putBack = () => {
+          clearFollowUp(db, where);
+          if (before) setFollowUp(db, { ...where, userId: before.userId, text: before.text });
+        };
+        if (!next) {
+          if (!clearFollowUp(db, where)) return `[noop] This conversation left no step on ${key}.`;
+          try {
+            await appendPolicyNote(db, { dataRoot }, slug, key, {
+              title: "Controller follow-up dropped",
+              text: `${user.name}'s controller conversation no longer continues when this task is accepted.`,
+            });
+          } catch (error) {
+            putBack();
+            throw error;
+          }
+          recordAudit(db, {
+            action: "controller.follow_up.dropped",
+            actor,
+            subjectKind: "task",
+            subjectId: key,
+            projectSlug: slug,
+            taskKey: key,
+            details: { conversationId: deps.conversationId },
+          });
+          return `[done] Dropped: nothing starts in this conversation when ${key} is accepted.`;
+        }
+        if (next.length > FOLLOW_UP_MAX_CHARS) {
+          return (
+            `[noop] That step is ${next.length.toLocaleString("en-US")} characters and one carries at most ` +
+            `${FOLLOW_UP_MAX_CHARS.toLocaleString("en-US")}. Say what you will do, not how each call goes. Nothing was left on ${key}.`
+          );
+        }
+        if (summary.archived) {
+          return `[noop] ${key} is archived, so nobody will accept it. Nothing was left on it.`;
+        }
+        if (summary.stage === terminalStageIdFor({ dataRoot }, slug)) {
+          return `[noop] ${key} is already accepted: take that step now, in this turn. Nothing was left on it.`;
+        }
+        // One hop: a turn a follow-up started, which no person has written
+        // into, does not arrange another. On a board whose operator accepts
+        // by itself that would be work with no person in it, for as long as
+        // each turn left the next.
+        if (turnOpenedByFollowUp(db, deps.conversationId, deps.answering)) {
+          return (
+            `[noop] This turn was itself started by a follow-up, and a turn started that way leaves no further step. ` +
+            `Say what is left to do and why, and ${user.name} asks for it. Nothing was left on ${key}.`
+          );
+        }
+        const replaced = setFollowUp(db, { ...where, userId: user.id, text: next });
+        // On the task, where whoever accepts it reads what accepting starts.
+        // A step the task does not show is not left: an acceptance would start
+        // a turn nobody was told of.
+        try {
+          await appendPolicyNote(db, { dataRoot }, slug, key, {
+            title: "Controller follow-up",
+            text: `When this task is accepted, the controller continues in ${user.name}'s conversation: ${endSentence(next)}`,
+          });
+        } catch (error) {
+          putBack();
+          throw error;
+        }
+        recordAudit(db, {
+          action: "controller.follow_up.set",
+          actor,
+          subjectKind: "task",
+          subjectId: key,
+          projectSlug: slug,
+          taskKey: key,
+          details: { conversationId: deps.conversationId, replaced },
+        });
+        return (
+          `[done] When ${key} is accepted, Viberr starts your next turn in this conversation with that step` +
+          `${replaced ? ", in place of the one you left before" : ""}. It runs as ${user.name}, with their permissions as they stand then. ` +
+          "Tell them you will continue on your own then, and that nothing happens before the task is accepted."
+        );
+      }),
+    ),
+    "continue_when_done",
   );
 
   /**

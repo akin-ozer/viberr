@@ -957,7 +957,7 @@ describe("ruling 503(d): when every task of an open epic is done", () => {
   }
 
   it("when the last open task reaches the terminal stage, the history says so once and the lead is told; the status stays theirs", async () => {
-    // CANARY: drop the `maybeNoteEpicComplete` call from applyAcceptanceWrite.
+    // CANARY: drop the `maybeNoteEpicComplete` call from afterAcceptance.
     const { id, open } = await epicWithOneTaskLeft("Finish line");
     expect(allDoneLines(id)).toEqual([]);
     await accept(open);

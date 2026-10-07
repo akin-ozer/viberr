@@ -80,6 +80,7 @@ import {
   autoInvokeOperator,
   avatarTone,
   humanActorRef,
+  interruptLiveRunsOnClosure,
   OPERATOR_TASK_ACTOR,
   ownerException,
   requireAcceptCompletion,
@@ -96,6 +97,7 @@ import {
   type AcceptanceMergeOutcome,
   acceptancePrHeadCheck,
   acceptanceRefusalReason,
+  afterAcceptance,
   assertAcceptanceDisclosure,
   assertVerifiedHeadStillApplies,
   attemptAcceptanceMerge,
@@ -108,6 +110,7 @@ import {
   mergePendingCause,
   refuseUnverifiedHead,
   revisionDriftNote,
+  unverifiedHeadNote,
 } from "./task-acceptance.server";
 import { manualDeliverForReview, recordDeliveredNextStep } from "./task-delivery.server";
 import { transitionStage } from "./task-transitions.server";
@@ -689,6 +692,10 @@ export async function resolvePacket(
             fm.pr.state === "merged" || reallyMerged ? "merged" : "accepted";
           fm.pr = { ...fm.pr, state: next };
         }
+        // A9 / ruling 226: the record says when the head that merged could
+        // not be verified, in the shared write's own words (ruling 686). After
+        // the PR's state is settled: the note is for a merge that landed.
+        event.text += unverifiedHeadNote(fm, headCheck);
       };
       clearPacket = true;
       break;
@@ -1657,6 +1664,17 @@ export async function resolvePacket(
     throw error;
   }
   reprojectTask(db, ctx, input.projectSlug, input.taskKey);
+  // Ruling 686: the `accept_completion` arm writes the last stage itself, so
+  // what follows an acceptance is run here as the shared write runs it: the
+  // epic's all-done check, the dependents' release and a waiting controller
+  // conversation's next turn. Not when a racing acceptance had already closed
+  // the task (U3): those are that write's to run.
+  if (acceptsInto !== null && !alreadyAccepted) {
+    afterAcceptance(db, ctx, input.projectSlug, input.taskKey);
+    // Ruling 177: a task that closes ends its live runs, as it does when the
+    // person presses Accept. A run left going spends on a task that is Done.
+    await interruptLiveRunsOnClosure(db, ctx, input.projectSlug, input.taskKey, actor, { cause: "accept" });
+  }
 
   // U3: one act, one row. A no-op write made no decision to record.
   if (!alreadyAccepted) {

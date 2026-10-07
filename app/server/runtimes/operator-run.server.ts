@@ -2146,8 +2146,9 @@ async function startCodexOperatorRun(
       : refusedPrincipalUserId(start.principal.refusal),
   };
   if (!start.principal.ok) spec.principalRefusal = start.principal.refusal;
-  // An absent effort leaves the SDK on its own default; an absent mcpServers
-  // key is what the adapters read as "this run mounts none".
+  // An absent effort is sent as the Codex catalog default, `medium`, by
+  // startRun (ruling 683); an absent mcpServers key is what the adapters read
+  // as "this run mounts none".
   if (authority.effort) spec.effort = authority.effort;
   if (Object.keys(orgMcpServers).length) spec.mcpServers = orgMcpServers;
   // Ruling 176: Codex sends these as each server's `disabled_tools`.

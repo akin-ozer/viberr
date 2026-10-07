@@ -130,19 +130,18 @@ describe("curated catalog", () => {
 
   it("codex curated: the pinned CLI's bundled models + low…max efforts, per model", () => {
     const cat = curatedCatalog("codex");
-    // F20-33: Terra is listed FIRST (so it is the fallback default) — Sol 400s
-    // on a ChatGPT-plan Codex account and must not be what a model-less operator
-    // falls back to. Sol stays offered, just no longer first/default. Codex CLI
-    // 0.153 (SDK 0.153.4) added GPT-6 Astra as its own default; here it is
-    // offered second, never the default, for the same reason. 0.156.0 is the
-    // first pinned client the account's server sends GPT-6 Sol and Luna to
-    // (`minimal_client_version` 0.155.0), so they are offered from it on.
+    // Ruling 683: GPT-6.1 Sol is listed FIRST, so it is the fallback a
+    // model-less operator or profile runs on (it replaced F20-33's Terra).
+    // The rest follow the 0.160.1 bundled catalog's priority order, its
+    // hidden models left out. CANARY: move GPT-6.1 Sol below another entry and
+    // the Codex default becomes that model.
     expect(cat.models.map((m) => m.value)).toEqual([
-      "gpt-5.6-terra",
+      "gpt-6.1-sol",
       "gpt-6-astra",
       "gpt-6-sol",
       "gpt-6-luna",
       "gpt-5.6-sol",
+      "gpt-5.6-terra",
       "gpt-5.6-luna",
       "gpt-5.5",
     ]);
@@ -154,10 +153,10 @@ describe("curated catalog", () => {
     // `xhigh`, the rest reach `max`.
     const effortsOf = (id: string) => cat.models.find((m) => m.value === id)?.efforts;
     expect(effortsOf("gpt-5.5")).toEqual(["low", "medium", "high", "xhigh"]);
-    for (const id of ["gpt-5.6-terra", "gpt-6-astra", "gpt-6-sol", "gpt-6-luna", "gpt-5.6-sol", "gpt-5.6-luna"]) {
+    for (const id of ["gpt-6.1-sol", "gpt-6-astra", "gpt-6-sol", "gpt-6-luna", "gpt-5.6-sol", "gpt-5.6-terra", "gpt-5.6-luna"]) {
       expect(effortsOf(id), id).toEqual(["low", "medium", "high", "xhigh", "max"]);
     }
-    expect(cat.defaultModel).toBe("gpt-5.6-terra");
+    expect(cat.defaultModel).toBe("gpt-6.1-sol");
     expect(cat.defaultEffort).toBe("medium");
   });
 
@@ -207,7 +206,7 @@ describe("getModelCatalog", () => {
       claudeQueryFn: queryFn,
       credential: VIEWER_CREDENTIAL,
     });
-    expect(cat.defaultModel).toBe("gpt-5.6-terra");
+    expect(cat.defaultModel).toBe("gpt-6.1-sol");
     expect(queryFn).not.toHaveBeenCalled();
   });
 

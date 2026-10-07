@@ -149,7 +149,7 @@ RUN sed -i 's|http://deb.debian.org|https://deb.debian.org|g' /etc/apt/sources.l
 RUN apt-get update \
     && apt-get install -y --no-install-recommends make curl \
     && rm -rf /var/lib/apt/lists/*
-RUN npm install -g pnpm@12.4.1 && npm cache clean --force
+RUN npm install -g pnpm@12.9.1 && npm cache clean --force
 
 # R19-19: agents get a real browser. Debian's chromium (~700MB installed with
 # its dependency closure — the owner accepted the weight over a sidecar), driven
@@ -189,7 +189,7 @@ RUN apt-get update \
 # uv is a single static binary and brings `uvx`, so this is two files rather
 # than a Python toolchain: uv downloads and manages its own CPython on first
 # use, which is also why a system python3 is deliberately NOT installed.
-COPY --from=ghcr.io/astral-sh/uv:0.12.3 /uv /uvx /usr/local/bin/
+COPY --from=ghcr.io/astral-sh/uv:0.12.23 /uv /uvx /usr/local/bin/
 
 ENV NODE_ENV=production
 # Canonical file store + SQLite projections live here; compose mounts a
