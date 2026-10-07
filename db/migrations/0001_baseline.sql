@@ -1,22 +1,23 @@
--- 0001_baseline.sql — squashed pre-prod baseline.
+-- 0001_baseline.sql — the squashed schema baseline.
 --
 -- Collapses the original 13-file migration history (0001_app_foundation …
--- 0014_drop_legacy_sessions) into a single schema definition. We are pre-prod:
--- no deployed database needs the incremental chain, so the granular migrations
--- were removed and this file IS the schema. Generated from the end-state of the
--- old chain, so a fresh DB gets exactly what the chain produced — minus the
--- mock scope-violation the old 0005 seeded (schema only, zero demo data).
+-- 0014_drop_legacy_sessions) into a single schema definition. No deployed
+-- database needed the incremental chain when it was squashed, so the granular
+-- migrations were removed and this file IS the schema. Generated from the
+-- end-state of the old chain, so a fresh DB gets exactly what the chain
+-- produced — minus the mock scope-violation the old 0005 seeded (schema only,
+-- zero demo data).
 --
--- Convention (owner ruling, pass 11): while pre-prod, schema changes are
--- squashed INTO this baseline — no incremental migration chain is kept. The
--- runner records this filename in schema_migrations and skips by FILENAME
--- alone, so editing this file reaches FRESH databases only: an existing DB
--- keeps its old schema and every projection write touching a new column
--- throws (there is no drift healer — schema-reconcile.server was removed).
--- That is accepted: the DB is a derived projection, so after pulling a
--- baseline change, wipe the sqlite and re-seed (`npm run seed -- --reset`).
--- Because users/auth live in the same file, a wipe regenerates user ids.
--- Revisit this convention at the first real deployment.
+-- Convention (owner ruling, pass 11; kept at launch by ruling 683): schema
+-- changes are squashed INTO this baseline — no incremental migration chain is
+-- kept. The runner records this filename in schema_migrations and skips by
+-- FILENAME alone, so editing this file reaches FRESH databases only. An
+-- existing DB gains what `ensureBaselineColumns` (app/server/db/sqlite.server.ts)
+-- adds at open: the added columns, tables and indexes it lists. Boot names any
+-- other drift as a `projection schema drift` WARN with its remedy: a manual
+-- `ALTER TABLE … ADD COLUMN`, or for a CHECK no ALTER can widen, a re-baseline
+-- as docs/operations/deployment.md "Re-baselining the projection database"
+-- describes. Users/auth live in this file, so back it up first.
 
 -- ============================ tables ============================
 

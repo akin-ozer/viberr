@@ -235,8 +235,11 @@ Deliberate V1 boundaries, documented rather than half-built:
 
 - **Single node.** SQLite, a local file store and an in-process event bus: one app
   process per data root, enforced by a writer lock.
-- **Pre-production formats.** Migrations are squashed into one baseline, and file
-  formats and schemas may change between versions with no migration path.
+- **One schema baseline, no migration chain.** Schema changes edit
+  `0001_baseline.sql`. Boot adds the columns, tables and indexes an older database lacks
+  and names any other drift with its remedy (for a changed constraint, re-baselining the
+  projection database). File formats may change between versions with no conversion
+  step. Back up before upgrading.
 - **No email.** Notifications are in-app, plus an opt-in browser notification for a new
   decision. Admins hand new users their one-time password themselves.
 - **TLS is the deployment's job.** The app serves plain HTTP and expects a reverse proxy.
@@ -263,5 +266,8 @@ Read [CONTRIBUTING.md](CONTRIBUTING.md), then [AGENTS.md](AGENTS.md) if you work
 coding agent. Before you push: `npm run lint && npm run typecheck && npm test && npm run build`.
 CI also runs `npm run e2e` against the production image.
 
-Third-party code vendored into this repository and its licences:
-[THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
+## License
+
+Viberr is released under the [MIT License](LICENSE). Code adapted from other projects
+keeps its own licence, listed in [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md);
+dependencies installed from npm carry theirs in `node_modules`.

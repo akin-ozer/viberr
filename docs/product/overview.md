@@ -86,7 +86,7 @@ and governed AI delivery through a familiar board/task surface.
 - **MCP grants sit outside the capability matrix.** Granting a server authorizes its tools (ruling 39), except the ones an admin marks as write tools, which a run that withholds repo write does not get (ruling 176). Viberr makes no claim about unmarked tools.
 - **The spending cap binds Claude only.** Codex has no budget option (ruling 175).
 - **Single node.** SQLite plus local file authority plus an in-process SSE bus; one instance per data root.
-- **Pre-production.** Migrations are squashed into one baseline; schema changes reach fresh databases only; there is no backwards compatibility promise for file formats (owner rulings 98 and 99 were explicitly no-back-compat).
+- **One schema baseline, no migration chain.** Migrations are squashed into one baseline; an added column, table or index reaches an existing database at boot, any other schema change reaches fresh databases only (boot names the drift and its remedy), and there is no backwards compatibility promise for file formats (owner rulings 98 and 99 were explicitly no-back-compat; ruling 683 kept the convention at launch).
 
 Held spec-vs-app gaps that stay noted rather than silently closed (ruling 80): the
 decision packet's impact/confidence/severity fields, the Continuity Recovery Panel's

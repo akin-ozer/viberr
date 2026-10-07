@@ -5,7 +5,10 @@ page's header names its source files and the commit it was last verified against
 that alters behaviour corrects the pages it touches in the same pull request, so trust the
 code first, then a page's dated header, then anything undated.
 
-Viberr is **pre-production**: formats and schemas change without migrations.
+Schema changes edit one baseline migration rather than adding to a chain, and file formats
+carry no back-compat promise (ruling 683):
+[development/contributing.md §4](development/contributing.md#4-data-and-schema-changes) says
+what that means for a change.
 
 ## Where to start
 
@@ -57,7 +60,7 @@ what V1 covers, [product/glossary.md](product/glossary.md) for the vocabulary, t
 | [architecture/data-model.md](architecture/data-model.md) | Data-root layout including the per-person runtime homes, every SQLite table (primary vs derived vs config), indexes, retention, ids |
 | [architecture/file-formats.md](architecture/file-formats.md) | The canonical `project.md`, `task.md`, epic and agent-profile formats; timeline grammar; packet YAML (the `## Packet` section is pinned by a test) |
 | [architecture/projections-and-events.md](architecture/projections-and-events.md) | Writers, watcher, tolerant parsing and diagnostics, rebuilder, rescan/rebuild, SSE broker and client |
-| [architecture/decisions.md](architecture/decisions.md) | Conventions, the 682 numbered owner rulings in numeric order (117 records a number that was never used), each carrying a dated pointer when a later ruling changed it; the unnumbered owner decisions of 2026-08-20 → 2026-09-01; the route map |
+| [architecture/decisions.md](architecture/decisions.md) | Conventions, the 683 numbered owner rulings in numeric order (117 records a number that was never used), each carrying a dated pointer when a later ruling changed it; the unnumbered owner decisions of 2026-08-20 → 2026-09-01; the route map |
 
 ### Domain
 
@@ -82,7 +85,7 @@ what V1 covers, [product/glossary.md](product/glossary.md) for the vocabulary, t
 
 | Page | What it answers |
 |---|---|
-| [development/contributing.md](development/contributing.md) | Setup, gates, where code goes, invariants, schema changes while pre-prod, pinned docs, definition of done |
+| [development/contributing.md](development/contributing.md) | Setup, gates, where code goes, invariants, schema changes, pinned docs, definition of done |
 | [development/testing.md](development/testing.md) | Vitest config and harnesses, how state is built, doc-pinning tests, lint rules, the e2e flow and spec table, CI |
 | [development/scripts.md](development/scripts.md) | Every npm script and CLI, which ones take the writer lock, seed/backup/restore internals |
 | [development/performance.md](development/performance.md) | The journeys, the deterministic metrics, the ratchet that only moves down (ruling 457), the measuring harnesses |
@@ -100,7 +103,8 @@ what V1 covers, [product/glossary.md](product/glossary.md) for the vocabulary, t
 - [`.env.example`](../.env.example): the documented environment template, pinned to the env
   schema's keys and the code's raw `VIBERR_*` reads by `env.server.test.ts`;
   [operations/configuration.md](operations/configuration.md) is the superset.
-- [`THIRD_PARTY_NOTICES.md`](../THIRD_PARTY_NOTICES.md): the licences of vendored code.
+- [`LICENSE`](../LICENSE): Viberr's licence, MIT.
+  [`THIRD_PARTY_NOTICES.md`](../THIRD_PARTY_NOTICES.md): the licences of vendored code.
 - `app/server/seed/assets/*.md`: the seeded agents' definitions, profiles and skills. They
   are product prompts, not documentation, and are pinned by the seed tests.
 - History: the original architecture and UX specifications, the HTML mock the UI was ported
