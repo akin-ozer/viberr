@@ -519,7 +519,7 @@ describe("ruling 690: what the work under review rests on", () => {
   });
 
   /** Keep one source on VIB-1 at `at`, by the store's own writer. */
-  function keepAt(at: string, name: string): void {
+  function keepAt(at: string, name: string, profileId = "researcher"): void {
     vi.setSystemTime(new Date(at));
     writeTaskSource(
       store.slug,
@@ -529,7 +529,7 @@ describe("ruling 690: what the work under review rests on", () => {
         data: Buffer.from(`the page ${name}`),
         title: `The page ${name}`,
         from: `https://aws.amazon.com/${name}`,
-        by: { backend: "claude", profileId: "researcher", roleHint: "Researcher" },
+        by: { backend: "claude", profileId, roleHint: "Researcher" },
         runId: "run_abc",
       },
       store.dataRoot,
@@ -598,6 +598,43 @@ describe("ruling 690: what the work under review rests on", () => {
     // A rework mints a new revision, and what was kept by then is under it.
     revision("2026-10-07T17:00:00.000Z");
     expect(rested()).toEqual(["S1", "S2", "S3"]);
+  });
+
+  it("counts a source the deliverer kept after its result was delivered, and not one a reviewer kept then", () => {
+    // Asked for the source of a claim, a deliverer keeps it and reports, and
+    // changes no file: the same tree keeps its revision and its mint instant,
+    // and a run that saved no file moves no stamp. CANARY: count by the
+    // anchor alone and the card says the result rests on no kept source after
+    // its deliverer answered the reviewer's objection with one.
+    vi.useFakeTimers({ toFake: ["Date"] });
+    const engagements = [
+      { profileId: "developer", backend: "claude" as const, role: "Implementation", delivers: true, verdictCapable: false },
+      { profileId: "reviewer", backend: "claude" as const, role: "Review", delivers: false, verdictCapable: true },
+    ];
+    const rested = () =>
+      sourcesRestedOn(readTaskSources(store.slug, "VIB-1", store.dataRoot), parsed().frontmatter).map((s) => s.id);
+
+    // A revision minted at 14:30; the reviewer keeps a page at 14:45 and the
+    // deliverer the advisory its claim rests on at 15:10, with no new commit.
+    seed({
+      engagements,
+      workRevision: {
+        id: "rev_1",
+        headSha: SHA,
+        treeSha: "t".repeat(40),
+        branch: "vib-1-work",
+        createdAt: "2026-10-07T14:30:00.000Z",
+        sourceProfileId: "developer",
+      },
+    });
+    keepAt("2026-10-07T14:45:00.000Z", "checked.html", "reviewer");
+    keepAt("2026-10-07T15:10:00.000Z", "advisory.html", "developer");
+    expect(rested()).toEqual(["S2"]);
+
+    // The same for files: the delivery recorded what the task held at its
+    // stamp (nothing), and the deliverer's later source still counts.
+    seed({ engagements, workRevision: null, branch: null, github: null, deliveredAt: "2026-10-07T14:30:00.000Z" });
+    expect(rested()).toEqual(["S2"]);
   });
 
   it("the page's card carries the count and the first twelve, says zero for a files result, and nothing for a revision that rests on none or a viewer who may not see", () => {

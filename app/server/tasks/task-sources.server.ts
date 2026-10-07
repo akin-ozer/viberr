@@ -98,7 +98,9 @@ function removeStaged(abs: string, what: string, at: { projectSlug: string; task
  * and answer the sentence the agent reads: `[kept]` with the new id, `[noop]`
  * when the task already keeps those bytes, or `[refused]` with what to do
  * instead. A refusal writes nothing and leaves the staged file where it is,
- * with one exception: a file that reads as holding a credential is removed.
+ * with three exceptions, each a file that must not sit where every agent on
+ * the task reads: one that reads as holding a credential, one whose name does,
+ * and the bytes of a source a person took out of the store.
  *
  * Synchronous from the first check to the move. An unexpected failure throws,
  * and the tool that called answers it.
@@ -173,11 +175,23 @@ export function keepTaskSource(db: DatabaseSync, ctx: TaskMutationContext, input
   }
   if ("tooLarge" in read) {
     return refused(
-      `\`${stored}\` is ${(read.tooLarge / 1024 / 1024).toFixed(1)} MB; a source may be up to ${SOURCE_MAX_BYTES / 1024 / 1024} MB. ` +
+      `\`${stored}\` is ${(Math.ceil((read.tooLarge / 1024 / 1024) * 10) / 10).toFixed(1)} MB; a source may be up to ${SOURCE_MAX_BYTES / 1024 / 1024} MB. ` +
         `Save the page or the part of the output your claim rests on as its own file and keep that.`,
     );
   }
   const data = read.bytes;
+  // The name reaches the index, the audit row, every reader's list and the
+  // download's header. `wget` names a file after its URL, query included.
+  if (readsAsCredential(name)) {
+    const gone = removeStaged(abs, "a staged source whose name reads as holding a credential could not be removed", staged);
+    return refused(
+      "The file's name holds what reads as a token or a password, so it is not kept" +
+        (gone
+          ? " and it was removed from the attachments folder. "
+          : ". It could not be removed from the attachments folder: delete it there yourself. ") +
+        `Save what you fetched again under a plain name that starts with \`${SOURCE_STAGING_PREFIX}\` and keep that.`,
+    );
+  }
   if (data.length === 0) {
     return refused(
       `\`${stored}\` is empty, so nothing came back. Fetch it again and keep what you get, or say in your result that the source could not be opened.`,
@@ -225,8 +239,14 @@ export function keepTaskSource(db: DatabaseSync, ctx: TaskMutationContext, input
   }
   if ("removed" in written) {
     const source = written.removed;
+    // A person took these bytes out of the store; a hidden copy in a folder
+    // every agent on the task reads would bring them back.
+    const gone = removeStaged(abs, "the staged bytes of a removed source could not be removed", staged);
     return refused(
-      `These bytes were kept as ${source.id} and that source has since been removed from the store, so they are not kept again. ` +
+      `These bytes were kept as ${source.id} and that source has since been removed from the store, so they are not kept again` +
+        (gone
+          ? ", and the staged file was removed from the attachments folder. "
+          : `. The staged file \`${stored}\` could not be removed from the attachments folder: delete it there yourself. `) +
         `Say in your result that the source for this claim was removed.`,
     );
   }

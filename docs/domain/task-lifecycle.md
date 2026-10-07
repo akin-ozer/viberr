@@ -775,8 +775,10 @@ packet goes away (`retryReviewDeadlockEscalation`, ruling 328).
   delivered as a revision), and the reviewers who gave a verdict on the accepted work.
   Ruling 690: the card, before and after the acceptance, also says how many kept sources
   the work under review rests on and lists the first twelve (`sourcesRestedOn`: the ones
-  the delivery recorded, or for a revision the ones kept by the time it was minted, so a
-  page a reviewer kept while checking it is not counted); a result that is files says so
+  the delivery recorded, or for a revision the ones kept by the time it was minted, plus
+  any the task's deliverer kept afterwards, so a page a reviewer kept while checking it is
+  not counted and one the deliverer kept to answer an objection is); a result that is
+  files says so
   when it rests on none, and a revision that rests on none says nothing.
   The diff reader is the offer's alone, and nobody is shown as still owed a verdict. A
   task accepted with no packet on file (a person's own acceptance before the operator

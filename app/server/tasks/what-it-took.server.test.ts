@@ -659,7 +659,7 @@ describe("what a task took (ruling 693)", () => {
     run("VIB-3", { kind: "reviewer", backend: "claude", state: "finished", agentProfileId: "reviewer", reviewSubject: "rev_1", startedAt: at("09:45"), finishedAt: at("09:55"), totalCostUsd: 1 });
     const reworked = took("VIB-3");
     expect(reworked.wall.firstDelivery?.at).toBe(at("09:45"));
-    expect(reworked.notes).toEqual(["The first delivery is timed by the first review dispatched on it."]);
+    expect(reworked.notes).toEqual(["The first delivery is timed by the first run dispatched on it."]);
 
     // The run rows are gone (a rebuilt database): the verdict the first
     // delivery got still names it, in the file.

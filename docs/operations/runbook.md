@@ -581,8 +581,9 @@ personal data, a takedown), stop the app, then delete that source's bytes file,
 the record stays, a delivery that rested on the id still names it, the id is never given
 to another source, the task page's link answers 404 and `read_task_source` says the bytes
 are not in the store. The removal holds: an agent that fetches the same bytes again and
-hands them to `keep_source` is refused and told that source was removed, so they do not
-come back under a new id (a page that has changed by one byte is a different source, and
+hands them to `keep_source` is refused and told that source was removed, and the staged
+copy is removed with the refusal, so they do not come back under a new id or under a
+hidden name (a page that has changed by one byte is a different source, and
 is kept). When the record's own `title` or `from` must go too, blank those two
 values in its line and keep the line. Never edit the folder while the app runs: one
 process writes a data root.

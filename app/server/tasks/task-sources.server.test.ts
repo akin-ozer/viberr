@@ -179,12 +179,15 @@ describe("ruling 690: keeping a source on a task", () => {
 
     save(store, ".source-roster-again.html", "names and addresses");
     expect(keep(store, { file: ".source-roster-again.html", title: "The roster" })).toBe(
-      "[refused] These bytes were kept as S1 and that source has since been removed from the store, so they are not kept again. " +
+      "[refused] These bytes were kept as S1 and that source has since been removed from the store, so they are not kept again, " +
+        "and the staged file was removed from the attachments folder. " +
         "Say in your result that the source for this claim was removed.",
     );
     expect(kept(store).map((s) => s.id)).toEqual(["S1"]);
     expect(existsSync(sourceFile(store, "S1.html"))).toBe(false);
-    expect(inFolder(store)).toEqual([".source-roster-again.html"]);
+    // A person took these bytes out; a hidden copy the attachments route
+    // serves by name would bring them back. CANARY: leave the staged file.
+    expect(inFolder(store)).toEqual([]);
   });
 
   interface Refusal {
@@ -275,6 +278,16 @@ describe("ruling 690: keeping a source on a task", () => {
         "Save the page or the part of the output your claim rests on as its own file and keep that.",
     },
     {
+      // CANARY: round the size to the nearest tenth and a file 20,000 bytes
+      // over reads "is 10.0 MB; a source may be up to 10 MB".
+      what: "a file just over 10 MB, whose size is not rounded down to the cap",
+      saved: { name: ".source-export.json", body: Buffer.alloc(10 * MB + 20_000, "x") },
+      call: { file: ".source-export.json" },
+      reply:
+        "[refused] `.source-export.json` is 10.1 MB; a source may be up to 10 MB. " +
+        "Save the page or the part of the output your claim rests on as its own file and keep that.",
+    },
+    {
       what: "the 201st source",
       saved: page,
       alreadyKept: { count: 200 },
@@ -351,6 +364,19 @@ describe("ruling 690: keeping a source on a task", () => {
         "save that output and keep it. If this is a page you fetched and not a command's output, fetch it again and give its URL as `from`.",
     },
     {
+      // `wget` names a download after its URL, query included, and the name
+      // reaches the index, the audit row, every reader's list and the
+      // download's header. CANARY: read `from` and `title` alone and the keep
+      // answers `[kept] S1` with the token in the store.
+      what: "a staged name that holds a token, which it also removes",
+      saved: { name: `.source-export.csv?access_token=${TOKEN}`, body: "host,cpu\napp01,4\n" },
+      call: { file: `.source-export.csv?access_token=${TOKEN}` },
+      removes: true,
+      reply:
+        "[refused] The file's name holds what reads as a token or a password, so it is not kept and it was removed from the attachments folder. " +
+        "Save what you fetched again under a plain name that starts with `.source-` and keep that.",
+    },
+    {
       what: "an archived task",
       saved: page,
       task: { archived: true },
@@ -409,7 +435,23 @@ describe("ruling 690: keeping a source on a task", () => {
     },
   ];
 
-  it.each(lookalikes)("keeps $what: it is not a credential", ({ from, body }) => {
+  it.each([
+    ...lookalikes,
+    {
+      // The scan took everything between `://` and the next `@` with a `:`
+      // in it for a password, and that refusal removes the file. CANARY: let
+      // a quote or a comma stand in a userinfo and an API answer that holds a
+      // site address before an e-mail address is deleted as a credential.
+      what: "an API answer with a site address before an e-mail address",
+      from: "gh api orgs/acme",
+      body: '{"login":"acme","blog":"https://acme.example","location":"Berlin","email":"hello@acme.example"}',
+    },
+    {
+      what: "a line that names a local address before an e-mail address",
+      from: "cat README.md",
+      body: "see http://localhost:3000,admin@example.com for access",
+    },
+  ])("keeps $what: it is not a credential", ({ from, body }) => {
     const store = storeWithTask();
     save(store, ".source-page.html", body);
     expect(keep(store, { file: ".source-page.html", from })).toContain("[kept] S1: page.html");

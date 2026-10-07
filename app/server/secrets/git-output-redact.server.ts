@@ -66,8 +66,11 @@ function readsAsKey(token: string): boolean {
 /** The characters a URL's scheme is made of, after its first letter. */
 const SCHEME_REST_RE = /[0-9+.-]/;
 const SCHEME_LETTER_RE = /[a-z]/i;
-/** What stands between `://` and the `@` of a userinfo: no space, `/` or `@`. */
-const USERINFO_SPAN_RE = /[^\s/@]*/y;
+/** What stands between `://` and the `@` of a userinfo: no space, `/` or `@`,
+ *  and none of the marks that end a URL in running text or in JSON (a quote, a
+ *  comma, a bracket), so `"https://acme.example","email":"a@b.example"` and
+ *  `http://localhost:3000,admin@example.com` are not read as a password. */
+const USERINFO_SPAN_RE = /[^\s/@"'`,<>{}\\]*/y;
 
 /**
  * {@link URL_USERINFO_RE}'s shape, `scheme://user:secret@`, found without

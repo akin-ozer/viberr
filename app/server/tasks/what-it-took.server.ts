@@ -580,7 +580,7 @@ function notesOf(
     );
   }
   if (firstDeliveryByReview) {
-    notes.push("The first delivery is timed by the first review dispatched on it.");
+    notes.push("The first delivery is timed by the first run dispatched on it.");
   }
   return notes;
 }
@@ -700,10 +700,19 @@ export function whatItTook(input: WhatItTookInput): WhatItTook {
  * an object cost a row five lines there, a line costs it one.
  */
 export function runTotalsLine(rows: readonly TookRunRow[]): string | null {
-  const { runs, agentMinutes, costUsd } = runTotals(rows);
-  if (runs === 0) return null;
-  const cost = costUsd === null ? "cost not reported" : formatCost(costUsd);
-  return `${countLabel(runs, "run")}, ${agentMinutes} min, ${cost}`;
+  const measure = measureRuns(rows);
+  if (measure.started === 0) return null;
+  const cost = measure.costUsd === null ? "cost not reported" : formatCost(measure.costUsd);
+  // A run still going or cut by a restart adds no time and may yet report a
+  // cost, so a line that left it out would rank its task as the cheap one.
+  const unmeasured = [
+    measure.live > 0 ? `${measure.live} still going` : null,
+    measure.cutByRestart > 0 ? `${measure.cutByRestart} cut by a restart` : null,
+  ].filter((part) => part !== null);
+  return (
+    `${countLabel(measure.started, "run")}, ${minutesOf(measure.agentMs)} min, ${cost}` +
+    (unmeasured.length > 0 ? ` (${unmeasured.join(", ")}: not in the minutes)` : "")
+  );
 }
 
 /** The figure with who spent it: what a task read hands an operator or the

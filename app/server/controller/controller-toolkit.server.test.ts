@@ -5963,6 +5963,31 @@ describe("ruling 693: the controller's read of what a task took", () => {
     const plain = JSON.parse(await call(ids.contributor, "list_tasks", {})) as Listed;
     expect(plain.map((t) => t.key)).toEqual(ranked.map((t) => t.key));
     expect(plain.filter((t) => "whatItTook" in t)).toEqual([]);
+
+    // A run still going adds no minutes and may yet report a cost, and the
+    // line says so. CANARY: print the three numbers alone and a task three
+    // hours into its only run reads "1 run, 0 min, cost not reported", the
+    // cheapest on the board.
+    const { upsertRun } = await import("~/server/runtimes/run-store.server");
+    upsertRun(app.db, {
+      id: "run_took_ctl_live",
+      projectSlug: SLUG,
+      taskKey: "VIB-168",
+      threadId: "th-run_took_ctl_live",
+      role: DEVELOPER.name,
+      kind: DEVELOPER.kind,
+      backend: DEVELOPER.backend,
+      model: "sonnet",
+      sdk: "test",
+      agentName: DEVELOPER.name,
+      agentProfileId: DEVELOPER.profile,
+      state: "running",
+      startedAt: "2026-09-27T09:00:00.000Z",
+    });
+    const going = JSON.parse(await call(ids.contributor, "list_tasks", { withWhatItTook: true })) as Listed;
+    expect(going.find((t) => t.key === "VIB-168")?.whatItTook).toBe(
+      "1 run, 0 min, cost not reported (1 still going: not in the minutes)",
+    );
   });
 
   it("ruling 693: a board of 150 tasks is listed whole with what each task took", async () => {

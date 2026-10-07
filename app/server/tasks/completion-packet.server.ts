@@ -20,6 +20,7 @@ import { readTaskFile, updateTaskFile } from "~/server/files/task-writer.server"
 import {
   activeWorkRevision,
   deliveredAsFiles,
+  deliveringEngagement,
   requiredReviewers,
   reviewSubjectId,
   type CompletionPacket,
@@ -176,17 +177,28 @@ function resultFileCandidates(fm: PacketState, ref: StoreRef): string[] {
  * operator writes it after the reviews, so every page a reviewer fetched to
  * check a claim would read as what the developer's result stood on. Empty
  * while nothing is delivered.
+ *
+ * One more case counts: a source the task's deliverer kept after the anchor.
+ * Asked for the source of a claim, a deliverer keeps it and reports, and
+ * changes no file: the same tree keeps its revision and its mint instant, and
+ * a run that saves no file moves no stamp. That source is what the result
+ * rests on all the same, and it is the deliverer's by its record.
  */
-export function sourcesRestedOn(kept: TaskSourcesRead, fm: PacketState): TaskSource[] {
+export function sourcesRestedOn(
+  kept: TaskSourcesRead,
+  fm: PacketState & Pick<TaskFrontmatter, "engagements">,
+): TaskSource[] {
   if (reviewSubjectId(fm) === null) return [];
+  const deliverer = deliveringEngagement(fm)?.profileId ?? null;
+  const byDeliverer = (s: TaskSource) => deliverer !== null && s.by.profileId === deliverer;
   if (deliveredAsFiles(fm) && fm.deliveredAt) {
     const ids = new Set(deliverySourceIds(kept, fm.deliveredAt));
-    return kept.sources.filter((s) => ids.has(s.id));
+    return kept.sources.filter((s) => ids.has(s.id) || byDeliverer(s));
   }
   const rev = activeWorkRevision(fm.workRevision);
   if (!rev) return [];
   const minted = Date.parse(rev.createdAt);
-  return kept.sources.filter((s) => Date.parse(s.keptAt) <= minted);
+  return kept.sources.filter((s) => Date.parse(s.keptAt) <= minted || byDeliverer(s));
 }
 
 /** How many candidate names a refusal or the snapshot lists. */

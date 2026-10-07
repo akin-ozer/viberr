@@ -1193,7 +1193,10 @@ delivery with no line rested on the sources kept at or before its stamp
 (`deliverySourceIds`), which for one stamped before the task kept anything is none: the
 list `read_task_source` answers names every kept delivery, and says so for that one. A
 delivery that is a revision has no line either: it rests on the sources kept at or before
-the instant the revision was minted, `workRevision.createdAt` (`sourcesRestedOn`). The
+the instant the revision was minted, `workRevision.createdAt` (`sourcesRestedOn`). Either
+way a source the task's deliverer kept after that anchor counts too, by the `by` of its
+record: asked for the source of a claim, a deliverer keeps one and changes no file, so no
+stamp moves and no revision is minted. The
 completion packet's own time is not the anchor: the operator writes the packet after the
 reviews, and a page a reviewer kept while checking a claim is not what the work stood on.
 
