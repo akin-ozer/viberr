@@ -29,7 +29,7 @@ import { RadioSeg, RadioSegOption } from "~/ui/radio-seg";
 import { useToast } from "~/ui/toast";
 import { useDialog } from "~/ui/use-dialog";
 import { useFetcherResult } from "~/ui/use-fetcher-result";
-import { useRefusalShake } from "~/ui/use-refusal-shake";
+import { useRefusalShake, type RefusalShake } from "~/ui/use-refusal-shake";
 import type { OrgActionData } from "./use-org-action";
 
 /**
@@ -239,6 +239,199 @@ function BoardResources({
   );
 }
 
+/** The file's task key when the form can keep it (2 to 4 capitals), else ""
+ *  and the key follows the name, as in the New project dialog. */
+function importFileKey(taskPrefix: string): string {
+  return /^[A-Z]{2,4}$/.test(taskPrefix) ? taskPrefix : "";
+}
+
+/** What the import form reads off its fields (ruling 689(e), split out of
+ *  `BoardImportDialog`, which keeps the fields' state): the key and the
+ *  repository in effect, the new project's slug, whether the key is taken,
+ *  and the first field that stops the import (a taken slug stops the name)
+ *  with the sentence that says why. */
+interface ImportForm {
+  effKey: string;
+  effRepo: string;
+  slug: string;
+  keyInUse: boolean;
+  blocked: BlockedField | null;
+  blockedReason: string | null;
+}
+
+function importForm(
+  fields: {
+    name: string;
+    key: string;
+    keyTouched: boolean;
+    repo: string;
+    connOwner: string;
+    needsRepo: boolean;
+  },
+  boards: readonly BoardExportSummary[],
+): ImportForm {
+  const { name, connOwner, needsRepo } = fields;
+  const effKey = fields.keyTouched ? fields.key : keyFromName(name);
+  const effRepo = fields.repo || slugify(name);
+  const slug = slugify(name);
+  const slugTaken = slug !== "" && boards.some((b) => b.slug === slug);
+  const keyInUse = effKey.length >= 2 && boards.some((b) => b.taskPrefix.toUpperCase() === effKey);
+  const blocked = blockedImportField({ name, slugTaken, effKey, needsRepo, connOwner, effRepo });
+  return { effKey, effRepo, slug, keyInUse, blocked, blockedReason: blockedImportReason(blocked, slugTaken, slug) };
+}
+
+/** The first field that stops the import, in the form's order. */
+function blockedImportField(f: {
+  name: string;
+  slugTaken: boolean;
+  effKey: string;
+  needsRepo: boolean;
+  connOwner: string;
+  effRepo: string;
+}): BlockedField | null {
+  if (f.name.trim().length <= 1 || f.slugTaken) return "name";
+  if (f.effKey.length < 2) return "key";
+  if (!f.needsRepo) return null;
+  if (f.connOwner.length === 0) return "conn";
+  return f.effRepo.length === 0 ? "repo" : null;
+}
+
+/** What the foot says about the field that stops the import. */
+function blockedImportReason(blocked: BlockedField | null, slugTaken: boolean, slug: string): string | null {
+  switch (blocked) {
+    case "name":
+      return slugTaken
+        ? `A project at projects/${slug} already exists. Give the board another name.`
+        : "Enter a project name (2+ characters).";
+    case "key":
+      return "Task key needs at least 2 letters.";
+    case "conn":
+      return "Pick a GitHub connection.";
+    case "repo":
+      return "Enter a repository name.";
+    default:
+      return null;
+  }
+}
+
+/** A file with problems, all of them, in place of the form (ruling 689(e):
+ *  one slot of `BoardImportDialog`'s body, drawn from its props alone). */
+function BoardImportProblems({ problems }: { problems: string[] }) {
+  return (
+    <div className="form-err" role="alert">
+      <Icon name="alert" />
+      <div>
+        <b>
+          {problems.length === 1
+            ? "One problem in this file stops the import. Fix it and choose the file again:"
+            : `${problems.length} problems in this file stop the import. Fix them and choose the file again:`}
+        </b>
+        <ul className="board-problems">
+          {problems.map((problem) => (
+            <li key={problem}>{problem}</li>
+          ))}
+        </ul>
+      </div>
+    </div>
+  );
+}
+
+/** Whether the board takes a repository: a results board attaches one only
+ *  on request (ruling 667), a software board may connect it later (ruling
+ *  672). Ruling 689(e): one slot of `BoardImportDialog`'s form, which keeps
+ *  both choices' state. */
+function BoardImportRepository({
+  delivers,
+  attachRepo,
+  setAttachRepo,
+  repoLater,
+  setRepoLater,
+}: {
+  delivers: BoardImportPreview["delivers"];
+  attachRepo: boolean;
+  setAttachRepo: (v: boolean) => void;
+  repoLater: boolean;
+  setRepoLater: (v: boolean) => void;
+}) {
+  return delivers === "results" ? (
+    <div className="field">
+      <span className="flabel">Repository</span>
+      <span className="fhint flush">
+        None of this board&apos;s agents writes a repository, so it needs none.
+      </span>
+      <AttachRepoLine attachRepo={attachRepo} setAttachRepo={setAttachRepo} />
+    </div>
+  ) : (
+    <div className="field">
+      <span className="flabel">Repository</span>
+      <span className="fhint flush">
+        {repoLater
+          ? SOFTWARE_REPO_LATER_HINT
+          : "This board's agents write a repository, and each task ships as a pull request."}
+      </span>
+      <RepoLaterLine repoLater={repoLater} setRepoLater={setRepoLater} />
+    </div>
+  );
+}
+
+/** The dialog's foot (ruling 689(e), split out of `BoardImportDialog`, which
+ *  keeps the refusal count and its shake): where the board will live, why it
+ *  cannot be imported yet, and the way on. */
+function BoardImportFoot({
+  hasProblems,
+  slug,
+  blockedReason,
+  attempted,
+  refusalShake,
+  busy,
+  onCancel,
+  onChooseAnother,
+  onSubmit,
+}: {
+  hasProblems: boolean;
+  slug: string;
+  blockedReason: string | null;
+  attempted: number;
+  refusalShake: RefusalShake;
+  busy: boolean;
+  onCancel: () => void;
+  onChooseAnother: () => void;
+  onSubmit: () => void;
+}) {
+  return (
+    <div className="modal-foot">
+      <span className="foot-hint mono">{hasProblems ? "nothing is written" : `creates projects/${slug || "…"}/`}</span>
+      <span className="foot-actions">
+        {!hasProblems && blockedReason && (
+          <span
+            key={attempted ? "alert-" + attempted : "status"}
+            className={"foot-hint" + (attempted ? " err" : "") + (attempted && refusalShake.shake ? " refused" : "")}
+            onAnimationEnd={attempted ? refusalShake.onAnimationEnd : undefined}
+            role={attempted ? "alert" : "status"}
+            id={BLOCK_REASON_ID}
+          >
+            {blockedReason}
+          </span>
+        )}
+        <button type="button" className="btn ghost" onClick={onCancel}>
+          Cancel
+        </button>
+        {hasProblems ? (
+          <button type="button" className="btn primary" onClick={onChooseAnother}>
+            <Icon name="upload" />
+            Choose the fixed file
+          </button>
+        ) : (
+          <button type="button" className="btn primary" disabled={busy} aria-busy={busy} onClick={onSubmit}>
+            <GlyphSwap rest="board" alt="loader" on={busy} spinAlt />
+            {busy ? "Importing board…" : "Import board"}
+          </button>
+        )}
+      </span>
+    </div>
+  );
+}
+
 export function BoardImportDialog({
   file,
   preview,
@@ -259,7 +452,7 @@ export function BoardImportDialog({
   onChooseAnother: () => void;
   onClose: () => void;
 }) {
-  const fileKey = /^[A-Z]{2,4}$/.test(preview.taskPrefix) ? preview.taskPrefix : "";
+  const fileKey = importFileKey(preview.taskPrefix);
   const [name, setName] = useState(preview.suggestedName);
   const [nameTouched, setNameTouched] = useState(true);
   // The file's key stands while the name changes; without one the key
@@ -310,11 +503,10 @@ export function BoardImportDialog({
     if (d.slug) navigate(`/projects/${d.slug}/board`);
   });
 
-  const effKey = keyTouched ? key : keyFromName(name);
-  const effRepo = repo || slugify(name);
-  const slug = slugify(name);
-  const slugTaken = slug !== "" && boards.some((b) => b.slug === slug);
-  const keyInUse = effKey.length >= 2 && boards.some((b) => b.taskPrefix.toUpperCase() === effKey);
+  const { effKey, effRepo, slug, keyInUse, blocked, blockedReason } = importForm(
+    { name, key, keyTouched, repo, connOwner, needsRepo },
+    boards,
+  );
   const editName = (v: string) => {
     setName(v);
     setNameTouched(true);
@@ -329,30 +521,6 @@ export function BoardImportDialog({
     setRepoTouched(true);
     if (v && !nameTouched) setName(projectNameFromRepo(v));
   };
-  const blocked: BlockedField | null =
-    name.trim().length <= 1 || slugTaken
-      ? "name"
-      : effKey.length < 2
-        ? "key"
-        : !needsRepo
-          ? null
-          : connOwner.length === 0
-            ? "conn"
-            : effRepo.length === 0
-              ? "repo"
-              : null;
-  const blockedReason =
-    blocked === "name"
-      ? slugTaken
-        ? `A project at projects/${slug} already exists. Give the board another name.`
-        : "Enter a project name (2+ characters)."
-      : blocked === "key"
-        ? "Task key needs at least 2 letters."
-        : blocked === "conn"
-          ? "Pick a GitHub connection."
-          : blocked === "repo"
-            ? "Enter a repository name."
-            : null;
   const invalidField = attempted ? blocked : null;
   const hasProblems = preview.problems.length > 0;
   const differing = preview.resources.filter((r) => r.status === "differs" && r.kind !== "agent");
@@ -399,21 +567,7 @@ export function BoardImportDialog({
       </div>
       <div className="modal-body">
         {hasProblems ? (
-          <div className="form-err" role="alert">
-            <Icon name="alert" />
-            <div>
-              <b>
-                {preview.problems.length === 1
-                  ? "One problem in this file stops the import. Fix it and choose the file again:"
-                  : `${preview.problems.length} problems in this file stop the import. Fix them and choose the file again:`}
-              </b>
-              <ul className="board-problems">
-                {preview.problems.map((problem) => (
-                  <li key={problem}>{problem}</li>
-                ))}
-              </ul>
-            </div>
-          </div>
+          <BoardImportProblems problems={preview.problems} />
         ) : (
           <>
             {preview.description && <p className="board-desc">{preview.description}</p>}
@@ -432,25 +586,13 @@ export function BoardImportDialog({
               keyInUse={keyInUse}
               submit={submit}
             />
-            {preview.delivers === "results" ? (
-              <div className="field">
-                <span className="flabel">Repository</span>
-                <span className="fhint flush">
-                  None of this board&apos;s agents writes a repository, so it needs none.
-                </span>
-                <AttachRepoLine attachRepo={attachRepo} setAttachRepo={setAttachRepo} />
-              </div>
-            ) : (
-              <div className="field">
-                <span className="flabel">Repository</span>
-                <span className="fhint flush">
-                  {repoLater
-                    ? SOFTWARE_REPO_LATER_HINT
-                    : "This board's agents write a repository, and each task ships as a pull request."}
-                </span>
-                <RepoLaterLine repoLater={repoLater} setRepoLater={setRepoLater} />
-              </div>
-            )}
+            <BoardImportRepository
+              delivers={preview.delivers}
+              attachRepo={attachRepo}
+              setAttachRepo={setAttachRepo}
+              repoLater={repoLater}
+              setRepoLater={setRepoLater}
+            />
             {needsRepo && (
               <>
                 <NewProjectConnectionField
@@ -498,36 +640,17 @@ export function BoardImportDialog({
           </div>
         )}
       </div>
-      <div className="modal-foot">
-        <span className="foot-hint mono">{hasProblems ? "nothing is written" : `creates projects/${slug || "…"}/`}</span>
-        <span className="foot-actions">
-          {!hasProblems && blockedReason && (
-            <span
-              key={attempted ? "alert-" + attempted : "status"}
-              className={"foot-hint" + (attempted ? " err" : "") + (attempted && refusalShake.shake ? " refused" : "")}
-              onAnimationEnd={attempted ? refusalShake.onAnimationEnd : undefined}
-              role={attempted ? "alert" : "status"}
-              id={BLOCK_REASON_ID}
-            >
-              {blockedReason}
-            </span>
-          )}
-          <button type="button" className="btn ghost" onClick={close}>
-            Cancel
-          </button>
-          {hasProblems ? (
-            <button type="button" className="btn primary" onClick={onChooseAnother}>
-              <Icon name="upload" />
-              Choose the fixed file
-            </button>
-          ) : (
-            <button type="button" className="btn primary" disabled={busy} aria-busy={busy} onClick={submit}>
-              <GlyphSwap rest="board" alt="loader" on={busy} spinAlt />
-              {busy ? "Importing board…" : "Import board"}
-            </button>
-          )}
-        </span>
-      </div>
+      <BoardImportFoot
+        hasProblems={hasProblems}
+        slug={slug}
+        blockedReason={blockedReason}
+        attempted={attempted}
+        refusalShake={refusalShake}
+        busy={busy}
+        onCancel={close}
+        onChooseAnother={onChooseAnother}
+        onSubmit={submit}
+      />
     </dialog>
   );
 }
