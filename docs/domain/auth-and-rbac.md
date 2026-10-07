@@ -762,12 +762,3 @@ reason to hide a running one: the in-progress card renders over the connected ca
 the flow ends, which is how a key is replaced by a hosted sign-in, and a card whose
 credential file has vanished offers the sign-in its own sentence names, beside
 Disconnect.
-
-## 8. Known drift in older documents
-
-- `design/better-auth-migration.md` describes the better-auth `organization`
-  plugin, `member`/`invitation` tables, a legacy `scrypt$…` compatibility hook and a
-  password backfill. None of these exist; treat that file as history.
-- The README's "Known gaps" entry "Org audit browse is minimal" says the browse has no
-  filtering; it has a text filter and an org-scoped toggle backed by its own query
-  (§5). It has no paging.

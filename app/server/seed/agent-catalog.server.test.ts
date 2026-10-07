@@ -5,8 +5,8 @@ import { SEED_AGENT_PROFILES } from "./agent-catalog.server";
 /**
  * F17 / H15: the seeded specialist profiles shipped
  * `Global base · customized for Viberr Core` — a workspace that exists nowhere
- * in the product. It is a literal lifted from the design mock
- * (design/html-app/app/data.js), where "Viberr Core" is the prototype's one
+ * in the product. It is a literal lifted from the design mock's data, where
+ * "Viberr Core" is the prototype's one
  * fake project; the app's OWN profile writer (`gagents.server.ts`) has always
  * written the honest `Global base`. So a clean-sheet instance's Agents page
  * described every preinstalled profile as customized for a project the user

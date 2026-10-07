@@ -3,9 +3,7 @@ export default {
   ignore: {
     // .claude/worktrees and data/ (the gitignored VIBERR_DATA_ROOT) both hold
     // live agent checkouts of this same repo — scanning them double-counts
-    // every finding against stale copies. design/ is the standalone mockup
-    // bundle (static HTML/JSX prototypes, never bundled by the app) — its
-    // support.js is what produced 45 phantom postmessage-origin-risk hits.
+    // every finding against stale copies.
     // *.server.test.ts files are server-only test fixtures (react-router never
     // bundles .server. modules client-side) — their synthetic PATs aren't
     // "client code" secrets.
@@ -16,16 +14,13 @@ export default {
     // parameters + runtime `typeof` guards every AST node-type check must use.
     // test-support/ is jsdom/seed infrastructure (setup-dom.ts reads `window` at
     // module scope, which only ever runs in the test env — never SSR — so the
-    // no-unguarded-browser-global premise doesn't hold). planning/ is 800+ design
-    // and discovery documents, not app source.
+    // no-unguarded-browser-global premise doesn't hold).
     files: [
-      "**/design/**",
       "**/.claude/**",
       "**/data/**",
       "**/*.server.test.ts",
       "**/tools/oxlint/**",
       "**/test-support/**",
-      "**/planning/**",
     ],
   },
 };

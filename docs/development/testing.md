@@ -88,7 +88,7 @@ canonical-file format, a migration or storage invariant, a security or isolation
 (ruling 460), an SSE payload, a default, a prompt byte an agent depends on, an audit row,
 or a numbered ruling. Keep call ordering when the order is observable (ruling 375). Keep a
 doc pin when the doc mirrors a code-owned list (file-format keys, packet kinds,
-`.env.example`, the PRD mirror) or forbids a dangerous recipe (ruling 158); a pin on a
+`.env.example`) or forbids a dangerous recipe (ruling 158); a pin on a
 sentence's wording is not a contract. Static or slow is never a reason to delete, and a
 test that must change for a behaviour-preserving refactor is suspect, not automatically
 deletable: show the stronger proof first. A retained test that fails on a clean checkout
@@ -298,8 +298,6 @@ ctx.cleanup();
 
 Every test under `app/shared/docs/`, and the ones elsewhere that read a doc or a vendored file:
 
-- `app/shared/docs/prd-sync.test.ts` (ruling 27): `design/prd.md` must be byte-identical
-  to `planning/planning-artifacts/prd.md`; a failure names the diverging lines.
 - `app/shared/docs/file-formats-sync.test.ts`: `docs/architecture/file-formats.md` §2
   documents every `TASK_FRONTMATTER_KEYS` entry and §4 every `AGENT_PROFILE_KNOWN_KEYS`
   entry; the `## Packet` section enumerates `PACKET_OPTION_KINDS` in schema order under a
@@ -467,7 +465,7 @@ Every test under `app/shared/docs/`, and the ones elsewhere that read a doc or a
 
 `npm run lint` is bare `oxlint` with `.oxlintrc.json`: it ignores agent directories
 (`.agent`, `.agents`, `.claude`, `.codex`, `.continue`, `.cursor`, `.gemini`,
-`.opencode`, `.pi`, `.roo`, `.windsurf`), `design/**` and the plugin's own source, loads
+`.opencode`, `.pi`, `.roo`, `.windsurf`) and the plugin's own source, loads
 `tools/oxlint/anti-slop/index.ts` as a JS plugin, and sets all 15 `anti-slop/*` rules to
 `error`. There is no override, allowlist or baseline file anywhere, so every anti-slop
 finding fails CI (ruling 86). The rules:

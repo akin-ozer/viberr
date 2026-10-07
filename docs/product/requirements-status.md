@@ -3,10 +3,8 @@
 > Every functional and non-functional requirement in the canon PRD judged against the
 > code. Where the PRD carries a dated amendment, the status is judged against the
 > amended text and says "as amended". Vocabulary: IMPLEMENTED · PARTIAL · NOT
-> IMPLEMENTED · UNVERIFIABLE. Paths are relative to `app/`. Edit the canon PRD only;
-> the mirror follows.
-> Source of truth: `planning/planning-artifacts/prd.md` (mirrored byte-for-byte into
-> `design/prd.md` by `app/shared/docs/prd-sync.test.ts`), [decisions.md](../architecture/decisions.md), `app/`.
+> IMPLEMENTED · UNVERIFIABLE. Paths are relative to `app/`.
+> Source of truth: [prd.md](prd.md), [decisions.md](../architecture/decisions.md), `app/`.
 > Verified against `main` @ `7d9fbf72` (2026-09-23).
 
 ## 1. Summary
@@ -16,7 +14,7 @@
 | Functional (FR1–FR41) | 41 | 39 (10 as amended; FR23 by interpretation; FR19 judged against ruling 127; FR41 judged against ruling 503) | 2 (FR6, FR8) | 0 |
 | Non-functional (NFR1–NFR18) | 18 | 16 (3 as amended, 1 bounded) | 2 (NFR6, NFR9) | 0 |
 
-The two PRD copies are identical. The PRD's last amendment is dated 2026-09-01 (ruling
+The PRD's last amendment is dated 2026-09-01 (ruling
 108, on FR40); every ruling after it that changes what a requirement says is listed in
 §5 rather than in the PRD. Where such a ruling moves a row, the row is judged against
 the ruling and says so.
@@ -169,18 +167,25 @@ the ruling and says so.
     FR22); twenty stage colour presets (364, FR6); a manual backward move says why (381,
     FR13); refresh-and-review before acceptance (449, FR27).
 
-## 6. README "Known gaps" re-verification
+## 6. README "Known limitations" re-verification
 
-| Gap as stated in the README | Still true? | Note |
+| Limitation as the README states it | Still true? | Note |
 |---|---|---|
-| No mailer; one-time passwords handed over by admins | Yes | |
-| Org audit browse is minimal: newest 150 org-scoped rows, "no filtering or paging" | **Partly** | No paging, but the browse has a text filter and an "Org-scoped" toggle backed by its own query; the unscoped window shows 150 rows of every scope except the poller heartbeat (ruling 234) |
-| Retention windows are compile-time constants (run logs 30 days, audit 90 with export first, notifications 500 per user; boot, every 6 h, disk pressure) | Yes | `RUN_LOG_RETENTION_DAYS`, `AUDIT_RETENTION_DAYS`, `NOTIFICATION_MAX_PER_USER` in `server/db/retention.server.ts` |
-| Several tables have no retention (`provenance`, `session`, `agent_runs`, an upgraded root's `goal_projections`, `controller_messages`, `scope_violations`, `model_availability`) | Yes | `staged_outcomes` is not among them: each insert prunes rows past its TTL (`server/tasks/agent-outcome.server.ts`) |
-| No cleartext-transport guard in the app itself | Yes | Boot warns when a production origin would issue insecure cookies |
-| Notifications page caps at newest 200 | Yes | `NOTIF_PAGE_LIMIT` in `routes/notifications.tsx` |
+| Single node, one app process per data root | Yes | The data-root writer lock (`server/db/data-root-lock.server.ts`) |
+| Pre-production formats, one squashed baseline | Yes | `db/migrations/0001_baseline.sql`; no back-compat obligation ([../development/contributing.md](../development/contributing.md) §4) |
+| No email; one-time passwords handed over by admins | Yes | The opt-in browser notification for a new decision is ruling 481(c) |
+| TLS is the deployment's job | Yes | Boot warns when a production origin would issue insecure cookies |
+| Codex runs are not OS-sandboxed beyond the per-person OS user | Yes | Ruling 185; the per-person OS user is ruling 460 |
+| Chromium only | Yes | Ruling 103 |
+| Retention windows mostly fixed (run logs 30 days, audit 90 with export first, notifications 500 per user; the page shows 200); `provenance` and others unpruned | Yes | `RUN_LOG_RETENTION_DAYS`, `AUDIT_RETENTION_DAYS`, `NOTIFICATION_MAX_PER_USER` in `server/db/retention.server.ts`; `NOTIF_PAGE_LIMIT` in `routes/notifications.tsx`; unpruned: `provenance`, `session`, `agent_runs`, an upgraded root's `goal_projections`, `controller_messages`, `scope_violations`, `model_availability` (`staged_outcomes` prunes on insert) |
+| Instance audit browse is minimal: newest 150 rows, a text filter over the loaded window, download and S3, no paging | Yes | The "Org-scoped" toggle reads its own newest 150 instance-level rows; the poller heartbeat is left out (ruling 234) |
 | Fine-grained PAT validation partly assumed | Yes | `pull_request:write` reads "assumed" until first use unless `VIBERR_GITHUB_WRITE_PROBE` opts into the dry-run |
-| Codex runs receive MCP servers without credentials | **No longer** (ruling 461) | A credentialed server is reached through Viberr's loopback MCP gateway on both backends; the credential stays in the server process and the run holds a run-scoped token |
+| The spending cap binds Claude only | Yes | Ruling 175 |
+
+The README's earlier list also said Codex runs receive MCP servers without credentials.
+That stopped being true with ruling 461: a credentialed server is reached through Viberr's
+loopback MCP gateway on both backends, the credential stays in the server process, and the
+run holds a run-scoped token. The README no longer says it.
 
 ## 7. Method
 

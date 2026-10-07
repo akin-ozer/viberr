@@ -946,7 +946,7 @@ const STALE_SESSION_SET_ASIDE = "stale_large_session" satisfies ContinuityLossRe
  * is a plain SUM over the columns the sink folded; the rates are taken over the
  * runs that HAVE a first call, so a refused run is neither warm nor cold.
  *
- * Ruling 505 adds what PLAN.md (`planning/prompt-cache-2026-09-21/`) asked the
+ * Ruling 505 adds what the prompt-cache plan asked the
  * page for and it lacked: the baseline table's own columns (the mean first-call
  * write, reads per run, the peak prompt's spread), resumes by idle time (the
  * Codex retention probe, and the check on every TTL ruling 372 assumes) and the
