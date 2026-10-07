@@ -101,7 +101,7 @@ if (!sha) {
   );
 }
 if (dirty) {
-  // Named, not refused: deploying a dirty tree is the normal preprod move. But
+  // Named, not refused: deploying a dirty tree is a normal move here. But
   // the sha stamped on the image is then NOT the whole of what is running, and
   // an operator comparing two images by sha has to know that.
   console.warn(
