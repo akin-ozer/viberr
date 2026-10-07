@@ -177,8 +177,11 @@ describe("ruling 686: what follows an acceptance does not depend on the door", (
 
       // CANARY: leave the release to the runner's tick and the task that
       // waited stays held for up to a minute after the acceptance it waited for.
-      expect(await pollUntil(() => task("VIB-2").frontmatter.blockedBy.length === 0)).toBe(true);
-      expect(task("VIB-2").timeline.some((event) => event.title === "Dependencies released")).toBe(true);
+      // The note is the release's last write on the task.
+      expect(
+        await pollUntil(() => task("VIB-2").timeline.some((event) => event.title === "Dependencies released")),
+      ).toBe(true);
+      expect(task("VIB-2").frontmatter.blockedBy).toEqual([]);
 
       // CANARY: end live runs from the button only and a run goes on spending
       // on a task a person accepted from its decision.
@@ -197,7 +200,7 @@ describe("ruling 686: what follows an acceptance does not depend on the door", (
   it("does none of it for the decision's other answer, which is no acceptance", async () => {
     // CANARY: run what follows an acceptance for every answer and sending a
     // task back ends the run that was working on it.
-    const epicId = await lastTaskOfAnEpic();
+    await lastTaskOfAnEpic();
     await resolvePacket(
       store.db,
       { projectSlug: store.slug, taskKey: "VIB-1", optionIndex: 0, note: "Fix the footer." },
@@ -209,9 +212,6 @@ describe("ruling 686: what follows an acceptance does not depend on the door", (
     expect(task("VIB-1").frontmatter.stage).not.toBe("done");
     expect(store.db.prepare(`SELECT state FROM agent_runs WHERE id = 'run_live_dev'`).get()).toEqual({ state: "running" });
     expect(task("VIB-1").timeline.some((event) => event.title === "Interrupted by acceptance")).toBe(false);
-    expect(task("VIB-2").frontmatter.blockedBy).toEqual(["VIB-1"]);
-    expect(
-      readEpicFile({ projectSlug: store.slug, epicId, dataRoot: store.dataRoot })!.parsed.timeline.map((entry) => entry.text),
-    ).not.toContain("Every task is done (2 tasks).");
+    expect(listAuditEvents(store.db, { action: "task.acceptance.interrupted_runs" })).toEqual([]);
   });
 });

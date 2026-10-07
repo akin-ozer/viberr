@@ -110,6 +110,7 @@ import {
   mergePendingCause,
   refuseUnverifiedHead,
   revisionDriftNote,
+  unverifiedHeadNote,
 } from "./task-acceptance.server";
 import { manualDeliverForReview, recordDeliveredNextStep } from "./task-delivery.server";
 import { transitionStage } from "./task-transitions.server";
@@ -691,6 +692,10 @@ export async function resolvePacket(
             fm.pr.state === "merged" || reallyMerged ? "merged" : "accepted";
           fm.pr = { ...fm.pr, state: next };
         }
+        // A9 / ruling 226: the record says when the head that merged could
+        // not be verified, in the shared write's own words (ruling 686). After
+        // the PR's state is settled: the note is for a merge that landed.
+        event.text += unverifiedHeadNote(fm, headCheck);
       };
       clearPacket = true;
       break;

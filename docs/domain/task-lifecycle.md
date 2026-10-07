@@ -1071,7 +1071,8 @@ board renders "accepted" (or "merged"). Both writes that set the last stage run 
 check, the release and the controller's turn through one list (`afterAcceptance`, ruling
 686): the shared acceptance write, and the decision packet's "accept completion" option,
 which writes the stage itself. A person's acceptance by either also ends the task's live
-runs (ruling 177).
+runs (ruling 177), and either writes the same caveat on the completion record when the
+head that merged could not be verified (`unverifiedHeadNote`).
 
 **A post-merge proof is a follow-up read task** (ruling 492, the owner's F40-64 decision).
 Acceptance moves the task to Done and no stage sits after it, so nothing that happens after

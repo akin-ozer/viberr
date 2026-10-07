@@ -3638,6 +3638,23 @@ describe("F21-2 / ruling 88: the server-side acceptance disclosure", () => {
     const store = setupProjectedStore(ctx);
     seedReviewed(store, {}, ACCEPT_PACKET);
     const echo = live(store);
+    // A run the racing acceptance left going: the operator's own, when the
+    // operator was the one that got there first.
+    upsertRun(store.db, {
+      id: "run_left_going",
+      taskKey: "VIB-1",
+      projectSlug: store.slug,
+      threadId: "th-left-going",
+      role: "Operator",
+      kind: "operator",
+      backend: "claude",
+      agentProfileId: "operator",
+      agentName: "Operator",
+      model: "opus",
+      sdk: "claude-agent-sdk",
+      state: "running",
+      startedAt: new Date().toISOString(),
+    });
 
     // The racing acceptance, performed at the one moment that reproduces the
     // window: after every gate, inside the irreversible merge.
@@ -3683,6 +3700,12 @@ describe("F21-2 / ruling 88: the server-side acceptance disclosure", () => {
     expect(
       listAuditEvents(store.db, { action: "task.packet.resolved" }),
     ).toHaveLength(0);
+    // Ruling 686: nor does it run what follows an acceptance, which is the
+    // racing write's to run. A resolution that accepted nothing ends no run.
+    // CANARY: drop `!alreadyAccepted` from the guard after the write and a
+    // person's no-op answer stops the run of whoever accepted first.
+    expect(store.db.prepare(`SELECT state FROM agent_runs WHERE id = 'run_left_going'`).get()).toEqual({ state: "running" });
+    expect(listAuditEvents(store.db, { action: "task.acceptance.interrupted_runs" })).toHaveLength(0);
   });
 
   describe("resolvePacket custom directive (P21 — questionnaire packets)", () => {

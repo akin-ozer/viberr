@@ -2031,6 +2031,48 @@ describe("gap 1: resolvePacket's accept_completion is the THIRD Done writer and 
     expect(fm().frontmatter.stage).toBe("review");
   });
 
+  it("ruling 686: packet acceptance on an UNVERIFIABLE head that still merges records the caveat, as the button's does (A9 on path 3)", async () => {
+    // The option made the same head check as the button and wrote a record
+    // that read like a verified accept: "…and the review PR was merged."
+    // CANARY: drop `unverifiedHeadNote` from the packet arm's write.
+    const patActor = actorOf(store.users.arda);
+    const pat = createPat(
+      store.db,
+      { userId: store.users.arda.id, label: "bot", token: "ghp_headgate0010" },
+      patActor,
+    );
+    setProjectCredential(store.db, { projectSlug: store.slug, patId: pat.id }, patActor);
+    // GitHub cannot be read for the pull, so the containment check cannot run.
+    github = fakeGithubFetch({
+      "GET /repos/akin-ozer/viberr/pulls/7": { status: 500, body: { message: "boom" } },
+    });
+    mergeMock.mockResolvedValue({ status: "merged", prNumber: 7, sha: null });
+    seedWithPacket({
+      stage: "review",
+      branch: "vib-1",
+      engagements: [REVIEWER],
+      workRevision: revision(),
+      verdicts: [approval()],
+      pr: { number: 7, state: "review", title: "[VIB-1] t" },
+      validation: "healthy",
+    });
+    await resolvePacket(
+      store.db,
+      { projectSlug: store.slug, taskKey: "VIB-1", optionIndex: 0 },
+      actorOf(store.users.arda),
+      dataCtx(),
+    );
+    const parsed = fm();
+    expect(parsed.frontmatter.stage).toBe("done");
+    expect(parsed.frontmatter.pr?.state).toBe("merged");
+    const completion = parsed.timeline.find((e) => e.type === "completion");
+    expect(completion!.text).toContain("and the review PR was merged.");
+    expect(completion!.text).toContain(
+      "Note: PR #7's head could not be verified against the delivered revision before the merge " +
+        "(GitHub could not be reached for the check). It was accepted without that containment check.",
+    );
+  });
+
   it("packet acceptance of an out-of-band-merged PR says so and never downgrades (F15-13 on path 3)", async () => {
     // Fails on wave-1: the packet mutate wrote `reallyMerged ? merged :
     // accepted` — an already-merged PR was downgraded and the event claimed
