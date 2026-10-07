@@ -58,8 +58,9 @@ function renderBrowser(
     onClose?: () => void;
     /** Make the org-settings action fail, to exercise the failure toast. */
     actionResult?: StubActionReply;
-    /** Per-intent canned responses (the editor reads AND writes). */
-    respond?: (intent: string) => StubActionReply | undefined;
+    /** Per-intent canned responses (the editor reads AND writes); a promise
+     *  holds the answer until the test settles it. */
+    respond?: (intent: string) => StubActionReply | Promise<StubActionReply> | undefined;
   } = {},
 ) {
   lastForm = null;
@@ -594,6 +595,88 @@ describe("StoreBrowser document editor", () => {
     expect(
       control(getByLabelText("Document contents"), HTMLTextAreaElement).value,
     ).toBe("THE ONLY COPY");
+  });
+
+  // A save's answer settles the draft it saved, not whatever the card holds
+  // when the answer arrives: the stub holds the save open while the person
+  // closes the draft or starts another (the P14-UI-60 case above answers
+  // while its draft is still open). CANARY: settle the answer against the
+  // open draft (close it on success, mark it on a refusal) and the new draft
+  // is closed under its typing, the refusal after Escape says nothing and
+  // drops the only copy, and the new draft wears the old save's error.
+  const REFUSED = "facts.md already exists. Open it to edit, or pick another name.";
+  const typed = (view: ReturnType<typeof renderBrowser>) =>
+    control(view.getByLabelText("Document contents"), HTMLTextAreaElement).value;
+  const startAnother = (view: ReturnType<typeof renderBrowser>) => {
+    // The open card is titled "New document" too: the toolbar's is the button.
+    fireEvent.click(view.getByRole("button", { name: "New document" }));
+    fireEvent.change(view.getByLabelText("Document contents"), {
+      target: { value: "SECOND DRAFT" },
+    });
+  };
+  it.each([
+    {
+      answer: "a save that lands after another draft opened",
+      settles: "leaves that draft open",
+      meanwhile: startAnother,
+      reply: { ok: true, toast: "facts.md saved · 13 bytes" },
+      after: async (view: ReturnType<typeof renderBrowser>) => {
+        await view.findByText("facts.md saved · 13 bytes");
+        expect(typed(view)).toBe("SECOND DRAFT");
+      },
+    },
+    {
+      answer: "a save refused after Escape closed its draft",
+      settles: "reopens the draft and says why (P14-UI-60)",
+      meanwhile: (view: ReturnType<typeof renderBrowser>) => {
+        fireEvent(
+          document.querySelector("dialog.modal-wide")!,
+          new Event("cancel", { bubbles: false, cancelable: true }),
+        );
+        expect(view.queryByLabelText("Document contents")).toBeNull();
+      },
+      reply: { ok: false, error: REFUSED },
+      after: async (view: ReturnType<typeof renderBrowser>) => {
+        await view.findByText(REFUSED);
+        expect(typed(view)).toBe("THE ONLY COPY");
+        expect(
+          control(view.getByPlaceholderText("file-name.md"), HTMLInputElement).value,
+        ).toBe("facts.md");
+      },
+    },
+    {
+      answer: "a save refused after another draft opened",
+      settles: "says why in a toast, not on that draft",
+      meanwhile: startAnother,
+      reply: { ok: false, error: REFUSED },
+      after: async (view: ReturnType<typeof renderBrowser>) => {
+        const told = await view.findByText(REFUSED);
+        expect(view.getByRole("region", { name: "New document" }).textContent).not.toContain(
+          REFUSED,
+        );
+        expect(told.closest(".toast")?.getAttribute("data-kind")).toBe("error");
+        expect(typed(view)).toBe("SECOND DRAFT");
+      },
+    },
+  ])("$answer $settles", async ({ meanwhile, reply, after }) => {
+    const held = Promise.withResolvers<StubActionReply>();
+    const view = renderBrowser({
+      respond: (intent) => (intent === "store-write-doc" ? held.promise : undefined),
+    });
+    fireEvent.click(view.getByText("New document"));
+    fireEvent.change(view.getByPlaceholderText("file-name.md"), {
+      target: { value: "facts.md" },
+    });
+    fireEvent.change(view.getByLabelText("Document contents"), {
+      target: { value: "THE ONLY COPY" },
+    });
+    fireEvent.click(view.getByText("Save document"));
+    await waitFor(() =>
+      expect(lastForm).toMatchObject({ intent: "store-write-doc", name: "facts.md" }),
+    );
+    meanwhile(view);
+    held.resolve(reply);
+    await after(view);
   });
 
   // Ruling 147: an empty file name no longer kills the primary. Save stays

@@ -773,6 +773,11 @@ type DocSaveFields = {
  * rejected save never rides the generic store toast — the editor stays open and
  * says what went wrong.
  *
+ * A save's answer settles the draft it saved, not whatever the card holds when
+ * it arrives. A draft closed while saving comes back with the reason if the
+ * save is refused; a refusal that arrives after another draft opened is an
+ * error toast, since bringing the refused draft back would close that one.
+ *
  * `onSaved` gets the toast and the folder the save was posted to.
  */
 function useDocEditor(
@@ -780,14 +785,19 @@ function useDocEditor(
   onSaved: (toast: string, dir: string[]) => void,
 ) {
   const csrf = useCsrfToken();
+  const push = useToast();
   const readFetcher = useFetcher<StoreActionReply>();
   const saveFetcher = useFetcher<StoreActionReply>();
   const [doc, setDoc] = useState<DocDraft | null>(null);
   /** A save the user has confirmed will replace an existing file (UI-59). */
   const [confirmReplace, setConfirmReplace] = useState(false);
-  /** The folder the last save was posted to. Kept apart from `doc`, which an
-   *  Escape or another opened row can clear or replace before the answer. */
-  const savedDir = useRef<string[]>([]);
+  /** How many drafts the card has opened: the number a draft opened under
+   *  tells it apart from one opened after it. */
+  const opened = useRef(0);
+  /** The last save: the draft as it was posted, and the opening it belongs
+   *  to. Kept apart from `doc`, which an Escape or another opened row can
+   *  clear or replace before the answer. */
+  const posted = useRef<{ draft: DocDraft; opening: number } | null>(null);
 
   const loading = readFetcher.state !== "idle";
   const saving = saveFetcher.state !== "idle";
@@ -810,20 +820,37 @@ function useDocEditor(
   });
 
   useFetcherResult(saveFetcher, (d) => {
+    const sent = posted.current;
+    if (!sent) return;
+    // Does the card still hold the draft this save posted? Escape or Cancel
+    // may have closed it, and a row or New document replaced it, while the
+    // save was in flight; another draft is not this answer's to close or mark.
+    const held = doc !== null && opened.current === sent.opening;
     if (d.ok) {
-      setConfirmReplace(false);
-      setDoc(null);
-      onSaved(d.toast ?? "Document saved", savedDir.current);
+      if (held) {
+        setConfirmReplace(false);
+        setDoc(null);
+      }
+      onSaved(d.toast ?? "Document saved", sent.draft.dir);
       return;
     }
-    // UI-60: keep the draft. The typed body is the only copy that exists.
-    setConfirmReplace(false);
-    setDoc((prev) =>
-      prev ? { ...prev, err: d.error ?? "The document was not saved." } : prev,
-    );
+    const err = d.error ?? "The document was not saved.";
+    if (held) {
+      // UI-60: keep the draft. The typed body is the only copy that exists.
+      setConfirmReplace(false);
+      setDoc((prev) => (prev ? { ...prev, err } : prev));
+    } else if (doc === null) {
+      // Closed while saving: the posted text is now the only copy, so the
+      // draft comes back with the reason, as an open one keeps it (UI-60).
+      setDoc({ ...sent.draft, err });
+    } else {
+      // Another draft is open, and bringing this one back would close it.
+      push(err, "error");
+    }
   });
 
-  const openNew = (dir: string[]) =>
+  const openNew = (dir: string[]) => {
+    opened.current += 1;
     setDoc({
       dir,
       name: "",
@@ -835,8 +862,10 @@ function useDocEditor(
       view: "raw",
       err: null,
     });
+  };
 
   const openExisting = (dir: string[], name: string) => {
+    opened.current += 1;
     setDoc({
       dir,
       name,
@@ -876,7 +905,7 @@ function useDocEditor(
     if (overwrite) fields.overwrite = "1";
     // Ruling 663: an opened document is saved against the version it read.
     if (doc.version) fields.version = doc.version;
-    savedDir.current = doc.dir;
+    posted.current = { draft: doc, opening: opened.current };
     saveFetcher.submit(fields, { method: "post", action: STORE_ACTION });
   };
 
