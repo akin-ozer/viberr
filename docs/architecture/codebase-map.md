@@ -163,7 +163,7 @@ painted, ruling 459), `live-pose` (a dialog closed mid-entrance leaves from wher
 453(b)), `spring` (the board drop's spring and pointer velocity, ruling 453(a); momentum projection
 and rubber-banding, ruling 454), `use-sheet-drag` (the dock's pull-to-dismiss sheet, ruling
 454), `use-dismiss`, `page-overlay`, `stage-menu`, `task-meta` (priority, labels, due
-date), `label-input`, `calendar` + `date-picker`, `local-time` + `use-relative-time`
+date), `label-input` (its rows and label fold in `label-input-derive`), `calendar` + `date-picker`, `local-time` + `use-relative-time`
 (hydration-safe timestamps), `use-clock` (one shared interval per cadence for every
 ticking reader, ruling 457), `use-stable-rows` (structural sharing of loader rows and
 values across revalidations, ruling 457), `number-ticker` (counts up to a figure,

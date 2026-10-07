@@ -84,3 +84,26 @@ export function needsYouTime(iso: string, now: Date = new Date()): string {
 export function needsYouTimeUTC(iso: string): string {
   return formatDayBucketUTC(iso).toLowerCase() + " " + formatClockUTC(iso);
 }
+
+/** The "Waiting on you" header's tail after "N decisions" (ruling 689(e), the
+ *  split of `NtfNeedsYou`): what the authoritative count holds that the card
+ *  does not list, the rows the filter hides and the decisions with no row
+ *  here. Empty when the card lists every one. */
+export function needsYouCountTail(hiddenByFilter: number, onTaskPages: number): string {
+  const subParts = [
+    hiddenByFilter > 0 ? `${hiddenByFilter} hidden by the filter` : null,
+    onTaskPages > 0 ? `${onTaskPages} on their task pages` : null,
+  ].filter(Boolean);
+  return subParts.length > 0 ? ` · ${subParts.join(" · ")}` : "";
+}
+
+/** What the "Waiting on you" card says when it lists nothing (ruling 689(e),
+ *  the split of `NtfNeedsYou`): nothing waits; or decisions wait that the
+ *  filter hides; or decisions wait that have no row here. */
+export function needsYouEmptyText(decisionCount: number, hiddenByFilter: number): string {
+  return decisionCount === 0
+    ? "Nothing is waiting on you."
+    : hiddenByFilter > 0
+      ? `${decisionCount} decision${decisionCount === 1 ? " is" : "s are"} waiting on you. Switch to "All" to see ${decisionCount === 1 ? "it" : "them"}.`
+      : `${decisionCount} decision${decisionCount === 1 ? " is" : "s are"} waiting on you. Open ${decisionCount === 1 ? "it" : "them"} from the board or the task page.`;
+}

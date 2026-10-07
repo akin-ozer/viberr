@@ -1,5 +1,11 @@
 import { revalidateWhen } from "~/features/live-updates/revalidation-policy";
-import { useEffect, useRef, useState } from "react";
+import {
+  useEffect,
+  useRef,
+  useState,
+  type FormEventHandler,
+  type RefObject,
+} from "react";
 import { pageTitle } from "~/shared/page-title";
 import { data, Form, redirect, useNavigation } from "react-router";
 import { z } from "zod";
@@ -200,6 +206,38 @@ function refusalKey(refusal: Refusal | null | undefined): string | undefined {
   return key;
 }
 
+/**
+ * The error the card shows (ruling 689(e), read once per render by `Login`):
+ * the client's own refusal, else the action's unless the person dismissed
+ * it. A dismissal stores WHICH result was dismissed (see SetNewPassword), so
+ * a second refusal un-hides itself.
+ */
+function shownError(
+  clientErr: ShownError | null,
+  actionData: Route.ComponentProps["actionData"],
+  dismissed: Route.ComponentProps["actionData"],
+): ShownError | null {
+  const serverErrHidden = actionData !== undefined && dismissed === actionData;
+  return (
+    clientErr ??
+    (actionData && !serverErrHidden
+      ? { text: actionData.error, field: actionData.field }
+      : null)
+  );
+}
+
+/** Which of the card's posts is in flight (ruling 689(e), read once per render
+ *  by `Login`): a provider's sign-in, the local form's submission, or none. */
+function signInBusy(
+  providerBusy: "github" | "google" | null,
+  navigation: ReturnType<typeof useNavigation>,
+): "github" | "google" | "local" | null {
+  const submitting =
+    navigation.state !== "idle" &&
+    navigation.formData?.get("intent") === "login";
+  return providerBusy ?? (submitting ? "local" : null);
+}
+
 /** The forced set-new-password step (mock's `reset` screen). */
 function SetNewPassword({
   returnTo,
@@ -390,6 +428,154 @@ function ProviderButtons({
   );
 }
 
+/** The SSO-first head of the sign-in card (ruling 689(e), the split of
+ *  `Login`: hook-free, in the slot its `ssoConfigured &&` held): the provider
+ *  buttons, the note for the one that is missing, the info box and the
+ *  divider above the local form. `Login` renders it only while at least one
+ *  provider is configured. */
+function SsoProviders({
+  providers,
+  busy,
+  onProvider,
+  info,
+}: {
+  providers: { github: boolean; google: boolean };
+  busy: "github" | "google" | "local" | null;
+  onProvider: (which: "github" | "google") => void;
+  info: string | null;
+}) {
+  return (
+    <>
+      <ProviderButtons
+        providers={providers}
+        busy={busy}
+        onProvider={onProvider}
+      />
+      {(!providers.github || !providers.google) && (
+        <div className="login-tag providers">
+          {/* Inside the ssoConfigured branch exactly one provider can be
+          missing — the both-missing deployment renders the local-first
+          layout below instead. */}
+          {!providers.github
+            ? "GitHub sign-in isn't configured on this deployment. Use a local account below."
+            : "Google sign-in isn't configured on this deployment. Use a local account below."}
+        </div>
+      )}
+      {info && (
+        <div className="cred-warn" role="status">
+          <Icon name="alert" />
+          {info}
+        </div>
+      )}
+
+      <div className="login-div">or a local account</div>
+    </>
+  );
+}
+
+/** The local credentials form (ruling 689(e), the split of `Login`:
+ *  hook-free; `Login` keeps the fields' state, refs and handlers). */
+function LocalSignInForm({
+  returnTo,
+  email,
+  pw,
+  emailRef,
+  pwRef,
+  err,
+  refusal,
+  busy,
+  onSubmit,
+  onEmail,
+  onPassword,
+  onForgot,
+}: {
+  returnTo: string | null;
+  email: string;
+  pw: string;
+  emailRef: RefObject<HTMLInputElement | null>;
+  pwRef: RefObject<HTMLInputElement | null>;
+  err: ShownError | null;
+  /** What the error box is keyed on (ruling 451(g)). */
+  refusal: Refusal | null | undefined;
+  busy: "github" | "google" | "local" | null;
+  onSubmit: FormEventHandler<HTMLFormElement>;
+  onEmail: (value: string) => void;
+  onPassword: (value: string) => void;
+  onForgot: () => void;
+}) {
+  return (
+    <Form method="post" className="login-form" onSubmit={onSubmit}>
+      <input type="hidden" name="intent" value="login" />
+      {returnTo ? (
+        <input type="hidden" name="returnTo" value={returnTo} />
+      ) : null}
+      <div className="field">
+        <label className="flabel" htmlFor="lg-email">
+          Email
+        </label>
+        <input
+          id="lg-email"
+          ref={emailRef}
+          name="email"
+          type="email"
+          autoComplete="username"
+          value={email}
+          placeholder="you@company.dev"
+          aria-invalid={err?.field === "email" || undefined}
+          aria-describedby={err?.field === "email" ? "lg-err" : undefined}
+          onChange={(e) => onEmail(e.target.value)}
+        />
+      </div>
+      <div className="field">
+        <label className="flabel" htmlFor="lg-pw">
+          Password
+        </label>
+        <input
+          id="lg-pw"
+          ref={pwRef}
+          name="password"
+          type="password"
+          autoComplete="current-password"
+          value={pw}
+          aria-invalid={err?.field === "password" || undefined}
+          aria-describedby={err?.field === "password" ? "lg-err" : undefined}
+          onChange={(e) => onPassword(e.target.value)}
+        />
+      </div>
+      {err && (
+        // Ruling 451(g): keyed on the refusal itself, so a second refused
+        // sign-in remounts the box (shake, re-announce) instead of leaving
+        // the same sentence standing as if the click had been ignored.
+        <div
+          key={refusalKey(refusal)}
+          className="login-err refused"
+          role="alert"
+          id="lg-err"
+        >
+          <Icon name="alert" />
+          {err.text}
+        </div>
+      )}
+      <button
+        className="btn primary provider"
+        type="submit"
+        aria-busy={busy === "local" || undefined}
+      >
+        {busy === "local" ? "Signing in…" : "Sign in"}
+      </button>
+      <div className="login-foot">
+        <button
+          type="button"
+          className="linkish fine sm"
+          onClick={onForgot}
+        >
+          Forgot password?
+        </button>
+      </div>
+    </Form>
+  );
+}
+
 export default function Login({
   loaderData,
   actionData,
@@ -405,7 +591,6 @@ export default function Login({
   // Same identity-keyed dismissal as SetNewPassword (see the comment there).
   const [dismissed, setDismissed] =
     useState<Route.ComponentProps["actionData"]>(undefined);
-  const serverErrHidden = actionData !== undefined && dismissed === actionData;
   const [info, setInfo] = useState<string | null>(null);
   const [providerBusy, setProviderBusy] = useState<"github" | "google" | null>(
     null,
@@ -421,15 +606,8 @@ export default function Login({
     return <SetNewPassword returnTo={returnTo} actionData={actionData} />;
   }
 
-  const submitting =
-    navigation.state !== "idle" &&
-    navigation.formData?.get("intent") === "login";
-  const busy = providerBusy ?? (submitting ? "local" : null);
-  const err: ShownError | null =
-    clientErr ??
-    (actionData && !serverErrHidden
-      ? { text: actionData.error, field: actionData.field }
-      : null);
+  const busy = signInBusy(providerBusy, navigation);
+  const err = shownError(clientErr, actionData, dismissed);
 
   const provider = (which: "github" | "google") => {
     if (busy) return;
@@ -529,36 +707,23 @@ export default function Login({
         </div>
 
         {ssoConfigured && (
-          <>
-            <ProviderButtons
-              providers={providers}
-              busy={busy}
-              onProvider={provider}
-            />
-            {(!providers.github || !providers.google) && (
-              <div className="login-tag providers">
-                {/* Inside the ssoConfigured branch exactly one provider can be
-                missing — the both-missing deployment renders the local-first
-                layout below instead. */}
-                {!providers.github
-                  ? "GitHub sign-in isn't configured on this deployment. Use a local account below."
-                  : "Google sign-in isn't configured on this deployment. Use a local account below."}
-              </div>
-            )}
-            {info && (
-              <div className="cred-warn" role="status">
-                <Icon name="alert" />
-                {info}
-              </div>
-            )}
-
-            <div className="login-div">or a local account</div>
-          </>
+          <SsoProviders
+            providers={providers}
+            busy={busy}
+            onProvider={provider}
+            info={info}
+          />
         )}
 
-        <Form
-          method="post"
-          className="login-form"
+        <LocalSignInForm
+          returnTo={returnTo}
+          email={email}
+          pw={pw}
+          emailRef={emailRef}
+          pwRef={pwRef}
+          err={err}
+          refusal={clientErr ?? actionData}
+          busy={busy}
           onSubmit={(e) => {
             if (busy) {
               e.preventDefault();
@@ -571,89 +736,24 @@ export default function Login({
               emailRef.current?.focus();
             }
           }}
-        >
-          <input type="hidden" name="intent" value="login" />
-          {returnTo ? (
-            <input type="hidden" name="returnTo" value={returnTo} />
-          ) : null}
-          <div className="field">
-            <label className="flabel" htmlFor="lg-email">
-              Email
-            </label>
-            <input
-              id="lg-email"
-              ref={emailRef}
-              name="email"
-              type="email"
-              autoComplete="username"
-              value={email}
-              placeholder="you@company.dev"
-              aria-invalid={err?.field === "email" || undefined}
-              aria-describedby={err?.field === "email" ? "lg-err" : undefined}
-              onChange={(e) => {
-                setEmail(e.target.value);
-                setClientErr(null);
-                setDismissed(actionData);
-              }}
-            />
-          </div>
-          <div className="field">
-            <label className="flabel" htmlFor="lg-pw">
-              Password
-            </label>
-            <input
-              id="lg-pw"
-              ref={pwRef}
-              name="password"
-              type="password"
-              autoComplete="current-password"
-              value={pw}
-              aria-invalid={err?.field === "password" || undefined}
-              aria-describedby={err?.field === "password" ? "lg-err" : undefined}
-              onChange={(e) => {
-                setPw(e.target.value);
-                setClientErr(null);
-                setDismissed(actionData);
-              }}
-            />
-          </div>
-          {err && (
-            // Ruling 451(g): keyed on the refusal itself, so a second refused
-            // sign-in remounts the box (shake, re-announce) instead of leaving
-            // the same sentence standing as if the click had been ignored.
-            <div
-              key={refusalKey(clientErr ?? actionData)}
-              className="login-err refused"
-              role="alert"
-              id="lg-err"
-            >
-              <Icon name="alert" />
-              {err.text}
-            </div>
-          )}
-          <button
-            className="btn primary provider"
-            type="submit"
-            aria-busy={busy === "local" || undefined}
-          >
-            {busy === "local" ? "Signing in…" : "Sign in"}
-          </button>
-          <div className="login-foot">
-            <button
-              type="button"
-              className="linkish fine sm"
-              onClick={() => {
-                setClientErr(null);
-                setDismissed(actionData);
-                setInfo(
-                  "Ask an admin to reset your password. You'll be prompted to set a new one at your next sign-in.",
-                );
-              }}
-            >
-              Forgot password?
-            </button>
-          </div>
-        </Form>
+          onEmail={(value) => {
+            setEmail(value);
+            setClientErr(null);
+            setDismissed(actionData);
+          }}
+          onPassword={(value) => {
+            setPw(value);
+            setClientErr(null);
+            setDismissed(actionData);
+          }}
+          onForgot={() => {
+            setClientErr(null);
+            setDismissed(actionData);
+            setInfo(
+              "Ask an admin to reset your password. You'll be prompted to set a new one at your next sign-in.",
+            );
+          }}
+        />
 
         {/* The info box ("forgot password?" guidance) renders after the form
             in the local-first layout so clicking the link doesn't shove the
