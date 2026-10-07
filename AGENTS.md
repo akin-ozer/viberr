@@ -2,7 +2,8 @@
 
 Viberr is a governed AI software-delivery app (React Router 8 SSR, Node ≥ 26, `node:sqlite`,
 Zod 4, SSE). Canonical business state is markdown files under the data root; SQLite holds
-projections plus app-owned rows. It is **pre-production**: schemas change without migrations.
+projections plus app-owned rows. Schema changes edit the one baseline migration rather than
+adding to a chain, and file formats carry no back-compat promise (ruling 683).
 
 ## Read first
 

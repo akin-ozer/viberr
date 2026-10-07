@@ -609,7 +609,7 @@ Notes:
 
 - **`engagements` replaced `specialist:` / `reviewers:` / `consultants:`** (generic-agents
   pass, 2026-07-19), and the legacy-key absorption was deleted in the dynamic-dispatch rework
-  (ruling 98; preprod, no back-compat). A file still carrying those keys parses with whatever
+  (ruling 98; no back-compat). A file still carrying those keys parses with whatever
   `engagements:` says (or none) and keeps the legacy keys verbatim as unknown fields; nothing
   reads them. The parser keeps the first engagement per `profileId` and demotes every
   `delivers: true` after the first, each with a warning. Engagements are created by the

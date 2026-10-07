@@ -191,9 +191,13 @@ and [domain/operator.md](domain/operator.md). The vocabulary is in
   Every field is explained in
   [operations/runbook.md](operations/runbook.md#health--liveness).
 - **Upgrades.** `git pull && npm run deploy`. Migrations apply at boot and the volume
-  carries the state; take a backup before a major upgrade. Viberr is pre-production, so
-  formats can change between versions without a migration path: check what changed
-  before you upgrade an instance that holds real work.
+  carries the state; take a backup before a major upgrade. Schema changes edit one
+  baseline rather than adding to a migration chain. On an older database, boot adds the
+  columns and tables the release lists, and warns when a projection table lacks a column
+  or a CHECK refuses a new value, naming the remedy (a manual `ADD COLUMN`, or a
+  [re-baseline](operations/deployment.md#re-baselining-the-projection-database)); other
+  drift is not detected, and file formats carry no back-compat promise. Check what
+  changed before you upgrade an instance that holds real work.
 
 ## 7. Run from source
 
