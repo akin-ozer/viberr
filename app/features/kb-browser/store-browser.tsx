@@ -774,9 +774,11 @@ type DocSaveFields = {
  * says what went wrong.
  *
  * A save's answer settles the draft it saved, not whatever the card holds when
- * it arrives. A draft closed while saving comes back with the reason if the
- * save is refused; a refusal that arrives after another draft opened is an
- * error toast, since bringing the refused draft back would close that one.
+ * it arrives, and a read fills only the draft it was opened for. A refused
+ * draft the card no longer holds comes back with the reason when that loses
+ * nothing: the card is empty, or holds a draft nothing was typed into. A
+ * refusal that arrives while a draft with typing of its own is open is an
+ * error toast instead, since bringing the refused draft back would close it.
  *
  * `onSaved` gets the toast and the folder the save was posted to.
  */
@@ -794,6 +796,9 @@ function useDocEditor(
   /** How many drafts the card has opened: the number a draft opened under
    *  tells it apart from one opened after it. */
   const opened = useRef(0);
+  /** The opening the last read was submitted for: a draft opened since is
+   *  not its answer's to fill. */
+  const readFor = useRef(0);
   /** The last save: the draft as it was posted, and the opening it belongs
    *  to. Kept apart from `doc`, which an Escape or another opened row can
    *  clear or replace before the answer. */
@@ -803,6 +808,9 @@ function useDocEditor(
   const saving = saveFetcher.state !== "idle";
 
   useFetcherResult(readFetcher, (d) => {
+    // New document, another row, or a refused draft brought back may have
+    // taken the card while the read was in flight.
+    if (readFor.current !== opened.current) return;
     setDoc((prev) =>
       prev
         ? d.ok
@@ -839,13 +847,30 @@ function useDocEditor(
       // UI-60: keep the draft. The typed body is the only copy that exists.
       setConfirmReplace(false);
       setDoc((prev) => (prev ? { ...prev, err } : prev));
-    } else if (doc === null) {
-      // Closed while saving: the posted text is now the only copy, so the
-      // draft comes back with the reason, as an open one keeps it (UI-60).
+      return;
+    }
+    // Closed or replaced while saving: the posted text is now the only copy.
+    // Taking the card back loses nothing if it is empty or holds an opened
+    // document as read (or still reading), or a new one with no name or text.
+    const free =
+      doc === null ||
+      (doc.existing ? doc.saved === null || doc.body === doc.saved : !doc.name && !doc.body);
+    if (free) {
+      // Back with the reason, as an open draft keeps it (UI-60), and as a new
+      // opening, so a read still in flight for the draft it replaces is not
+      // its to fill.
+      opened.current += 1;
       setDoc({ ...sent.draft, err });
     } else {
-      // Another draft is open, and bringing this one back would close it.
-      push(err, "error");
+      // The open draft has typing of its own, and bringing this one back
+      // would close it. The server's sentence is not repeated: it can say
+      // the text is still here, which is now untrue.
+      const file = sent.draft.existing ? sent.draft.name : draftFileName(sent.draft.name);
+      push(
+        `${[...sent.draft.dir, file].join("/")} was not saved, and its text could not ` +
+          "be kept: another draft with changes was open.",
+        "error",
+      );
     }
   });
 
@@ -866,6 +891,7 @@ function useDocEditor(
 
   const openExisting = (dir: string[], name: string) => {
     opened.current += 1;
+    readFor.current = opened.current;
     setDoc({
       dir,
       name,
