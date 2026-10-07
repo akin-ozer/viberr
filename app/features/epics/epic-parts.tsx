@@ -1,25 +1,19 @@
-import { useImperativeHandle, useRef, useState, type KeyboardEvent, type Ref } from "react";
+import { useImperativeHandle, useRef, useState, type Ref } from "react";
 import { useFetcher } from "react-router";
-import {
-  EPIC_COLORS,
-  EPIC_STATUS_LABEL,
-  EPIC_STATUS_VALUES,
-  EPIC_TITLE_MAX,
-  type EpicColor,
-  type EpicStatus,
-} from "~/schemas/epic-file.schema";
+import { EPIC_STATUS_LABEL, EPIC_TITLE_MAX, type EpicStatus } from "~/schemas/epic-file.schema";
 import type { EpicProgress, EpicSummary } from "~/server/projections/epic-query.server";
 import { StageMeter } from "~/features/home/project-cards";
 import { countLabel } from "~/shared/text/plural";
 import { ConfirmDialog } from "~/ui/confirm-dialog";
 import { GlyphSwap } from "~/ui/copy-glyph";
 import { useCsrfToken } from "~/ui/csrf-input";
-import { DatePicker } from "~/ui/date-picker";
 import { Icon } from "~/ui/icon";
 import { Pill } from "~/ui/pill";
 import { useToast } from "~/ui/toast";
 import { useDialog } from "~/ui/use-dialog";
 import { useFetcherResult } from "~/ui/use-fetcher-result";
+import { datesReversed, draftOf, epicDialogHint, refusalOf, type EpicDraft } from "./epic-dialog-derive";
+import { EpicDialogFields, EpicDialogFoot } from "./epic-dialog-regions";
 import { EPIC_STATUS_PILL } from "./epic-helpers";
 import type { EpicMemberView, EpicStageView } from "./epics-query.server";
 
@@ -173,30 +167,6 @@ export function ArchiveEpicTasksConfirm({
   );
 }
 
-/** The epic fields a create or an edit posts. */
-interface EpicDraft {
-  title: string;
-  description: string;
-  status: EpicStatus;
-  color: EpicColor | "";
-  leadUserId: string;
-  startDate: string;
-  targetDate: string;
-}
-
-function draftOf(epic: EpicSummary | null): EpicDraft {
-  return {
-    title: epic?.title ?? "",
-    description: epic?.description ?? "",
-    status: epic?.status ?? "planned",
-    // A new epic takes the next colour in the sequence unless one is picked.
-    color: epic?.color ?? "",
-    leadUserId: epic?.leadUserId ?? "",
-    startDate: epic?.startDate ?? "",
-    targetDate: epic?.targetDate ?? "",
-  };
-}
-
 /**
  * Create an epic, or edit what one is: its name, its description, its
  * status, its colour, who leads it and when it is meant to start and land.
@@ -235,8 +205,8 @@ export function EpicDialog({
   const busy = fetcher.state !== "idle";
   const valid = draft.title.trim().length > 0;
   const titleError = titleTouched && !valid;
-  const datesReversed = draft.startDate !== "" && draft.targetDate !== "" && draft.targetDate < draft.startDate;
-  const serverError = fetcher.data && !fetcher.data.ok ? (fetcher.data.error ?? null) : null;
+  const reversed = datesReversed(draft);
+  const serverError = refusalOf(fetcher.data);
   const set = <K extends keyof EpicDraft>(key: K, value: EpicDraft[K]) =>
     setDraft((d) => ({ ...d, [key]: value }));
 
@@ -250,7 +220,7 @@ export function EpicDialog({
     setTitleTouched(true);
     // Once made or saved, the dialog is closing: a second Enter posts nothing.
     if (busy || fetcher.data?.ok) return;
-    if (!valid || datesReversed) {
+    if (!valid || reversed) {
       titleRef.current?.focus();
       return;
     }
@@ -265,18 +235,6 @@ export function EpicDialog({
     fd.set("startDate", draft.startDate);
     fd.set("targetDate", draft.targetDate);
     fetcher.submit(fd, { method: "post" });
-  };
-
-  const onSwatchKey = (e: KeyboardEvent<HTMLDivElement>) => {
-    const all = [...e.currentTarget.querySelectorAll<HTMLButtonElement>('[role="radio"]')];
-    const at = all.findIndex((el) => el === document.activeElement);
-    const step =
-      e.key === "ArrowRight" || e.key === "ArrowDown" ? 1 : e.key === "ArrowLeft" || e.key === "ArrowUp" ? -1 : 0;
-    if (step === 0 || at < 0) return;
-    e.preventDefault();
-    const next = all[(at + step + all.length) % all.length];
-    next?.focus();
-    next?.click();
   };
 
   return (
@@ -326,131 +284,16 @@ export function EpicDialog({
             }}
           />
         </div>
-        <div className="field">
-          <label className="flabel" htmlFor="epic-description">
-            Description
-            <span className="fhint">markdown, optional: the outcome the tasks add up to</span>
-          </label>
-          <textarea
-            id="epic-description"
-            rows={5}
-            value={draft.description}
-            onChange={(e) => set("description", e.target.value)}
-            placeholder="What is done when this epic is done, and what is out of scope."
-          />
-        </div>
-        <div className="field-row">
-          <div className="field">
-            <label className="flabel" htmlFor="epic-status">
-              Status
-            </label>
-            <select
-              id="epic-status"
-              value={draft.status}
-              onChange={(e) => {
-                const next = EPIC_STATUS_VALUES.find((s) => s === e.target.value);
-                if (next) set("status", next);
-              }}
-            >
-              {EPIC_STATUS_VALUES.map((s) => (
-                <option key={s} value={s}>
-                  {EPIC_STATUS_LABEL[s]}
-                </option>
-              ))}
-            </select>
-          </div>
-          <div className="field">
-            <label className="flabel" htmlFor="epic-lead">
-              Lead
-            </label>
-            <select id="epic-lead" value={draft.leadUserId} onChange={(e) => set("leadUserId", e.target.value)}>
-              <option value="">Nobody</option>
-              {members.map((m) => (
-                <option key={m.userId} value={m.userId}>
-                  {m.name}
-                </option>
-              ))}
-            </select>
-          </div>
-        </div>
-        <div className="field-row">
-          <div className="field">
-            <span className="flabel">Start date</span>
-            <DatePicker
-              label="Start date"
-              placeholder="Not set"
-              value={draft.startDate || null}
-              onChange={(v) => set("startDate", v ?? "")}
-            />
-          </div>
-          <div className="field">
-            <span className="flabel">Target date</span>
-            <DatePicker
-              label="Target date"
-              placeholder="Not set"
-              value={draft.targetDate || null}
-              onChange={(v) => set("targetDate", v ?? "")}
-            />
-          </div>
-        </div>
-        <div className="field">
-          <span className="flabel" id="epic-color-label">
-            Colour
-            <span className="fhint">{draft.color ? draft.color : "the next in the sequence"}</span>
-          </span>
-          <div
-            className="epic-swatches"
-            role="radiogroup"
-            aria-labelledby="epic-color-label"
-            onKeyDown={onSwatchKey}
-          >
-            {EPIC_COLORS.map((color, i) => {
-              const checked = draft.color === color;
-              return (
-                <button
-                  key={color}
-                  type="button"
-                  role="radio"
-                  aria-checked={checked}
-                  // One tab stop: the picked swatch, else the first.
-                  tabIndex={checked || (draft.color === "" && i === 0) ? 0 : -1}
-                  className="swatch"
-                  data-stage-color={color}
-                  aria-label={color}
-                  title={color}
-                  onClick={() => set("color", color)}
-                />
-              );
-            })}
-          </div>
-        </div>
+        <EpicDialogFields draft={draft} set={set} members={members} />
       </div>
-      <div className="modal-foot">
-        <span
-          id="epic-dialog-hint"
-          className={"foot-hint" + (serverError || titleError || datesReversed ? " err" : "")}
-          role={serverError || titleError || datesReversed ? "alert" : undefined}
-        >
-          {titleError
-            ? "An epic needs a name."
-            : datesReversed
-              ? "The target date is before the start date."
-              : serverError
-                ? serverError
-                : epic
-                  ? "Changes are recorded on the epic's history."
-                  : "The epic id is assigned automatically."}
-        </span>
-        <div className="foot-actions">
-          <button type="button" className="btn ghost" onClick={close}>
-            Cancel
-          </button>
-          <button type="button" className="btn primary" onClick={submit} disabled={busy} aria-busy={busy}>
-            <Icon name={epic ? "check" : "plus"} />
-            {epic ? "Save" : "Create epic"}
-          </button>
-        </div>
-      </div>
+      <EpicDialogFoot
+        hint={epicDialogHint({ titleError, reversed, serverError, editing: epic !== null })}
+        alert={Boolean(serverError || titleError || reversed)}
+        editing={epic !== null}
+        busy={busy}
+        onCancel={close}
+        onSubmit={submit}
+      />
     </dialog>
   );
 }

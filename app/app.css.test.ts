@@ -5693,8 +5693,8 @@ describe("app.css ruling 459: the better-ui pass — contextual icon motion", ()
         // Ruling 651: Archive tasks, and an epic task row's Archive and
         // Restore, trade their mark for the loader while their request runs.
         "features/epics/epic-parts.tsx: archive → loader (spins)",
-        "features/epics/epic-page.tsx: archive → loader (spins)",
-        "features/epics/epic-page.tsx: refresh → loader (spins)",
+        "features/epics/epic-page-regions.tsx: archive → loader (spins)",
+        "features/epics/epic-page-regions.tsx: refresh → loader (spins)",
         // Ruling 368's 2026-09-24 extension: every in-flight starter's loader
         // takes its icon's place, and through the cell it trades rather than
         // replacing it in one frame. Home's re-scan, Interrupt, Retry, Force
@@ -5738,7 +5738,7 @@ describe("app.css ruling 459: the better-ui pass — contextual icon motion", ()
         "features/task-detail/changes-panel.tsx: file → loader (spins)",
         "features/task-detail/changes-panel.tsx: send → loader (spins)",
         // Ruling 503: an epic task row's Remove.
-        "features/epics/epic-page.tsx: x → loader (spins)",
+        "features/epics/epic-page-regions.tsx: x → loader (spins)",
         // Ruling 638: a library row's Add while its deploy is in flight.
         "features/agents/agents-page.tsx: plus → loader (spins)",
         // Ruling 653: the board file's drop while the server reads it, a

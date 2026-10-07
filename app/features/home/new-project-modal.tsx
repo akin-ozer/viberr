@@ -7,15 +7,15 @@ import { useToast } from "~/ui/toast";
 import { useDialog } from "~/ui/use-dialog";
 import { GOVERNED_TEMPLATE } from "~/shared/workflow/templates";
 import { slugify } from "~/shared/ids/slugify";
-import { keyFromName, projectNameFromRepo } from "./project-name";
+import { projectNameFromRepo } from "./project-name";
 import type { BoardDelivers } from "~/shared/board-delivers";
+import { resolveNewProject } from "./new-project-modal-derive";
 import {
   BLOCK_REASON_ID,
   NewProjectConnectionField,
   NewProjectDeliversField,
   NewProjectNameFields,
   NewProjectRepoField,
-  type BlockedField,
 } from "./project-fields";
 import { useRefusalShake } from "~/ui/use-refusal-shake";
 
@@ -26,8 +26,54 @@ import { useRefusalShake } from "~/ui/use-refusal-shake";
  * workflow, policy preset, footer. Split out of `home-page.tsx` (pass 16, pure structural refactor — no
  * behaviour or copy change); the name ↔ repo autocomplete and the create
  * submit stay together here in `NewProjectModal`, which owns all of the
- * dialog's state.
+ * dialog's state. Ruling 689(e): what the fields resolve to (the key, the
+ * repository, the first unmet requirement) is `resolveNewProject` in
+ * `new-project-modal-derive.ts`, and a made project's landing is
+ * `useLandInNewProject` below.
  */
+
+/** The create-project action's reply. */
+interface CreateProjectReply {
+  ok: boolean;
+  key?: string;
+  slug?: string;
+  storePath?: string;
+  repoWarning?: string | null;
+  repoNote?: string | null;
+  error?: string;
+}
+
+/**
+ * A made project, once: the success toast says what became of it and of its
+ * repository, the dialog goes at once, and the page lands on the new board.
+ */
+function useLandInNewProject(data: CreateProjectReply | undefined, onClose: () => void) {
+  const push = useToast();
+  const navigate = useNavigate();
+  const closedRef = useRef(false);
+  useEffect(() => {
+    if (data?.ok && !closedRef.current) {
+      closedRef.current = true;
+      // Ruling 462: a requested repository says what became of it (created,
+      // or an existing one used as it is) in the same success toast.
+      push(
+        data.key +
+          " initialized. Task store created at " +
+          data.storePath +
+          (data.repoNote ? ". " + data.repoNote : ""),
+      );
+      // UI-09: the repo probe's outcome, when it wasn't clean. Creation used to
+      // report unqualified success even for a repo GitHub has never heard of.
+      if (data.repoWarning) push(data.repoWarning, "error");
+      // Instant on purpose (ruling 459): the page navigates to the new board,
+      // so there is nothing for an exit to leave toward.
+      onClose();
+      // F15-04: land IN the project you just made. Creation used to drop the
+      // modal and leave you on the home grid, hunting for the new card.
+      if (data.slug) navigate(`/projects/${data.slug}/board`);
+    }
+  }, [data, onClose, push, navigate]);
+}
 
 /**
  * P13-AP-04 / owner ruling 2: the "Lightweight · 3 stages" preset was DELETED —
@@ -231,26 +277,14 @@ export function NewProjectModal({
   const nameRef = useRef<HTMLInputElement>(null);
   const keyRef = useRef<HTMLInputElement>(null);
   const repoRef = useRef<HTMLInputElement>(null);
-  const fetcher = useFetcher<{
-    ok: boolean;
-    key?: string;
-    slug?: string;
-    storePath?: string;
-    repoWarning?: string | null;
-    repoNote?: string | null;
-    error?: string;
-  }>();
+  const fetcher = useFetcher<CreateProjectReply>();
   const csrf = useCsrfToken();
-  const push = useToast();
-  const navigate = useNavigate();
   const { ref: panelRef, close } = useDialog(onClose);
-  const closedRef = useRef(false);
 
   useEffect(() => {
     nameRef.current?.focus();
   }, []);
 
-  const effKey = keyTouched ? key : keyFromName(name);
   const busy = fetcher.state !== "idle";
   // The collision note is a PRE-submit aid, so it reads the project list as it
   // was when Create was pressed. `existingKeys` is the home loader's list, and
@@ -263,13 +297,8 @@ export function NewProjectModal({
   // has settled, so a collision that appeared meanwhile is still shown.
   const [keysAtSubmit, setKeysAtSubmit] = useState<string[]>([]);
   const keyPool = busy || fetcher.data?.ok ? keysAtSubmit : existingKeys ?? [];
-  // Q26-3: does the resolved key already belong to another project? (Only once
-  // it is a valid 2+-letter key; case-insensitive, since keys are upper-cased.)
-  const keyInUse =
-    effKey.length >= 2 &&
-    keyPool.some((k) => k.toUpperCase() === effKey.toUpperCase());
-  const effRepo = repo || slugify(name);
-  const slug = slugify(name);
+  const { effKey, keyInUse, effRepo, slug, effOwner, needsRepo, ok, blocked, blockedReason } =
+    resolveNewProject({ name, key, keyTouched, repo, connOwner, delivers, repoLater, attachRepo }, keyPool);
   // Name ↔ repo AUTOCOMPLETE (not a persistent two-way lock — pass-8 P1 ruling):
   // typing into an empty/untouched field fills the OTHER, but once a field has
   // been edited by hand it is `*Touched` and the other's derive no longer
@@ -290,70 +319,11 @@ export function NewProjectModal({
     setRepoTouched(true);
     if (v && !nameTouched) setName(projectNameFromRepo(v));
   };
-  // The effective repo owner: a picked connection. A board that delivers
-  // software delivers through GitHub, so it takes a repository, and with it a
-  // PAT connection, unless the person connects it later (ruling 672: the
-  // operator asks for one when a task needs it, so a board without is no dead
-  // end). Ruling 667: a board that delivers results needs none, and takes one
-  // only when the person attaches it.
-  const effOwner = connOwner;
-  const needsRepo = delivers === "software" ? !repoLater : attachRepo;
-  const ok =
-    name.trim().length > 1 &&
-    effKey.length >= 2 &&
-    (!needsRepo || (effOwner.length > 0 && effRepo.length > 0));
-  // LV-07: name the FIRST unmet requirement so a refused Create is never
-  // unexplained (the previous modal offered no message anywhere). The field
-  // is derived once and the copy from it, so the flagged input and the
-  // visible reason can never disagree.
-  const blocked: BlockedField | null =
-    name.trim().length <= 1
-      ? "name"
-      : effKey.length < 2
-        ? "key"
-        : !needsRepo
-          ? null
-          : effOwner.length === 0
-            ? "conn"
-            : effRepo.length === 0
-              ? "repo"
-              : null;
-  const blockedReason =
-    blocked === "name"
-      ? "Enter a project name (2+ characters)."
-      : blocked === "key"
-        ? "Task key needs at least 2 letters."
-        : blocked === "conn"
-          ? "Pick a GitHub connection."
-          : blocked === "repo"
-            ? "Enter a repository name."
-            : null;
   const invalidField = attempted ? blocked : null;
   const serverError =
     fetcher.data && fetcher.data.ok === false ? fetcher.data.error : null;
 
-  useEffect(() => {
-    if (fetcher.data?.ok && !closedRef.current) {
-      closedRef.current = true;
-      // Ruling 462: a requested repository says what became of it (created,
-      // or an existing one used as it is) in the same success toast.
-      push(
-        fetcher.data.key +
-          " initialized. Task store created at " +
-          fetcher.data.storePath +
-          (fetcher.data.repoNote ? ". " + fetcher.data.repoNote : ""),
-      );
-      // UI-09: the repo probe's outcome, when it wasn't clean. Creation used to
-      // report unqualified success even for a repo GitHub has never heard of.
-      if (fetcher.data.repoWarning) push(fetcher.data.repoWarning, "error");
-      // Instant on purpose (ruling 459): the page navigates to the new board,
-      // so there is nothing for an exit to leave toward.
-      onClose();
-      // F15-04: land IN the project you just made. Creation used to drop the
-      // modal and leave you on the home grid, hunting for the new card.
-      if (fetcher.data.slug) navigate(`/projects/${fetcher.data.slug}/board`);
-    }
-  }, [fetcher.data, onClose, push, navigate]);
+  useLandInNewProject(fetcher.data, onClose);
 
   const submit = () => {
     if (busy) return;
@@ -477,7 +447,7 @@ export function NewProjectModal({
         )}
       </div>
       {/* Cancel routes through the animated close; the success unmount
-          (fetcher effect above) keeps the raw onClose. */}
+          (useLandInNewProject) keeps the raw onClose. */}
       <NewProjectFooter
         storeRoot={storeRoot}
         slug={slug}
