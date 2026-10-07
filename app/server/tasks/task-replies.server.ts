@@ -11,6 +11,7 @@ import {
   listTaskAttachmentNames,
 } from "~/server/files/task-attachments.server";
 import { keepDelivery } from "~/server/files/kept-deliveries.server";
+import { recordDeliverySources } from "~/server/files/task-sources.server";
 import type { FileLease } from "~/shared/file-leases";
 import { isRelayComment } from "./task-relay.server";
 import type { DatabaseSync } from "node:sqlite";
@@ -531,6 +532,10 @@ export function deliveredFileNames(fm: TaskFrontmatter, timeline: readonly TaskF
  * the Estimate Judge's J4 audit found no `mapping.md` in the first delivery and
  * called its Deliverable 10/10 unsupported. The browser's working files stay
  * out, as they stay out of the delivery (ruling 570).
+ *
+ * Ruling 690: the sources the task holds are recorded with it, as ids, not
+ * as copies: a kept source is never overwritten, so the delivery only needs
+ * to say which ones were there.
  */
 export function keepStampedDelivery(
   ctx: TaskMutationContext,
@@ -553,6 +558,21 @@ export function keepStampedDelivery(
     );
   } catch (error) {
     logger.warn("a files delivery could not be kept", { projectSlug, taskKey, stamp, err: toError(error) });
+  }
+  // Ruling 690: and what it rested on. The sources the task holds at this
+  // instant are recorded on the sources' own index, so a source a reviewer
+  // keeps afterwards is on the task and not on this delivery. A line that
+  // cannot be written is logged and the delivery stands; readers then take
+  // the sources kept at or before the stamp.
+  try {
+    recordDeliverySources(projectSlug, taskKey, stamp, ctx.dataRoot);
+  } catch (error) {
+    logger.warn("the sources a files delivery rested on could not be recorded", {
+      projectSlug,
+      taskKey,
+      stamp,
+      err: toError(error),
+    });
   }
 }
 

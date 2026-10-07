@@ -77,7 +77,9 @@ import {
   taskAttachmentExists,
   MAX_UPLOAD_BYTES,
 } from "~/server/files/task-attachments.server";
-import { completionView } from "~/server/tasks/completion-packet.server";
+import { completionView, sourcesRestedOn } from "~/server/tasks/completion-packet.server";
+import { readTaskSources } from "~/server/files/task-sources.server";
+import { taskSourceRows } from "~/server/tasks/task-sources.server";
 import {
   directiveDeferredNote,
   isAgentBusy,
@@ -474,6 +476,23 @@ export async function loader({ request, params }: Route.LoaderArgs) {
     ? countTaskAttachments(params.slug, params.key)
     : 0;
 
+  // Ruling 690: the sources the task keeps, apart from its files and behind
+  // the same bar: a kept page shows whatever the agent read. One read of
+  // their index whatever the count, and none on a task that keeps no sources;
+  // sent only for a task that keeps some, so every other task's payload
+  // stays as it was (ruling 457). The serving route re-checks membership.
+  const keptSources = runsVisible ? readTaskSources(params.slug, params.key) : null;
+  const sourcesShown =
+    keptSources && keptSources.sources.length > 0
+      ? {
+          sources: taskSourceRows(
+            keptSources.sources,
+            (by) => deployedSpecialists.find((s) => s.id === by.profileId)?.name ?? by.roleHint ?? by.profileId,
+          ),
+          sourcesTotal: keptSources.sources.length,
+        }
+      : {};
+
   // P14-LV-06: the acceptance affordance, with the project's required-reviewer
   // rules from the same read of project.md (the completion packet below).
   const standing = acceptanceStanding({
@@ -508,6 +527,9 @@ export async function loader({ request, params }: Route.LoaderArgs) {
             );
           },
           ruleReviewers: standing.requiredReviewers.map((r) => r.profileId),
+          // Ruling 690: what the work under review rests on, from the read
+          // above; null for a viewer who may not see the task's files.
+          sources: keptSources ? sourcesRestedOn(keptSources, taskFile.parsed.frontmatter) : null,
         })
       : null;
 
@@ -525,6 +547,8 @@ export async function loader({ request, params }: Route.LoaderArgs) {
     epics: listEpicChips(db, params.slug),
     attachments,
     attachmentsTotal,
+    /** Ruling 690: the task's kept sources, when it keeps any. */
+    ...sourcesShown,
     /** Ruling 521: the operator's completion packet as the page shows it. */
     completion,
     // Who saved each attachment and when, from the events that claim names —
@@ -1639,6 +1663,11 @@ export default function TaskDetailRoute({
       // Ruling 521: the completion packet the acceptance decision shows.
       completion={loaderData.completion}
       attachmentsBase={`/projects/${params.slug}/tasks/${loaderData.task.key}/attachments`}
+      // Ruling 690: the task's kept sources, when it keeps any, and the
+      // route that serves one by its id.
+      sources={loaderData.sources}
+      sourcesTotal={loaderData.sourcesTotal}
+      sourcesBase={`/projects/${params.slug}/tasks/${loaderData.task.key}/sources`}
       // Ruling 484: the Changes panel's read, beside the page it posts notes to.
       changesUrl={`/projects/${params.slug}/tasks/${loaderData.task.key}/changes`}
       // Ruling 548: the Blocked by picker's list of the project's tasks.

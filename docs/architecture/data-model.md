@@ -60,6 +60,9 @@ Created by the code that needs them:
   projects/<slug>/tasks/<KEY>/deliveries/<stamp>/   each files delivery as it was delivered, copied
                                                     when `deliveredAt` is stamped (ruling 597): every
                                                     file on the task then (ruling 610)
+  projects/<slug>/tasks/<KEY>/sources/              the sources the task's result rests on: `index.jsonl`
+                                                    and one bytes file a source, the server's own
+                                                    (ruling 690; file-formats.md §10)
   projects/<slug>/tasks/<KEY>/workspace/<repo-name>/ the delivering engagement's git clone, shared by the
                                                     operator (a cache, not canonical)
   projects/<slug>/tasks/<KEY>/workspace/support/<profileId>/<repo-name>/
@@ -330,6 +333,7 @@ booleans are `0/1` in SQLite.
 | `controller_follow_ups` | none | a step goes with its conversation (delete, ruling 525, which says so on the task) and with its project (delete); a started or refused one stays as the record of what became of it |
 | better-auth `session` rows | none on a timer; expired rows are simply never honoured | sign-out, password change, admin disable/reset, or the auth guard on a disabled user |
 | `attachments/` | one **completion-time prune** (ruling 105): when a run finishes (and no sibling run on the task is live), the machine-stamped non-visual artifacts its browser MCP wrote (a short lowercase prefix plus the MCP's dashed-ISO stamp, such as `page-*.yml` and `console-*.log`; png/jpg/webp/gif/pdf are always kept) are deleted unless the exact filename is cited in the run's reply, its evidence rows or the timeline since it started (any entry's text, evidence rows or claimed files, ruling 593). A run that finishes while a sibling is live deletes nothing and claims only the working files it cited, so the sibling's completion decides the rest and no entry names a file that later goes (ruling 593). Beside another specialist run, live or finished inside its window, a run that does not deliver claims only the files its own words name and never one the delivery holds (ruling 627). Deliberately named files, every screenshot or PDF and every person's upload stay. No age- or size-based retention beyond that: the rest of the directory rides with the task | `pruneBrowserWorkingArtifacts` (`app/server/files/task-attachments.server.ts`, driven from `applyAgentCompletionEffects`); archive/delete of the task |
+| `sources/` (a task's kept sources) | none: a kept source is never pruned or overwritten (ruling 690). It goes with its task's directory, so with the project when the project is deleted. After 30 days it is the only copy of what a run read: `run_log_lines` and the raw run log are gone by then, and the record's `runId` names an `agent_runs` row whose lines went with them | `writeTaskSource` (`app/server/files/task-sources.server.ts`) writes it; nothing removes it |
 
 The maintenance pass (`runMaintenancePass`: retention, transcript pruning, workspace reclaim)
 runs at boot and then every `VIBERR_MAINTENANCE_INTERVAL_SECONDS` (default 6 h). A disk check runs

@@ -163,6 +163,7 @@ import {
   suppressedReplyReason,
 } from "./task-replies.server";
 import { acceptanceRefusalFor } from "./task-acceptance.server";
+import { noteSourcesKeptByRun } from "./task-sources.server";
 
 /**
  * The agent's most-recent reply comment text on a task, or null when it has
@@ -1590,6 +1591,28 @@ export async function applyAgentCompletionEffects(
   // with no `started_at` at all. Using the launch instant dropped every comment
   // refused during that wait, silently, under a note promising delivery.
   const deferredWindowFrom = thisRunRow?.created_at ?? thisRunStartedAt;
+  // Ruling 690: the sources this run kept leave one entry on the timeline,
+  // for a finished, a failed and an interrupted run alike: what a run read is
+  // on the task whatever became of the run. Written before the run's files
+  // are listed and its reply lands, so the thread reads in the order things
+  // happened and the listing below (ruling 558) runs as it did. An entry that
+  // cannot be written never fails the completion: the sources stay listed on
+  // the page.
+  try {
+    await noteSourcesKeptByRun(db, ctx, {
+      projectSlug: input.projectSlug,
+      taskKey: input.taskKey,
+      runId: finished.id,
+      actorRef,
+      startedAt: thisRunStartedAt,
+    });
+  } catch (err) {
+    logger.warn("failed to note the sources a run kept", {
+      taskKey: input.taskKey,
+      runId: finished.id,
+      err: toError(err),
+    });
+  }
   // Files this run saved into the task's attachments/ dir (browser captures):
   // everything written at-or-after the run started. Stamped onto the producing
   // event below so the panel can say who added each file and from which

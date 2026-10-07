@@ -9,6 +9,12 @@ import {
   taskAttachmentExists,
   type TaskAttachmentEntry,
 } from "~/server/files/task-attachments.server";
+import {
+  readTaskSources,
+  sourceFromShown,
+  type TaskSource,
+  type TaskSourcesRead,
+} from "~/server/files/task-sources.server";
 import { readTaskFile, updateTaskFile } from "~/server/files/task-writer.server";
 import {
   activeWorkRevision,
@@ -156,6 +162,30 @@ function resultFileCandidates(fm: PacketState, ref: StoreRef): string[] {
   return onTask.filter((name) => delivered.has(name)).sort();
 }
 
+/**
+ * Ruling 690: the kept sources the work under review rests on, in id order.
+ *
+ * A delivery that is files recorded the sources the task held when it was
+ * stamped (`recordDeliverySources`), so those are read back; a delivery whose
+ * line was never written rests on what was kept at or before its stamp. A
+ * revision records no line: it rests on what was kept by the time the
+ * operator summarized it, and on everything kept so far while nobody has. A
+ * source a reviewer keeps afterwards is on the task and not among these.
+ * Empty while nothing is delivered.
+ */
+export function sourcesRestedOn(kept: TaskSourcesRead, fm: PacketState): TaskSource[] {
+  if (reviewSubjectId(fm) === null) return [];
+  const keptBy = (at: string) => kept.sources.filter((s) => Date.parse(s.keptAt) <= Date.parse(at));
+  if (deliveredAsFiles(fm) && fm.deliveredAt) {
+    const recorded = kept.deliveries.find((d) => d.deliveredAt === fm.deliveredAt);
+    if (!recorded) return keptBy(fm.deliveredAt);
+    const ids = new Set(recorded.sources);
+    return kept.sources.filter((s) => ids.has(s.id));
+  }
+  const packet = currentCompletionPacket(fm);
+  return packet ? keptBy(packet.at) : kept.sources;
+}
+
 /** How many candidate names a refusal or the snapshot lists. */
 const CANDIDATES_SHOWN = 40;
 
@@ -176,7 +206,18 @@ export interface CompletionPacketFact {
   resultFilesRequired: boolean;
   /** Ruling 668: the delivered files you may name as the result. */
   resultFileCandidates: string[];
+  /** Ruling 690: how many sources the task keeps (`kept`) and how many of
+   *  them the delivery under review rests on (`restedOn`); `read_task_source`
+   *  lists them. A result that states facts from outside and rests on none
+   *  has a gap to name. */
+  sources: CompletionSourcesFact;
   note: string;
+}
+
+/** Ruling 690: the snapshot's count of a task's sources. */
+interface CompletionSourcesFact {
+  kept: number;
+  restedOn: number;
 }
 
 export function completionPacketFact(
@@ -186,6 +227,8 @@ export function completionPacketFact(
   const subject = reviewSubjectId(fm);
   const lines = activeWorkRevision(fm.workRevision) ? changedLines(fm.github?.changed) : null;
   const changesSummaryRequired = lines !== null && lines > COMPLETION_SMALL_CHANGE_LINES;
+  const kept = readTaskSources(input.projectSlug, input.taskKey, input.dataRoot);
+  const sources = { kept: kept.sources.length, restedOn: sourcesRestedOn(kept, fm).length };
   if (subject === null) {
     return {
       state: "not_applicable",
@@ -195,6 +238,7 @@ export function completionPacketFact(
       screenshotCandidates: [],
       resultFilesRequired: false,
       resultFileCandidates: [],
+      sources,
       note: "Nothing is delivered yet, so there is no completion packet to write.",
     };
   }
@@ -225,6 +269,7 @@ export function completionPacketFact(
     screenshotCandidates: candidates,
     resultFilesRequired: resultFiles.length > 0,
     resultFileCandidates: resultFiles.slice(0, CANDIDATES_SHOWN),
+    sources,
     note,
   };
 }
@@ -544,7 +589,32 @@ export interface CompletionView {
    *  `RESULT_PATHS_SHOWN`, how many more were read, and whether the read
    *  itself was cut. Null when nobody read them. */
   paths: { shown: string[]; more: number; truncated: boolean } | null;
+  /** Ruling 690: the kept sources the work under review rests on: how many,
+   *  and the first `RESULT_SOURCES_SHOWN` of them. Absent for a viewer who
+   *  may not see the task's files, and for a revision that rests on none, so
+   *  a task that keeps no sources ships the bytes it always did (ruling 457);
+   *  a delivery that is files carries it at zero, which the card says. */
+  sources?: ResultSources;
 }
+
+/** Ruling 690: a result's sources as its card lists them. */
+export interface ResultSources {
+  count: number;
+  shown: ResultSourceRow[];
+}
+
+/** One of them: its id, the name it was saved under (which decides how the
+ *  reader card opens it), its title and where it came from. */
+export interface ResultSourceRow {
+  id: string;
+  name: string;
+  title: string;
+  from: string;
+}
+
+/** Ruling 690: how many of a result's sources the card lists; the Sources
+ *  panel lists the rest. */
+const RESULT_SOURCES_SHOWN = 12;
 
 /**
  * The completion packet as the task page shows it, from the task file the
@@ -553,7 +623,9 @@ export interface CompletionView {
  * attachments); `nameOf` names a reviewer; `ruleReviewers` are the profiles
  * the project's rules require on every delivered task (ruling 178). None of
  * them reads a store file, so the task page's revalidation budget is
- * untouched (ruling 457).
+ * untouched (ruling 457). Ruling 690: `sources` is the work's kept sources as
+ * the loader read them (`sourcesRestedOn`), or null for a viewer who may not
+ * see the task's files.
  */
 export function completionView(
   fm: TaskFrontmatter,
@@ -561,6 +633,7 @@ export function completionView(
     canSee: ((name: string) => boolean) | null;
     nameOf: (profileId: string) => string;
     ruleReviewers: readonly string[];
+    sources?: readonly TaskSource[] | null;
   },
 ): CompletionView | null {
   const subject = reviewSubjectId(fm);
@@ -623,7 +696,7 @@ export function completionView(
 
   const stats = rev ? fm.github?.changed : null;
   const changed = rev ? (fm.pr?.paths ?? null) : null;
-  return {
+  const view: CompletionView = {
     subjectSha: rev ? rev.headSha.slice(0, 7) : null,
     packet,
     verdicts,
@@ -643,4 +716,19 @@ export function completionView(
         }
       : null,
   };
+  // Ruling 690: a files result says what it rests on even when that is
+  // nothing; a revision says so only when it rests on something.
+  const rested = opts.sources ?? null;
+  if (rested !== null && (rested.length > 0 || !rev)) {
+    view.sources = {
+      count: rested.length,
+      shown: rested.slice(0, RESULT_SOURCES_SHOWN).map((s) => ({
+        id: s.id,
+        name: s.name,
+        title: s.title,
+        from: sourceFromShown(s.from),
+      })),
+    };
+  }
+  return view;
 }

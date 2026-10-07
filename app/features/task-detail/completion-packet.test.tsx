@@ -73,6 +73,7 @@ function renderPacket(v: CompletionView, result: CompletionResult | null = null)
           <CompletionPacket
             view={v}
             attachmentsBase="/t/attachments"
+            sourcesBase="/t/sources"
             standalone={result !== null}
             result={result}
             diff={
@@ -276,5 +277,46 @@ describe("ruling 668: the card is the task's result once it is accepted", () => 
     expect(screen.getByRole("heading", { level: 3, name: "Completion" })).toBeTruthy();
     expect(labels(container).slice(0, 3)).toEqual(["Files", "Considerations", "Reviewers"]);
     expect(screen.getByText("No reviewer is engaged on this task, and none has given a verdict.")).toBeTruthy();
+  });
+
+  it("ruling 690: says how many kept sources the result rests on and lists them, and says so when a files result rests on none", () => {
+    // A fact the result states from outside is checked against what its runs
+    // kept. CANARY: render the section only when the count is above zero and
+    // a files result with no source says nothing about it.
+    const shown = Array.from({ length: 12 }, (_, i) => ({
+      id: `S${i + 1}`,
+      name: `page-${i + 1}.html`,
+      title: `Pricing page ${i + 1}`,
+      from: `https://aws.amazon.com/pricing/${i + 1}`,
+    }));
+    const filesResult = { subjectSha: null, change: null };
+    const rested = renderPacket(view({ ...filesResult, sources: { count: 14, shown } }), { pr: null });
+    expect(labels(rested.container)).toEqual(["Sources"]);
+    expect(screen.getByText("This result rests on 14 kept sources.")).toBeTruthy();
+    const rows = [...rested.container.querySelectorAll<HTMLAnchorElement>(".cmp-files a.cmp-file")];
+    expect(rows.map((row) => row.getAttribute("href"))).toEqual(shown.map((s) => `/t/sources/${s.id}`));
+    expect(
+      [".cmp-file-ext", ".cmp-file-name", ".cmp-file-what"].map((part) => rows[0]!.querySelector(part)!.textContent),
+    ).toEqual(["S1", "Pricing page 1", "https://aws.amazon.com/pricing/1"]);
+    // The card lists twelve; the panel lists the rest.
+    expect(screen.getByText("and 2 more, listed under Sources.")).toBeTruthy();
+    rested.unmount();
+
+    const one = renderPacket(view({ ...filesResult, sources: { count: 1, shown: shown.slice(0, 1) } }), { pr: null });
+    expect(screen.getByText("This result rests on 1 kept source.")).toBeTruthy();
+    expect(one.container.textContent).not.toContain("listed under Sources");
+    one.unmount();
+
+    // A result that is files and rests on nothing kept says so.
+    const none = renderPacket(view({ ...filesResult, sources: { count: 0, shown: [] } }), { pr: null });
+    expect(labels(none.container)).toEqual(["Sources"]);
+    expect(screen.getByText("This result rests on no kept source.")).toBeTruthy();
+    expect(none.container.querySelector(".cmp-files")).toBeNull();
+    none.unmount();
+
+    // A view that carries none (a revision that rests on none, a viewer who
+    // may not see the task's files) has no Sources section at all.
+    const silent = renderPacket(view(filesResult), { pr: null });
+    expect(labels(silent.container)).toEqual([]);
   });
 });

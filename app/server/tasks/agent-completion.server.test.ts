@@ -28,6 +28,7 @@ import { readProjectFile } from "~/server/files/project-writer.server";
 import { taskAttachmentsDir } from "~/server/files/file-store-root.server";
 import { listKeptDeliveries } from "~/server/files/kept-deliveries.server";
 import { readTaskAttachment } from "~/server/files/task-attachments.server";
+import { readTaskSources } from "~/server/files/task-sources.server";
 import { insertUser } from "~/server/auth/user-store.server";
 import { logger } from "~/server/logging/logger.server";
 import { listAuditEvents } from "../../../test-support/audit-log";
@@ -50,6 +51,7 @@ import type { runOperator } from "~/server/runtimes/operator-run.server";
 import type { pushWorkspaceBranch } from "~/server/github/push-workspace.server";
 import type { openTaskPr } from "~/server/github/pr-open.server";
 import { acceptanceRefusalFor } from "./task-acceptance.server";
+import { keepTaskSource } from "./task-sources.server";
 import {
   applyAgentCompletionEffects,
   classifyReviewerVerdict,
@@ -1389,6 +1391,107 @@ describe("applyAgentCompletionEffects (the shared effects)", () => {
       kind: "text",
       text: "the Architect's mapping",
     });
+  });
+
+  /** Ruling 690: keep `name` as a source on VIB-1, the way a run's
+   *  `keep_source` does: saved in the attachments folder, then handed over. */
+  function keepSourceInRun(runId: string, name: string, body: string, profileId = "reviewer"): string {
+    const dir = taskAttachmentsDir(store.slug, "VIB-1", store.dataRoot);
+    mkdirSync(dir, { recursive: true });
+    writeFileSync(path.join(dir, name), body);
+    return keepTaskSource(
+      store.db,
+      { dataRoot: store.dataRoot },
+      {
+        projectSlug: store.slug,
+        taskKey: "VIB-1",
+        file: name,
+        from: `https://aws.amazon.com/${name}`,
+        title: `The page ${name}`,
+        actorRef: { kind: "agent", backend: "claude", profileId, roleHint: "Review & validation" },
+        runId,
+      },
+    );
+  }
+
+  it("ruling 690: a kept delivery records the sources the task held when it was delivered, and one kept afterwards is not among them", async () => {
+    // What a result rests on is what its runs had kept when it was delivered.
+    // A source a reviewer keeps while checking it is on the task, and was not
+    // under the delivery. CANARY: remove recordDeliverySources from
+    // keepStampedDelivery and the index holds no delivery line.
+    writeReviewTask({
+      stage: "impl",
+      workRevision: null,
+      validation: "none",
+      engagements: [{ ...REVIEWER_ENGAGEMENT, delivers: true }],
+    });
+    const runId = await finishedRunWith("Built the estimate; the unit prices are cited by source id.");
+    expect(keepSourceInRun(runId, "ec2-pricing.html", "t3.medium $0.0416 per hour")).toContain("[kept] S1");
+    saveInRunWindow(runId, ["assumptions.md"]);
+    await applyAgentCompletionEffects(
+      store.db,
+      { dataRoot: store.dataRoot },
+      {
+        projectSlug: store.slug,
+        taskKey: "VIB-1",
+        backend: "claude",
+        profileId: "reviewer",
+        role: "Calculator Builder",
+        delivers: true,
+        workdir: null,
+        agentHandle: "reviewer",
+      },
+      { id: runId, state: "finished" },
+    );
+    const stamp = taskFile().parsed.frontmatter.deliveredAt!;
+    expect(stamp).toBeTruthy();
+    // The kept source was never one of the delivery's files.
+    expect(listKeptDeliveries(store.slug, "VIB-1", store.dataRoot)).toEqual([
+      { deliveredAt: stamp, files: ["assumptions.md"] },
+    ]);
+    expect(keepSourceInRun("run_review", "rds-pricing.html", "db.t3.medium $0.068 per hour")).toContain("[kept] S2");
+
+    const kept = readTaskSources(store.slug, "VIB-1", store.dataRoot);
+    expect(kept.sources.map((s) => s.id)).toEqual(["S1", "S2"]);
+    expect(kept.deliveries).toEqual([{ deliveredAt: stamp, sources: ["S1"] }]);
+  });
+
+  it("ruling 690: a run that kept sources leaves one note naming them, and replaying its effects adds no second", async () => {
+    // One entry a run, not one a source: seventy pages would bury the
+    // thread. Boot recovery replays a run's lost effects, and the entry it
+    // finds is the entry. CANARY: drop the already-noted check and the
+    // replay writes the note twice.
+    writeReviewTask();
+    const runId = await finishedRunWith("Checked the two unit prices against the pages the estimate cites.");
+    keepSourceInRun(runId, "ec2-pricing.html", "t3.medium $0.0416 per hour");
+    keepSourceInRun(runId, "rds-pricing.html", "db.t3.medium $0.068 per hour");
+    // Another run's source on the same task is not this run's to name.
+    keepSourceInRun("run_other", "s3-pricing.html", "$0.023 per GB", "dev");
+    const input = {
+      projectSlug: store.slug,
+      taskKey: "VIB-1",
+      backend: "claude" as const,
+      profileId: "reviewer",
+      role: "Review & validation",
+      delivers: false,
+      workdir: null,
+      agentHandle: "reviewer",
+    };
+    await applyAgentCompletionEffects(store.db, { dataRoot: store.dataRoot }, input, { id: runId, state: "finished" });
+    await applyAgentCompletionEffects(
+      store.db,
+      { dataRoot: store.dataRoot },
+      { ...input, replayed: true },
+      { id: runId, state: "finished" },
+    );
+    const notes = taskFile().parsed.timeline.filter((e) => e.title === "Sources kept");
+    expect(notes.map((e) => [e.type, e.actor, e.text])).toEqual([
+      [
+        "note",
+        { kind: "agent", backend: "claude", profileId: "reviewer", roleHint: "Review & validation" },
+        "Kept 2 sources on this task: S1, S2. They are listed under Sources.",
+      ],
+    ]);
   });
 
   it("ruling 587: a file the delivery does not hold moves nothing", async () => {

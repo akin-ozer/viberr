@@ -572,6 +572,17 @@ sessionFiles, workspaces, freed, …}` and is reported on `/resources/health` un
 | run transcripts `runtimes/<backend>/*.jsonl` | mtime older than **30 days** | `VIBERR_TRANSCRIPT_RETENTION_DAYS` (0 = forever) |
 | per-person provider session homes `runtimes/users/*/claude-home/projects/**/*.jsonl` and `runtimes/users/*/codex-home/sessions/**/*.jsonl` | mtime older than **30 days**. `*.jsonl` ONLY: `auth.json`, `.credentials.json` and `.claude.json` are the vendor-held sign-ins and are never touched, so retention can never sign anybody out (ruling 127) | `VIBERR_SESSION_HOME_RETENTION_DAYS` (0 = forever) |
 | task `workspace/` directories | removed for tasks in the terminal stage, only when no run is queued or running | no |
+| a task's kept sources, `projects/<slug>/tasks/<KEY>/sources/` | **never pruned and never overwritten** (ruling 690). They go with the task's directory, so with the project when it is deleted. Past 30 days a kept source is the only copy of what a run read: its log lines and transcript are gone by then | no |
+
+**Nothing in the app removes a kept source.** A task holds at most 200 of them and 100 MB
+(10 MB each), and a backup copies them with `projects/`. To take one out (a page that holds
+personal data, a takedown), stop the app, then delete that source's bytes file,
+`sources/S<n>` with its extension, from the volume and leave `sources/index.jsonl` alone:
+the record stays, a delivery that rested on the id still names it, the id is never given
+to another source, the task page's link answers 404 and `read_task_source` says the bytes
+are not in the store. When the record's own `title` or `from` must go too, blank those two
+values in its line and keep the line. Never edit the folder while the app runs: one
+process writes a data root.
 
 **Two audit actions are exempt from the 90-day delete** because boot recovery uses them
 as idempotency keys: `task.agent.replied` (read by `recoverUnreactedAgentRuns`) and

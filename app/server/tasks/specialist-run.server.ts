@@ -852,7 +852,15 @@ async function dispatchAgentRun(
   // and its own timeline through the gateway's board server, as a Claude run's
   // toolkit does.
   const boardMount = realBackend
-    ? resolveBoardMcp({ backend, collaborates: holdsCollaborationGrant(collab), dataRoot: ctx.dataRoot })
+    ? resolveBoardMcp({
+        backend,
+        collaborates: holdsCollaborationGrant(collab),
+        // Ruling 690: the grant that lets a run save files on its task lets
+        // it keep the sources its result rests on.
+        keepsSources: collab.evidence,
+        agent: { profileId: engagement.profileId, roleHint: engagement.role },
+        dataRoot: ctx.dataRoot,
+      })
     : null;
   // The agent's own actor ref (D7/D8) — toolkit writes are attributed to it.
   const agentActorRef: FileActorRef = {
@@ -1166,6 +1174,11 @@ async function dispatchAgentRun(
   );
   if (kbReadDirs.length > 0) promptInput.kbReadDirs = kbReadDirs;
   if (boardReader) promptInput.taskFileReader = true;
+  // Ruling 690: the same conditions that mount `keep_source`: the grant, and
+  // on Codex the gateway's board server (a Claude run has it in its toolkit).
+  if (collab.evidence && realBackend && (backend === "claude" || !!boardMount)) {
+    promptInput.sourceKeeper = true;
+  }
   // Ruling 591: the same condition as the correction note below.
   if (realBackend && kb.length > 0 && (backend === "claude" || knowledgeMount)) {
     promptInput.kbCorrectionTool = true;
@@ -2172,6 +2185,9 @@ export async function resolveResumeConfinement(
     const resumeBoard = resolveBoardMcp({
       backend: input.backend,
       collaborates: holdsCollaborationGrant(collab),
+      // Ruling 690: a resumed run keeps sources as the fresh one did.
+      keepsSources: collab.evidence,
+      agent: { profileId: input.profileId, roleHint: input.role ?? resolved.role },
       dataRoot: ctx.dataRoot,
     });
     const resumeRepo = projectRepo(ctx, input.projectSlug);

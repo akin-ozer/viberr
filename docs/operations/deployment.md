@@ -458,8 +458,10 @@ under `runtimes/`:
 
 ```
 projects/       canonical project.md, task.md, epics/*.md (the source of truth — editable);
-                per task: workspace/ (git clones, a cache), attachments/ (evidence files) and
-                deliveries/ (each files delivery as it was delivered, ruling 597);
+                per task: workspace/ (git clones, a cache), attachments/ (evidence files),
+                deliveries/ (each files delivery as it was delivered, ruling 597) and
+                sources/ (what the task's result rests on, kept as the agents read it and
+                never pruned, ruling 690);
                 per project: .repo-mirror/ (bare mirror, a cache)
 agents/         agents/profiles/*.md templates + agents/definitions/ doctrine files
 kb/ skills/     knowledge-base and skill files
@@ -486,6 +488,8 @@ re-asserts the modes: `/data` 0750 in group `viberr-agents`, `state/`, `audit-ex
 `runtimes/claude|codex/` 0700, `runtimes/users/` 0710, `agents/`, `kb/`, `skills/`,
 `projects/` 0755, and each task's `workspace/`, `attachments/`, `.operator-scratch/` 2770 in
 the agent group ([agents-and-runtime.md §8](../domain/agents-and-runtime.md#8-boot-recovery)).
+A task's `sources/` is not among them (ruling 690): it is the server's own, like `task.md`
+beside it, so an agent reads a kept source and cannot rewrite or delete it.
 There is no `auth/`,
 `cache/` or `logs/` directory; application logs are structured JSON on stdout. Full layout
 with retention: [`../architecture/data-model.md`](../architecture/data-model.md#2-data-root-layout).

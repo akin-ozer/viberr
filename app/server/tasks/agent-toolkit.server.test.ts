@@ -655,9 +655,11 @@ describe("report_outcome's evidence field (P13-D-26)", () => {
     expect(mounted).toEqual([
       "correct_knowledge_doc",
       "github_read",
+      "keep_source",
       "read_board",
       "read_knowledge_doc",
       "read_task_attachment",
+      "read_task_source",
       "read_timeline_entry",
       "report_outcome",
     ]);
@@ -868,6 +870,172 @@ describe("report_outcome's evidence field (P13-D-26)", () => {
     );
     expect(await text(read, { taskKey: "VIB-9", name: "mapping.md", delivery: first })).toBe(
       `[noop] VIB-9's delivery of ${first} held no \`mapping.md\`. It held: comparison.md.`,
+    );
+  });
+
+  it("ruling 690: keep_source is on the toolkit only for a profile that holds attach-evidence-references, and records the run that called it", async () => {
+    // CANARY: mount it under holdsCollaborationGrant(collab) and a profile
+    // with every other grant, which may not save a file on the task, is
+    // offered keep_source. Pass no run id from the handler and the record
+    // names no run.
+    const { mkdirSync, writeFileSync } = await import("node:fs");
+    const path = await import("node:path");
+    const { taskAttachmentsDir } = await import("~/server/files/file-store-root.server");
+    const { readTaskSources } = await import("~/server/files/task-sources.server");
+    const ungranted = toolkitTools({ comment: true, ask: true, verdict: true, evidence: false, githubRead: true }, "oc_nokeep");
+    expect(ungranted.keep_source).toBeUndefined();
+    // It still reads what the task keeps.
+    expect(ungranted.read_task_source).toBeTruthy();
+
+    const tools = toolkitTools({ comment: false, ask: false, verdict: false, evidence: true }, "oc_keep");
+    const store = lastStore;
+    // The run row as registerAgentCompletion leaves it: stamped with the key.
+    upsertRun(store.db, {
+      id: "run_keep",
+      projectSlug: store.slug,
+      taskKey: "VIB-3",
+      threadId: "thread_keep",
+      role: "Security review",
+      kind: "reviewer",
+      agentProfileId: "security-reviewer",
+      backend: "claude",
+      model: "claude-opus-5",
+      sdk: "claude-agent-sdk",
+      state: "running",
+    });
+    patchRun(store.db, "run_keep", { outcomeKey: "oc_keep" });
+    const dir = taskAttachmentsDir(store.slug, "VIB-3", store.dataRoot);
+    mkdirSync(dir, { recursive: true });
+    writeFileSync(path.join(dir, "advisory.json"), '{"id":"GHSA-xxxx","fixedIn":"4.2.1"}');
+
+    // SAFETY: the tool answers the text block `{ content: [{ type: "text", text }] }`.
+    const out = (await tools.keep_source!.handler(
+      {
+        file: "advisory.json",
+        from: "https://api.github.com/advisories/GHSA-xxxx",
+        title: "The advisory for the pinned parser",
+      } as never,
+      {} as never,
+    )) as { content: { text: string }[] };
+    expect(out.content[0]!.text).toMatch(/^\[kept\] S1: advisory\.json, 36 bytes, sha256 [0-9a-f]{12}\. /);
+    expect(readTaskSources(store.slug, "VIB-3", store.dataRoot).sources).toMatchObject([
+      {
+        id: "S1",
+        runId: "run_keep",
+        by: { backend: "claude", profileId: "security-reviewer", roleHint: "Security review" },
+      },
+    ]);
+  });
+
+  it("ruling 690: read_task_source lists a task's sources with what each delivery rested on, opens one by id in pages, and reads another task's with taskKey", async () => {
+    // The reader the operator's, the controller's and the gateway's tools
+    // answer with, unchanged. CANARY: resolve the bytes by the record's
+    // `name` instead of its `file` and the read answers [noop] for a source
+    // the list just named.
+    const { createHash } = await import("node:crypto");
+    const { readTaskSources, recordDeliverySources, writeTaskSource } = await import(
+      "~/server/files/task-sources.server"
+    );
+    // A reviewer with no file grant: it cannot keep a source and still reads them.
+    const tools = toolkitTools({ ...BASE, comment: true, evidence: false }, "oc_sources");
+    const read = tools.read_task_source!;
+    expect(read).toBeTruthy();
+    const store = lastStore;
+    writeTask(store.dataRoot, store.slug, { frontmatter: baseTaskFrontmatter("VIB-9", { stage: "review" }) });
+    rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
+    const by = { backend: "codex", profileId: "researcher", roleHint: "Researcher" };
+    // A page longer than one read, so the second half is only a page away.
+    const page = `<html>${"t3.medium $0.0416 per hour. ".repeat(1500)}</html>`;
+    const exportJson = '{"monthly":1234.56}';
+    writeTaskSource(
+      store.slug,
+      "VIB-9",
+      {
+        name: "aws-pricing.html",
+        data: Buffer.from(page),
+        title: "AWS EC2 on-demand pricing",
+        from: "https://aws.amazon.com/ec2/pricing/on-demand/",
+        by,
+        runId: "run_abc",
+      },
+      store.dataRoot,
+    );
+    recordDeliverySources(store.slug, "VIB-9", "2026-10-07T13:00:00.000Z", store.dataRoot);
+    writeTaskSource(
+      store.slug,
+      "VIB-9",
+      {
+        name: "calc-export.json",
+        data: Buffer.from(exportJson),
+        title: "The calculator's export",
+        from: "curl -sS https://calculator.aws/pricing/2.0/export",
+        by,
+        runId: null,
+      },
+      store.dataRoot,
+    );
+    const [first, second] = readTaskSources(store.slug, "VIB-9", store.dataRoot).sources;
+    const sha = (text: string) => createHash("sha256").update(text).digest("hex");
+    // SAFETY: every text answer here is `{ content: [{ type: "text", text }] }`.
+    const text = async (args: Record<string, string | number>) =>
+      ((await read.handler(args as never, {} as never)) as { content: { text: string }[] }).content[0]!.text;
+
+    // The list: what each delivery rested on, then each source's record.
+    expect(JSON.parse(await text({ taskKey: "VIB-9" }))).toEqual({
+      task: "VIB-9",
+      kept: 2,
+      truncated: false,
+      text:
+        "Delivery 2026-10-07T13:00:00.000Z rested on: S1\n\n" +
+        `S1 · aws-pricing.html · ${page.length.toLocaleString("en-US")} bytes · sha256 ${sha(page).slice(0, 12)}\n` +
+        "title: AWS EC2 on-demand pricing\n" +
+        "from: https://aws.amazon.com/ec2/pricing/on-demand/\n" +
+        `kept: ${first!.keptAt} by agent:researcher (run run_abc)\n\n` +
+        `S2 · calc-export.json · 19 bytes · sha256 ${sha(exportJson).slice(0, 12)}\n` +
+        "title: The calculator's export\n" +
+        "from: curl -sS https://calculator.aws/pricing/2.0/export\n" +
+        `kept: ${second!.keptAt} by agent:researcher`,
+    });
+
+    // One source, a page at a time.
+    expect(JSON.parse(await text({ taskKey: "VIB-9", id: "S1" }))).toEqual({
+      id: "S1",
+      title: "AWS EC2 on-demand pricing",
+      from: "https://aws.amazon.com/ec2/pricing/on-demand/",
+      keptAt: first!.keptAt,
+      by: "agent:researcher",
+      name: "aws-pricing.html",
+      bytes: page.length,
+      sha256: sha(page),
+      text: page.slice(0, 32_000),
+      truncated: true,
+      nextOffset: 32_000,
+    });
+    expect(JSON.parse(await text({ taskKey: "VIB-9", id: "S1", offset: 32_000 }))).toMatchObject({
+      id: "S1",
+      text: page.slice(32_000),
+      truncated: false,
+      offset: 32_000,
+    });
+
+    // The misses say what the task does keep.
+    expect(await text({ taskKey: "VIB-9", id: "S9" })).toBe(
+      "[noop] VIB-9 keeps no source `S9`. It keeps S1 to S2; call read_task_source without `id` to list them.",
+    );
+    // Without a key it reads this task, which keeps none.
+    expect(JSON.parse(await text({}))).toEqual({ task: "VIB-3", kept: 0, text: "VIB-3 keeps no sources.", truncated: false });
+    expect(await text({ id: "S1" })).toBe("[noop] VIB-3 keeps no source `S1`. It keeps no sources.");
+    expect(await text({ taskKey: "VIB-404" })).toBe(
+      "[noop] No task VIB-404 in this project; `read_board` lists the project's tasks.",
+    );
+    // `read_board` says a task keeps sources and which tool lists them.
+    // SAFETY: `read_board` answers the same one text block.
+    const boardOut = (await tools.read_board!.handler({ taskKey: "VIB-9" } as never, {} as never)) as {
+      content: { text: string }[];
+    };
+    const board = z.object({ sources: z.string() }).parse(JSON.parse(boardOut.content[0]!.text));
+    expect(board.sources).toBe(
+      "2 kept; `read_task_source` with this task's key lists them and what each delivery rested on",
     );
   });
 

@@ -257,6 +257,31 @@ describe("governed actions record audit rows (table-driven)", () => {
         },
       },
       {
+        // Ruling 690: a run keeps a source its result rests on, from a file
+        // it saved in the task's attachments folder. CANARY: remove
+        // recordAudit from keepTaskSource and the sweep reports the action
+        // as unaudited.
+        name: "keepTaskSource",
+        action: "task.source.kept",
+        taskKey: "VIB-1",
+        run: async () => {
+          const { taskAttachmentsDir } = await import("~/server/files/file-store-root.server");
+          const { keepTaskSource } = await import("~/server/tasks/task-sources.server");
+          const dir = taskAttachmentsDir(store.slug, "VIB-1", store.dataRoot);
+          mkdirSync(dir, { recursive: true });
+          writeFileSync(path.join(dir, "aws-pricing.html"), "t3.medium $0.0416 per hour");
+          keepTaskSource(store.db, fileCtx, {
+            projectSlug: store.slug,
+            taskKey: "VIB-1",
+            file: "aws-pricing.html",
+            from: "https://aws.amazon.com/ec2/pricing/on-demand/",
+            title: "AWS EC2 on-demand pricing",
+            actorRef: { kind: "agent", backend: "claude", profileId: "researcher", roleHint: "Researcher" },
+            runId: null,
+          });
+        },
+      },
+      {
         // Ruling 488: a relay from one task to another, audited on the target.
         name: "relayToTask",
         action: "task.relayed",
