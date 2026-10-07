@@ -289,10 +289,9 @@ describe("ruling 521: the completion packet stands with the offer to accept", ()
     const card = within(container.querySelector<HTMLElement>(".detail-packet .packet")!);
     fireEvent.click(card.getByRole("button", { name: "Show the diff" }));
     // The reader's chunk loads, then its read goes through the router and
-    // redraws the whole page, which can outrun the 1 s default wait on a
-    // loaded runner.
+    // redraws the whole page (test-support/setup-dom.ts sizes the wait).
     const line = { name: "Add a note on app/timeline.tsx line 2" };
-    fireEvent.click(await card.findByRole("button", line, { timeout: 5_000 }));
+    fireEvent.click(await card.findByRole("button", line));
     fireEvent.change(card.getByRole("textbox", { name: "Note on app/timeline.tsx line 2" }), {
       target: { value: "Name the quiet stretch." },
     });
