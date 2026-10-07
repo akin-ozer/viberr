@@ -24,7 +24,7 @@ import { MESSAGE_BATCH } from "~/shared/attachment-kinds";
  * and reopening loses nothing; this module is only what the open panel draws,
  * and the button preloads it when a pointer or focus reaches it.
  *
- * Ruling 689(e): the body keeps its hooks and composes the regions in
+ * Ruling 695(e): the body keeps its hooks and composes the regions in
  * `controller-dock-panel-regions.tsx`, which call none.
  */
 

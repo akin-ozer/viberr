@@ -2,7 +2,7 @@ import { MAX_LABEL_LENGTH, MAX_TASK_LABELS } from "~/schemas/task-file.schema";
 
 /**
  * What the label field reads off its value, its suggestions and the typed text
- * (ruling 689(e), the split of `label-input.tsx`): the normal form of a label,
+ * (ruling 695(e), the split of `label-input.tsx`): the normal form of a label,
  * the rows the open list offers, and how a batch of typed labels folds into the
  * set. Pure functions, no React; `LabelInput` calls each at most once per
  * render or per edit.

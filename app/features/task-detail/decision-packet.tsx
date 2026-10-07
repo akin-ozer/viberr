@@ -53,7 +53,7 @@ import {
  */
 
 /*
- * Ruling 689(e) split the card along the task-page recipe: its choice is one
+ * Ruling 695(e) split the card along the task-page recipe: its choice is one
  * hook (`usePacketChoice`, decision-packet-actions.ts), what it reads off the
  * packet and the viewer's tiers is pure functions (decision-packet-derive.ts),
  * and its regions and its three ask-first ceremonies are hook-free components

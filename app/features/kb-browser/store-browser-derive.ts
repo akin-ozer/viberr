@@ -5,7 +5,7 @@ import type { DocView } from "~/ui/markdown-doc";
 
 /**
  * What the store browser's document card reads off the open draft (ruling
- * 689(e), the split of `store-browser.tsx`): whether the read has answered,
+ * 695(e), the split of `store-browser.tsx`): whether the read has answered,
  * whether the text changed, the name it saves under, whether it renders as
  * markdown and in which view, and the line that sums the saved text up. Pure
  * functions of the draft, no React; `DocumentCard` calls `documentCardState`

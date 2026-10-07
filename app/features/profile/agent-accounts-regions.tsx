@@ -12,7 +12,7 @@ import { SignInSteps } from "./agent-sign-in-steps";
 import type { ProfileBackend, ProfileBackendAccount } from "./profile-query.server";
 
 /**
- * An agent account card's regions (ruling 689(e), the split of
+ * An agent account card's regions (ruling 695(e), the split of
  * `agent-accounts-panel.tsx` along the task page's recipe): the failed and the
  * running sign-in, the card with no account yet, and the controls every
  * account carries. Each takes the slot its markup held in the card and calls
@@ -21,7 +21,7 @@ import type { ProfileBackend, ProfileBackendAccount } from "./profile-query.serv
  */
 
 /**
- * What a card's regions act through (ruling 689(e)). The card owns every
+ * What a card's regions act through (ruling 695(e)). The card owns every
  * piece of state here (ruling 507: the account a Disconnect is asking about,
  * the account whose name is being edited, whether "Add another account" is
  * open; ruling 616: and whether the other accounts' management is) and hands

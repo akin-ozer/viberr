@@ -6,7 +6,7 @@ import type { PacketArchiveDisclosure } from "./decision-packet";
 import { archiveCeremonyCopy } from "./decision-packet-derive";
 
 /**
- * The decision packet card's three ask-first ceremonies (ruling 689(e), the
+ * The decision packet card's three ask-first ceremonies (ruling 695(e), the
  * split of `decision-packet.tsx` along the task-page recipe): archive (with or
  * without the remote branch), discard the local branch, and clear a branch
  * collision. The card draws the one whose kind the pending option is, in the

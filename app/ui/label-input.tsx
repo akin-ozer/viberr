@@ -276,7 +276,7 @@ export function LabelInput({
  * the release landed on no button and the browser sent no click. While a
  * press outside is under way the combo keeps the height it had, and lets
  * go at the press's click. `shifts`: the list is shown or a label is half
- * typed. (Ruling 689(e), the split of `LabelInput`: its effect, unchanged,
+ * typed. (Ruling 695(e), the split of `LabelInput`: its effect, unchanged,
  * called where it always ran.)
  */
 function usePressHold(wrapRef: RefObject<HTMLDivElement | null>, shifts: boolean) {
@@ -304,7 +304,7 @@ function usePressHold(wrapRef: RefObject<HTMLDivElement | null>, shifts: boolean
   }, [shifts, wrapRef]);
 }
 
-/** The open checkbox list (ruling 689(e), the split of `LabelInput`:
+/** The open checkbox list (ruling 695(e), the split of `LabelInput`:
  *  hook-free, in the slot its `showList &&` held). */
 function LabelOptions({
   rows,

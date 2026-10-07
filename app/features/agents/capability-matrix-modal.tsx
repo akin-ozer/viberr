@@ -63,7 +63,7 @@ const MODE_TITLE = {
 } satisfies Record<Mode, string>;
 
 /**
- * What the matrix draws from the roster (ruling 689(e), the split of
+ * What the matrix draws from the roster (ruling 695(e), the split of
  * `CapabilityMatrixModal`): the grid's groups, the curated catalog plus
  * "Operator actions", and the advisory lines that never reach a cell. A pure
  * function of the profiles; the modal calls it once per render.
@@ -330,7 +330,7 @@ export function CapabilityMatrixModal({
 }
 
 /**
- * The runtime notes under the grid, hook-free (ruling 689(e) moved them
+ * The runtime notes under the grid, hook-free (ruling 695(e) moved them
  * out of the modal's body unchanged).
  *
  * P13-RT-14 / LV-15 / KM-04: the Claude↔Codex differences below are

@@ -29,7 +29,7 @@ import {
  * The knowledge-base / MCP-server / skill editors for the Agent-resources tab.
  * Split out of `resources-panel.tsx` (pass 16, pure structural refactor —
  * no behaviour or copy change). The agent-template editor is the odd one out
- * and lives in `agent-template-modal.tsx`. Ruling 689(e) split the MCP editor
+ * and lives in `agent-template-modal.tsx`. Ruling 695(e) split the MCP editor
  * along the task-page recipe: its write-tool draft lives in
  * `resource-modals-draft.ts` (a hook), what it reads off the row in
  * `resource-modals-derive.ts`, its fields in `mcp-modal-fields.tsx` and its

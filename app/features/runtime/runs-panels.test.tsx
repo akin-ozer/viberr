@@ -1438,7 +1438,7 @@ describe("AgentLogsPanel — run inputs (P19-G11)", () => {
     // ...and, like every other line, it is patched there rather than replaced:
     // a reader's selection in its clock or tag survives the toggle, and so
     // does the size `content-visibility` remembered for the row. Ruling
-    // 689(e)'s split once drew this branch as a component of its own, a
+    // 695(e)'s split once drew this branch as a component of its own, a
     // different element type from the other branch's fragment, and React
     // swapped the whole row on every toggle with the same markup either side.
     // CANARY: make `runInputsRow` a component LineRow renders

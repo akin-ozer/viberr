@@ -13,7 +13,7 @@ import { reachesAcceptance } from "./reaches-acceptance";
 import type { OpenCeremony } from "./task-detail-actions";
 
 /**
- * What the task page reads off its props before it draws (ruling 689(d), the
+ * What the task page reads off its props before it draws (ruling 695(d), the
  * pilot split of `task-detail-page.tsx`): the viewer's authority on this task,
  * whether it is closed for work, where the completion packet stands and which
  * surface carries the delivered changes, and the GitHub panel's doors. Pure

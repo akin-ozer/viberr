@@ -8,7 +8,7 @@ import { useEpicActionToast, type EpicActionResult } from "./epic-parts";
 import type { EpicPageView, EpicStageView, EpicTaskView } from "./epics-query.server";
 
 /**
- * The epic page's posts (ruling 689(e), the large-component split of
+ * The epic page's posts (ruling 695(e), the large-component split of
  * `epic-page.tsx`), each with its fetcher, toast, local state and confirm: the
  * status the head's select sets, and a task row's Remove, Archive and
  * Restore. The page calls them in the order its fetchers always registered

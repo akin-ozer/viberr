@@ -22,7 +22,7 @@ import type { BoardColumnData, BoardStage, BoardTask } from "./board-page";
 import { findTask, readBoardView, stageNameIn } from "./board-page-derive";
 
 /**
- * The board page's state and posts (ruling 689(e), the task-page recipe rolled
+ * The board page's state and posts (ruling 695(e), the task-page recipe rolled
  * out to `board-page.tsx`), each hook owning its fetcher, toast and local
  * state: the view the URL carries, the re-scan, the moves and what they draw
  * while the server answers, the keyboard's way around the cards, the confirms a

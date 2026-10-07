@@ -85,7 +85,7 @@ export function needsYouTimeUTC(iso: string): string {
   return formatDayBucketUTC(iso).toLowerCase() + " " + formatClockUTC(iso);
 }
 
-/** The "Waiting on you" header's tail after "N decisions" (ruling 689(e), the
+/** The "Waiting on you" header's tail after "N decisions" (ruling 695(e), the
  *  split of `NtfNeedsYou`): what the authoritative count holds that the card
  *  does not list, the rows the filter hides and the decisions with no row
  *  here. Empty when the card lists every one. */
@@ -97,7 +97,7 @@ export function needsYouCountTail(hiddenByFilter: number, onTaskPages: number): 
   return subParts.length > 0 ? ` · ${subParts.join(" · ")}` : "";
 }
 
-/** What the "Waiting on you" card says when it lists nothing (ruling 689(e),
+/** What the "Waiting on you" card says when it lists nothing (ruling 695(e),
  *  the split of `NtfNeedsYou`): nothing waits; or decisions wait that the
  *  filter hides; or decisions wait that have no row here. */
 export function needsYouEmptyText(decisionCount: number, hiddenByFilter: number): string {

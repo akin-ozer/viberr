@@ -15,7 +15,7 @@ import {
 } from "./decision-packet-derive";
 
 /**
- * The decision packet card's regions (ruling 689(e), the split of
+ * The decision packet card's regions (ruling 695(e), the split of
  * `decision-packet.tsx` along the task-page recipe): the body, the options
  * (live, and locked once an `edit_goal` decision is made), the two answer
  * boxes, the refusals and notes under them, and the action row. Each takes

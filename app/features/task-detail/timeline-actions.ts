@@ -23,7 +23,7 @@ import type { TimelineFilterId } from "./timeline";
 import { isEventAnchor, shownBy } from "./timeline-derive";
 
 /**
- * The timeline's post and its tab (ruling 689(e), the split of `timeline.tsx`
+ * The timeline's post and its tab (ruling 695(e), the split of `timeline.tsx`
  * along the task page's recipe): the comment the composer sends, with its
  * fetcher, toast, file tray and the "Ask operator" prefill, and the filter tab
  * with the step a link to an event takes (ruling 497). `Timeline` calls them

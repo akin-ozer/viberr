@@ -242,7 +242,7 @@ export function TopBell({
 }
 
 /**
- * The open popover (ruling 689(e), split out of `TopBell` on the task page's
+ * The open popover (ruling 695(e), split out of `TopBell` on the task page's
  * recipe; it calls no hook): its head and Mark all read, the list or what
  * stands for it, and the foot. The bell owns the list, the reads and focus,
  * and renders this only while it is open.

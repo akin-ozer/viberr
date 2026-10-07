@@ -11,7 +11,7 @@ import type { AcceptConfirmTask } from "./accept-confirm";
 import { GateResults } from "./gate-results";
 
 /**
- * The acceptance ceremony's rows and its foot (ruling 689(e), the split of
+ * The acceptance ceremony's rows and its foot (ruling 695(e), the split of
  * `accept-confirm.tsx` along the task-page recipe). Each takes the slot its
  * markup held in `AcceptConfirm`'s row list and calls no hook: the dialog owns
  * `useDialog` and hands the foot its `close` and `commit`, so the markup, and

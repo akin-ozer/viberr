@@ -9,7 +9,7 @@ import { ChangesPanel } from "./changes-slot";
 import type { CompletionDiff, CompletionResult } from "./completion-packet";
 
 /**
- * The completion packet's sections (ruling 689(e), the split of
+ * The completion packet's sections (ruling 695(e), the split of
  * `completion-packet.tsx` along the task-page recipe): its head, Operator's
  * summary, the notes on what is not shown, the reviewers' verdicts and the
  * change. Each takes the slot its markup held in `CompletionPacket`'s section

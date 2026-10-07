@@ -205,7 +205,7 @@ const projectSlugSchema = z.string().regex(/^[a-z0-9][a-z0-9-]*$/);
 const archivedSchema = z.boolean().optional();
 /** The project's GitHub repo ("owner/name"). One project, one repository —
  * P13-D-5 deleted the task-level override (nothing ever wrote `task.repo`
- * and the admin toggle gated nothing). Ruling 689(a): the parse below holds it
+ * and the admin toggle gated nothing). Ruling 695(a): the parse below holds it
  * to `REPO_SLUG_RE`, so no reader builds a checkout path from anything else. */
 const repoSchema = z.string().nullable();
 const defaultBranchSchema = z.string().min(1);
@@ -476,7 +476,7 @@ export function parseProjectFrontmatter(
     }),
     slug,
     archived: tolerant(diagnostics, data, "archived", archivedSchema, false),
-    // Ruling 689(a): a repository outside the pattern reads as none (ruling
+    // Ruling 695(a): a repository outside the pattern reads as none (ruling
     // 667's project with no repository), and as an error, so `store:check`
     // lists the project among the degraded files and names the field. The
     // pattern is applied here, not on `repoSchema`: the browser loads this

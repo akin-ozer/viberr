@@ -171,7 +171,7 @@ export function ReleaseConfirm({
 /**
  * The dialog's "Open now" row: the open packet waiting on the owner, a pending
  * human decision, or agent work with no boundary waiting. A hook-free
- * component of its own (ruling 689(e), the split of `ReleaseConfirm` along the
+ * component of its own (ruling 695(e), the split of `ReleaseConfirm` along the
  * task-page recipe) in the slot the row always held.
  */
 function OpenNowRow({ task }: { task: TaskSummary }) {

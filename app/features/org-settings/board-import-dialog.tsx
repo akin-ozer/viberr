@@ -245,7 +245,7 @@ function importFileKey(taskPrefix: string): string {
   return /^[A-Z]{2,4}$/.test(taskPrefix) ? taskPrefix : "";
 }
 
-/** What the import form reads off its fields (ruling 689(e), split out of
+/** What the import form reads off its fields (ruling 695(e), split out of
  *  `BoardImportDialog`, which keeps the fields' state): the key and the
  *  repository in effect, the new project's slug, whether the key is taken,
  *  and the first field that stops the import (a taken slug stops the name)
@@ -314,7 +314,7 @@ function blockedImportReason(blocked: BlockedField | null, slugTaken: boolean, s
   }
 }
 
-/** A file with problems, all of them, in place of the form (ruling 689(e):
+/** A file with problems, all of them, in place of the form (ruling 695(e):
  *  one slot of `BoardImportDialog`'s body, drawn from its props alone). */
 function BoardImportProblems({ problems }: { problems: string[] }) {
   return (
@@ -338,7 +338,7 @@ function BoardImportProblems({ problems }: { problems: string[] }) {
 
 /** Whether the board takes a repository: a results board attaches one only
  *  on request (ruling 667), a software board may connect it later (ruling
- *  672). Ruling 689(e): one slot of `BoardImportDialog`'s form, which keeps
+ *  672). Ruling 695(e): one slot of `BoardImportDialog`'s form, which keeps
  *  both choices' state. */
 function BoardImportRepository({
   delivers,
@@ -374,7 +374,7 @@ function BoardImportRepository({
   );
 }
 
-/** The dialog's foot (ruling 689(e), split out of `BoardImportDialog`, which
+/** The dialog's foot (ruling 695(e), split out of `BoardImportDialog`, which
  *  keeps the refusal count and its shake): where the board will live, why it
  *  cannot be imported yet, and the way on. */
 function BoardImportFoot({

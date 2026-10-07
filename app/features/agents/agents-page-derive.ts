@@ -7,7 +7,7 @@ import type {
 import type { BackendConnectionSummary, BackendHealthMap } from "./agents-page";
 
 /**
- * What the Agents page reads off its props before it draws (ruling 689(e), the
+ * What the Agents page reads off its props before it draws (ruling 695(e), the
  * split of `agents-page.tsx` along the task-page recipe): which backend a
  * profile's runs resolve and whether the viewer connected it, the roster's
  * operator, agents and open profile, each profile's live runs, the stats'

@@ -36,7 +36,7 @@ import { TimelineEntryBody, TimelineEntryFiles, TimelineEntryMeta } from "./time
  * "Show older" affordance driving the `?events=` param (progressive
  * disclosure — the first payload never ships the full history).
  *
- * Ruling 689(e) split the two components along the task page's recipe, a
+ * Ruling 695(e) split the two components along the task page's recipe, a
  * pure structural refactor: the comment post and the filter tab with its
  * landing are hooks in `timeline-actions.ts`, called where their hooks always
  * ran; what the list reads off its tab is pure functions in

@@ -4,7 +4,7 @@ import { countLabel } from "~/shared/text/plural";
 
 /**
  * What the Agent resources tab reads off its state before it draws (ruling
- * 689(e), the split of `resources-panel.tsx`): which editor or removal
+ * 695(e), the split of `resources-panel.tsx`): which editor or removal
  * confirm is open, the row an open MCP editor reads, and what a removal
  * says it takes. Pure functions, no React.
  */

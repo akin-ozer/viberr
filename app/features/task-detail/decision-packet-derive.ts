@@ -6,7 +6,7 @@ import type { PacketArchiveDisclosure } from "./decision-packet";
 
 /**
  * What the decision packet card reads off its packet, its viewer's authority
- * and the person's choice before it draws (ruling 689(e), the split of
+ * and the person's choice before it draws (ruling 695(e), the split of
  * `decision-packet.tsx` along the task-page recipe): the authority gate table,
  * the choice the card opens on, the refusals a Confirm can meet, who may
  * answer at all, and the words of the archive ceremony. Pure functions of the
