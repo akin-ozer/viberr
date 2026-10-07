@@ -30,8 +30,8 @@
   `question: {kind: "completeness", runId, at}` (ruling 421). At most one entry
   delivers; it owns the workspace, branch and PR. Engagements are written by the dispatch
   itself (ruling 98).
-- **Backend**: `claude` (Claude Agent SDK `^0.3.280`, Claude Code 2.1.280) or `codex`
-  (Codex SDK `^0.156.0`). Both run on the vendor SDKs; the Cognipeer Agent SDK was
+- **Backend**: `claude` (Claude Agent SDK `0.3.291`, Claude Code 2.1.291, pinned below
+  0.3.292 as `claude-runtime.server.ts` explains) or `codex` (Codex SDK `^0.160.1`). Both run on the vendor SDKs; the Cognipeer Agent SDK was
   evaluated and not adopted (ruling 173). A profile lists the backends it may run on; the
   FIRST listed one is the deployment's "primary run backend" (`primaryRunBackend`,
   `app/server/agents/deployment-view.server.ts`), `claude` when none is listed.
