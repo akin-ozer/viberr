@@ -1228,7 +1228,8 @@ describe("ruling 573: files from the dock", () => {
  * Ruling 368: the dock's Send named its work ("Sending…") but sat at the .45
  * refused step with no busy mark while the controller took the message. It is
  * `aria-busy` now, the loader spinning.
- * Canary: drop `aria-busy={busy || undefined}` in controller-dock-panel.tsx.
+ * Canary: drop `aria-busy={busy || undefined}` in controller-dock-panel-regions.tsx
+ * (`DockComposerFoot`).
  */
 describe("ruling 368: the dock's send in flight", () => {
   it("Send reads Sending…, busy, the loader spinning", () => {
@@ -1293,8 +1294,9 @@ describe("ruling 459: the dock's deferred half", () => {
     // The person clicks the trigger again before the exit ends (a click
     // focuses the button it lands on).
     trigger.focus();
-    // CANARY: drop the `closing` branch from the trigger's onClick — the
-    // click is swallowed by the close already running, and the panel goes.
+    // CANARY: drop the `closing` branch from `onTrigger`, the trigger's
+    // click — the click is swallowed by the close already running, and the
+    // panel goes.
     fireEvent.click(trigger);
     expect(panel.isConnected).toBe(true);
     expect(panel.hasAttribute("data-closing")).toBe(false);
@@ -1358,7 +1360,7 @@ describe("ruling 459: the dock's deferred half", () => {
     await waitFor(() => expect(screen.queryByRole("dialog", DIALOG)).toBeNull());
     expect(dock.hasAttribute("data-restored")).toBe(false);
     // The person's own open plays its entrance.
-    // CANARY: drop `setRestoredOpen(false)` from the trigger's open path.
+    // CANARY: drop `setRestoredOpen(false)` from `onTrigger`'s open path.
     fireEvent.click(trigger);
     await screen.findByRole("dialog", DIALOG);
     expect(dock.hasAttribute("data-restored")).toBe(false);
@@ -1391,7 +1393,7 @@ describe("ruling 459: the dock's deferred half", () => {
   it("(F20, F24) taking back a restored panel's close drops the mark, so the way back retargets", async () => {
     // Under `data-restored` the panel has no transition, and a reversal would
     // snap open instead of turning around from where the exit had got to.
-    // CANARY: drop `setRestoredOpen(false)` from the trigger's closing branch.
+    // CANARY: drop `setRestoredOpen(false)` from `onTrigger`'s closing branch.
     window.sessionStorage.setItem("viberr.dock.open", "1");
     mount({ path: "/projects/viberr/board", view: () => taskView() });
     const panel = await screen.findByRole("dialog", DIALOG);
@@ -1411,7 +1413,7 @@ describe("ruling 459: the dock's deferred half", () => {
     // renders a task later; Chrome can run a queued click first, and that
     // click's handler still sees `closing`. One `act` holds both, so neither
     // renders before the other has run.
-    // CANARY: drop `setOpen(true)` from the trigger's closing branch — the
+    // CANARY: drop `setOpen(true)` from `onTrigger`'s closing branch — the
     // pending close lands after the take-back and unmounts the panel, and
     // focus falls to <body>.
     mount({ path: "/projects/viberr/tasks/VIB-1", view: () => taskView() });
@@ -1669,7 +1671,7 @@ describe("ruling 528: the dock opens on the newest thread, and its one dot is a 
     await pickOlder(loads);
 
     // Closed, then opened again: the newest thread, not the one picked.
-    // CANARY: drop `setSelected({})` from the trigger's open, and this asks
+    // CANARY: drop `setSelected({})` from `onTrigger`'s open, and this asks
     // for cnv_old.
     fireEvent.click(screen.getByRole("button", { name: "Close the controller dock" }));
     await waitFor(() => expect(screen.queryByRole("dialog", { name: "Controller dock" })).toBeNull());

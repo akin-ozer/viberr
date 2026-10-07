@@ -1,24 +1,22 @@
-import { Fragment, useEffect, useRef, useState, type RefObject } from "react";
-import { Link } from "react-router";
-import { TurnStep, WorkingSentence } from "./turn-step";
+import { useEffect, useRef, useState, type RefObject } from "react";
 import { useFreshMessageIds } from "./use-fresh-messages";
 import { useTranscriptFollow, useTurnAnnouncement } from "./transcript-follow";
-import { TranscriptJumpButton } from "./transcript-jump";
 import type { ControllerDockView } from "./controller-dock-query.server";
 import type {
   ConversationTurnState,
   SendMode,
 } from "~/server/controller/controller-run.server";
-import { withRetracted } from "./with-retracted";
-import { MessageList } from "./message-list";
 import type { UnseenReplyView } from "~/routes/resources.controller-unseen";
-import { NotConnectedNote } from "./not-connected";
-import { ControllerExampleList, controllerExamples, type ControllerExample } from "./controller-examples";
-import { Icon } from "~/ui/icon";
-import { LocalDayDotTime } from "~/ui/local-time";
+import {
+  DockComposer,
+  DockThreadList,
+  DockTranscript,
+  DockUnavailable,
+  DockUnseenLine,
+} from "./controller-dock-panel-regions";
 import { useModifierHint } from "~/ui/use-shortcut-hint";
-import { AttachButton, AttachTray, useFileDrop } from "~/ui/attach-files";
-import { addPickedFiles, filesFromPaste } from "~/ui/picked-files";
+import { useFileDrop } from "~/ui/attach-files";
+import { addPickedFiles } from "~/ui/picked-files";
 import { MESSAGE_BATCH } from "~/shared/attachment-kinds";
 
 /**
@@ -31,47 +29,10 @@ import { MESSAGE_BATCH } from "~/shared/attachment-kinds";
  * button, the panel's frame and header, and every piece of state, so closing
  * and reopening loses nothing; this module is only what the open panel draws,
  * and the button preloads it when a pointer or focus reaches it.
+ *
+ * Ruling 689(e): the body keeps its hooks and composes the regions in
+ * `controller-dock-panel-regions.tsx`, which call none.
  */
-
-/** Ruling 314's examples for the scope the dock is open on (shared with the
- *  page, ruling 419(g)). */
-function emptyExamples(view: ControllerDockView): ControllerExample[] {
-  return controllerExamples(
-    view.scope.kind === "task" && view.scope.taskKey
-      ? { kind: "task", taskKey: view.scope.taskKey }
-      : view.scope.kind === "board"
-        ? { kind: "board" }
-        : { kind: "instance" },
-  );
-}
-
-function emptyCopy(view: ControllerDockView): string {
-  if (view.scope.kind === "task") {
-    return `Ask about ${view.scope.taskKey} or say what to do with it. The controller already has its task file.`;
-  }
-  if (view.scope.kind === "board") {
-    return `Ask about the ${view.scope.projectName} board or say what to do on it: tasks, epics, agents.`;
-  }
-  return "Ask about this instance or say what to do: projects, users, resources, agents, epics.";
-}
-
-/**
- * The dock's "is working…" row (ruling 250's step beside it). Visual only
- * (ruling 476(d)): the announcer beside the dock's button says the turn is
- * working, and the panel's own region says it replied.
- */
-function DockWorkingRow({ name, turn }: { name: string; turn: ConversationTurnState }) {
-  return (
-    <div className="ctl-working">
-      <span className="live-dot" />
-      <WorkingSentence name={name} />
-      {/* Ruling 250: the dock follows a person onto every page and has no
-          live-run panel at all, so this row is the ONLY place the turn's own
-          step can reach them here. */}
-      <TurnStep turn={turn} />
-    </div>
-  );
-}
 
 export interface DockPanelBodyProps {
   /** The view for the CURRENT scope, or null while it loads. */
@@ -126,9 +87,6 @@ export function DockPanelBody({
   // this keyboard has (UI-55; the page's composer shares the rule).
   const sendHint = useModifierHint("↵");
   const queueHint = useModifierHint("⇧↵");
-  // Ruling 527: while a turn holds the thread, a message steers it or queues
-  // behind it, and the composer offers both.
-  const live = (turn?.answering ?? null) !== null;
   const threads = current?.threads ?? [];
   const unavailable = current?.unavailable ?? false;
   const working = turn?.working ?? false;
@@ -145,7 +103,6 @@ export function DockPanelBody({
     setFileProblem(next.problem);
   };
   const { dropping, dropProps } = useFileDrop(addFiles, disabled);
-  const empty = !text.trim() && files.length === 0;
 
   // Message entry motion: only a message that arrives while THIS conversation
   // is already on screen animates (the page shares the rule, ruling 451(d)).
@@ -176,215 +133,49 @@ export function DockPanelBody({
         {said}
       </span>
       {unseen.length > 0 && (
-        <p className="dock-unseen fine xs">
-          <span className="unseen-dot" aria-hidden="true" />
-          <span>
-            New {unseen.length === 1 ? "reply" : "replies"} in{" "}
-            {unseen.slice(0, 3).map((u, i) => (
-              <Fragment key={u.id}>
-                {i > 0 && ", "}
-                {threads.some((t) => t.id === u.id) ? (
-                  // A thread of this scope opens right here.
-                  <button type="button" className="linkish" onClick={() => onPick(u.id)}>
-                    {u.title}
-                  </button>
-                ) : (
-                  <Link className="linkish" to={u.href} onClick={onLeave}>
-                    {u.taskKey ? `${u.taskKey} · ${u.title}` : u.title}
-                  </Link>
-                )}
-              </Fragment>
-            ))}
-            {unseen.length > 3 && ` and ${unseen.length - 3} more`}
-          </span>
-        </p>
+        <DockUnseenLine unseen={unseen} threads={threads} onPick={onPick} onLeave={onLeave} />
       )}
       {unavailable ? (
-        <section className="dock-body" aria-label="Controller unavailable here">
-          <p className="empty sm">
-            {current?.signedOut ? (
-              // Ruling 457: the dock's loads answer a signed-out tab 401, never
-              // a login redirect; the page's own navigation asks for the sign-in.
-              <>
-                You're signed out, so the controller can't answer here. Reload
-                the page to sign in again.
-              </>
-            ) : (
-              <>
-                The controller has nothing to work with here: this project or
-                task is not open to you, or it no longer exists. Everything else
-                on the page still works.
-              </>
-            )}
-          </p>
-        </section>
+        <DockUnavailable signedOut={current?.signedOut} />
       ) : threadsOpen ? (
-        <section className="dock-body dock-threads" aria-label="Threads here">
-          {threads.length === 0 ? (
-            <p className="empty sm">No threads here yet.</p>
-          ) : (
-            <ul className="ctl-conv-list">
-              {threads.map((t) => (
-                <li key={t.id}>
-                  <button
-                    type="button"
-                    className={`ctl-conv${t.id === conversationId ? " on" : ""}${t.unread ? " unread" : ""}`}
-                    aria-current={t.id === conversationId ? "true" : undefined}
-                    onClick={() => onPick(t.id)}
-                  >
-                    <span className="ctl-conv-title">
-                      {t.unread && <span className="unseen-dot" aria-hidden="true" />}
-                      {t.title}
-                      {t.unread && <span className="vh">, new reply</span>}
-                    </span>
-                    <span className="fine xs dim">
-                      {t.lastMessageAt ? <LocalDayDotTime iso={t.lastMessageAt} /> : "empty"}
-                    </span>
-                  </button>
-                </li>
-              ))}
-            </ul>
-          )}
-        </section>
+        <DockThreadList threads={threads} conversationId={conversationId} onPick={onPick} />
       ) : (
-        <section
-          className="dock-body dock-transcript"
-          ref={scrollRef}
-          aria-label="Conversation transcript"
-          // Ruling 626: as the page's transcript, a scroller the keyboard reaches.
-          tabIndex={0}
-        >
-          {!current ? (
-            <p className="empty sm">Loading…</p>
-          ) : !current.conversation ? (
-            <div className="ctl-empty">
-              <p className="empty sm">{emptyCopy(current)}</p>
-              {/* Ruling 625: as on the page, no examples a viewer whose
-                  Claude is not connected could not send; the note says what
-                  to do instead. */}
-              {current.available && (
-                <ControllerExampleList
-                  examples={emptyExamples(current)}
-                  disabled={busy || disabled}
-                  onSend={onSubmit}
-                />
-              )}
-            </div>
-          ) : (
-            <MessageList
-              inDock
-              messages={messages}
-              turn={turn}
-              fresh={fresh}
-              controllerName={current.controllerName}
-              userLabel="You"
-              taskLinks={current.taskLinks}
-              waiting={
-                current.viewerOwnsActive && conversationId
-                  ? {
-                      conversationId,
-                      csrf,
-                      action: "/resources/controller",
-                      onRetracted: (retracted, back) => {
-                        onText(withRetracted(text, retracted));
-                        if (back.length > 0) onFiles((cur) => addPickedFiles(cur, back, MESSAGE_BATCH).files);
-                      },
-                    }
-                  : null
-              }
-              working={turn?.working && <DockWorkingRow name={current.controllerName} turn={turn} />}
-            />
-          )}
-          <TranscriptJumpButton jump={jump} />
-        </section>
+        <DockTranscript
+          current={current}
+          turn={turn}
+          messages={messages}
+          fresh={fresh}
+          conversationId={conversationId}
+          csrf={csrf}
+          text={text}
+          onText={onText}
+          onFiles={onFiles}
+          busy={busy}
+          disabled={disabled}
+          onSubmit={onSubmit}
+          scrollRef={scrollRef}
+          jump={jump}
+        />
       )}
-      <div className="dock-composer">
-        <div className="ctl-composer" data-dropping={dropping ? "" : undefined} {...dropProps}>
-          {current && !current.available && !current.signedOut && <NotConnectedNote />}
-          <AttachTray
-            files={files}
-            problem={fileProblem}
-            disabled={busy}
-            onRemove={(name) => {
-              onFiles((cur) => cur.filter((f) => f.name !== name));
-              setFileProblem(null);
-            }}
-          />
-          <textarea
-            ref={composerRef}
-            value={text}
-            onChange={(e) => onText(e.target.value)}
-            onPaste={(e) => {
-              // Ruling 573: a bare screenshot goes with the message; copied
-              // text, cells included, stays text.
-              const pasted = filesFromPaste(e.clipboardData, true, files);
-              if (!pasted) return;
-              e.preventDefault();
-              addFiles(pasted);
-            }}
-            onKeyDown={(e) => {
-              if ((e.metaKey || e.ctrlKey) && e.key === "Enter") {
-                e.preventDefault();
-                // Ruling 527: ⇧ queues behind a working turn.
-                onSubmit(undefined, live && e.shiftKey ? "queue" : "steer");
-              }
-            }}
-            rows={2}
-            placeholder={
-              !current
-                ? "Loading…"
-                : disabled
-                  ? current.signedOut
-                    ? "Sign in again to send a message."
-                    : current.available
-                      ? "Read-only: only the thread's owner can talk in it."
-                      : // Ruling 127: the dock bills the person reading it,
-                        // and says so in the note above the box (U39-10);
-                        // ruling 625: the box does not repeat it.
-                        undefined
-                  : "Ask the controller, or tell it what to do here…"
-            }
-            disabled={disabled}
-            aria-label="Message to the controller"
-          />
-          <div className="ctl-composer-foot">
-            <span className="att-lead">
-              <AttachButton onFiles={addFiles} disabled={disabled || busy} />
-              <span className="fine xs dim">
-                Acts with your permissions
-                <span className="kbd-hint" suppressHydrationWarning>
-                  {live ? ` · ${sendHint} steers · ${queueHint} queues` : ` · ${sendHint} sends`}
-                </span>
-              </span>
-            </span>
-            <span className="inline-row">
-              {live && (
-                <button
-                  type="button"
-                  className="btn sm"
-                  title="Wait for its own turn, after the one working now"
-                  onClick={() => onSubmit(undefined, "queue")}
-                  disabled={busy || disabled || empty}
-                >
-                  Queue
-                </button>
-              )}
-              <button
-                type="button"
-                className="btn primary sm"
-                title={live ? "Go into the turn working now, at its next step" : undefined}
-                onClick={() => onSubmit(undefined, "steer")}
-                disabled={busy || disabled || empty}
-                aria-busy={busy || undefined}
-              >
-                {busy && <Icon name="loader" className="spin" />}
-                {busy ? "Sending…" : live ? "Steer" : "Send"}
-              </button>
-            </span>
-          </div>
-        </div>
-      </div>
+      <DockComposer
+        current={current}
+        turn={turn}
+        text={text}
+        onText={onText}
+        files={files}
+        onFiles={onFiles}
+        fileProblem={fileProblem}
+        onFileProblem={setFileProblem}
+        addFiles={addFiles}
+        dropping={dropping}
+        dropProps={dropProps}
+        composerRef={composerRef}
+        busy={busy}
+        disabled={disabled}
+        onSubmit={onSubmit}
+        sendHint={sendHint}
+        queueHint={queueHint}
+      />
     </>
   );
 }
-

@@ -942,45 +942,88 @@ function Composer({
         disabled={disabled}
         aria-label="Message to the controller"
       />
-      <div className="ctl-composer-foot">
-        <span className="att-lead">
-          <AttachButton onFiles={addFiles} disabled={disabled || busy} />
-          <span className="fine xs dim">
-            Acts with your permissions · refusals say why
-            {/* A touch screen has no key to name; app.css drops this on a
-                coarse pointer (`.kbd-hint`). */}
-            <span className="kbd-hint" suppressHydrationWarning>
-              {live ? ` · ${sendHint} steers · ${queueHint} queues` : ` · ${sendHint} sends`}
-            </span>
+      <ComposerFoot
+        live={live}
+        busy={busy}
+        disabled={disabled}
+        blocked={busy || disabled || empty}
+        sending={sending}
+        addFiles={addFiles}
+        onSubmit={submit}
+        sendHint={sendHint}
+        queueHint={queueHint}
+      />
+    </div>
+  );
+}
+
+/**
+ * The composer's foot (ruling 689(e), split out of `Composer` on the task
+ * page's recipe; it calls no hook): attach, the key hint, and Queue beside
+ * Steer or Send, each naming the send it made while that send is out.
+ */
+function ComposerFoot({
+  live,
+  busy,
+  disabled,
+  blocked,
+  sending,
+  addFiles,
+  onSubmit,
+  sendHint,
+  queueHint,
+}: {
+  live: boolean;
+  busy: boolean;
+  disabled: boolean;
+  /** Busy, disabled or empty: nothing can be sent. */
+  blocked: boolean;
+  /** The mode of the send that is out, if one is. */
+  sending: SendMode | null;
+  addFiles: (incoming: File[]) => void;
+  onSubmit: (mode: SendMode) => void;
+  sendHint: string;
+  queueHint: string;
+}) {
+  return (
+    <div className="ctl-composer-foot">
+      <span className="att-lead">
+        <AttachButton onFiles={addFiles} disabled={disabled || busy} />
+        <span className="fine xs dim">
+          Acts with your permissions · refusals say why
+          {/* A touch screen has no key to name; app.css drops this on a
+              coarse pointer (`.kbd-hint`). */}
+          <span className="kbd-hint" suppressHydrationWarning>
+            {live ? ` · ${sendHint} steers · ${queueHint} queues` : ` · ${sendHint} sends`}
           </span>
         </span>
-        <span className="inline-row">
-          {live && (
-            <button
-              type="button"
-              className="btn sm"
-              title="Wait for its own turn, after the one working now"
-              onClick={() => submit("queue")}
-              disabled={busy || disabled || empty}
-              aria-busy={sending === "queue" || undefined}
-            >
-              {sending === "queue" && <Icon name="loader" className="spin" />}
-              {sending === "queue" ? "Queueing…" : "Queue"}
-            </button>
-          )}
+      </span>
+      <span className="inline-row">
+        {live && (
           <button
             type="button"
-            className="btn primary sm"
-            title={live ? "Go into the turn working now, at its next step" : undefined}
-            onClick={() => submit("steer")}
-            disabled={busy || disabled || empty}
-            aria-busy={sending === "steer" || undefined}
+            className="btn sm"
+            title="Wait for its own turn, after the one working now"
+            onClick={() => onSubmit("queue")}
+            disabled={blocked}
+            aria-busy={sending === "queue" || undefined}
           >
-            {sending === "steer" && <Icon name="loader" className="spin" />}
-            {sending === "steer" ? "Sending…" : live ? "Steer" : "Send"}
+            {sending === "queue" && <Icon name="loader" className="spin" />}
+            {sending === "queue" ? "Queueing…" : "Queue"}
           </button>
-        </span>
-      </div>
+        )}
+        <button
+          type="button"
+          className="btn primary sm"
+          title={live ? "Go into the turn working now, at its next step" : undefined}
+          onClick={() => onSubmit("steer")}
+          disabled={blocked}
+          aria-busy={sending === "steer" || undefined}
+        >
+          {sending === "steer" && <Icon name="loader" className="spin" />}
+          {sending === "steer" ? "Sending…" : live ? "Steer" : "Send"}
+        </button>
+      </span>
     </div>
   );
 }
