@@ -5984,6 +5984,7 @@ describe("ruling 693: the controller's read of what a task took", () => {
       state: "running",
       startedAt: "2026-09-27T09:00:00.000Z",
     });
+    // SAFETY: the same tool's reply, in the same shape.
     const going = JSON.parse(await call(ids.contributor, "list_tasks", { withWhatItTook: true })) as Listed;
     expect(going.find((t) => t.key === "VIB-168")?.whatItTook).toBe(
       "1 run, 0 min, cost not reported (1 still going: not in the minutes)",
