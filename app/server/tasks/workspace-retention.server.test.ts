@@ -212,6 +212,12 @@ describe("reclaimTerminalTaskWorkspaces", () => {
         const profile = path.join(captures, "no.run", "cap_cut", "profile");
         mkdirSync(profile, { recursive: true });
         writeFileSync(path.join(profile, "Cookies"), "left by a restart");
+        // And the copy of the kept delivery that render was reading, which is
+        // the server's own folder. CANARY: leave `.capture-input` out of the
+        // sweep and up to 200 MB of it stays on the closed task.
+        const carried = path.join(taskDir(store.slug, key, store.dataRoot), ".capture-input", "cap_cut");
+        mkdirSync(carried, { recursive: true });
+        writeFileSync(path.join(carried, "post.html"), "<h1>a copy of a kept delivery</h1>");
         return captures;
       };
       const finished = leftBy("VIB-1");
@@ -228,6 +234,8 @@ describe("reclaimTerminalTaskWorkspaces", () => {
         `uid=${AGENT_UID_FLOOR} exec=rm args=-rf -- ${finished}`,
       ]);
       expect(existsSync(path.join(inFlight, "no.run", "cap_cut", "profile", "Cookies"))).toBe(true);
+      expect(existsSync(path.join(taskDir(store.slug, "VIB-1", store.dataRoot), ".capture-input"))).toBe(false);
+      expect(existsSync(path.join(taskDir(store.slug, "VIB-2", store.dataRoot), ".capture-input", "cap_cut", "post.html"))).toBe(true);
     });
   });
 });

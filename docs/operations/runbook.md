@@ -796,7 +796,8 @@ page, `deployment.md` and `scripts.md` to:
 
 `npm run backup [-- --out <dir>]` writes a consistent point-in-time artefact (`VACUUM
 INTO` plus the store tree — `projects/`, `agents/`, `kb/`, `skills/` and
-`audit-exports/`, without task `workspace/` checkouts and `.repo-mirror/` mirrors — and a
+`audit-exports/`, without task `workspace/` checkouts, `.repo-mirror/` mirrors and the page
+renderer's `.captures/` and `.capture-input/` — and a
 manifest) **without** taking the lock, so it works on a live instance, and without opening
 the live database: with a `state/writer.lock` present at all it copies
 `projection.sqlite` and its `-wal` to `state/tmp/reader-<pid>/`, runs the `VACUUM INTO` on

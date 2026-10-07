@@ -737,6 +737,14 @@ export const TASK_SHARED_DIRS = ["workspace", "attachments", ".operator-scratch"
  */
 export const TASK_CAPTURE_SCRATCH_DIR = ".captures";
 
+/**
+ * Ruling 691: the folder a kept delivery's files are handed to the page
+ * renderer in, beside `deliveries/` in the task's own directory. The server's
+ * own: an agent reads a file of it by name and can neither list nor write it,
+ * so the server removes it itself.
+ */
+export const TASK_CAPTURE_INPUT_DIR = ".capture-input";
+
 /** Every per-task directory that can hold what a person's process wrote, so
  *  is removed as the task's person and never by the server's own recursive
  *  remove (ruling 485): the shared ones and the page renderer's scratch. */

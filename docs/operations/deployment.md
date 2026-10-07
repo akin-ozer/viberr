@@ -549,7 +549,10 @@ with retention: [`../architecture/data-model.md`](../architecture/data-model.md#
   project's `.repo-mirror/` bare mirror. Those two are re-derivable from the remote, a live
   run can be mid-write so the copy would be torn, and they dwarf what is actually truth (on
   the tree this was found on, 17M of git against 168K of project and task markdown); the
-  next run re-clones and re-fetches. `state/writer.lock` and `*.tmp` files are never
+  next run re-clones and re-fetches. A task's `.captures/` and `.capture-input/` are left
+  out too (ruling 691): they are what a page render works in, a browser's profile only its
+  uid can enter and a copy of a kept delivery, and the pictures it keeps are among the
+  attachments and the kept deliveries. `state/writer.lock` and `*.tmp` files are never
   copied. Without the key every sealed PAT, MCP credential and personal backend API key in
   the backed-up database is unreadable, so back an environment key up separately. A key
   the instance generated for itself is IN the artefact, as `state/instance-secrets.json`

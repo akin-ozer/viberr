@@ -1,4 +1,4 @@
-import { existsSync, readdirSync, statSync } from "node:fs";
+import { existsSync, readdirSync, rmSync, statSync } from "node:fs";
 import path from "node:path";
 import type { DatabaseSync } from "node:sqlite";
 import { taskDir } from "~/server/files/file-store-root.server";
@@ -8,7 +8,7 @@ import {
   listProjects,
   listProjectTasks,
 } from "~/server/projections/board-query.server";
-import { TASK_CAPTURE_SCRATCH_DIR } from "~/server/runtimes/agent-isolation.server";
+import { TASK_CAPTURE_INPUT_DIR, TASK_CAPTURE_SCRATCH_DIR } from "~/server/runtimes/agent-isolation.server";
 import { removeAgentTreeSync } from "~/server/runtimes/agent-trees.server";
 import { toError } from "~/shared/errors";
 import { taskWorkspaceLaunch } from "./workspace-git.server";
@@ -128,6 +128,24 @@ export function reclaimTerminalTaskWorkspaces(
             projectSlug: project.slug,
             taskKey: task.key,
             tree: path.basename(tree),
+            err: toError(error),
+          });
+        }
+      }
+      // Ruling 691: the copy of a kept delivery a cut render was reading is
+      // the server's own folder (no agent can write in it), so the server
+      // removes it itself. Nothing else comes to a closed task to do it.
+      const carried = path.join(dir, TASK_CAPTURE_INPUT_DIR);
+      if (existsSync(carried)) {
+        const size = dirSize(carried);
+        try {
+          rmSync(carried, { recursive: true, force: true });
+          bytes += size;
+        } catch (error) {
+          logger.warn("could not reclaim a finished task's workspace", {
+            projectSlug: project.slug,
+            taskKey: task.key,
+            tree: TASK_CAPTURE_INPUT_DIR,
             err: toError(error),
           });
         }

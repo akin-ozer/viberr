@@ -39,6 +39,7 @@ import {
 import { readTaskFile, updateTaskFile } from "~/server/files/task-writer.server";
 import { logger } from "~/server/logging/logger.server";
 import {
+  TASK_CAPTURE_INPUT_DIR,
   TASK_CAPTURE_SCRATCH_DIR,
   isServersOwnDir,
   passThroughDirForAgents,
@@ -456,9 +457,6 @@ interface RenderRequest {
   runId: string | null;
 }
 
-/** The folder a kept delivery's files are handed to the renderer in, beside
- *  `deliveries/` in the task's own directory. */
-const CAPTURE_INPUT_DIR = ".capture-input";
 
 /** One file's carry: its size, that it is past what a capture carries, or
  *  null when the kept delivery holds no regular file of that name. */
@@ -635,7 +633,7 @@ async function render(request: RenderRequest): Promise<Render> {
     pageTimeoutMs: PAGE_TIMEOUT_MS,
     maxBytes: IMAGE_READ_MAX_BYTES,
   };
-  const inputRoot = path.join(task, CAPTURE_INPUT_DIR);
+  const inputRoot = path.join(task, TASK_CAPTURE_INPUT_DIR);
   let notCarried = new Set<string>();
   const timeoutMs = JOB_BASE_MS + PAGE_TIMEOUT_MS * pages.length;
   let outcome: Awaited<ReturnType<typeof runPersonCommand>>;
