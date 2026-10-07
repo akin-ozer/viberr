@@ -1253,7 +1253,7 @@ describe("F19-27: the board confirm asks the server's own refusal questions", ()
   });
 
   it("ruling 135: names an unpushed delivered revision ABOVE the conflict, through the server's own predicate", () => {
-    // Canary: drop `unpushedRevisionBlockedReason` from `acceptanceCeremonyRefusal`.
+    // Canary: drop `unpushedRevisionBlockedReason` from `boardAcceptRefusal` (board-accept-confirm.tsx).
     const text = openConfirm({
       blockReason: null,
       workRevisionSha: "9".repeat(40),

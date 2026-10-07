@@ -75,8 +75,9 @@ interface RescanAnswer {
 
 /** The re-scan's post: its fetcher, whether it runs, and the press, which does
  *  nothing while the last one runs. Its answer is `useRescanAnswer`, which the
- *  page calls after every other hook, so the answer's toast still follows the
- *  moves' (as it did while one component held both). */
+ *  page calls after every other hook that has an effect, so its effect runs
+ *  last and the answer's toast still follows the moves' and the abandoned
+ *  acceptance's (as it did while one component held both). */
 export function useRescan(csrf: string) {
   const rescanFetcher = useFetcher<RescanAnswer>();
   const push = useToast();
