@@ -22,7 +22,7 @@ import {
 } from "~/features/notifications/desktop-alerts";
 import { MiniModal } from "~/features/org-settings/mini-modal";
 import { AgentAccountsPanel } from "./agent-accounts-panel";
-import { GithubOAuthCard } from "./profile-github";
+import { GithubOAuthIdentity } from "./profile-github";
 import type { ProfileBackend } from "./profile-query.server";
 
 /**
@@ -719,17 +719,19 @@ function ProfileGithub({
           </span>
         </div>
       ) : (
-        <GithubOAuthCard
-          connected={gh}
-          handle={user.githubHandle}
-          email={user.email}
-          busy={fetcher.state !== "idle"}
-          confirming={confirmDisconnect}
-          onConfirming={setConfirmDisconnect}
-          onDisconnect={() => submit({ intent: "github-disconnect" })}
-          connectBusy={connectBusy}
-          onConnect={startConnect}
-        />
+        <div className="cred-card">
+          <GithubOAuthIdentity
+            connected={gh}
+            handle={user.githubHandle}
+            email={user.email}
+            busy={fetcher.state !== "idle"}
+            confirming={confirmDisconnect}
+            onConfirming={setConfirmDisconnect}
+            onDisconnect={() => submit({ intent: "github-disconnect" })}
+            connectBusy={connectBusy}
+            onConnect={startConnect}
+          />
+        </div>
       )}
       {(error || connectErr) && (
         <div className="login-err spaced" role="alert">

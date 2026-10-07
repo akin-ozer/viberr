@@ -312,7 +312,7 @@ describe("ProfilePage", () => {
     expect(container.querySelector(".cred-ok")).toBeTruthy();
     expect(container.querySelectorAll(".scope-chip.miss")).toHaveLength(0);
     // Ruling 149: disconnecting an identity is destructive, so the control
-    // carries the danger label. Canary: drop `danger` in `GithubConnected`
+    // carries the danger label. Canary: drop `danger` in `GithubStatus`
     // (profile-github.tsx).
     expect(
       Array.from(container.querySelector(".cred-ok button")!.classList),
@@ -412,7 +412,7 @@ describe("ProfilePage", () => {
  * Ruling 368: Connect named its work ("Connecting…") but kept the GitHub glyph
  * and sat at the .45 refused step with a not-allowed cursor while better-auth
  * built the OAuth redirect. It is `aria-busy` now, the loader spinning.
- * Canary: drop `aria-busy={connectBusy || undefined}` in `GithubNotConnected`
+ * Canary: drop `aria-busy={connectBusy || undefined}` in `GithubStatus`
  * (profile-github.tsx).
  */
 describe("ruling 368: GitHub Connect in flight", () => {

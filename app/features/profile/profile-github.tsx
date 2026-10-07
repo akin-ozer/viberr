@@ -7,8 +7,12 @@ import { Icon } from "~/ui/icon";
  * `profile-page.tsx` along the task page's recipe): the scopes, and either the
  * connection with its Disconnect or the Connect. Hook-free: `ProfileGithub`
  * owns the connect, the confirm and the fetcher, and hands each in.
+ *
+ * This is the card's CONTENTS. Its `.cred-card` box stays in `ProfileGithub`,
+ * where the page chooses between it and the quiet note, so a revalidation that
+ * flips that choice keeps the same `<div>` node, as it did before the split.
  */
-export function GithubOAuthCard({
+export function GithubOAuthIdentity({
   connected,
   handle,
   email,
@@ -33,7 +37,7 @@ export function GithubOAuthCard({
   onConnect: () => void;
 }) {
   return (
-    <div className="cred-card">
+    <>
       <div className="cred-top">
         <Icon name="github" />
         <span className="cred-name">Personal OAuth identity</span>
@@ -51,40 +55,54 @@ export function GithubOAuthCard({
           user:email
         </span>
       </div>
-      {connected ? (
-        <GithubConnected
-          handle={handle}
-          email={email}
-          busy={busy}
-          confirming={confirming}
-          onConfirming={onConfirming}
-          onDisconnect={onDisconnect}
-        />
-      ) : (
-        <GithubNotConnected handle={handle} connectBusy={connectBusy} onConnect={onConnect} />
-      )}
-    </div>
+      <GithubStatus
+        connected={connected}
+        handle={handle}
+        email={email}
+        busy={busy}
+        confirming={confirming}
+        onConfirming={onConfirming}
+        onDisconnect={onDisconnect}
+        connectBusy={connectBusy}
+        onConnect={onConnect}
+      />
+    </>
   );
 }
 
-/** Connected: whom the audit records name, and the Disconnect behind its
- *  confirm. */
-function GithubConnected({
+/**
+ * Connected: whom the audit records name, and the Disconnect behind its
+ * confirm. Not connected: what that costs, and the Connect.
+ *
+ * One component with the choice at its root, never one per state: the two
+ * boxes line up as glyph, sentence, button, so when a revalidation flips the
+ * connection React keeps the box, the glyph, the sentence and the button and
+ * the focused Disconnect simply becomes the Connect (and back). As two
+ * components the button was replaced, and the confirm's focus return found its
+ * opener gone and dropped a keyboard user on <body>.
+ */
+function GithubStatus({
+  connected,
   handle,
   email,
   busy,
   confirming,
   onConfirming,
   onDisconnect,
+  connectBusy,
+  onConnect,
 }: {
+  connected: boolean;
   handle: string | null;
   email: string;
   busy: boolean;
   confirming: boolean;
   onConfirming: (confirming: boolean) => void;
   onDisconnect: () => void;
+  connectBusy: boolean;
+  onConnect: () => void;
 }) {
-  return (
+  return connected ? (
     <div className="cred-ok">
       <Icon name="check" />
       <span>
@@ -124,20 +142,7 @@ function GithubConnected({
         />
       )}
     </div>
-  );
-}
-
-/** Not connected: what that costs, and the Connect. */
-function GithubNotConnected({
-  handle,
-  connectBusy,
-  onConnect,
-}: {
-  handle: string | null;
-  connectBusy: boolean;
-  onConnect: () => void;
-}) {
-  return (
+  ) : (
     <div className="cred-warn">
       <Icon name="alert" />
       {/* Ruling 154 (pass 35, G35-3): an org admin can link the handle
