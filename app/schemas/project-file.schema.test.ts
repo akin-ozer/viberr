@@ -230,12 +230,12 @@ describe("parseProjectFrontmatter — fallback wording (ruling 458(h))", () => {
 });
 
 /**
- * Ruling 684(a): every checkout path is `<taskDir>/workspace/<name>`, so a
+ * Ruling 689(a): every checkout path is `<taskDir>/workspace/<name>`, so a
  * hand-edited `owner/..` made the checkout the task directory itself, and
  * `owner/.` made it the whole workspace, support checkouts included. The
  * "no `.git/HEAD`, remove and re-clone" step could remove either.
  */
-describe("parseProjectFrontmatter — repo (ruling 684(a))", () => {
+describe("parseProjectFrontmatter — repo (ruling 689(a))", () => {
   const read = (repo: string) =>
     parseProjectFrontmatter({ slug: "proj", repo }, { fallbackSlug: "proj" });
 

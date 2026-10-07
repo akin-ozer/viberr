@@ -41,7 +41,7 @@ import { useFetcherResult } from "~/ui/use-fetcher-result";
  * click merged an unreviewed head into main) moved the apply path up into
  * `task-detail-page.tsx`, because the click has to reach the page's confirm
  * state — a section that owns its own fetcher structurally CANNOT ask first.
- * The page owns the fetcher (`useRecommendationActions`, ruling 684(d)) and
+ * The page owns the fetcher (`useRecommendationActions`, ruling 689(d)) and
  * the ceremony, and routes Apply through `AcceptConfirm` (mode
  * `apply-recommendation`); `TaskMainColumn` renders `OperatorRecommendations`
  * with the page's handlers and owns nothing. Do not re-add a local wrapper

@@ -527,7 +527,7 @@ design-system or cross-file decision — revisit deliberately, not per lint run.
   surfaces (BoardPage, SettingsPage, DecisionPacket, Timeline, the agents and
   org-settings modals, and their siblings). Splitting them is a structural refactor per
   surface, best done with the e2e suite and the bundle ratchet beside it, not as a lint
-  sweep. Ruling 684(d) piloted the recipe on TaskDetailPage, which no longer carries
+  sweep. Ruling 689(d) piloted the recipe on TaskDetailPage, which no longer carries
   either finding: its posts became hooks that each own their fetcher, toast and confirm
   (`task-detail-actions.tsx`), what it reads off its props became pure functions
   (`task-detail-derive.ts`), and its regions became hook-free components that each take

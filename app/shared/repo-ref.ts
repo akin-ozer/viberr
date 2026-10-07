@@ -1,5 +1,5 @@
 /**
- * Ruling 684(a): the one shape a project's repository takes, `owner/name` as
+ * Ruling 689(a): the one shape a project's repository takes, `owner/name` as
  * GitHub allows it. The owner is letters, digits and single hyphens, neither
  * first nor last, up to 39 characters; the name is letters, digits, `.`, `_`
  * and `-`, up to 100, and never `.` or `..`. Every checkout path is

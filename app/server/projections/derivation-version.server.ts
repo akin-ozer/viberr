@@ -41,7 +41,7 @@ import type { RescanSummary } from "./rebuilder.server";
  * from the older `label · add · del` line too. `evidence_json` written by an
  * older build holds `add` and `del`, which the timeline no longer reads, so an
  * unchanged task file would draw its rows with no result without this stamp.
- * 7 = ruling 684(a): `projects.repo` reads NULL for a project.md `repo`
+ * 7 = ruling 689(a): `projects.repo` reads NULL for a project.md `repo`
  * outside `REPO_SLUG_RE`, with its error diagnostic projected, and the cascade
  * carries the NULL into `task_projections.repo`. A row an older build wrote
  * from a hand-edited `owner/..` keeps it, and every GitHub reader keeps calling
