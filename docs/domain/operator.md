@@ -282,7 +282,9 @@ by it, in its embedded mode (the final text only), below every other instruction
 prompt, and never names it. It rides every drive on both backends whatever the project's
 persona and skill grants say. It is no grant, so the Agents page and the run's
 `run_inputs` skills row never list it; `personaChars` counts it with the rest of the
-prompt.
+prompt. Ruling 689 gives every
+specialist run the same guide under a framing of its own
+([agents-and-runtime.md](agents-and-runtime.md)).
 
 `operatorTurnDoctrine` builds the trigger-specific instruction and
 `operatorTurnInstruction` wraps it for every trigger: it PREPENDS, in order, the

@@ -78,6 +78,7 @@ runbook's "Agent runtimes").
    existing admin with an unverifiable legacy hash is re-hashed to the configured
    password.
 4. Writes the `operator`, `developer`, `reviewer` templates (`SEED_AGENT_PROFILES`) and
+   the library's `writer` and `editor` (`LIBRARY_AGENT_PROFILES`, ruling 692), then
    `rebuildAll(force)`; audit `seed.baseline`.
 5. `seedOrgResources`: three KBs (`architecture-notes`, `api-contracts`,
    `deploy-runbooks`, 15 files), four skills (`conventional-commits`,

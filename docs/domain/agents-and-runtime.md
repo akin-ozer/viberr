@@ -1736,12 +1736,16 @@ runtime's answer for a missing grant.
   tell whoever wrote it how much reaches no such run (ruling 679). The controller's own turn
   reads its skills under 40 000 (`CONTROLLER_SKILL_BUDGET`) and draws its guide from that
   first, so the guide this repository ships arrives whole whatever is attached beside it.
-- **The writing guide** (ruling 502): the operator's and the controller's prompts close
-  their static block with `HUMANIZER_PROMPT_SECTION`, the Humanizer skill vendored
+- **The writing guide** (rulings 502 and 689): the operator's and the controller's prompts
+  close their static block with `HUMANIZER_PROMPT_SECTION`, the Humanizer skill vendored
   unchanged in `app/server/runtimes/humanizer/` (MIT, pinned by hash,
   `humanizer.server.ts`). It is not a store skill and no profile grants it, so it spends
   none of the budget above, and no grant list, plugin or `run_inputs` skills row names
-  it. A specialist run does not carry it.
+  it. Every specialist run carries the same guide as `HUMANIZER_SPECIALIST_SECTION`, the
+  last part of its static block on both backends, under a framing of its own: the prose
+  it writes includes the task's result, a person's own writing (samples, or a voice guide
+  made from them) outranks the guide, and a run that reviews prose a person will read
+  holds it to the guide and says what it found in plain words.
 - **The persona's order** (ruling 370): `buildSpecialistPromptPrefix` returns the persona
   as a static block (definition, the native-skill banner, the attached-resources banner,
   injected skill bodies, the knowledge-base notes and indexes, the MCP governance rules,
@@ -2160,14 +2164,29 @@ and the shipped base templates, refreshed by hash through `state/shipped-assets.
 (hand-edited copies kept and warned about): the operator and controller profiles ship as
 files in `app/server/seed/assets/`; the Developer and Reviewer templates are generated
 from `SEED_AGENT_PROFILES` (`builtinAgentProfileTemplate`, `default-assets.server.ts`)
-and the boot backfill writes them with `kb: []`, because it installs no knowledge bases:
+and the boot backfill writes them with `kb: []`, because it installs no knowledge bases.
+The Writer and the Editor (`LIBRARY_AGENT_PROFILES`, ruling 692) are written by the same
+two writers and are in the library only: no project's default roster holds them, and a
+board gets them when the controller passes them as `agents` or a person adds them.
 
 | Profile | Kind | Backends | Model | Stages | Skills / KB | Grants |
 |---|---|---|---|---|---|---|
 | `operator` | operator | claude, codex | `orchestration runtime` (a sentinel, not a catalog id; falls back to the backend default) | all (`spanAll`) | `viberr-app-expertise` / `architecture-notes` after `npm run seed`, `kb: []` in the base template | direct: dispatch, packets, typed events, deliver; recommend: transitions, acceptance; human: repo write, done, policy |
 | `developer` | specialist | claude, codex (Claude first) | `sonnet` | ready, impl | `developer-expertise` / `architecture-notes`, `api-contracts` (seed only) | direct: repo write, branch, commit/push, open PR, comments, ask, browser, egress, advisory items; human: merge, done |
 | `reviewer` | specialist | claude | `sonnet` | impl, review | `reviewer-expertise` / `api-contracts` (seed only) | direct: read diff, validation suites, tests, evidence, quality flags, comments, ask, verdict, approve, request changes; human: merge, done, commit/push |
+| `writer` (library) | specialist | claude, codex (Claude first) | `opus` | ready, impl | `writer-expertise` / none | direct: repo write, branch, commit/push, open PR (all four withheld on a board made to deliver results, ruling 667), comments, ask, evidence, browser, egress, advisory items; human: merge, done |
+| `editor` (library) | specialist | claude | `opus` | impl, review | `editor-expertise` / none | direct: read diff, evidence, quality flags, comments, ask, verdict, approve, request changes, egress; human: merge, done, commit/push |
 | `controller` | controller | claude | `sonnet` | n/a | `controller-guide` / `controller-handbook` | none (tools are gated by the asker's RBAC) |
+
+The Writer and the Editor are for a task whose result is prose a person puts their name
+to. Their manuals (`writer-expertise`, `editor-expertise`) say how such work is done on
+any subject: a fact from outside rests on a source the run opened and kept (ruling 690),
+code is run, or checked without running and presented as untested, or quoted with its
+origin, the first person comes only from the person's notes and answers, a person is
+asked once and only what they alone know, their voice is taken from their own writing
+and nothing of a sample is carried over, and the page is looked at as its reader sees it
+(ruling 691). Each manual stays within half of the 24 000 characters a run with no
+checkout is given, so a board's own skill still fits beside it.
 
 The shipped operator doctrine (`operator.definition.md`, upgraded in place through
 `PRIOR_SHIPPED_HASHES`) tells the operator that a wait on other work is a fact with its

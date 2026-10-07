@@ -98,6 +98,21 @@ own pieces:
   toolchain, pipeline, generator, validator or CLI, no gates (a files-only delivery owes
   none, ruling 482), and no Developer and Reviewer to build them, unless the person asked
   for that software.
+- A person is asked only what they alone know, once: the guide has the controller write
+  that into the skill of the step that asks, and a choice the agent can make it makes and
+  lists as an assumption (ruling 692).
+- When the result is prose a person puts their name to (an article, a report, a proposal,
+  a letter), the board starts from the shipped Writer and Editor (ruling 692): `writer`
+  and `editor` in `agents`, the Writer handed delivery and the Editor the required
+  reviewer. The board's own skill and rulings then hold only what is this board's: what a
+  task returns, where it goes and in which format, and whose voice it is. The name on a
+  person's account is never written in as the author's: the byline comes from their own
+  published work or from asking. Their voice comes from their own writing, turned into a
+  voice guide on a task the controller files for the Writer and continues from on
+  acceptance (ruling 685), with a sample itself kept only as `kind: "sample"`.
+- A result that states facts keeps its sources (`keep_source`, ruling 690), and a result
+  that is a page is pictured at a desktop and a phone width before it is accepted
+  (`capture_page`, ruling 691).
 
 A results board needs no repository (ruling 667). The controller says what the board
 delivers when it creates it (`create_project`'s `delivers`), and a results board is
