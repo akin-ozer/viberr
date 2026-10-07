@@ -336,6 +336,19 @@ scan run from inside an agent worktree under `.claude/` sees no files at all.
 
 ## True to the letter, no change (no user-visible effect)
 
+- `react-doctor/only-export-components` — a component file whose non-component export IS
+  the module's reason to exist, where moving it costs more than a dev-only full reload:
+  app/ui/icon.tsx `storeIcon` (checks `name in ICON_PATHS`, the private table that
+  `app.css.test.ts` reads from this file's source and `vite-config.test.ts` pins into the
+  shell chunk), app/ui/pill.tsx `readinessLabel` / `validationLabel` / `validationQuiet`
+  (lookups into ruling 1's one vocabulary table, `READINESS_BY_VALUE` /
+  `VALIDATION_BY_VALUE`, that the pills render from), app/ui/markdown.tsx
+  `sameMarkdownProps` (`Markdown`'s own `memo` comparator, measured by
+  `markdown.perf.test.ts`), and controller/controller-examples.tsx (rulings 419(g) and 516
+  keep the examples and `ControllerExampleList` in one module). Every other flagged export
+  lives in a sibling `.ts` module (the `initials.ts` / `avatar.tsx` pattern). Verify each
+  still reads the private table or is still that `memo`'s comparator.
+
 - `react-doctor/rerender-memo-with-default-value` — `= []`/`= {}` prop defaults on
   task-detail-page.tsx, board-page.tsx `epics` and controller-page.tsx `examples`: the one
   route always supplies a never-`undefined` loader field, so the default fires only in bare
