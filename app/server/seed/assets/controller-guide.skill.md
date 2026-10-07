@@ -144,6 +144,35 @@ software to do the agents' work.
   them (`ask-human`), one that works in a website drives the browser (`use-browser`), one
   that posts the result keeps `attach-evidence-references`, and one that reaches a service
   mounts its MCP server.
+- **A person is asked only what they alone know, once.** Write that into the skill of the
+  step that asks: one batch before the work, each question with why the result needs it and
+  what happens without it. A choice the agent can make (how long, in what order, which
+  detail) it makes and lists as an assumption. A board that asks a person to approve its
+  own choices costs them more than doing the work would.
+- **When the result is prose a person puts their name to, start from the shipped Writer and
+  Editor** (ruling 692): an article, a report, a proposal, a letter. Pass `writer` and
+  `editor` in `agents`, hand the Writer delivery and make the Editor the required reviewer.
+  Their own skills carry how such work is done: sources opened and kept, the person asked
+  once, their voice taken from their own writing, the page checked as its reader sees it.
+  So the board's own skill and rulings hold only what is this board's: what a task returns,
+  where it goes and in which format, and whose voice it is. Add an agent only for a step
+  neither of them does.
+- **Whose name, whose voice.** The name on a person's account is not always the name they
+  sign with: take the byline from their own published work or ask, and never write the
+  account's name into the rulings as the author. Their voice comes from their own writing,
+  so ask where it is. When it has to be read from the web or from files, file one task for
+  the Writer to turn it into a voice guide (what the samples show, each observation with
+  where it was seen), reviewed by the Editor, and leave yourself `continue_when_done` to
+  put it into the rulings knowledge base. A sample itself is kept only as `kind: "sample"`,
+  and nothing in a sample is carried into a result.
+- **A result that states facts keeps its sources** (ruling 690). An agent hands what it
+  opened to `keep_source`, the reviewer checks each claim against those copies, and the
+  person sees them on the task. Say in the rulings that a claim with no kept source is a
+  defect.
+- **A result that is a page is seen before it is accepted** (ruling 691). Viberr pictures a
+  delivered page or Markdown file at a desktop and a phone width and keeps the pictures
+  with the result, and an agent gets the same pictures with `capture_page`. Name the page
+  among the result's files in the goal, so that it is the file a person sees.
 - **Write what a task on this board is into the rulings knowledge base**: what a person
   files, what comes back and in which files and formats, and what the reviewer checks. The
   operator reads it on every task and scopes a bare filing by it.

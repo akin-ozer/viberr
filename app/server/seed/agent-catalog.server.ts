@@ -200,6 +200,62 @@ export const SEED_AGENT_PROFILES: SeedAgentProfile[] = [
   ),
 ];
 
+/**
+ * Ruling 692: the agents that ship in the library beside the base roster, for a
+ * board whose result is prose a person puts their name to. They are global
+ * templates like the Developer and the Reviewer, written by the same two
+ * writers (the boot backfill and `npm run seed`), but they are in no project's
+ * default roster: the controller passes them as a board's `agents`, or a person
+ * adds them from the library. Kept out of {@link SEED_AGENT_PROFILES}, which
+ * feeds every project's preinstalled deployments.
+ */
+export const LIBRARY_AGENT_PROFILES: SeedAgentProfile[] = [
+  profile(
+    {
+      id: "writer", kind: "specialist", name: "Writer", role: "Writing",
+      // Claude first, as the Developer is; Codex stays an offered backend.
+      icon: "edit", backends: ["claude", "codex"], model: "opus",
+      scope: "Global base",
+      stages: ["ready", "impl"],
+      resources: { skills: ["writer-expertise"], mcps: [], kb: [] },
+    },
+    {
+      // The Writer is the delivering agent of a prose task. On a board with a
+      // repository (a site whose posts are files in git) it commits the piece on
+      // the task's branch, so it holds the delivery grants the Developer holds;
+      // a board made to deliver results withholds them at creation (ruling 667)
+      // and the piece comes back as files on the task. It ships WITH the browser
+      // and web egress as an explicit pair, for the reason the Developer does:
+      // a screenshot of the real thing is one of the three pictures a piece may
+      // carry, and the mount refuses without egress.
+      direct: ["Execute code or write to the repo", "Create the task-key branch", "Commit & push to the branch", "Open the review pull request", "Post mid-run comments", "Ask the human a question", "Attach evidence references", "Move the task to Review", "Drive a live web browser", "Search & fetch from the web"],
+      recommend: [],
+      forbidden: ["Merge a pull request", "Transition a task to Done"],
+    },
+    "Writes a piece of prose that goes out under a person's name (an article, a report, a proposal, a page) from their notes and from sources it opens and keeps on the task. Asks the person once for what only they know, writes in their voice from their own writing, and delivers the piece in the form its destination takes.",
+  ),
+  profile(
+    {
+      id: "editor", kind: "specialist", name: "Editor", role: "Editing & fact check",
+      // Claude only, as the Reviewer is: it looks at pictures of the page, and
+      // an image a tool returns is not proven to reach a Codex model.
+      icon: "eye", backends: ["claude"], model: "opus",
+      scope: "Global base",
+      stages: ["impl", "review"],
+      resources: { skills: ["editor-expertise"], mcps: [], kb: [] },
+    },
+    {
+      // The quality specialist of a prose task, shaped like the Reviewer: it
+      // holds the verdict and no way to write the piece. Web egress is explicit
+      // because opening every link is part of its job.
+      direct: ["Read the repository & diff", "Attach evidence references", "Post quality-flag events", "Post mid-run comments", "Ask the human a question", "Report a validation verdict", "Approve the review", "Request changes", "Search & fetch from the web"],
+      recommend: [],
+      forbidden: ["Merge a pull request", "Transition a task to Done", "Commit & push to the branch"],
+    },
+    "The quality specialist of a prose task: reads the piece cold beside the person's own writing, checks every fact against the sources kept on the task, looks at the page as a reader sees it, then records an approve or request-changes verdict that gates acceptance. Never rewrites the piece.",
+  ),
+];
+
 // ------------------------------------------------------------ deployments
 
 /** The default agent roster deployed into a project — the operator plus the

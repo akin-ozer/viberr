@@ -25,7 +25,7 @@ import {
 } from "~/server/files/file-store-root.server";
 import { logger } from "~/server/logging/logger.server";
 import { rebuildAll } from "~/server/projections/rebuilder.server";
-import { SEED_AGENT_PROFILES } from "./agent-catalog.server";
+import { LIBRARY_AGENT_PROFILES, SEED_AGENT_PROFILES } from "./agent-catalog.server";
 import { builtinAgentProfileTemplate } from "./default-assets.server";
 import { SEED_DEFAULT_PASSWORD } from "./seed-credentials";
 
@@ -208,7 +208,8 @@ export async function runSeed(
   //    permanently. `kbGrants: true` because `npm run seed` also seeds the
   //    backing knowledge bases (seedOrgResources); the bare boot backfill
   //    doesn't, which is the one field the two writers differ on.
-  for (const profile of SEED_AGENT_PROFILES) {
+  //    Ruling 692: the library's Writer and Editor are written beside them.
+  for (const profile of [...SEED_AGENT_PROFILES, ...LIBRARY_AGENT_PROFILES]) {
     writeFileAtomic(
       agentProfileFilePath(profile.frontmatter.id, dataRoot),
       builtinAgentProfileTemplate(profile, { kbGrants: true }),
@@ -225,14 +226,14 @@ export async function runSeed(
     details: {
       reset: options.reset ?? false,
       adminCreated: bootstrap.created,
-      agentProfiles: SEED_AGENT_PROFILES.length,
+      agentProfiles: SEED_AGENT_PROFILES.length + LIBRARY_AGENT_PROFILES.length,
     },
   });
 
   const summary: SeedSummary = {
     adminCreated: bootstrap.created,
     adminEmail,
-    agentProfiles: SEED_AGENT_PROFILES.length,
+    agentProfiles: SEED_AGENT_PROFILES.length + LIBRARY_AGENT_PROFILES.length,
     rescanChanged: rescan.changed,
   };
   logger.info("seed complete", { ...summary });

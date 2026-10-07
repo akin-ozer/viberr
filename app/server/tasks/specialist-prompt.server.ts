@@ -27,6 +27,7 @@ import {
 import { attachmentsDropSection, browserPersonaSection } from "./specialist-browser-mcp.server";
 import { githubReadPersonaSection } from "~/server/github/agent-github-read.server";
 import type { CloneCredential } from "./git-clone-auth.server";
+import { HUMANIZER_SPECIALIST_SECTION } from "~/server/runtimes/humanizer.server";
 import { type PromptPrefix, sortedBy, sortedNames } from "~/server/runtimes/prompt-prefix.server";
 import { PEOPLE_RULE } from "~/server/runtimes/people-rule.server";
 import {
@@ -322,6 +323,12 @@ export function buildSpecialistPromptPrefix(input: SpecialistPersonaInput): Prom
   if (input.githubRead) {
     parts.push(githubReadPersonaSection(input.githubRead.repo));
   }
+  // Ruling 689: the writing guide the two coordinators already carry (ruling
+  // 502), for the agents that write a task's result and the agents that
+  // review it. It closes the static block on both backends, whatever the
+  // profile grants, and it is no store skill, so it spends none of the skill
+  // budget above and no disclosure lists it.
+  parts.push(HUMANIZER_SPECIALIST_SECTION);
 
   // ------------------------------------------------ the per-run tail (dynamic)
   const dynamic: string[] = [];

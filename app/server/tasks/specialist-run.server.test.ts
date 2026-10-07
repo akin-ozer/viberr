@@ -1,3 +1,4 @@
+import { HUMANIZER_SPECIALIST_SECTION } from "~/server/runtimes/humanizer.server";
 import { joinedPrompt } from "~/server/runtimes/prompt-prefix.server";
 import type { TaskMutationContext } from "~/server/tasks/task-mutation.server";
 import {
@@ -3497,7 +3498,9 @@ describe("buildSpecialistPromptPrefix — attached resources", () => {
       skills: names,
       dataRoot,
     }));
-    const zChars = (persona.match(/Z/g) ?? []).length;
+    // The writing guide that closes the static block (ruling 689) is no skill
+    // and spends none of this budget, so the count is taken without it.
+    const zChars = (persona.replace(HUMANIZER_SPECIALIST_SECTION, "").match(/Z/g) ?? []).length;
     // Per-skill budgeting produced 4 × 24k = 96k characters of skill text.
     expect(zChars).toBeLessThanOrEqual(SKILL_INJECTION_BUDGET);
     // …and the squeezed-out skills say so rather than vanishing.

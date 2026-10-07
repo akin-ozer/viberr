@@ -44,6 +44,7 @@ import {
 } from "~/server/files/task-writer.server";
 import { logger } from "~/server/logging/logger.server";
 import {
+  ASK_HUMAN_ONLY_NOTE,
   ASK_HUMAN_RECOMMEND_NOTE,
   ASK_HUMAN_REPLY_NOTE,
   RELAY_FIELD_NOTE,
@@ -426,7 +427,9 @@ export function buildAgentToolkit(deps: AgentToolkitDeps): AgentToolkit | null {
     tools.push(
       tool(
         "ask_human",
-        "Ask the humans on this task a question you are blocked on; it opens a decision card they resolve from the task page. Use it ONLY for a genuine decision you cannot make (ambiguous requirement, conflicting instructions, a choice only a human may make). Give 2-4 concrete answer options when they exist. The answer does not arrive during THIS run: end this run with a report of what you did and what is pending. You WILL be resumed with the decision, in this same session, so you can carry on from where you stopped; do not restart your work or re-ask.",
+        "Ask the humans on this task a question you are blocked on; it opens a decision card they resolve from the task page. Use it ONLY for a genuine decision you cannot make (ambiguous requirement, conflicting instructions, a choice only a human may make). " +
+          ASK_HUMAN_ONLY_NOTE +
+          " Give 2-4 concrete answer options when they exist. The answer does not arrive during THIS run: end this run with a report of what you did and what is pending. You WILL be resumed with the decision, in this same session, so you can carry on from where you stopped; do not restart your work or re-ask.",
         {
           title: z.string().describe("The question, one sentence."),
           body: z

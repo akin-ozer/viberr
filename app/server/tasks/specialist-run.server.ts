@@ -18,6 +18,7 @@ import {
   supportingEngagements,
 } from "~/schemas/task-file.schema";
 import {
+  ASK_HUMAN_ONLY_NOTE,
   AGENT_OUTCOME_JSON_SCHEMA,
   holdsCollaborationGrant,
   resolveAgentCollab,
@@ -1254,7 +1255,9 @@ async function dispatchAgentRun(
     }
     if (collab.ask) {
       collabNotes.push(
-        "- `ask_human`: raise a question you are blocked on as a decision card for the humans. The answer does not arrive during this run; note it in your report and finish. You will be RESUMED in this same session with the decision, so do not restart your work when that happens.",
+        "- `ask_human`: raise a question you are blocked on as a decision card for the humans. " +
+          ASK_HUMAN_ONLY_NOTE +
+          " The answer does not arrive during this run; note it in your report and finish. You will be RESUMED in this same session with the decision, so do not restart your work when that happens.",
       );
     }
     if (collab.verdict) {
