@@ -49,6 +49,53 @@ export const TOKEN_PATTERN_SOURCE = [
 /** `scheme://user:secret@host` — git echoes remote URLs verbatim. */
 const URL_USERINFO_RE = /([a-z][a-z0-9+.-]*:\/\/)[^\s/@]*:[^\s/@]*@/gi;
 
+const TOKEN_AT_WORD_START_RE = new RegExp(`(?<![A-Za-z0-9_-])(?:${TOKEN_PATTERN_SOURCE})`, "g");
+
+/**
+ * Whether a token the pattern matched is a key. The GitHub prefixes are
+ * never words. `sk-` followed by sixteen letters, digits and hyphens is also
+ * a slug or a class name (SK hynix's newsroom, scikit-learn's stylesheet), so
+ * an `sk-` match counts only when it holds what those do not: sixteen letters
+ * and digits in a row, or a capital letter together with a digit.
+ */
+function readsAsKey(token: string): boolean {
+  if (!token.startsWith("sk-")) return true;
+  return /[A-Za-z0-9]{16}/.test(token) || (/[A-Z]/.test(token) && /\d/.test(token));
+}
+
+/** The characters a URL's scheme is made of, after its first letter. */
+const SCHEME_REST_RE = /[0-9+.-]/;
+const SCHEME_LETTER_RE = /[a-z]/i;
+/** What stands between `://` and the `@` of a userinfo: no space, `/` or `@`. */
+const USERINFO_SPAN_RE = /[^\s/@]*/y;
+
+/**
+ * {@link URL_USERINFO_RE}'s shape, `scheme://user:secret@`, found without
+ * backtracking: for each `://`, a letter must lead the scheme characters
+ * before it, and what follows must reach an `@` past a `:` with no space or
+ * `/` on the way. Each character of the text is looked at a bounded number of
+ * times, because a `/` ends both walks and every `://` holds one.
+ */
+function holdsUrlUserinfo(text: string): boolean {
+  for (let at = text.indexOf("://"); at !== -1; at = text.indexOf("://", at + 3)) {
+    if (!schemeEndsAt(text, at)) continue;
+    USERINFO_SPAN_RE.lastIndex = at + 3;
+    const span = USERINFO_SPAN_RE.exec(text)?.[0] ?? "";
+    if (text[at + 3 + span.length] === "@" && span.includes(":")) return true;
+  }
+  return false;
+}
+
+/** Whether a scheme (`[a-z][a-z0-9+.-]*`) ends right before `end`. */
+function schemeEndsAt(text: string, end: number): boolean {
+  for (let i = end - 1; i >= 0; i -= 1) {
+    const ch = text[i]!;
+    if (SCHEME_LETTER_RE.test(ch)) return true;
+    if (!SCHEME_REST_RE.test(ch)) return false;
+  }
+  return false;
+}
+
 /**
  * Ruling 690: whether a text holds what reads as a credential, by the two
  * shapes the scrub below removes on sight: a token by its prefix, and a
@@ -56,17 +103,25 @@ const URL_USERINFO_RE = /([a-z][a-z0-9+.-]*:\/\/)[^\s/@]*:[^\s/@]*@/gi;
  * project member can open it, so the keep refuses on these rather than
  * rewriting what it was handed.
  *
- * A token is taken only where it starts a word. The scrub can afford to
- * redact the tail of `task-management-best-practices` in a line of git
- * output; a refusal cannot, because that is an ordinary page address and the
- * agent has no other one to give.
+ * A token is taken only where it starts a word, and an `sk-` one only when
+ * it reads as a key and not as words. The scrub can afford to redact the tail
+ * of `task-management-best-practices` in a line of git output; a refusal
+ * cannot, because that is an ordinary page address and the agent has no other
+ * one to give. Nor can it refuse `sk-hynix-reports-third-quarter-2025` in an
+ * address or `sk-toggleable__content` in a page's markup.
+ *
+ * It reads up to 4 MB of a file an agent saved, inside the server's own
+ * process, so it never backtracks over the text: the scrub's userinfo pattern
+ * tried a scheme at every character of a long unbroken run and scanned to the
+ * run's end each time, which held the event loop for minutes on a megabyte of
+ * hex. The token pattern starts at a fixed prefix; the userinfo shape is
+ * found from each `://` outwards.
  */
 export function readsAsCredential(text: string): boolean {
-  return (
-    new RegExp(`(?<![A-Za-z0-9_-])(?:${TOKEN_PATTERN_SOURCE})`).test(text) ||
-    // A copy without the global flag: `.test` on the shared one keeps state.
-    new RegExp(URL_USERINFO_RE.source, "i").test(text)
-  );
+  for (const match of text.matchAll(TOKEN_AT_WORD_START_RE)) {
+    if (readsAsKey(match[0])) return true;
+  }
+  return holdsUrlUserinfo(text);
 }
 
 /** ANSI CSI escape sequences (`ESC [ … m` and friends): git colourises
