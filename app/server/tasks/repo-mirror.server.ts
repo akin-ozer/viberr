@@ -18,6 +18,7 @@ import { projectDir } from "~/server/files/file-store-root.server";
 import { logger } from "~/server/logging/logger.server";
 import { shareTreeBuiltForAgents, type AgentLaunch } from "~/server/runtimes/agent-isolation.server";
 import { removeAgentTree } from "~/server/runtimes/agent-trees.server";
+import { REPO_SLUG_RE } from "~/shared/repo-ref";
 import {
   gitErrorText,
   redactGitOutput,
@@ -106,14 +107,11 @@ const execFileAsync = promisify(execFile);
  * good one when what it serves is a WHOLE one.
  */
 
-/** `owner/repo` — the only shape that becomes a mirror directory name. Anything
- *  else (a hand-edited `project.md`, a traversal attempt) skips the cache
- *  entirely rather than deriving a path from it. */
-const REPO_SEGMENT_RE = /^[A-Za-z0-9._-]+$/;
-
 /**
  * Where this project caches its repository, or null when `repo` is not a plain
- * `owner/name` pair.
+ * `owner/name` pair (`REPO_SLUG_RE`, ruling 684(a)). `project.md` already reads
+ * any other value as no repository; a caller that hands one in anyway skips
+ * the cache rather than deriving a path from it.
  *
  * Lives beside `tasks/`, NOT inside a task workspace: the boot reclaim only
  * removes `<taskDir>/workspace` (`workspace-retention.server`), the projection
@@ -126,22 +124,11 @@ export function projectRepoMirrorDir(
   repo: string,
   dataRoot?: string,
 ): string | null {
-  const [owner, name, ...rest] = repo.split("/");
-  if (
-    rest.length > 0 ||
-    !owner ||
-    !name ||
-    !REPO_SEGMENT_RE.test(owner) ||
-    !REPO_SEGMENT_RE.test(name) ||
-    owner.startsWith(".") ||
-    name.startsWith(".")
-  ) {
-    return null;
-  }
+  if (!REPO_SLUG_RE.test(repo)) return null;
   return path.join(
     projectDir(projectSlug, dataRoot),
     ".repo-mirror",
-    `${owner}__${name}.git`,
+    `${repo.replace("/", "__")}.git`,
   );
 }
 

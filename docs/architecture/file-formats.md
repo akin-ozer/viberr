@@ -106,7 +106,14 @@ slug: viberr-core                 # must match the directory; the directory name
 archived: true                    # optional; only an archived project carries the key
 repo: akin-ozer/viberr            # THE project's GitHub repo (one per project), or
                                   # null: a board that delivers results needs none
-                                  # (ruling 667)
+                                  # (ruling 667). `owner/name` as GitHub allows it
+                                  # (ruling 684(a), `REPO_SLUG_RE`): an owner of
+                                  # letters, digits and single hyphens, up to 39; a
+                                  # name of letters, digits, `.`, `_`, `-`, up to
+                                  # 100, never `.` or `..`. Any other value reads as
+                                  # null (no repository) with an error-severity
+                                  # `frontmatter.invalid_field`, which
+                                  # `npm run store:check` lists
 defaultBranch: main
 taskPrefix: VIB                   # letters only; task keys: VIB-142. `EPIC` is reserved
 nextTaskNumber: 169               # atomic per-project key counter

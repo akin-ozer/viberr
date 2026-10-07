@@ -108,7 +108,7 @@ export interface TolerantFieldOptions {
   /** An absent field is diagnosed too; otherwise it reads the fallback in silence. */
   required?: boolean;
   /** The diagnostic's severity; `warning` unless the field says otherwise. */
-  severity?: "info" | "warning";
+  severity?: DiagnosticSeverity;
 }
 
 /**
@@ -134,7 +134,8 @@ export function tolerantField<T>(
   fallback: T,
   options: TolerantFieldOptions = {},
 ): T {
-  const make = options.severity === "info" ? diagInfo : diagWarning;
+  const make =
+    options.severity === "info" ? diagInfo : options.severity === "error" ? diagError : diagWarning;
   const value = data[path];
   if (value === undefined) {
     if (options.required) {

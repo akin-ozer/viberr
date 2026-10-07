@@ -228,3 +228,32 @@ describe("parseProjectFrontmatter — fallback wording (ruling 458(h))", () => {
     );
   });
 });
+
+/**
+ * Ruling 684(a): every checkout path is `<taskDir>/workspace/<name>`, so a
+ * hand-edited `owner/..` made the checkout the task directory itself, and the
+ * operator's "no `.git/HEAD`, remove and re-clone" step could remove it.
+ */
+describe("parseProjectFrontmatter — repo (ruling 684(a))", () => {
+  it("reads a repository GitHub could not name as none, with an error an admin's store check lists", () => {
+    // CANARY: read `repo` with the bare `repoSchema` (drop the `REPO_SLUG_RE`
+    // refine) and `akin-ozer/..` loads as the project's repository, with no
+    // diagnostic.
+    const read = (repo: string) =>
+      parseProjectFrontmatter({ slug: "proj", repo }, { fallbackSlug: "proj" });
+
+    const traversal = read("akin-ozer/..");
+    expect(traversal.frontmatter.repo).toBeNull();
+    expect(traversal.diagnostics.filter((d) => d.path === "repo")).toEqual([
+      {
+        severity: "error",
+        code: "frontmatter.invalid_field",
+        path: "repo",
+        message:
+          "Frontmatter field `repo` is invalid (not a GitHub owner/name, so the project reads as having no repository); using null.",
+      },
+    ]);
+    // A name GitHub allows that starts with a dot is still a repository.
+    expect(read("akin-ozer/.github").frontmatter.repo).toBe("akin-ozer/.github");
+  });
+});
