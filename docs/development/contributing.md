@@ -111,9 +111,12 @@ back-compat obligation (ruling 683 kept this convention at launch). To change a 
 existing roots a way to get it: a new column goes into `BASELINE_COLUMNS` in a form `ALTER TABLE … ADD COLUMN`
 accepts on a table that has rows (with a backfill when the default misdescribes older rows),
 a new table into `BASELINE_TABLES` and a new index into `BASELINE_INDEXES`
-(`app/server/db/sqlite.server.ts`). A changed constraint reaches existing roots only through
-an in-place rebuild of its table, as `widenNotificationKindCheck` and
-`ensureBackendAccountsTable` do, or a re-baseline; listing a CHECK over an enum the build
+(`app/server/db/sqlite.server.ts`). A changed constraint reaches existing roots only through an in-place change (an
+`ALTER TABLE` the bundled SQLite accepts, or a rebuild of the table as
+`widenNotificationKindCheck` and `ensureBackendAccountsTable` do) or a re-baseline. Those two
+rebuilds are safe because no other table references theirs; a table others reference must
+be rebuilt with `PRAGMA foreign_keys = OFF` set before its transaction, or `DROP TABLE` first
+deletes its rows, which cascades into or is refused by the tables that reference it; listing a CHECK over an enum the build
 derives into in `projectionCheckGaps` (`app/server/boot.server.ts`) only makes boot name the
 gap. Recreating your local `state/projection.sqlite` hides a missing entry. The boot WARN `projection schema drift` names only a column
 `task_projections` / `task_events` lacks and a value one of the four CHECKs

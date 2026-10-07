@@ -14,7 +14,8 @@
 -- FILENAME alone, so editing this file reaches FRESH databases only. Every
 -- read-write open of an existing DB through `getDb`
 -- (app/server/db/sqlite.server.ts: the server, and the seed, seed:demo,
--- rescan and keys CLIs; a whole-root restore and `npm run backup` do not) runs
+-- rescan and `keys -- reseal` CLIs; `npm run backup`, `npm run keys --
+-- status` and a whole-root restore do not) runs
 -- `ensureSingleFlightIndexes` and `ensureBaselineColumns`: the columns, tables
 -- and indexes in `BASELINE_COLUMNS` / `BASELINE_TABLES` / `BASELINE_INDEXES`,
 -- and `user_backend_credentials` rebuilt to its several-accounts shape
@@ -29,9 +30,12 @@
 -- goes into `BASELINE_COLUMNS` in a form `ALTER TABLE … ADD COLUMN` accepts on
 -- a table that has rows (a UNIQUE one as a plain column plus a unique index),
 -- a new table into `BASELINE_TABLES` and a new index into `BASELINE_INDEXES`,
--- or existing DBs never get it. A changed constraint needs an in-place
--- rebuild of its table, as `widenNotificationKindCheck` and
--- `ensureBackendAccountsTable` do, or a re-baseline.
+-- or existing DBs never get it. A changed constraint needs an in-place change
+-- (an `ALTER TABLE` the bundled SQLite accepts, or a rebuild of its table as
+-- `widenNotificationKindCheck` and `ensureBackendAccountsTable` do; a table
+-- others reference must be rebuilt with `PRAGMA foreign_keys = OFF` set before
+-- the transaction, or `DROP TABLE` first deletes its rows, which cascades into
+-- or is refused by the tables that reference it) or a re-baseline.
 -- Users/auth live in this file, so back it up before a re-baseline.
 
 -- ============================ tables ============================
@@ -833,13 +837,18 @@ CREATE TABLE run_log_lines (
 --      column plus a unique index), a new table into `BASELINE_TABLES` and a new
 --      index (the CLI emits some) into `BASELINE_INDEXES`
 --      (app/server/db/sqlite.server.ts), all applied at open. A changed
---      constraint needs an in-place rebuild of its table or a re-baseline, the
---      last resort: its lossy form deletes the user, session and account rows
---      this block holds, and the preserve-copy form (docs/operations/
---      deployment.md "Re-baselining the projection database") copies only the
---      columns both files share, so a table that gained a NOT NULL column
---      without a DEFAULT loses every row unless the copy supplies that column's
---      value. `npm run seed -- --reset` is no re-baseline: it deletes the board,
+--      constraint needs an in-place change (an `ALTER TABLE` the bundled SQLite
+--      accepts, or a rebuild of the table with `PRAGMA foreign_keys = OFF` set
+--      before its transaction: "session" and "account" reference "user" ON
+--      DELETE CASCADE, so a rebuild of "user" with foreign keys on deletes them)
+--      or a re-baseline, the last resort. Its lossy form deletes the user,
+--      session and account rows this block holds, and its preserve-copy form
+--      (docs/operations/deployment.md "Re-baselining the projection database")
+--      copies the columns both files share with INSERT OR IGNORE, so it
+--      silently skips every row the new schema refuses: all rows of a table that
+--      gained a NOT NULL column without a DEFAULT, unless the copy supplies it,
+--      and each row that fails a new or narrowed CHECK, UNIQUE or NOT NULL.
+--      `npm run seed -- --reset` is no re-baseline: it deletes the board,
 --      its run history and the org resources (docs/development/scripts.md §3
 --      lists everything) and makes no schema change of its own.
 CREATE TABLE "user" ("id" text not null primary key, "name" text not null, "email" text not null unique, "emailVerified" integer not null, "image" text, "createdAt" date not null, "updatedAt" date not null, "githubHandle" text);
