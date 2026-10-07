@@ -16,7 +16,7 @@
  * from none of their other modules, so importing it there adds ~100 B gzip to
  * two budgets that have no room: the run console (`runs-panels.tsx`,
  * `runs-helpers.ts`, `log-noise.ts`), the label field (`ui/label-input.tsx`)
- * and the two withdrawn-recommendation lists (`decision-packet.tsx`,
+ * and the two withdrawn-recommendation lists (`decision-packet-derive.ts`,
  * `archive-confirm.tsx`) spell it inline. So does `shared/revision-drift.ts`,
  * for the closed dock's module count.
  */

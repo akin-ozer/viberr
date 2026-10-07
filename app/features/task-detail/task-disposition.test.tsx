@@ -470,9 +470,9 @@ describe("F10-09: a replacement packet opens as a fresh card", () => {
 
   it("keeps nothing the person chose or typed on the packet it replaced", () => {
     // CANARY: drop the card's re-seed on a new packet id (`seededFrom` in
-    // decision-packet.tsx) and the replacement opens with the old card's
-    // second choice selected (here "Switch to Codex", which nobody picked)
-    // and its note typed.
+    // `usePacketChoice`, decision-packet-actions.ts) and the replacement opens
+    // with the old card's second choice selected (here "Switch to Codex",
+    // which nobody picked) and its note typed.
     const { container, revalidate } = renderPage({ task: { packet: first } });
     fireEvent.click(findButton(container, "Adopt A")!);
     const note = container.querySelector<HTMLTextAreaElement>("#pkt-note")!;
@@ -553,8 +553,9 @@ describe("F10-09: a replacement packet opens as a fresh card", () => {
     ],
     [
       // CANARY: drop `setRepository(initialRepository(p))` from the re-seed
-      // and the replacement's box keeps the repository typed for the old
-      // question instead of the one the new question names.
+      // (`usePacketChoice`, decision-packet-actions.ts) and the replacement's
+      // box keeps the repository typed for the old question instead of the
+      // one the new question names.
       "opens the repository box on the repository the replacement names",
       askingRepository(first, "acme/site"),
       askingRepository(replacement, "acme/storefront"),
@@ -566,8 +567,9 @@ describe("F10-09: a replacement packet opens as a fresh card", () => {
     ],
     [
       // CANARY: drop the focus hand-back after a re-seed (`focusSeed` in
-      // decision-packet.tsx), or key the card on its packet again, and focus
-      // falls to <body> with the directive box that held it.
+      // `usePacketChoice`, decision-packet-actions.ts), or key the card on its
+      // packet again, and focus falls to <body> with the directive box that
+      // held it.
       "hands the focus to its choices when the re-seed takes the focused box away",
       first,
       replacement,

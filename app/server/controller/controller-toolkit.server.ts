@@ -4659,8 +4659,8 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
                         // one more answer than the packet stores — a directive
                         // in the person's own words, composed with the fixed
                         // choices as their last choice (`customOffered =
-                        // canResolve`, decision-packet.tsx). It is not a stored
-                        // option, so this tool listed the fixed choices and
+                        // canResolve`, decision-packet-derive.ts). It is not a
+                        // stored option, so this tool listed the fixed choices and
                         // nothing else, and the one tool whose job is to "brief
                         // the person fully" left out the only answer that is
                         // always available. Live, the controller read a packet

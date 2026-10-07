@@ -2997,7 +2997,8 @@ describe("UX19-4: the recovery packet names the in-app re-delivery path", () => 
   it("U36-2 (pass 36): a branchless task renders no re-delivery paragraph, whatever the options say", () => {
     // Live: an `input` packet on HLC-9 (no branch, no PR, no closure) rendered
     // the closed-PR recovery paragraph. Canary: drop the
-    // `archiveDisclosure?.branch != null` half of `branchDiscardOffered`.
+    // `archiveDisclosure?.branch != null` half of `branchDiscardOffered`
+    // (decision-packet-derive.ts).
     const packetView = render(
       <DecisionPacket
         packet={recoveryPacket}
@@ -3436,8 +3437,9 @@ describe("DecisionPacket — pass-20 governance", () => {
     );
     const opts = container.querySelectorAll<HTMLButtonElement>(".options .opt");
     expect(opts[0]!.getAttribute("aria-disabled")).toBe("true");
-    // Canary: drop the collision row's `option` from PACKET_TIER_GATES (or the
-    // `note` off it) and this goes red — that was the shipped state.
+    // Canary: drop the collision row's `option` from PACKET_TIER_GATES
+    // (decision-packet-derive.ts), or the `note` off it, and this goes red —
+    // that was the shipped state.
     expect(opts[0]!.querySelector(".od")!.textContent).toContain(
       "your role can't clear the collision",
     );
@@ -3461,8 +3463,8 @@ describe("DecisionPacket — pass-20 governance", () => {
    * `force-accept-completion` (admin), so one option is live and one is not.
    */
   it("ruling 164: force_accept takes the admin tier and move_stage the stage picker's, each with its own sentence", () => {
-    // Canary: drop either row from PACKET_TIER_GATES and a maintainer is
-    // offered a click the server answers with a 403.
+    // Canary: drop either row from PACKET_TIER_GATES (decision-packet-derive.ts)
+    // and a maintainer is offered a click the server answers with a 403.
     const { container } = render(
       <DecisionPacket
         packet={withOptions([
@@ -3513,8 +3515,9 @@ describe("DecisionPacket — pass-20 governance", () => {
    * foreign fixture commit the packet itself called "not ours".
    */
   it("U35-8: the archive + deleteBranch dialog names the foreign remote head and its PR before the button", () => {
-    // Canary: drop the `foreignHead` block from `PacketArchiveConfirm` and
-    // the sentence is gone.
+    // Canary: drop the `foreignHead` clause (`ForeignHeadClause`) from
+    // `PacketArchiveConfirm` (decision-packet-ceremonies.tsx) and the sentence
+    // is gone.
     const renderWith = (foreignHead: { sha: string | null; prNumber: number | null } | null) =>
       render(
         <DecisionPacket
@@ -3564,12 +3567,12 @@ describe("DecisionPacket — pass-20 governance", () => {
 
   /**
    * V16 — the three ask-first ceremonies are ONE shell with three sets of rows
-   * (`PacketDestructiveConfirm`). They were three shell-for-shell copies of the
-   * standard rulings 20 (R15-1) and 53 (R18-7) hold every one-way write to, so
-   * a change to the shared half landed on whichever copy was open. This pins
-   * the shell on all three at once: the same alertdialog contract, the same
-   * close affordance, the same obs body, the same "Not yet" beside one danger
-   * commit whose label names the outcome.
+   * (`PacketDestructiveConfirm`, decision-packet-ceremonies.tsx). They were
+   * three shell-for-shell copies of the standard rulings 20 (R15-1) and 53
+   * (R18-7) hold every one-way write to, so a change to the shared half landed
+   * on whichever copy was open. This pins the shell on all three at once: the
+   * same alertdialog contract, the same close affordance, the same obs body,
+   * the same "Not yet" beside one danger commit whose label names the outcome.
    */
   it("V16: all three destructive ceremonies render the same alertdialog shell", () => {
     const shells: {
@@ -4753,7 +4756,8 @@ describe("ruling 478: the task page's timeline, packet and GitHub panel", () => 
 
   it("(f) F40-35: a packet body's headings nest under the packet's own h2 title", () => {
     // WEB-3: "(a) Connect Workers Builds" and "Please reply with" were h2s,
-    // siblings of the question. CANARY: drop `headingBase` from PacketBody.
+    // siblings of the question. CANARY: drop `headingBase` from PacketBody
+    // (decision-packet-regions.tsx).
     const { container } = renderPacket(agentQuestion);
     const levels = [...container.querySelectorAll(".packet-body :is(h1, h2, h3, h4, h5, h6)")].map(
       (h) => `${h.tagName} ${h.textContent}`,
@@ -4912,7 +4916,8 @@ describe("DecisionPacket questionnaire custom answer (P21)", () => {
     // Ruling 147: Confirm stays ENABLED with the directive still empty, and the
     // click is refused in place instead of going dead.
     // SAFETY: the aria-label belongs to the packet's Confirm <button>
-    // (decision-packet.tsx); the bound query cannot state the element type.
+    // (`PacketActions`, decision-packet-regions.tsx); the bound query cannot
+    // state the element type.
     const confirm = getByLabelText(
       "Confirm decision: your custom directive",
     ) as HTMLButtonElement;
@@ -4981,10 +4986,11 @@ describe("DecisionPacket questionnaire custom answer (P21)", () => {
   // Ruling 147 dropped `choiceCount === 0` from Confirm's `disabled`, which
   // raises the question of what an options-less packet does now. Nothing bad:
   // the composed directive IS a choice, and it is offered to exactly the
-  // viewers who get the Confirm button (`customOffered = canResolve`), so the
-  // count is never zero while the button renders. With no authored option to
-  // select, `sel` lands on the directive, and an empty one is REFUSED — the
-  // button never reaches `onResolve` with an index that has no option.
+  // viewers who get the Confirm button (`customOffered = canResolve`, in
+  // `packetChoiceView`, decision-packet-derive.ts), so the count is never zero
+  // while the button renders. With no authored option to select, `sel` lands
+  // on the directive, and an empty one is REFUSED — the button never reaches
+  // `onResolve` with an index that has no option.
   //
   // Canary: hand the custom choice a different condition from the button's and
   // the click resolves option 0 of an empty list — this goes red.

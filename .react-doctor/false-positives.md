@@ -91,8 +91,8 @@ scan run from inside an agent worktree under `.claude/` sees no files at all.
   timeline-target.test.tsx).
 
 - `react-doctor/no-reset-all-state-on-prop-change` / `no-adjust-state-on-prop-change` —
-  decision-packet.tsx DecisionPacket `seededFrom`: when a replacement packet arrives with a
-  new `id` (F10-09), the card re-seeds its own choice, note, repository answer, directive,
+  decision-packet-actions.ts `usePacketChoice` (DecisionPacket's choice, ruling 689(e))
+  `seededFrom`: when a replacement packet arrives with a new `id` (F10-09), the card re-seeds its own choice, note, repository answer, directive,
   refusal count and open ask-first step during render, guarded on `p.id !== seededFrom`,
   through the same `initialChoice` / `initialRepository` helpers its useState calls use.
   The rule's fix, `key={packet.id}` at the render site, is wrong here: the card renders the
