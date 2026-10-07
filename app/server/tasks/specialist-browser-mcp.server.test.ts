@@ -75,6 +75,9 @@ describe("R19-19 resolveBrowserMcp", () => {
     expect(existsSync(server.args[3]!)).toBe(true);
     expect(server.args).toContain("--headless");
     expect(server.args).toContain("--isolated");
+    // A page's WebMCP tools would reach the agent's tool list with text the
+    // page wrote; drop the flag and @playwright/mcp lists them by default.
+    expect(server.args).toContain("--no-webmcp");
     expect(server.args).toContain(dir);
     expect(server.args[server.args.indexOf("--output-dir") + 1]).toBe(dir);
     // No env: the config survives codex --config argv with full parity.

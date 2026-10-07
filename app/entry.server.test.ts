@@ -9,16 +9,18 @@ import {
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { z } from "zod";
 import { setupAppTest, type AppTestContext } from "../test-support/test-app";
+import reactRouterConfig from "../react-router.config";
 
 /**
  * Ruling 458(d): every response carries its request's id as `X-Request-Id`, the
  * id the request's log records carry, and the document error page shows it.
  *
- * React Router's own request handler, over the REAL entry module and the REAL
- * root route (its middleware, loader, Layout and ErrorBoundary), with a few
- * synthetic child routes for the shapes a response can take. Some responses
- * pass through the root middleware and some never reach it (an unmatched URL,
- * a 405, a refused `.data` mutation), which is why the entry stamps them too.
+ * React Router's own request handler, over the REAL entry module, the REAL
+ * root route (its middleware, loader, Layout and ErrorBoundary) and the build
+ * options react-router.config.ts ships, with a few synthetic child routes for
+ * the shapes a response can take. Some responses pass through the root
+ * middleware and some never reach it (an unmatched URL, a 405, a refused
+ * `.data` mutation), which is why the entry stamps them too.
  */
 
 /** The entry awaits `bootServer()` at module scope: the data-root lock, the
@@ -83,6 +85,11 @@ beforeAll(async () => {
         throw redirect("/page");
       },
     }),
+    // A page with an action, for the form posts below.
+    "routes/form": child("routes/form", "form", {
+      default: Page,
+      action: () => ({ ok: true }),
+    }),
     // A resource route: a loader, no component.
     "routes/resource": child("routes/resource", "resource", {
       loader: () => Response.json({ ok: true }),
@@ -128,6 +135,8 @@ beforeAll(async () => {
     isSpaMode: false,
     prerender: [],
     routeDiscovery: { mode: "initial", manifestPath: "/__manifest" },
+    // What the Vite plugin copies from react-router.config.ts into the build.
+    allowedActionOrigins: reactRouterConfig.allowedActionOrigins,
   };
   const handler = createRequestHandler(build, "production");
   handle = (request) => handler(request);
@@ -207,11 +216,11 @@ describe("X-Request-Id on every response (ruling 458(d))", () => {
   });
 
   it("the id on a response the middleware never saw is the one its log record carries", async () => {
-    // A `.data` mutation from another origin is refused before any route
+    // A `.data` mutation whose Origin is not a URL is refused before any route
     // middleware runs, and `handleError` logs it; a 405 document likewise.
     const { result, records } = await capturingLog(() =>
       Promise.all([
-        get("/page.data", { method: "POST", headers: { Origin: "http://elsewhere.example" } }),
+        get("/page.data", { method: "POST", headers: { Origin: "not a url" } }),
         get("/page", { method: "PROPFIND" }),
       ]),
     );
@@ -228,6 +237,20 @@ describe("X-Request-Id on every response (ruling 458(d))", () => {
         notAllowed.headers.get("X-Request-Id"),
       ]),
     );
+  });
+});
+
+describe("React Router's action-origin check is off (ruling 683)", () => {
+  // CANARY: drop allowedActionOrigins from react-router.config.ts and, behind
+  // the TLS proxy, every https:// form post answers 400 before the app's own
+  // origin check (assertTrustedOrigin) can accept it.
+  it("a post whose Origin differs from request.url only in scheme reaches the action", async () => {
+    const headers = { Origin: "https://localhost:5173" };
+    const answers = await Promise.all([
+      get("/form", { method: "POST", headers }),
+      get("/form.data", { method: "POST", headers }),
+    ]);
+    expect(answers.map((r) => r.status)).toEqual([200, 200]);
   });
 });
 
