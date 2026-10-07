@@ -187,7 +187,7 @@ an unparseable epic file counts as one.
 
 **Derivation version.** The hash short-circuit never re-projects an unchanged file, so a
 change to how the rebuilder derives a column would leave old rows in the old shape.
-`derivation-version.server.ts` holds `PROJECTION_DERIVATION_VERSION` (4); boot compares
+`derivation-version.server.ts` holds `PROJECTION_DERIVATION_VERSION` (7); boot compares
 it with the `projection.derivationVersion` instance setting and, when the stored value
 lags, runs one forced full rescan and writes the new stamp only if no file failed, so the
 next boot retries otherwise. Bump it with any change to a derived column.
