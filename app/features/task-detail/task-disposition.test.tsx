@@ -483,6 +483,92 @@ describe("F10-09: a replacement packet opens as a fresh card", () => {
     expect(checked(container)).toEqual([expect.stringContaining("Keep Claude")]);
     expect(container.querySelector<HTMLTextAreaElement>("#pkt-note")!.value).toBe("");
   });
+
+  const box = (container: HTMLElement, id: string) =>
+    container.querySelector<HTMLTextAreaElement>(`#${id}`)!;
+  const archiveDialog = (container: HTMLElement) =>
+    container.ownerDocument.querySelector('dialog[data-screen-label="Packet archive dialog"]');
+  /** The packet with an `archive_task` second, so both hold it at one index. */
+  const archiving = (packet: PacketRender, t: string): PacketRender => ({
+    ...packet,
+    options: [packet.options[0]!, { kind: "archive_task", t, d: "", rec: false }],
+  });
+  /** The packet as ruling 672's repository question, naming `repo`. */
+  const askingRepository = (packet: PacketRender, repo: string): PacketRender => ({
+    ...packet,
+    options: [
+      { kind: "connect_repository", t: "Connect a repository", d: "", rec: true, reply: true, repo },
+      { kind: "keep_without_repository", t: "Keep this board without one", d: "", rec: false },
+    ],
+  });
+  const asking = (packet: PacketRender): PacketRender => ({ ...packet, answerTo: "Workflow Researcher" });
+
+  // What the person leaves standing on the old card, then what the
+  // replacement shows instead: a row per piece the re-seed covers.
+  it.each<[string, PacketRender, PacketRender, (c: HTMLElement) => void, (c: HTMLElement) => void]>([
+    [
+      // CANARY: drop `setPendingConfirm(null)` from the re-seed and the
+      // archive ceremony stays open over the replacement, and its Archive
+      // button answers the replacement's `archive_task`, which nobody read.
+      "closes the ask-first step left open",
+      archiving(first, "Archive the research"),
+      archiving(replacement, "Archive the follow-up"),
+      (c) => {
+        fireEvent.click(findButton(c, "Archive the research")!);
+        fireEvent.click(findButton(c, "Confirm decision")!);
+        expect(archiveDialog(c)).not.toBeNull();
+      },
+      (c) => expect(archiveDialog(c)).toBeNull(),
+    ],
+    [
+      // CANARY: drop `setCustomText("")` from the re-seed and the directive
+      // written for the old packet is back, ready to send, the moment the
+      // person chooses to write their own on the replacement.
+      "keeps no directive written for the packet it replaced",
+      first,
+      replacement,
+      (c) => {
+        fireEvent.click(findButton(c, "Write your own directive")!);
+        fireEvent.change(box(c, "pkt-custom"), { target: { value: "Run it on Codex." } });
+        expect(box(c, "pkt-custom").value).toBe("Run it on Codex.");
+      },
+      (c) => {
+        fireEvent.click(findButton(c, "Write your own directive")!);
+        expect(box(c, "pkt-custom").value).toBe("");
+      },
+    ],
+    [
+      // CANARY: drop `setRefused(0)` from the re-seed and an agent's new
+      // question opens refusing a Confirm nobody pressed on it.
+      "drops a refusal met on the packet it replaced",
+      asking(first),
+      asking(replacement),
+      (c) => {
+        fireEvent.click(findButton(c, "Confirm decision")!);
+        expect(c.textContent).toContain("Choose an answer above first.");
+      },
+      (c) => expect(c.textContent).not.toContain("Choose an answer above first."),
+    ],
+    [
+      // CANARY: drop `setRepository(initialRepository(p))` from the re-seed
+      // and the replacement's box keeps the repository typed for the old
+      // question instead of the one the new question names.
+      "opens the repository box on the repository the replacement names",
+      askingRepository(first, "acme/site"),
+      askingRepository(replacement, "acme/storefront"),
+      (c) => {
+        fireEvent.change(box(c, "pkt-note"), { target: { value: "acme/checkout" } });
+        expect(box(c, "pkt-note").value).toBe("acme/checkout");
+      },
+      (c) => expect(box(c, "pkt-note").value).toBe("acme/storefront"),
+    ],
+  ])("%s", (_, old, next, leave, check) => {
+    const { container, revalidate } = renderPage({ task: { packet: old } });
+    leave(container);
+    revalidate({ packet: next });
+    expect(container.textContent).toContain(next.title);
+    check(container);
+  });
 });
 
 /** An action the test answers when it decides to (ruling 368). */
