@@ -86,15 +86,28 @@ import { errorMessage, toError } from "~/shared/errors";
  * `claude-sonnet-5`); that release only adds to the surface used here.
  * Upgraded to v0.3.291 (Claude Code 2.1.291) in the 2026-10-07 dependency
  * refresh: against 0.3.284 its types only add optional fields, a
- * `get_task_output` control request and a startup-failure reason, and the
- * `opus`/`sonnet` aliases resolve as before. It is pinned EXACTLY, below
- * 0.3.292: Claude Code 2.1.292 makes an SDK run wait for a background command
- * after the final result, where it used to stop it 5 s later, and this
- * adapter reads until the stream ends, so a run that left `npm run dev` going
- * under `run_in_background` would sit past its result until the idle guard
- * settled it as hung. Moving past 0.3.291 needs the run to settle on its
- * result first. (2.1.292 also negotiates MCP protocol 2026-07-28 with stdio
- * servers by default.)
+ * `get_task_output` control request and a startup-failure reason. Then, the
+ * same day, to ^0.3.292 (Claude Code 2.1.292): against 0.3.291 its `sdk.d.ts`
+ * and `sdk-tools.d.ts` only add optional fields (a subagent message's
+ * `agent_id`, a background task's `run_id` and `parent_task_id`, the Agent
+ * tool's `effort`), nothing this adapter passes or reads changed, the abort and
+ * exit errors read as before, and the `opus`/`sonnet` aliases still resolve to
+ * `claude-opus-5-5` and `claude-sonnet-5-5`. 2.1.292 makes an SDK run wait for
+ * a background command after the final result, where it used to stop it 5 s
+ * later. This adapter reads until the stream ends, so a run that left
+ * `npm run dev` going under `run_in_background` would have sat past its result
+ * until the idle guard settled it as hung, and 0.3.291 was pinned exactly
+ * until the run could settle on its result. The result grace
+ * (`RESULT_GRACE_MS`, ruling 683) replaced that pin: the first result, a
+ * success or an error, starts a 5 s window for the stream to end, and later
+ * results do not extend it. A stream still open when it closes has its CLI
+ * stopped, and the run settles from the last result it read, so a run cut off
+ * or failed while such a command still runs keeps its cut-off or failure class
+ * as it did on 0.3.291. 2.1.292 also negotiates MCP protocol 2026-07-28 with
+ * stdio servers by default, sending `server/discover` before `initialize`; the
+ * browser supervisor (`browser-supervisor.server.ts`) forwards that request
+ * and the server's answer like any other and replays the `initialize` that
+ * follows.
  * `query()` returns a
  * `Query` (async generator of `SDKMessage`) whose yielded objects are the
  * SAME envelopes documented in runtime-adapters.md §1.3 (system·init with
@@ -436,6 +449,23 @@ export const INTERRUPT_GRACE_MS = 20_000;
  * SIGTERM→SIGKILL escalation.
  */
 export const INTERRUPT_ABORT_GRACE_MS = 10_000;
+
+/**
+ * Ruling 683: how long a run's stream may stay open after its first result,
+ * successful or not, before the adapter stops the CLI itself. Claude Code
+ * 2.1.292 keeps an SDK run open after its final result until every background
+ * command the agent started has ended (a dev server under `run_in_background`
+ * never does), where earlier releases stopped such a command 5 s after the
+ * final result and exited. This adapter reads until the stream ends, so without the
+ * grace that run would hold its slot until the idle guard settled it as hung,
+ * and a run cut off by a cap (ruling 175) or failed by its provider would lose
+ * that class to `run·error·idle_timeout`. 5 s is the window the CLI itself
+ * used to give. When it has passed, the CLI is stopped the way a forced stop
+ * does it, the run settles from the last result it read as a stream that
+ * ended does, and the settle sweep of ruling 174 reaps what the run left
+ * running.
+ */
+const RESULT_GRACE_MS = 5_000;
 
 /**
  * Built-in tools an operator run may never use: it coordinates the task and
@@ -1771,6 +1801,10 @@ export function createClaudeAdapter(deps: ClaudeAdapterDeps = {}): RuntimeAdapte
       let interrupted = false;
       let settled = false;
       let idleTimedOut = false;
+      /** Ruling 683: a result has armed the result grace, and the grace has
+       *  run out and stopped the CLI. */
+      let resultGraceArmed = false;
+      let stoppedAfterResult = false;
       let queryHandle: ClaudeQuery | null = null;
       // Wired into the SDK query options below. Aborting it tears down the
       // spawned CLI subprocess (SIGTERM→SIGKILL, to its whole group since
@@ -1806,14 +1840,37 @@ export function createClaudeAdapter(deps: ClaudeAdapterDeps = {}): RuntimeAdapte
         }
       };
       /**
-       * Escalate a stop the cooperative `interrupt()` did not achieve. After the
-       * grace window ABORT the SDK subprocess (SIGTERM→SIGKILL) so the stream
-       * ends for real and the loop's own catch settles the run once the process
-       * is gone — a settled run must never leave a live process writing the
-       * workspace. `onBackstop` runs only if even the abort never unblocks the
-       * generator, so the row cannot hang `running` forever. `settle` clears
-       * `interruptTimer`, so a real exit at any point cancels the escalation.
+       * ABORT the SDK subprocess (SIGTERM→SIGKILL) so the stream ends for real
+       * and the loop's own code settles the run once the process is gone — a
+       * settled run must never leave a live process writing the workspace.
+       * `onBackstop` runs only if even the abort never unblocks the generator,
+       * so the row cannot hang `running` forever. `settle` clears
+       * `interruptTimer`, so a real exit at any point cancels the backstop.
        */
+      const abortCli = (onBackstop: () => void) => {
+        try {
+          abortController.abort();
+        } catch {
+          // Already aborted / nothing to tear down.
+        }
+        // Ruling 174: the abort ends the SDK's stdin and SIGTERMs the CLI
+        // after its own grace; the group hears it now, so the stdio MCP
+        // servers the CLI started stop with it rather than outliving a CLI
+        // that is past answering. The SDK's SIGKILL, and the settle sweep,
+        // reach the same group.
+        cli?.signalGroup("SIGTERM");
+        interruptTimer = setTimeout(() => {
+          if (settled) return;
+          logger.warn(
+            "claude subprocess abort did not settle the run; forcing it",
+            { runId: spec.runId, graceMs: INTERRUPT_ABORT_GRACE_MS },
+          );
+          onBackstop();
+        }, INTERRUPT_ABORT_GRACE_MS);
+        interruptTimer.unref?.();
+      };
+      /** Escalate a stop the cooperative `interrupt()` did not achieve: after
+       *  the grace window, `abortCli`. */
       const armForcedStop = (onBackstop: () => void) => {
         if (interruptTimer) clearTimeout(interruptTimer);
         interruptTimer = setTimeout(() => {
@@ -1822,31 +1879,15 @@ export function createClaudeAdapter(deps: ClaudeAdapterDeps = {}): RuntimeAdapte
             "claude run did not stop cooperatively; aborting the subprocess",
             { runId: spec.runId, graceMs: INTERRUPT_GRACE_MS },
           );
-          try {
-            abortController.abort();
-          } catch {
-            // Already aborted / nothing to tear down.
-          }
-          // Ruling 174: the abort ends the SDK's stdin and SIGTERMs the CLI
-          // after its own grace; the group hears it now, so the stdio MCP
-          // servers the CLI started stop with it rather than outliving a CLI
-          // that is past answering. The SDK's SIGKILL, and the settle sweep,
-          // reach the same group.
-          cli?.signalGroup("SIGTERM");
-          interruptTimer = setTimeout(() => {
-            if (settled) return;
-            logger.warn(
-              "claude subprocess abort did not settle the run; forcing it",
-              { runId: spec.runId, graceMs: INTERRUPT_ABORT_GRACE_MS },
-            );
-            onBackstop();
-          }, INTERRUPT_ABORT_GRACE_MS);
-          interruptTimer.unref?.();
+          abortCli(onBackstop);
         }, INTERRUPT_GRACE_MS);
         interruptTimer.unref?.();
       };
       const armIdle = () => {
         disarmIdle();
+        // Ruling 683: once the result grace is armed it is the run's watchdog,
+        // and the lines that still arrive inside it must not re-arm this one.
+        if (resultGraceArmed) return;
         idleTimer = setTimeout(() => {
           if (settled || interrupted) return;
           idleTimedOut = true;
@@ -2149,6 +2190,68 @@ export function createClaudeAdapter(deps: ClaudeAdapterDeps = {}): RuntimeAdapte
           return false;
         };
 
+        /** Settle a stream that has ended, from what it said. */
+        const settleEnded = () => {
+          // Once only: the result grace's backstop settles a stream that never
+          // ended, and when it does end or throw later, its classified line
+          // has already been written (ruling 683).
+          if (settled) return;
+          // A stream that ENDS (rather than throwing) after the abort still has
+          // to report the hang, not a plain "no result" error.
+          if (idleTimedOut) return settleIdleTimeout();
+          if (interrupted) return settle("interrupted");
+          if (sawResult && !resultIsError) return settle("finished");
+          // A capped run is CUT OFF, not failed by the task (see `emitCutOff`);
+          // the run still settles `error` below.
+          if (!emitCutOff() && sawResult && resultIsError) {
+            // P14-RT-10: a run the SDK ends with an `is_error` result (rather than
+            // a thrown stream error) used to settle `error` carrying no classified
+            // line at all — the result line's own tag is `result`, which
+            // `runFailureReason` never matches, so a quota/auth failure delivered
+            // this way lost its `retry_other_backend` recovery option and got the
+            // generic "run ended in an error" copy. Classify it the same way a
+            // thrown error is classified; the raw text never leaves this scope.
+            //
+            // The prose is the result's own text, else its subtype when that
+            // names a failure. An API-refused run ends `is_error: true` under
+            // `subtype: "success"` (U34-1), and with no prose that word used to
+            // become the cause — and so the "provider's own sentence" appended to
+            // the human line ("The provider reported: success"). No prose is no
+            // prose: the structured evidence classifies, and nothing is quoted.
+            const resultProse =
+              resultErrorText ?? (resultSubtype && resultSubtype !== "success" ? resultSubtype : "");
+            emitFailure(classifyClaudeError(new Error(resultProse), evidence));
+          }
+          return settle("error");
+        };
+
+        /**
+         * Ruling 683: the first result, a success or an error, gives the
+         * stream `RESULT_GRACE_MS` to end on its own (see the constant for why
+         * 2.1.292 may not). Lines that arrive meanwhile are read and emitted as
+         * before, and a later result replaces what the run settles from without
+         * extending the grace. When the grace runs out the CLI is aborted, and
+         * the run settles as an ended stream does, from the last result it
+         * read; the backstop does the same if even the abort never ends the
+         * stream. A result that lands after a stop or a hang was already under
+         * way arms nothing.
+         */
+        const armResultGrace = () => {
+          if (resultGraceArmed || interrupted || idleTimedOut || settled) return;
+          resultGraceArmed = true;
+          disarmIdle();
+          interruptTimer = setTimeout(() => {
+            if (settled) return;
+            stoppedAfterResult = true;
+            logger.info("claude CLI still open after its result; stopping it", {
+              runId: spec.runId,
+              graceMs: RESULT_GRACE_MS,
+            });
+            abortCli(settleEnded);
+          }, RESULT_GRACE_MS);
+          interruptTimer.unref?.();
+        };
+
         try {
           armIdle();
           for await (const message of q) {
@@ -2202,6 +2305,7 @@ export function createClaudeAdapter(deps: ClaudeAdapterDeps = {}): RuntimeAdapte
               if (reported && reportedFor) rememberReported(reportedFor, reported);
               evidence.apiErrorStatus = envelope.api_error_status;
               evidence.terminalReason = envelope.terminal_reason;
+              armResultGrace();
             } else if (envelope.type === "user") {
               liveUsers += 1;
               liveTurns = 1 + liveUsers;
@@ -2257,6 +2361,11 @@ export function createClaudeAdapter(deps: ClaudeAdapterDeps = {}): RuntimeAdapte
           if (idleTimedOut) return settleIdleTimeout();
           // AbortError from interrupt() is expected; anything else is a fault.
           if (interrupted) return settle("interrupted");
+          // Ruling 683: the throw is the abort the result grace sent, not a
+          // transport drop or the run's failure, so the run settles as an
+          // ended stream does, from its last result: an error result's cut-off
+          // or classified line is written there, once, never the abort's.
+          if (stoppedAfterResult) return settleEnded();
           // A cut-off result arrived and THEN the stream threw: once a result
           // is an error and the CLI exits non-zero after it, the SDK swaps the
           // exit error for "Claude Code returned an error result: <text>"
@@ -2271,9 +2380,11 @@ export function createClaudeAdapter(deps: ClaudeAdapterDeps = {}): RuntimeAdapte
           // was not an error, so the query finished and the stream threw on
           // teardown. The Codex half of this ruling is the one the ax-clone
           // board demonstrated; this is the same gate on the same reasoning,
-          // and `sawResult` is stronger evidence still — Claude emits exactly
-          // one result, at the end of the whole query, so nothing can be in
-          // flight behind it.
+          // and `sawResult` is stronger evidence still: the result closes the
+          // run's own work. Since Claude Code 2.1.292 a backgrounded command's
+          // completion can wake a further turn behind it, which the result
+          // grace cuts at 5 s (ruling 683); the run stays `finished` unless
+          // the last result it read was an error.
           if (sawResult && !resultIsError) {
             logger.info("claude stream threw after its result", {
               runId: spec.runId,
@@ -2289,37 +2400,13 @@ export function createClaudeAdapter(deps: ClaudeAdapterDeps = {}): RuntimeAdapte
           return settleError(error);
         }
         disarmIdle();
+        // A backstop already settled a stream that ended this late, and a
+        // settled run's row takes no further phase.
+        if (settled) return;
         // The stream is done; the terminal classification + finalize below is
         // what the strip is waiting on now.
         phase(RUN_PHASE.finishing, null);
-
-        // A stream that ENDS (rather than throwing) after the abort still has
-        // to report the hang, not a plain "no result" error.
-        if (idleTimedOut) return settleIdleTimeout();
-        if (interrupted) return settle("interrupted");
-        if (sawResult && !resultIsError) return settle("finished");
-        // A capped run is CUT OFF, not failed by the task (see `emitCutOff`);
-        // the run still settles `error` below.
-        if (!emitCutOff() && sawResult && resultIsError) {
-          // P14-RT-10: a run the SDK ends with an `is_error` result (rather than
-          // a thrown stream error) used to settle `error` carrying no classified
-          // line at all — the result line's own tag is `result`, which
-          // `runFailureReason` never matches, so a quota/auth failure delivered
-          // this way lost its `retry_other_backend` recovery option and got the
-          // generic "run ended in an error" copy. Classify it the same way a
-          // thrown error is classified; the raw text never leaves this scope.
-          //
-          // The prose is the result's own text, else its subtype when that
-          // names a failure. An API-refused run ends `is_error: true` under
-          // `subtype: "success"` (U34-1), and with no prose that word used to
-          // become the cause — and so the "provider's own sentence" appended to
-          // the human line ("The provider reported: success"). No prose is no
-          // prose: the structured evidence classifies, and nothing is quoted.
-          const resultProse =
-            resultErrorText ?? (resultSubtype && resultSubtype !== "success" ? resultSubtype : "");
-          emitFailure(classifyClaudeError(new Error(resultProse), evidence));
-        }
-        return settle("error");
+        return settleEnded();
       };
 
       // Fire the async loop; failures surface through settleError (which
@@ -2350,6 +2437,11 @@ export function createClaudeAdapter(deps: ClaudeAdapterDeps = {}): RuntimeAdapte
           void queryHandle?.interrupt().catch(() => {
             // The generator may already have completed.
           });
+          // Ruling 683: after a result the grace's clock is already running.
+          // It aborts the CLI 5 s after that result, never later than the
+          // cooperative window would from now, and its backstop settles the
+          // run, `interrupted` now like any stopped run. Keep that clock.
+          if (resultGraceArmed) return;
           armForcedStop(() => settle("interrupted"));
         },
       };

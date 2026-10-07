@@ -30,8 +30,8 @@
   `question: {kind: "completeness", runId, at}` (ruling 421). At most one entry
   delivers; it owns the workspace, branch and PR. Engagements are written by the dispatch
   itself (ruling 98).
-- **Backend**: `claude` (Claude Agent SDK `0.3.291`, Claude Code 2.1.291, pinned below
-  0.3.292 as `claude-runtime.server.ts` explains) or `codex` (Codex SDK `^0.160.1`). Both run on the vendor SDKs; the Cognipeer Agent SDK was
+- **Backend**: `claude` (Claude Agent SDK `^0.3.292`, Claude Code 2.1.292) or `codex`
+  (Codex SDK `^0.160.1`). Both run on the vendor SDKs; the Cognipeer Agent SDK was
   evaluated and not adopted (ruling 173). A profile lists the backends it may run on; the
   FIRST listed one is the deployment's "primary run backend" (`primaryRunBackend`,
   `app/server/agents/deployment-view.server.ts`), `claude` when none is listed.
@@ -229,7 +229,7 @@ make).
 | Backend | Models (default first) | Efforts (default) | Rules |
 |---|---|---|---|
 | claude | `sonnet`, `opus`, `haiku` (aliases), plus a family alias carrying a bracketed context-window variant (`opus[1m]`, what the live catalog offers as "Opus (1M context)"), plus any dated `claude-*` id containing a digit, plus the live `supportedModels()` list of the VIEWER's OWN connected Claude account (10 min cache, one slot per backend tagged with the home that produced it, so another viewer misses and refills it; 15 s timeout; ruling 127) | `low medium high xhigh max` (`high`) | Alias or dated id runs verbatim; a string containing opus/haiku/sonnet maps to the alias; the bracketed variant is split off FIRST, the base resolved, and the variant re-appended verbatim (`claude-opus[1m]` → `opus[1m]`, `claude-sonnet-4-5[1m]` unchanged), so it reaches the SDK and is known on a cold process (pass 34, F34-7). Every run path first passes the stored id through `resolveRunModel`, which swaps an id `isKnownModel` rejects for the catalog default (`sonnet`) before the adapter sees it. Display: the live catalog row's name when cached, else "Claude Opus [1m]" |
-| codex | `gpt-5.6-terra`, `gpt-6-astra`, `gpt-6-sol`, `gpt-6-luna`, `gpt-5.6-sol`, `gpt-5.6-luna`, `gpt-5.5` (closed list, `CODEX_MODELS` in `model-catalog.server.ts`; GPT-6 Sol and Luna are not in the CLI's bundled catalog, the account's server offers them only to a client at 0.155.0 or later; Astra is the CLI's own default but Terra stays Viberr's, F20-33) | `low medium high xhigh max` (`medium`) on every model except GPT-5.5, which stops at `xhigh`; `minimal` accepted at run time, never offered; `ultra` (automatic task delegation, i.e. sub-agents — the operator's job) and `persistent` (no bundled model) are in the SDK union but neither offered nor forwarded | A model persisted for the other backend is **substituted at start and disclosed** (`substituteRunModel`, one home for the swap): the run log opens with the `run·model_substituted` line, and a cross-backend retry names the model it ran on in its timeline event and its `retry_other_backend` option (F36-8, pass 36) |
+| codex | `gpt-6.1-sol`, `gpt-6-astra`, `gpt-6-sol`, `gpt-6-luna`, `gpt-5.6-sol`, `gpt-5.6-terra`, `gpt-5.6-luna`, `gpt-5.5` (closed list, `CODEX_MODELS` in `model-catalog.server.ts`: the models the 0.160.1 CLI's bundled catalog lists as visible, in its priority order, GPT-6 Sol and Luna now among them; GPT-6.1 Sol is the CLI's own default since 0.159.1 and Viberr's since ruling 683, which retired F20-33's Terra default; the default is read at each run start, so a run with no Codex model of its own uses it; whether a ChatGPT-plan account runs it is unverified, and a refusal marks it unavailable (F20-4) without moving the default) | `low medium high xhigh max` (`medium`) on every model except GPT-5.5, which stops at `xhigh`; `minimal` accepted at run time, never offered; `ultra` (automatic task delegation, i.e. sub-agents — the operator's job) and `persistent` (no bundled model) are in the SDK union but neither offered nor forwarded | A model persisted for the other backend is **substituted at start and disclosed** (`substituteRunModel`, one home for the swap): the run log opens with the `run·model_substituted` line, and a cross-backend retry names the model it ran on in its timeline event and its `retry_other_backend` option (F36-8, pass 36) |
 
 `/resources/model-catalog?backend=` serves `{ data: { models, efforts, defaultModel,
 defaultEffort } }` to the profile editor (unknown backend → claude; any signed-in user, and a
@@ -498,24 +498,43 @@ card until one of the person's runs has made a model call (ruling 604). A readin
   no other; a board learns through its knowledge bases (ruling 498).
 - Timers: idle timeout 15 min (`VIBERR_CLAUDE_IDLE_TIMEOUT_MS`), interrupt grace 20 s
   then abort grace 10 s. The abort SIGTERMs the CLI's group at once (the SDK's own
-  SIGTERM→SIGKILL follows); what happens after the run settles is §3.4.
+  SIGTERM→SIGKILL follows); what happens after the run settles is §3.4. Result grace 5 s
+  (`RESULT_GRACE_MS`, ruling 683): Claude Code 2.1.292 keeps a run's stream open after
+  its `result` until every command the agent backgrounded has ended, so a stream still
+  open 5 s after the first `result`, a success or an error (a dev server left running,
+  say), is aborted the same way, with the same 10 s backstop. The run then settles from
+  the last `result` it read, as a stream that ended does: `finished` for a success, the
+  cut-off line or the classified failure for an error (Success, below), never
+  `run·error·idle_timeout`, and it settles once, so a stream that ends or throws after
+  the backstop has settled it writes nothing more. Lines and later `result`s that arrive
+  in those 5 s are read as before and do not extend the grace, and the idle timer stops
+  counting once it starts. A Stop pressed inside the grace sends the cooperative
+  interrupt but keeps the grace's clock instead of starting the 20 s one, and the run
+  settles `interrupted`.
 - No `managedSettings` and no CLAUDE.md excludes file (ruling 180):
   nothing under cwd is a settings source, so there is no ingress to close.
 - Success = a `result` envelope with `!is_error`. A stream that throws AFTER a non-error
-  `result` (the one terminal envelope, so nothing can be in flight behind it) still
-  settles `finished`; the drop is recorded on its own `run·transport·after-turn` line with
-  `ev: "meta"`, deliberately not an `err` line, because `runFailureReason` reads the last
-  `err` line as the run's cause and this run has none (ruling 394). Failures tag
-  `run·error·<kind>` with `kind ∈ quota | auth | overloaded | session_missing | unknown`;
-  idle → `run·error·idle_timeout`; `error_max_turns` → `run·error·max_turns`;
+  `result` (the run's own work is done; since Claude Code 2.1.292 a backgrounded
+  command's completion can wake a further turn behind it, which the result grace cuts at
+  5 s) still settles `finished`, unless the last `result` it read was an error; the drop
+  is recorded on its own `run·transport·after-turn` line with `ev: "meta"`, deliberately
+  not an `err` line, because `runFailureReason` reads the last `err` line as the run's
+  cause and this run has none (ruling 394). The throw that the result grace's own abort
+  causes is not a drop and writes no such line: the run settles from its last `result`
+  as a stream that ended does. Failures tag `run·error·<kind>` with
+  `kind ∈ quota | auth | overloaded | session_missing | unknown`; idle →
+  `run·error·idle_timeout`; `error_max_turns` → `run·error·max_turns`;
   `error_max_budget_usd` → `run·error·max_budget` with a typed record carrying the cap
   (`spendCapUsd`) and the spend at cut-off (`spentUsd`, the result's cost), and a line
-  saying it was cut off, not failed, and where the cap is raised (ruling 175). The pinned
-  SDK yields an error result and then THROWS: when the CLI exits non-zero after it,
-  `readMessages` replaces the exit error with "Claude Code returned an error result:
-  <text>". So a cut-off is classified from the result even when the stream throws
-  afterwards (`emitCutOff`, both paths); any other error result that ends in a throw is
-  classified from the throw. Provider text follows `"\n\nThe provider reported: "`.
+  saying it was cut off, not failed, and where the cap is raised (ruling 175). A stream a
+  backgrounded command holds open after an error `result` keeps that class: the result
+  grace stops the CLI and the run is classified from the `result`, the cut-off line
+  written once (Timers, above). The SDK yields an error result and then THROWS: when the
+  CLI exits non-zero after it, `readMessages` replaces the exit error with "Claude Code
+  returned an error result: <text>". So a cut-off is classified from the result even when
+  the stream throws afterwards (`emitCutOff`, both paths); any other error result whose
+  stream throws on its own, before the result grace stops the CLI, is classified from the
+  throw. Provider text follows `"\n\nThe provider reported: "`.
 - Ruling 130(a) (pass 34): refusals are classified from the STRUCTURED envelope first and
   from prose second, in the order spawn codes → `session_missing` → `quota` (a
   `rate_limit_event` whose `status` is `rejected`, an assistant-envelope `error` of
@@ -597,7 +616,7 @@ card until one of the person's runs has made a model call (ruling 604). A readin
   and never as 0. `compactions` is the length of that event list.
 - Live usage (ruling 541). A Viberr run is one Codex turn, and the SDK streams its usage
   once, on `turn.completed`, so the adapter reads the rollout while the run works
-  (`codexUsageTail`, `session-export.server.ts`). The pinned CLI (0.156.0) writes a
+  (`codexUsageTail`, `session-export.server.ts`). The pinned CLI (0.156.0, re-measured on 0.160.1) writes a
   top-level `token_usage_record` line the moment a model call completes, before the tool
   the call asked for runs (the `token_count` event waits for the tool's output), carrying
   the call's usage, the turn's running total and the thread's. On every SDK event the

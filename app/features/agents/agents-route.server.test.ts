@@ -557,9 +557,9 @@ describe("profile CRUD round trip (project.md writers + audit)", () => {
       role: "Schema changes",
       icon: "agents",
       backends: ["codex"],
-      // No picked model in FORM → per-backend catalog default. F20-33 made the
-      // codex default Terra (Sol 400s on a ChatGPT-plan account).
-      model: "gpt-5.6-terra",
+      // No picked model in FORM → per-backend catalog default, GPT-6.1 Sol on
+      // Codex since ruling 683.
+      model: "gpt-6.1-sol",
       effort: "medium",
       scope: "Created in Viberr Core",
       stages: ["ready", "impl"],

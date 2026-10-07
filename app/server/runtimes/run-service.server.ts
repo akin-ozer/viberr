@@ -425,7 +425,8 @@ export interface StartRunInput {
   reviewSubject?: string | null;
   model: string;
   /** Reasoning/effort level (claude options.effort · codex
-   *  modelReasoningEffort). Optional — the SDK default applies when absent. */
+   *  modelReasoningEffort). Optional: when absent, Claude takes the SDK
+   *  default and Codex the catalog default (ruling 683). */
   effort?: string;
   /** The deployed agent's display name persisted on the run (Agent-logs
    *  picker label). Null → the projection falls back to the backend name. */
@@ -1048,8 +1049,12 @@ export async function startRun(
   // run only on the D4 cross-backend retry, so a profile whose stored effort
   // came from the other backend's scale ("minimal" from Codex, "max" from
   // Claude) shipped a tier the target SDK does not accept. An unset effort
-  // stays unset — the SDK default applies, as before.
-  if (input.effort?.trim()) {
+  // stays unset on Claude, where the SDK default applies. On Codex it is the
+  // catalog default, `medium` (ruling 683): the CLI's own default is set per
+  // model, and in 0.160.1 it is `low` on gpt-6.1-sol, the model every
+  // model-less operator and undeployed fallback runs, while the picker and the
+  // catalog say `medium`.
+  if (input.effort?.trim() || input.backend === "codex") {
     spec.effort = resolveRunEffort(input.backend, input.effort);
   }
   if (input.systemPrompt) spec.systemPrompt = input.systemPrompt;
@@ -1847,7 +1852,7 @@ export interface ResumeRunInput {
 /**
  * Copy the caller's per-turn overrides onto a resumed run's input, key for key.
  * An option the caller did NOT pass must stay ABSENT: `startRun` reads key
- * PRESENCE (an absent effort keeps the SDK default, an absent `disallowedTools`
+ * PRESENCE (an absent effort keeps the default, an absent `disallowedTools`
  * derives the withheld-grant flags), so writing an explicit `undefined` here
  * would change what the run gets. Both resume paths — the continuity-reset
  * fresh run and the session resume — carry the identical set; that is the

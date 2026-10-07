@@ -115,3 +115,86 @@ describe("assertTrustedOrigin", () => {
     expect((thrown as Response).status).toBe(403);
   });
 });
+
+/**
+ * Ruling 683: behind the TLS-terminating proxy deployment.md requires,
+ * react-router-serve builds request.url from the plain-HTTP socket while the
+ * browser sends the https:// origin it is on. The guard accepts the configured
+ * public origin (BETTER_AUTH_URL) as well as the request's own, except the
+ * public host over plain http, and nothing else about it loosens.
+ */
+describe("assertTrustedOrigin and the configured public origin", () => {
+  const PUBLIC = "https://viberr.example.com";
+  /** What react-router-serve sees behind the proxy, with Host forwarded. */
+  const UPSTREAM = "http://viberr.example.com/login";
+
+  /** "passed", or the status of the Response the guard threw. */
+  function verdict(
+    betterAuthUrl: string | undefined,
+    headers: Record<string, string>,
+    url: string,
+  ): "passed" | number {
+    vi.stubEnv("BETTER_AUTH_URL", betterAuthUrl);
+    resetEnvCacheForTests();
+    try {
+      assertTrustedOrigin(new Request(url, { method: "POST", headers }));
+      return "passed";
+    } catch (error) {
+      if (!(error instanceof Response)) throw error;
+      return error.status;
+    } finally {
+      vi.unstubAllEnvs();
+      resetEnvCacheForTests();
+    }
+  }
+
+  it.each<[string, string | undefined, Record<string, string>, "passed" | number, string?]>([
+    // CANARY: leave the configured origin out of the accepted set and every
+    // login and form post behind the proxy is refused.
+    ["passes the public origin's Origin", PUBLIC, { Origin: PUBLIC }, "passed"],
+    // CANARY: compare Referer with the request's own origin only.
+    ["passes the public origin's Referer", PUBLIC, { Referer: `${PUBLIC}/x` }, "passed"],
+    // CANARY: replace the request's own origin with the configured one and the
+    // app reached under another name, such as the upstream port, refuses posts.
+    [
+      "passes the request's own origin under another name",
+      PUBLIC,
+      { Origin: "http://localhost:3000" },
+      "passed",
+      "http://localhost:3000/login",
+    ],
+    // CANARY: count the request's own origin unconditionally and, behind the
+    // proxy, a page on the public host's plain-HTTP listener, or one injected
+    // before HSTS, passes the origin check.
+    ["refuses the public host over plain http", PUBLIC, { Origin: "http://viberr.example.com" }, 403],
+    // CANARY: accept any Origin once BETTER_AUTH_URL is set.
+    ["refuses a foreign Origin", PUBLIC, { Origin: "https://evil.example.com" }, 403],
+    // CANARY: match the configured origin by hostname and another service on
+    // the public host, on another port, can post.
+    ["refuses another port on the public host", PUBLIC, { Origin: "https://viberr.example.com:8443" }, 403],
+    // CANARY: compare hosts only, or believe the forwarded headers, and the
+    // scheme stops being checked on a deployment that configured nothing.
+    [
+      "refuses the https Origin when BETTER_AUTH_URL is unset, even with X-Forwarded-*",
+      undefined,
+      {
+        Origin: PUBLIC,
+        "X-Forwarded-Proto": "https",
+        "X-Forwarded-Host": "viberr.example.com",
+      },
+      403,
+    ],
+    // CANARY: let an accepted Origin short-circuit the Sec-Fetch-Site rule.
+    [
+      "refuses Sec-Fetch-Site cross-site beside the public Origin",
+      PUBLIC,
+      { Origin: PUBLIC, "Sec-Fetch-Site": "cross-site" },
+      403,
+    ],
+    // CANARY: treat Origin: null as absent and the public Referer carries an
+    // opaque-origin post through.
+    ["refuses Origin null beside the public Referer", PUBLIC, { Origin: "null", Referer: `${PUBLIC}/x` }, 403],
+  ])("%s", (_name, betterAuthUrl, headers, expected, url = UPSTREAM) => {
+    expect(verdict(betterAuthUrl, headers, url)).toBe(expected);
+  });
+});
