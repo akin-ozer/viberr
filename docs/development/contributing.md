@@ -104,10 +104,10 @@ supersedes an earlier one obliges the earlier one to carry an inline marker
   a run's launch binds `runId` and `taskKey` in its own `forkCorrelation`), and every
   response echoes the request id as `X-Request-Id` (ruling 458(d)).
 
-## 4. Data and schema changes while pre-prod
+## 4. Data and schema changes
 
 There is one squashed migration, `db/migrations/0001_baseline.sql`, and no
-back-compat obligation. To change a table or a CHECK constraint, edit the baseline and
+back-compat obligation (ruling 683 kept this convention at launch). To change a table or a CHECK constraint, edit the baseline and
 recreate your local `state/projection.sqlite`. The boot WARN `projection schema drift`
 tells you when a root lags the baseline and names the refused CHECK values and the
 missing columns; a purely additive column drift can be closed with

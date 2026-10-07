@@ -172,7 +172,7 @@ the ruling and says so.
 | Limitation as the README states it | Still true? | Note |
 |---|---|---|
 | Single node, one app process per data root | Yes | The data-root writer lock (`server/db/data-root-lock.server.ts`) |
-| Pre-production formats, one squashed baseline | Yes | `db/migrations/0001_baseline.sql`; no back-compat obligation ([../development/contributing.md](../development/contributing.md) §4) |
+| One schema baseline, no migration chain; listed additions healed at boot, a missing projection column or a refused CHECK value named with its remedy, other drift unreported; no format back-compat | Yes | `db/migrations/0001_baseline.sql`; `BASELINE_COLUMNS` / `BASELINE_TABLES` / `BASELINE_INDEXES` healed at open by `ensureBaselineColumns` (`server/db/sqlite.server.ts`); `logBootIntegrity` (`server/boot.server.ts`) names missing `task_projections` / `task_events` columns and refused values of the four CHECKs `projectionCheckGaps` reads; no back-compat obligation ([../development/contributing.md](../development/contributing.md) §4, ruling 683) |
 | No email; one-time passwords handed over by admins | Yes | The opt-in browser notification for a new decision is ruling 481(c) |
 | TLS is the deployment's job | Yes | Boot warns when a production origin would issue insecure cookies |
 | Codex runs are not OS-sandboxed beyond the per-person OS user | Yes | Ruling 185; the per-person OS user is ruling 460 |

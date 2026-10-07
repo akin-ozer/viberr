@@ -30,7 +30,7 @@ import {
 describe("ensureBaselineColumns (pass 32 C02-R11; ruling 121 controller tables)", () => {
   it("adds every baseline column a pre-existing root lacks, idempotently", () => {
     // A data root that applied 0001 BEFORE the columns existed never re-runs
-    // the file (migrations stay squashed pre-prod), and `patchRun` naming a
+    // the file (migrations stay squashed into 0001), and `patchRun` naming a
     // missing column would fail every agent completion on that root. The
     // backstop applies the boot WARN's own remedy (ALTER TABLE … ADD COLUMN).
     const dir = mkdtempSync(path.join(tmpdir(), "viberr-runrow-"));

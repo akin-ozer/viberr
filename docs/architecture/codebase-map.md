@@ -42,10 +42,11 @@ Dockerfile           four stages: prod-deps, build, launcher (compiles tools/vib
                      production build on ./data (port 5175) for measuring
 .claude/skills/, .agents/skills/
                      agent skills for coding sessions on this repository (test-audit,
-                     react-doctor, ponytail, and the animation and design-review skills)
+                     ponytail, and the animation and design-review skills)
 README.md, AGENTS.md, CLAUDE.md, CONTRIBUTING.md
-                     entry points for people and coding agents; THIRD_PARTY_NOTICES.md the vendored
-                     code's licences; .env.example the documented environment template
+                     entry points for people and coding agents; LICENSE (MIT);
+                     THIRD_PARTY_NOTICES.md the vendored code's licences; .env.example the
+                     documented environment template
 config               vite.config.ts, vitest.config.ts, playwright.config.ts, react-router.config.ts,
                      tsconfig.json, .oxlintrc.json, doctor.config.ts + .react-doctor/ (react-doctor)
 ```

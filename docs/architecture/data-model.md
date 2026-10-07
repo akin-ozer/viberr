@@ -339,7 +339,7 @@ every `VIBERR_DISK_CHECK_INTERVAL_SECONDS` (default 5 min), logs each transition
 how an operator confirms the timer is alive; `/resources/health` reports
 `maintenance.lastPassAt`.
 
-## 6. Schema changes while pre-prod
+## 6. Schema changes
 
 The baseline is the schema. A change to `0001_baseline.sql` reaches fresh databases only; an
 existing root keeps its old DDL. Two mechanisms cover the gap.
@@ -398,8 +398,8 @@ start) regenerates user ids and destroys every primary row in the file. Both are
 `task_events`, `task_projections`, `project_members` and `projects` (the full rescan that
 follows prunes the orphaned `epic_projections` rows). It keeps users and
 better-auth tables, GitHub and backend credentials, org resources, audit rows, controller
-transcripts and the per-person runtime homes. Revisit this convention at the first real
-deployment.
+transcripts and the per-person runtime homes. The owner kept this convention at launch
+(ruling 683).
 
 ## 7. Identity and ids
 
