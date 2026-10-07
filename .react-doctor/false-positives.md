@@ -518,7 +518,7 @@ design-system or cross-file decision — revisit deliberately, not per lint run.
   each.
 
 - `react-doctor/no-high-complexity-react-function` / `no-giant-component` — the large
-  surfaces (BoardPage, SettingsPage, DecisionPacket, Timeline, the agents and
+  surfaces (SettingsPage, DecisionPacket, Timeline, the agents and
   org-settings modals, and their siblings). Splitting them is a structural refactor per
   surface, best done with the e2e suite and the bundle ratchet beside it, not as a lint
   sweep. Ruling 689(d) piloted the recipe on TaskDetailPage, which no longer carries
@@ -526,5 +526,8 @@ design-system or cross-file decision — revisit deliberately, not per lint run.
   (`task-detail-actions.tsx`), what it reads off its props became pure functions
   (`task-detail-derive.ts`), and its regions became hook-free components that each take
   one slot of its markup (`task-detail-regions.tsx`, `task-main-column.tsx`), with the
-  DOM, the hydration ids and the memoised children's props unchanged. The rest wait on
+  DOM, the hydration ids and the memoised children's props unchanged. Ruling 689(e) split
+  BoardPage the same way (`board-page-actions.tsx`, `board-page-derive.ts`,
+  `board-accept-confirm.tsx`, and the hook-free EmptyLane, NewTaskFoot and EpicFilter),
+  and it no longer carries either finding. The rest wait on
   the owner's sign-off on that recipe.
