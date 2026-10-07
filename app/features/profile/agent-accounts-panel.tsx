@@ -163,12 +163,12 @@ function AgentAccountCard({
   }
 
   // A completed rename or saved key closes what the person had open for it.
-  // Settled on the RESULT, so a refusal leaves the field as it was. The
-  // disconnect dialog closes on either outcome: it holds its busy state until
-  // the answer lands, and then the toast or the inline error says what
-  // happened (the card stays mounted now that other accounts may remain).
+  // Settled on the RESULT, so a refusal leaves the field as it was. Not the
+  // disconnect dialog: ConfirmDialog closes it once the Disconnect is
+  // confirmed (ruling 459), whatever the answer; the account's own Disconnect
+  // button carries the request, and the toast or the inline error says what
+  // happened.
   useFetcherResult(fetcher, (result) => {
-    if (result.intent === "backend-disconnect") setConfirmDisconnect(null);
     if (!result.ok) return;
     if (result.intent === "backend-account-rename") setRenaming(null);
     if (result.intent === "backend-set-key") {
