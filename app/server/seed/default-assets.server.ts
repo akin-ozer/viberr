@@ -356,6 +356,11 @@ export const PRIOR_SHIPPED_HASHES: PriorShippedHashes = {
     "a2defe42d6fb6a5eed063a1e7b9bb9b5636c1619c1f5ea0f6e56838b9628fecd",
   ],
   [path.join("agents", "definitions", "operator.md")]: [
+    // Rulings 690, 691 and 693 (2026-10-07): before the completion-packet
+    // paragraph said that what the task took is printed beside the packet,
+    // that a task keeps the sources its result rests on, and that Viberr
+    // pictures each result file that is a page.
+    "256e070e5a130fa506fd889646088420f522410dbd806f01e9fc0941128cc7c5",
     // Ruling 672 (owner, 2026-10-06): before the doctrine said what to do
     // when a task on a board with no repository needs one: ask once with
     // `ask_for_repository`, and never again once a person decided to keep none.
@@ -588,6 +593,10 @@ export const PRIOR_SHIPPED_HASHES: PriorShippedHashes = {
     "d7c78f20730ef44a8e1d490cc2efbb2a1cf1cd1c5bb21a63bf8343df7ba1b17e",
   ],
   [path.join("skills", "reviewer-expertise", "SKILL.md")]: [
+    // Ruling 690 (2026-10-07): before the guardrails said to check a claim
+    // against the source kept on the task, and that a claim with no kept
+    // source is a finding.
+    "68da19df9295f7c307fd16ce6d823a485494f9be6f5a92c5a3cc4b819997def3",
     "67b14be125a5f8b213a9ad3de6682c4762bdef703a40dc32ba1c907a267e1c31",
     "7aa79a7c54156f0556f437f525a31a5c12b2dd89a5465282974da61337bc041c",
     // outgoing before the evidence-rows-are-citations guidance
