@@ -27,7 +27,7 @@ import { recordAudit, SYSTEM_ACTOR } from "~/server/audit/audit-recorder.server"
 import { getEnv } from "~/server/config/env.server";
 import { AppError } from "~/server/errors/app-error.server";
 import { taskAttachmentsDir, taskDir } from "~/server/files/file-store-root.server";
-import { keepDelivery, keptDeliveryDir, resolveKeptDeliveryFile } from "~/server/files/kept-deliveries.server";
+import { keepDelivery, keptDeliveryDir } from "~/server/files/kept-deliveries.server";
 import {
   IMAGE_READ_MAX_BYTES,
   checkAttachmentUpload,
@@ -1001,21 +1001,6 @@ interface DeliveryCaptureInput {
   stamp: string;
 }
 
-/** Take down pictures a render put on a task and in the kept delivery they
- *  picture, when the record that would name them was not written. */
-function takeDownPictures(ctx: TaskMutationContext, of: DeliveryCaptureInput, names: readonly string[]): void {
-  unlinkRecorded(ctx, of.projectSlug, of.taskKey, names);
-  for (const name of names) {
-    if (!isPageCaptureName(name)) continue;
-    const kept = resolveKeptDeliveryFile(of.projectSlug, of.taskKey, of.stamp, name, ctx.dataRoot);
-    try {
-      if (kept) unlinkSync(kept);
-    } catch {
-      // Never copied there.
-    }
-  }
-}
-
 async function captureDelivery(
   db: DatabaseSync,
   ctx: TaskMutationContext,
@@ -1120,90 +1105,83 @@ async function captureDelivery(
   /** What the locked write below did: put the pictures down, or took an
    *  earlier delivery's record away because this one became a revision. */
   const wrote = { pictures: false, cleared: false };
-  try {
-    // Everything a render leaves on a task is put down inside the task
-    // file's own lock, after the two checks that decide whether it may be:
-    // the pictures, their copy in the kept delivery, the record and the note.
-    // The render itself ran outside the lock and took seconds, and the task
-    // can have moved on under it.
-    await updateTaskFile(ref, (parsed) => {
-      // A delivery that landed while this rendered has its own job, and these
-      // pictures are not of it.
-      if (parsed.frontmatter.deliveredAt !== stamp) return;
-      // The task's work became a revision while this rendered (a caller that
-      // asked before the delivery reconcile had minted one): a revision is
-      // never pictured, recorded or noted. The record still here is of an
-      // earlier files delivery, whose pictures went above.
-      if (!deliveredAsFiles(parsed.frontmatter)) {
-        if (parsed.frontmatter.pageCaptures) {
-          delete parsed.frontmatter.pageCaptures;
-          wrote.cleared = true;
+  // Everything a render leaves on a task is put down inside the task
+  // file's own lock, after the two checks that decide whether it may be:
+  // the pictures, their copy in the kept delivery, the record and the note.
+  // The render itself ran outside the lock and took seconds, and the task
+  // can have moved on under it.
+  await updateTaskFile(ref, (parsed) => {
+    // A delivery that landed while this rendered has its own job, and these
+    // pictures are not of it.
+    if (parsed.frontmatter.deliveredAt !== stamp) return;
+    // The task's work became a revision while this rendered (a caller that
+    // asked before the delivery reconcile had minted one): a revision is
+    // never pictured, recorded or noted. The record still here is of an
+    // earlier files delivery, whose pictures went above.
+    if (!deliveredAsFiles(parsed.frontmatter)) {
+      if (parsed.frontmatter.pageCaptures) {
+        delete parsed.frontmatter.pageCaptures;
+        wrote.cleared = true;
+      }
+      return;
+    }
+    // The pictures land on the task, then in the kept delivery they picture.
+    for (const page of results) {
+      const shots: PageCaptures["pages"][number]["shots"] = [];
+      let error = page.error;
+      for (const shot of page.shots) {
+        try {
+          const saved = writeTaskAttachment(
+            projectSlug,
+            taskKey,
+            pageCaptureName(page.file, shot.view),
+            shot.bytes,
+            ctx.dataRoot,
+          );
+          written.push(saved.name);
+          shots.push({ view: shot.view, name: saved.name, cut: shot.cut });
+        } catch (caught) {
+          error ??= `its ${shot.view} picture could not be saved (${reportText(errorMessage(caught))})`;
         }
-        return;
       }
-      // The pictures land on the task, then in the kept delivery they picture.
-      for (const page of results) {
-        const shots: PageCaptures["pages"][number]["shots"] = [];
-        let error = page.error;
-        for (const shot of page.shots) {
-          try {
-            const saved = writeTaskAttachment(
-              projectSlug,
-              taskKey,
-              pageCaptureName(page.file, shot.view),
-              shot.bytes,
-              ctx.dataRoot,
-            );
-            written.push(saved.name);
-            shots.push({ view: shot.view, name: saved.name, cut: shot.cut });
-          } catch (caught) {
-            error ??= `its ${shot.view} picture could not be saved (${reportText(errorMessage(caught))})`;
-          }
-        }
-        record.pages.push({ file: page.file, shots, error });
-        if (shots.length === 0) failed.push(page.file);
-        if (error) logger.warn("a page could not be captured", { taskKey, file: page.file, reason: error });
-      }
-      try {
-        keepDelivery(projectSlug, taskKey, stamp, written, ctx.dataRoot);
-      } catch (error) {
-        logger.warn("a delivery's page pictures could not be kept with it", { taskKey, stamp, err: toError(error) });
-      }
-      // The note says what was saved, which is what the record says.
-      const noted = results.map((page): RenderedPage => {
-        const recorded = record.pages.find((p) => p.file === page.file);
-        const saved = new Set(recorded?.shots.map((shot) => shot.view));
-        return { ...page, shots: page.shots.filter((shot) => saved.has(shot.view)), error: recorded?.error ?? page.error };
-      });
-      const lookable = new Set(
-        toolCanRender ? failed.filter((name) => refused.get(name)?.sharedByTool !== true) : [],
-      );
-      const note: TaskFileEvent = {
-        occurredAt: record.at,
-        type: "note",
-        actor: CAPTURE_ACTOR,
-        title: PAGE_CAPTURE_NOTE_TITLE,
-        text: captureNoteText({ pages: noted, more: extra.length, notCarried: rendered.notCarried, lookable }),
-        toAgent: false,
-        evidence: null,
-      };
-      if (written.length > 0) note.attachments = [...written];
-      // The record also says why a page past the cap has no picture, so the
-      // operator's fact and the card can: the next ones, up to its own bound.
-      for (const name of extra.slice(0, RECORDED_PAGES_MAX - results.length)) {
-        record.pages.push({ file: name, shots: [], error: PAST_PAGE_CAP });
-      }
-      parsed.frontmatter.pageCaptures = record;
-      parsed.timeline.unshift(note);
-      wrote.pictures = true;
+      record.pages.push({ file: page.file, shots, error });
+      if (shots.length === 0) failed.push(page.file);
+      if (error) logger.warn("a page could not be captured", { taskKey, file: page.file, reason: error });
+    }
+    try {
+      keepDelivery(projectSlug, taskKey, stamp, written, ctx.dataRoot);
+    } catch (error) {
+      logger.warn("a delivery's page pictures could not be kept with it", { taskKey, stamp, err: toError(error) });
+    }
+    // The note says what was saved, which is what the record says.
+    const noted = results.map((page): RenderedPage => {
+      const recorded = record.pages.find((p) => p.file === page.file);
+      const saved = new Set(recorded?.shots.map((shot) => shot.view));
+      return { ...page, shots: page.shots.filter((shot) => saved.has(shot.view)), error: recorded?.error ?? page.error };
     });
-  } catch (error) {
-    // The record was not written, so no picture stays that it would name.
-    takeDownPictures(ctx, input, written);
-    throw error;
-  } finally {
-    if (rendered.scratch) await removeScratch(rendered.scratch, launch);
-  }
+    const lookable = new Set(
+      toolCanRender ? failed.filter((name) => refused.get(name)?.sharedByTool !== true) : [],
+    );
+    const note: TaskFileEvent = {
+      occurredAt: record.at,
+      type: "note",
+      actor: CAPTURE_ACTOR,
+      title: PAGE_CAPTURE_NOTE_TITLE,
+      text: captureNoteText({ pages: noted, more: extra.length, notCarried: rendered.notCarried, lookable }),
+      toAgent: false,
+      evidence: null,
+    };
+    if (written.length > 0) note.attachments = [...written];
+    // The record also says why a page past the cap has no picture, so the
+    // operator's fact and the card can: the next ones, up to its own bound.
+    for (const name of extra.slice(0, RECORDED_PAGES_MAX - results.length)) {
+      record.pages.push({ file: name, shots: [], error: PAST_PAGE_CAP });
+    }
+    parsed.frontmatter.pageCaptures = record;
+    parsed.timeline.unshift(note);
+    wrote.pictures = true;
+  });
+  if (rendered.scratch) await removeScratch(rendered.scratch, launch);
   if (!wrote.pictures) {
     if (wrote.cleared) reprojectTask(db, ctx, projectSlug, taskKey);
     return;
