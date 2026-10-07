@@ -1,11 +1,9 @@
 import type { Dispatch, SetStateAction } from "react";
-import { useEffect, useId, useMemo, useRef, useState } from "react";
+import { useEffect, useId, useMemo, useRef } from "react";
 import { useFetcher } from "react-router";
 import {
-  ALWAYS_HUMAN_CAPABILITY_IDS,
   BROWSER_CAP_ID,
   capabilityEnforcement,
-  GRANT_REQUIRED_CAPABILITY_IDS,
   WEB_EGRESS_CAP_ID,
 } from "~/shared/capabilities";
 import { claudeModelRunsVerbatim } from "~/shared/model-ids";
@@ -22,18 +20,22 @@ import type { AgentProfileView } from "./agent-types";
 import { effortLabel } from "./effort-label";
 import type { CapabilityGrant } from "~/schemas/project-file.schema";
 import type { CatalogModel, ModelCatalog } from "~/server/runtimes/model-catalog.server";
-import {
-  CAP_MODAL_CATALOG,
-  CAP_MODAL_DEFAULTS,
-  OPERATOR_CAP_CATALOG,
-  OPERATOR_CAP_DEFAULTS,
-  OPERATOR_CAP_MODES,
-  SPECIALIST_CAP_MODES,
-  type CapMode,
-  type ModalCapGroup,
-  type ResCatalogGroup,
-  type ResourceSelection,
+import type {
+  CapMode,
+  ModalCapGroup,
+  ResCatalogGroup,
+  ResourceSelection,
 } from "./capability-catalog";
+import {
+  ALWAYS_HUMAN,
+  capabilityPolicyFor,
+  coupleGrants,
+  footHint,
+  modelHint,
+  seededOffCatalog,
+  VERDICT_CAP_ID,
+} from "./create-profile-modal-derive";
+import { useGrantPickers, useProfileFields, useSaveGate } from "./create-profile-modal-form";
 import { useRefusalShake } from "~/ui/use-refusal-shake";
 
 /**
@@ -46,6 +48,11 @@ import { useRefusalShake } from "~/ui/use-refusal-shake";
  * `{capabilityId, mode}` grants seed the modal caps for catalog ids;
  * grants outside the modal catalog + display-only extras are preserved
  * server-side and never touched here.
+ *
+ * Ruling 689(e) split the modal on the task page's recipe: its fields, grant
+ * pickers and save gate are hooks in `create-profile-modal-form.ts`, and what
+ * it reads off the profile (the seeds, the save's requirements, the footer's
+ * sentence) is pure functions in `create-profile-modal-derive.ts`.
  */
 
 /** The editor's working policy: capability id → the mode its toggle shows.
@@ -242,28 +249,6 @@ export function useModelCatalog(
   };
 }
 
-/**
- * F19 UX-13 — the modes the SERVER refuses to store as submitted.
- *
- * Two rewrites happen unconditionally in `agent-profile-actions.server.ts`:
- *  - `grantsFor` (edit) / `createModalGrants` (create) — every id in
- *    `ALWAYS_HUMAN_CAPABILITY_IDS` is coerced to `human` "whatever the
- *    submitted form says";
- *  - the same two functions — `report-validation-verdict` persists `direct`
- *    iff the form said `direct`, and `off` for every other value.
- *
- * The picker used to offer the rewritten modes anyway: an admin could set
- * "Merge a pull request" to Allowed, get a success toast, and find it back on
- * Human-only; picking "Human-only" for the verdict silently stored `off`, which
- * the policy surfaces then count in a different bucket than the one chosen. The
- * control now refuses what the server refuses instead of accepting and
- * discarding it — the same locked treatment (`.cap-seg.locked`) the Policy sheet
- * already uses for its human-authorized boundary (`WorkflowRules` in
- * policy-page.tsx).
- */
-const ALWAYS_HUMAN = new Set<string>(ALWAYS_HUMAN_CAPABILITY_IDS);
-const VERDICT_CAP_ID = "report-validation-verdict";
-
 /** Dot class + fallback word per mode for the collapsed group summary.
  *  `off` uses the SAME `.d.off` swatch as the capability matrix's `off` legend
  *  entry (`.mx-legend` in `CapabilityMatrixModal`) — the modal used to draw it
@@ -274,59 +259,6 @@ const SUMMARY_MODES: readonly { id: CapMode; word: string }[] = [
   { id: "human", word: "Human" },
   { id: "off", word: "Off" },
 ];
-
-/** Owner ruling (2026-08-20): a granted browser carries web egress with it —
- * the browser IS egress, and `resolveBrowserMcp` refuses to mount the pair in
- * disagreement, so the editor never lets the disagreement exist. Applied on
- * every state write AND on seed (a stored profile from before the rule can
- * still carry the contradiction; the save layer repairs it identically, so
- * seeding it coupled shows the admin what the next save persists — the same
- * F19 UX-13 round-trip honesty the verdict row follows below). */
-function coupleGrants(sel: CapSelection): CapSelection {
-  return sel[BROWSER_CAP_ID] === "direct" &&
-    sel[WEB_EGRESS_CAP_ID] !== "direct"
-    ? { ...sel, [WEB_EGRESS_CAP_ID]: "direct" }
-    : sel;
-}
-
-function seedCaps(
-  initial: AgentProfileView | null,
-  defaults: Readonly<CapSelection>,
-): CapSelection {
-  if (!initial) return coupleGrants({ ...defaults });
-  const caps: CapSelection = {};
-  // Seed each ABSENT toggle to the mode the RUNTIME uses for a missing grant, so
-  // the editor shows exactly what the agent may do — not a hardcoded "off".
-  //   - A GRANT-REQUIRED capability (repo write, branch, push, open-PR, merge,
-  //     verdict) is withheld when absent, so it seeds OFF. This preserves the
-  //     F10-07/F10-14 invariant: `report-validation-verdict` is grant-required,
-  //     so an absent verdict still seeds OFF and a save can never silently arm
-  //     the acceptance veto.
-  //   - Every OTHER capability keeps its permissive default when absent, so it
-  //     seeds from the catalog default. This fixes the BUG where
-  //     `use-web-search-fetch` (catalog default `direct`, i.e. web egress ON)
-  //     rendered as "Off" while WebFetch/WebSearch stayed available, and any
-  //     save then persisted that phantom "off" and silently WITHHELD egress the
-  //     admin never touched. Seeding from the effective default keeps the
-  //     display truthful and the round-trip behaviour-preserving.
-  for (const id of Object.keys(defaults)) {
-    caps[id] = GRANT_REQUIRED_CAPABILITY_IDS.has(id) ? "off" : defaults[id];
-  }
-  // Stored grants win over the seed. Verdict stays explicit-only: a non-`direct`
-  // stored verdict (a legacy `recommend`, or a `human` from some other path)
-  // seeds OFF — exactly what the save layer persists for it
-  // (`agent-profile-actions.server.ts` — `mode = mode === "direct" ? "direct" :
-  // "off"`), so the admin never sees a mode the next save silently rewrites.
-  for (const grant of initial.capabilities) {
-    if (grant.capabilityId in caps) {
-      caps[grant.capabilityId] =
-        grant.capabilityId === VERDICT_CAP_ID && grant.mode !== "direct"
-          ? "off"
-          : grant.mode;
-    }
-  }
-  return coupleGrants(caps);
-}
 
 /**
  * P13-AP-07 — say what saving actually DOES to a library-sourced profile.
@@ -603,13 +535,7 @@ export function ModelEffortFields({
       <div className="field">
         <label className="flabel" htmlFor={`${uid}-model`}>
           Model
-          <span className="fhint">
-            {catalogLoading
-              ? "loading available models…"
-              : catalogFailed
-                ? "couldn't load the models"
-                : "the model this profile runs on"}
-          </span>
+          <span className="fhint">{modelHint(catalogLoading, catalogFailed)}</span>
           {/* D5 (pass 23): a fetch that failed used to strand Save forever with
               no error and no way out — the picker sat empty and the footer said
               "Saving is held until a model loads". Offer the retry. */}
@@ -642,12 +568,9 @@ export function ModelEffortFields({
             </option>
           )}
           {/* Preserve a seeded value that is not in the catalog. */}
-          {backend &&
-            model &&
-            catalog &&
-            !catalog.models.some((m) => m.value === model) && (
-              <option value={model}>{model}</option>
-            )}
+          {seededOffCatalog(backend, model, catalog) && (
+            <option value={model}>{model}</option>
+          )}
           {(catalog?.models ?? []).map((m) => (
             <option
               key={m.value}
@@ -676,27 +599,56 @@ export function ModelEffortFields({
         ) : null}
       </div>
       {showEffort && (
-        <div className="field">
-          <label className="flabel" htmlFor={`${uid}-effort`}>
-            Effort
-            <span className="fhint">reasoning level per turn</span>
-          </label>
-          <select
-            id={`${uid}-effort`}
-            aria-label="Effort"
-            value={effort}
-            onChange={(e) => setEffort(e.target.value)}
-            disabled={!backend || catalogLoading}
-            >
-            {(!backend || effort === "") && <option value="">no effort yet</option>}
-            {effortOptions.map((e) => (
-              <option key={e} value={e}>
-                {effortLabel(e)}
-              </option>
-            ))}
-          </select>
-        </div>
+        <EffortField
+          uid={uid}
+          backend={backend}
+          effort={effort}
+          setEffort={setEffort}
+          catalogLoading={catalogLoading}
+          effortOptions={effortOptions}
+        />
       )}
+    </div>
+  );
+}
+
+/** The effort picker beside the model's, shown while the selected model takes
+ *  an effort (ruling 689(e) took it out of `ModelEffortFields`). */
+function EffortField({
+  uid,
+  backend,
+  effort,
+  setEffort,
+  catalogLoading,
+  effortOptions,
+}: {
+  uid: string;
+  backend: "codex" | "claude" | "";
+  effort: string;
+  setEffort: (v: string) => void;
+  catalogLoading: boolean;
+  effortOptions: string[];
+}) {
+  return (
+    <div className="field">
+      <label className="flabel" htmlFor={`${uid}-effort`}>
+        Effort
+        <span className="fhint">reasoning level per turn</span>
+      </label>
+      <select
+        id={`${uid}-effort`}
+        aria-label="Effort"
+        value={effort}
+        onChange={(e) => setEffort(e.target.value)}
+        disabled={!backend || catalogLoading}
+      >
+        {(!backend || effort === "") && <option value="">no effort yet</option>}
+        {effortOptions.map((e) => (
+          <option key={e} value={e}>
+            {effortLabel(e)}
+          </option>
+        ))}
+      </select>
     </div>
   );
 }
@@ -1310,11 +1262,7 @@ export function CreateProfileModal({
 }) {
   const editing = initial !== null;
   const isOperator = initial?.kind === "operator";
-  const capCatalog = isOperator ? OPERATOR_CAP_CATALOG : CAP_MODAL_CATALOG;
-  const capDefaults = isOperator ? OPERATOR_CAP_DEFAULTS : CAP_MODAL_DEFAULTS;
-  // R7-5: the specialist picker offers 3 honest modes (Allowed/Human-only/Off);
-  // the operator keeps all 4 (`recommend` is real for the operator only).
-  const capModes = isOperator ? OPERATOR_CAP_MODES : SPECIALIST_CAP_MODES;
+  const { capCatalog, capDefaults, capModes } = capabilityPolicyFor(isOperator);
   // Absent = the surface did not probe connections (isolated component tests),
   // so the note below claims nothing; it never gates the form either way.
   const connected = viewerConnected ?? { codex: true, claude: true };
@@ -1323,41 +1271,10 @@ export function CreateProfileModal({
     if (done) close();
   }, [done, close]);
   const uid = useId();
-  const [name, setName] = useState(initial ? initial.name : "");
-  const [role, setRole] = useState(initial ? initial.role : "");
-  const [stg, setStg] = useState<string[]>(initial ? [...initial.stages] : []);
-  const [backend, setBackend] = useState<"codex" | "claude" | "">(
-    initial ? (initial.backends[0] ?? "") : "",
-  );
-  const [autonomy, setAutonomy] = useState<"supervised" | "full">(
-    initial?.autonomy ?? "supervised",
-  );
-  const [definition, setDefinition] = useState(initial ? initial.desc : "");
-  const [persona, setPersona] = useState(initial ? initial.definition : "");
-  // Model + effort picks (seeded from the profile in edit mode). The catalog
-  // (fetched below) supplies the option lists + defaults; a seeded value that
-  // is not in the catalog is still preserved and rendered.
-  const [model, setModel] = useState(initial ? initial.model : "");
-  const [effort, setEffort] = useState(initial ? initial.effort : "");
-  const [caps, setCaps] = useState<CapSelection>(() =>
-    seedCaps(initial, capDefaults),
-  );
-  const [openGroups, setOpenGroups] = useState<Record<string, boolean>>({
-    [capCatalog[0]!.group]: true,
-  });
-  const [res, setRes] = useState<ResourceSelection>(() =>
-    initial
-      ? {
-          skills: [...initial.resources.skills],
-          mcps: [...initial.resources.mcps],
-          kb: [...initial.resources.kb],
-        }
-      : // A NEW profile starts with NOTHING pre-selected — the user grants real
-        // resources from the live catalog. (Pre-checking mock ids like
-        // `repo-write` / "Coding standards" seeded grants for resources that
-        // don't exist — finding #5.)
-        { skills: [], mcps: [], kb: [] },
-  );
+  const fields = useProfileFields(initial);
+  const { name, setName, role, setRole, stg, toggleStage, backend, pickBackend } = fields;
+  const { autonomy, setAutonomy, definition, setDefinition, persona, setPersona } = fields;
+  const { model, setModel, effort, setEffort } = fields;
   // The live store catalog (buildResourceCatalog) drives the picker; an empty
   // store means an empty picker — never a mock fallback.
   //
@@ -1368,121 +1285,28 @@ export function CreateProfileModal({
   // governed nothing. The catalog is now the registry for both kinds and needs
   // no per-kind filtering.
   const resCatalog: readonly ResCatalogGroup[] = resourceCatalog ?? [];
-  const [openRes, setOpenRes] = useState<Record<string, boolean>>(() =>
-    resCatalog[0] ? { [resCatalog[0].group]: true } : {},
-  );
-
-  const toggleStage = (id: string) =>
-    setStg((arr) =>
-      arr.includes(id) ? arr.filter((x) => x !== id) : [...arr, id],
-    );
-  const toggleRes = (key: keyof ResourceSelection, item: string) =>
-    setRes((p) => ({
-      ...p,
-      [key]: p[key].includes(item)
-        ? p[key].filter((x) => x !== item)
-        : [...p[key], item],
-    }));
-
-  /**
-   * F21-13 — switching the backend clears the model and effort ON THE CLICK.
-   *
-   * The catalog fetch below is async, and until it answers, `catalog` still
-   * holds the PREVIOUS backend's payload and `model` its previous id. Live, that
-   * window was long enough to save through: Developer went Codex → Claude
-   * while the picker read "loading available models…", Save was enabled, and the
-   * deployment landed with `backends: [claude]` next to `model: gpt-5.6-terra`
-   * — a pair no run can honour (the runtime silently substituted a Claude model,
-   * so the profile said one thing and the run did another). Clearing here makes
-   * the incoherent pair unrepresentable rather than merely unlikely: the model
-   * select has nothing to submit and `valid` below refuses the save until the
-   * new backend's catalog resolves. Re-picking the SAME chip is a no-op (an
-   * edited profile keeps its stored model through an idle click).
-   */
-  const pickBackend = (next: "codex" | "claude") => {
-    if (next === backend) return;
-    setBackend(next);
-    setModel("");
-    setEffort("");
-  };
-
-  // Ruling 518: the operator's editor has no name or role to fill.
-  const identityValid = isOperator || Boolean(name.trim() && role.trim());
-  const fieldsValid = Boolean(identityValid && backend && stg.length);
+  const { caps, setCaps, openGroups, setOpenGroups, res, toggleRes, openRes, setOpenRes } =
+    useGrantPickers(initial, capDefaults, capCatalog, resCatalog);
 
   // Model + effort catalog machinery — shared with the controller settings
   // panel (the hook holds the fetch, D5 failure/retry and default-seeding).
   const modelCatalog = useModelCatalog(backend, model, setModel, effort, setEffort);
   const { catalogLoading, catalogFailed, showEffort } = modelCatalog;
 
-  // F21-13: this profile has a backend but no model for it — `pickBackend`
-  // cleared the previous backend's id and the new catalog has not answered yet
-  // (or, in create mode, none has). Save is HELD for that whole window and the
-  // footer hint below says why: a save inside it is exactly how a Codex model id
-  // reached a Claude-pinned profile. Deliberately NOT "the fetch is in flight":
-  // opening the editor also fetches, and a stored model that is already coherent
-  // with its own backend must not lock Save behind a round-trip.
-  const modelPending = Boolean(backend) && model === "";
-  const valid = fieldsValid && !modelPending;
-  // The requirements line is neutral guidance until the person actually tries
-  // to save an invalid form — a modal that opens with red error text is
-  // scolding them for something they haven't had a chance to do yet. Counted:
-  // every refusal re-inserts the alert (ModalFooter).
-  const [attempted, setAttempted] = useState(0);
-  const missing: "name" | "role" | "backend" | "stages" | "model" | null =
-    !isOperator && !name.trim()
-      ? "name"
-      : !isOperator && !role.trim()
-        ? "role"
-        : !backend
-          ? "backend"
-          : stg.length === 0
-            ? "stages"
-            : modelPending
-              ? "model"
-              : null;
-  const flaggedField = attempted && (missing === "name" || missing === "role") ? missing : null;
-
-  const submit = () => {
-    if (busy || done) return;
-    // `valid` already requires a picked backend; naming it in the guard is what
-    // rules out the picker's initial "" for the payload below.
-    if (!valid || !backend) {
-      setAttempted((n) => n + 1);
-      // Ruling 147: the refusal puts the person on the first unmet requirement.
-      const dlg = dialogRef.current;
-      const target =
-        missing === "name" || missing === "role"
-          ? document.getElementById(`${uid}-${missing}`)
-          : missing === "backend" || missing === "stages"
-            ? dlg?.querySelector<HTMLElement>(`[data-field="${missing}"] .pick-chip`)
-            : document.getElementById(`${uid}-model`);
-      target?.focus();
-      return;
-    }
-    const payload: ProfileFormPayload = {
-      backend,
-      stages: [...stg],
-      definition,
-      persona,
-      model: model.trim(),
-      effort: showEffort ? effort.trim() : "",
-      caps,
-      resources: res,
-    };
-    // Ruling 518: the operator has no name or role to send.
-    if (!isOperator) {
-      payload.name = name.trim();
-      payload.role = role.trim();
-    }
-    // B5: an EDIT carries the record it was opened on; a create has none.
-    if (initial?.fingerprint) payload.fingerprint = initial.fingerprint;
-    // Autonomy is an OPERATOR field: a specialist payload must not carry the
-    // key at all (the action's schema leaves it optional and the writer only
-    // stores it for the operator).
-    if (isOperator) payload.autonomy = autonomy;
-    onSubmit(payload);
-  };
+  const { readiness, attempted, flaggedField, showError, submit } = useSaveGate({
+    initial,
+    isOperator,
+    fields,
+    caps,
+    res,
+    showEffort,
+    busy,
+    done,
+    error,
+    uid,
+    dialogRef,
+    onSubmit,
+  });
 
   // AP-07: a template-sourced profile FORKS on save (the deployment stores a
   // full definition snapshot that wins over the org template from then on) —
@@ -1491,28 +1315,17 @@ export function CreateProfileModal({
   // already holds its snapshot (a library deploy, any earlier save) forked
   // then, and saying so again implied template edits still reached it.
   const forksTemplate = editing && initial.tracksTemplate;
-  const backendLabel = BACKENDS.find((b) => b.id === backend)?.label ?? "";
-  const hint = error
-    ? error
-    : !fieldsValid
-      ? isOperator
-        ? "One execution backend and at least one stage are required."
-        : "Name, role, one execution backend, and at least one stage are required."
-      : // F21-13: the reason Save is disabled, in the same place every other
-        // reason is given. Silence here is what made the disabled button read as
-        // a glitch — and, before the hold existed, what let the click through.
-        modelPending
-        ? catalogLoading
-          ? `Loading the models available on ${backendLabel}. Saving is held until this profile has one of them.`
-          : catalogFailed
-            ? // D5: don't say "pick a model" over an empty picker — the fetch failed.
-              `Couldn't load the models available on ${backendLabel}. Retry above, then pick one. Saving is held until this profile has a model.`
-            : `Pick a model available on ${backendLabel}. Saving is held until this profile has one.`
-        : editing
-          ? forksTemplate
-            ? `Ready to save: this forks ${initial.name} for ${projectName}.`
-            : "Ready to save changes."
-          : `Ready to add to ${projectName}.`;
+  const hint = footHint({
+    error,
+    isOperator,
+    readiness,
+    catalogLoading,
+    catalogFailed,
+    backendLabel: BACKENDS.find((b) => b.id === backend)?.label ?? "",
+    initial,
+    forksTemplate,
+    projectName,
+  });
 
   return (
     // Native <dialog> — Escape, backdrop-click close, focus trap/restore and
@@ -1610,7 +1423,7 @@ export function CreateProfileModal({
         editing={editing}
         onClose={close}
         onSubmitClick={submit}
-        showError={Boolean(error) || (attempted > 0 && !valid)}
+        showError={showError}
         attempts={attempted}
       />
     </dialog>
