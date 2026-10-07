@@ -43,15 +43,6 @@ export interface AgentOutcomeChoice {
 }
 
 /**
- * Ruling 478(e) (F40-57, F40-31): what an agent is told about marking its
- * pick and asking for a typed answer, on both transports (`ask_human`'s schema
- * and the Codex envelope's). An unmarked list carries no recommendation: the
- * first option used to be "presented as suggested" whether the agent had a
- * pick or not, and on WEB-5 a question only the owner could answer (may a
- * customer story be published, is a video his talk) showed option 1 as
- * "recommended" and one Confirm away.
- */
-/**
  * Ruling 692(c): what a question to a person is for, in the words every asking
  * channel carries (the Claude tool, the Codex outcome field, the run's
  * collaboration notes). Live, a writer asked nine questions before drafting and
@@ -62,6 +53,15 @@ export const ASK_HUMAN_ONLY_NOTE =
   "Ask what only a person knows or may decide, and put all of it in one question. A choice " +
   "that is yours to make, make it and state it in your report as an assumption: never ask a " +
   "person to approve your own choices.";
+/**
+ * Ruling 478(e) (F40-57, F40-31): what an agent is told about marking its
+ * pick and asking for a typed answer, on both transports (`ask_human`'s schema
+ * and the Codex envelope's). An unmarked list carries no recommendation: the
+ * first option used to be "presented as suggested" whether the agent had a
+ * pick or not, and on WEB-5 a question only the owner could answer (may a
+ * customer story be published, is a video his talk) showed option 1 as
+ * "recommended" and one Confirm away.
+ */
 export const ASK_HUMAN_RECOMMEND_NOTE =
   'End the title of the choice you recommend with "(Recommended)". Leave every title unmarked ' +
   "when you have no recommendation (a question only the human can answer): an unmarked list " +

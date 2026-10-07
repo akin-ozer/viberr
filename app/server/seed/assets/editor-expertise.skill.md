@@ -48,11 +48,11 @@ Judge the voice against the samples, not against a style guide: how they open an
 
 ### 6. The page as a reader sees it
 
-Look at the pictures of the page at both widths, the ones Viberr kept with the delivery or fresh ones from `capture_page`. A title a person would write. A first screen that says something. Sections that follow the argument. Every image showing something the text is about, with a licence and credit when it is a photograph, and alt text. Nothing cut off or overflowing on the phone width.
+Where the piece is a page among the task's files, look at its pictures at both widths, the ones Viberr kept with the delivery or fresh ones from `capture_page`. A title a person would write. An opening that says something. Sections that follow the argument. Every image showing something the text is about, with a licence and credit when it is a photograph, and alt text. Nothing cut off or overflowing on the phone width. A piece that is no page (a document to print or send) or that lives in a repository has no such pictures: judge it from the file, say in your report that you did, and do not block on a picture nobody could take.
 
 ### 7. Ready for where it goes
 
-The files and fields the destination takes, as the rulings describe them: format, title, description, tags, canonical link, alt texts, and no markup the destination will not render.
+The files and fields the destination takes, as the rulings describe them: the format, the title, and what that destination asks for beside the text (for a page on the web usually a description, tags, a canonical link and alt texts), with no markup the destination will not render.
 
 ### 8. Risk
 
@@ -62,7 +62,7 @@ Nothing confidential, nothing defamatory, no commitment the person did not make.
 
 Record exactly one of `approve` or `request_changes` through the channel your run prompt names. Approve only when nothing blocking is left.
 
-When you request changes, name **everything you would block on in this revision**, each with the passage and what would fix it, so one rework can clear it. A second round that raises what you could have raised in the first costs the person a day. Label taste as taste and keep it out of the blocking list. Do not rewrite the piece yourself, and do not save files on the task: a file you save replaces the delivery you were asked to judge.
+When you request changes, name **everything you would block on in this revision**, each with the passage and what would fix it, so one rework can clear it. A second round that raises what you could have raised in the first costs the person a day. Label taste as taste and keep it out of the blocking list. Do not rewrite the piece yourself, and save no file on the task under a name the delivery holds: that replaces what you were asked to judge. A source you keep while checking is staged under its own hidden name, as your workspace contract says, and is no file of the result.
 
 ## Evidence rows
 

@@ -152,6 +152,9 @@ software to do the agents' work.
 - **When the result is prose a person puts their name to, start from the shipped Writer and
   Editor** (ruling 692): an article, a report, a proposal, a letter. Pass `writer` and
   `editor` in `agents`, hand the Writer delivery and make the Editor the required reviewer.
+  They are the library's templates whose skills are `writer-expertise` and
+  `editor-expertise`; where `list_global_agents` shows a template of the instance's own
+  under either name, give the agent you deploy that skill.
   Their own skills carry how such work is done: sources opened and kept, the person asked
   once, their voice taken from their own writing, the page checked as its reader sees it.
   So the board's own skill and rulings hold only what is this board's: what a task returns,

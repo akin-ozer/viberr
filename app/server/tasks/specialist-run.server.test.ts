@@ -3163,7 +3163,7 @@ describe("buildAnalyzePrompt — server-side delivery contract (both backends)",
       // run while the gateway is not listening).
       const cannot = (why: string) =>
         `- Sources: a fact your result states from outside rests on a source the run opened and kept, and this run cannot keep one (${why}). ` +
-        "Give the URL or the command beside each such fact and say it was not kept.\n";
+        "Say in your report, or in a notes file beside the result, which facts rest on no kept source, with the URL or the command for each. Put that in the result's own text only where its reader is meant to check it, and never in a piece that goes out under a person's name.\n";
       const ungranted = buildAnalyzePrompt({ ...base, repo, attachmentsReadDir: dir, taskFileReader: true });
       expect(ungranted, arm).toContain(cannot('your profile does not hold "Attach evidence references"'));
       expect(ungranted, arm).not.toContain("keep_source");

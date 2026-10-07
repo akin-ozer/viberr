@@ -5,8 +5,11 @@
  * asked, the questions agents raised and the times a person sent the work
  * back by reading the entries their writers leave on the timeline. Nothing
  * else records them for good: the audit rows expire and the packet leaves
- * with its answer. So each lead has this one home, which its writer and its
- * reader both import, and a rewording here moves the two together.
+ * with its answer. So each lead has this one home, which the reader imports,
+ * and with it the writers of the question lead, the declined title and the
+ * stage move. The decision lead is the exception: `packet-resolution.server.ts`
+ * and three other writers still write the literal, so rewording it means
+ * changing them together with this constant.
  *
  * No imports and no `.server` suffix: a browser module may read it too.
  */

@@ -216,7 +216,11 @@ describe("ruling 692: the library ships a Writer and an Editor", () => {
     expect(editor).toContain("read the piece once as its reader would, beside the samples of the person's own writing");
     expect(editor).toContain("No kept source: blocking, however plausible the fact.");
     expect(editor).toContain("name **everything you would block on in this revision**");
-    expect(editor).toContain("do not save files on the task");
+    expect(editor).toContain("save no file on the task under a name the delivery holds");
+    // A piece with no page to picture is judged from its file, not sent back
+    // for a picture nobody could take.
+    expect(editor).toContain("do not block on a picture nobody could take");
+    expect(writer).toContain("Where you could not look, say so in your note.");
     // Neither manual is about one kind of writing.
     expect(writer + editor).not.toMatch(/\bblog\b/i);
   });

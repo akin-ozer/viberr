@@ -453,6 +453,21 @@ export function sourcesListing(read: TaskSourcesRead, delivered: readonly string
       ? `Delivery ${stamp} rested on: ${ids.join(", ")}`
       : `Delivery ${stamp} rested on no kept source`;
   });
+  // What was kept after the newest delivery is under no line above. A reader
+  // checking a claim has to see it, and whose it is: one the task's deliverer
+  // kept (asked for the source of a claim, it keeps one and changes no file)
+  // counts as what the result rests on (`sourcesRestedOn`).
+  const newest = stamps.at(-1);
+  if (newest) {
+    const under = new Set(deliverySourceIds(read, newest));
+    const later = read.sources.filter((s) => !under.has(s.id) && Date.parse(s.keptAt) > Date.parse(newest));
+    if (later.length > 0) {
+      deliveries.push(
+        `Kept after it: ${later.map((s) => `${s.id} by agent:${s.by.profileId}`).join(", ")}. ` +
+          `One the task's deliverer kept counts as what its result rests on; one a reviewer kept while checking does not.`,
+      );
+    }
+  }
   const sources = read.sources.map(
     (s) =>
       `${s.id} · ${s.name} · ${s.bytes.toLocaleString("en-US")} bytes · sha256 ${s.sha256}\n` +

@@ -103,9 +103,10 @@ const DEFAULT_SPECIALIST_IDS: ReadonlySet<string> = new Set(["developer", "revie
 
 /**
  * Every specialist template this app ships: the base roster's two, then the
- * library's (ruling 692). One list for both template writers, the boot
- * backfill below and `npm run seed`, so neither can ship a template the other
- * does not.
+ * library's (ruling 692). The boot backfill below writes these; `npm run seed`
+ * writes the same two catalogs whole (the operator's template with them), and
+ * `seed.server.test.ts` holds its count, so neither ships a specialist the
+ * other does not.
  */
 export function shippedSpecialistProfiles(): SeedAgentProfile[] {
   return [

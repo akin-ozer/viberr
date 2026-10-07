@@ -451,6 +451,18 @@ describe("ruling 690: keeping a source on a task", () => {
       from: "cat README.md",
       body: "see http://localhost:3000,admin@example.com for access",
     },
+    {
+      // CANARY: let a round bracket or a semicolon stand in a userinfo and a
+      // Markdown link or a stylesheet is deleted as a credential.
+      what: "a Markdown link to a local address before an e-mail address",
+      from: "cat docs/setup.md",
+      body: "Open [the app](http://localhost:3000)ops@example.com owns it.",
+    },
+    {
+      what: "a stylesheet whose url() is followed by an at-rule",
+      from: "cat site.css",
+      body: "body{background:url(http://localhost:3000/bg.png)}a{b:url(http://localhost:3000);@media print{}}",
+    },
   ])("keeps $what: it is not a credential", ({ from, body }) => {
     const store = storeWithTask();
     save(store, ".source-page.html", body);

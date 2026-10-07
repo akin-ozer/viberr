@@ -1031,14 +1031,18 @@ describe("report_outcome's evidence field (P13-D-26)", () => {
     const text = async (args: Record<string, string | number>) =>
       ((await read.handler(args as never, {} as never)) as { content: { text: string }[] }).content[0]!.text;
 
-    // The list: what each delivery rested on, then each source's record.
+    // The list: what each delivery rested on, what was kept after the newest
+    // one and by whom, then each source's record. CANARY: leave the "Kept
+    // after it" line out and S2 stands under no delivery, while the card
+    // counts it when the deliverer kept it (`sourcesRestedOn`).
     expect(JSON.parse(await text({ taskKey: "VIB-9" }))).toEqual({
       task: "VIB-9",
       kept: 2,
       truncated: false,
       text:
         "Delivery 2024-03-01T09:00:00.000Z rested on no kept source\n" +
-        "Delivery 2026-10-07T13:00:00.000Z rested on: S1\n\n" +
+        "Delivery 2026-10-07T13:00:00.000Z rested on: S1\n" +
+        "Kept after it: S2 by agent:researcher. One the task's deliverer kept counts as what its result rests on; one a reviewer kept while checking does not.\n\n" +
         `S1 · aws-pricing.html · ${page.length.toLocaleString("en-US")} bytes · sha256 ${sha(page)}\n` +
         "title: AWS EC2 on-demand pricing\n" +
         "from: https://aws.amazon.com/ec2/pricing/on-demand/\n" +
