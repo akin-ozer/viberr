@@ -11,7 +11,7 @@
 
 ## 1. Authentication
 
-Viberr runs on **better-auth 1.6.25 with no plugins**. better-auth owns
+Viberr runs on **better-auth 1.7.7 with no plugins**. better-auth owns
 credentials, sessions and the OAuth handshake; the app's `users` table stays the
 canonical profile and org-role store. The one invariant binding them is that the
 better-auth `user.id` equals `users.id`; `provisionIdentity` writes the identity at

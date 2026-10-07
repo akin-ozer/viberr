@@ -788,10 +788,12 @@ CREATE TABLE run_log_lines (
   created_at TEXT NOT NULL
 );
 -- ---------------------------------------------------------------------------
--- better-auth core tables (better-auth 1.6.25), hand-inlined.
+-- better-auth core tables (better-auth 1.7.7), hand-inlined.
 --
--- PROVENANCE: these four statements are `npx @better-auth/cli@1.6.25 generate`
--- output for app/lib/auth.server.ts's `buildAuthOptions`, pasted verbatim —
+-- PROVENANCE: these four statements are better-auth 1.6.25's generated schema
+-- for app/lib/auth.server.ts's `buildAuthOptions`, pasted verbatim, and 1.7.7
+-- generates them unchanged (its `getMigrations()` for the same options, diffed
+-- 2026-10-07: the four tables and three indexes below, byte for byte) —
 -- hence the lower-case `not null` / quoted identifiers, which match nothing
 -- else in this file. The CLI is deliberately NOT a dependency: it is a codegen
 -- tool run by hand at version-bump time, and adding it would put better-auth's
@@ -799,9 +801,10 @@ CREATE TABLE run_log_lines (
 -- year.
 --
 -- REFRESH RECIPE, after bumping the better-auth version in package.json:
---   1. npx @better-auth/cli@<new-version> generate \
+--   1. npx auth@<new-version> generate \
 --        --config app/lib/auth.server.ts --output /tmp/ba-schema.sql -y
---      (check `generate --help` first — the flag names have moved across
+--      (the CLI is the `auth` package now; `@better-auth/cli` stops at 1.4.
+--      Check `generate --help` first — the flag names have moved across
 --      better-auth majors; the shape is always config-in, SQL-out.)
 --   2. Diff /tmp/ba-schema.sql against this block. Column ADDITIONS and NEW
 --      tables (a plugin's) get pasted in; better-auth never renames a core
@@ -824,10 +827,10 @@ CREATE TABLE "account" ("id" text not null primary key, "accountId" text not nul
 -- `isStateful` is just `!!options.database` — we pass one, so the strategy is
 -- "database": `generateGenericState` INSERTs the signed state here at
 -- /sign-in/social and `parseGenericState` reads then deletes it at /callback/:id
--- (better-auth 1.6.25, dist/state.mjs). Dropping the table makes every GitHub /
--- Google login fail with better-auth's own "there is a verification table in the
--- database" error. `verification_identifier_idx` below is the lookup that read
--- path uses.
+-- (better-auth 1.6.25, dist/state.mjs; unchanged in 1.7.7). Dropping the table
+-- makes every GitHub / Google login fail with better-auth's own "there is a
+-- verification table in the database" error. `verification_identifier_idx`
+-- below is the lookup that read path uses.
 CREATE TABLE "verification" ("id" text not null primary key, "identifier" text not null, "value" text not null, "expiresAt" date not null, "createdAt" date not null, "updatedAt" date not null);
 
 -- ============================ indexes ===========================
