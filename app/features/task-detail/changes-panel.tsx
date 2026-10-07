@@ -36,6 +36,11 @@ import { useFetcherResult } from "~/ui/use-fetcher-result";
  * reaches the agent as `path:start-end`. A line still carries one note, so a
  * range stops before a line that has one, and pressing any line of a note
  * opens it.
+ *
+ * Ruling 689(e) split the body and a file along the task page's recipe, a pure
+ * structural refactor: the body's read failure, stale notice and foot, and a
+ * file's left-out patch, are hook-free components below the one that draws
+ * them, and a file's own read is its hook `useFilePatch`.
  */
 
 export interface ChangesBodyProps {
@@ -174,19 +179,7 @@ export function ChangesBody({ url, revisionSha, githubHost }: ChangesBodyProps) 
   }
   if (!view.ok) {
     return (
-      <div className="chg-fail" role="alert">
-        <p>{view.reason}</p>
-        <button
-          type="button"
-          className="btn sm"
-          disabled={reading}
-          aria-busy={reading || undefined}
-          onClick={() => void loadRead(url)}
-        >
-          <GlyphSwap rest="refresh" alt="loader" on={reading} spinAlt />
-          {reading ? "Reading…" : "Try again"}
-        </button>
-      </div>
+      <ChangesReadFailure reason={view.reason} reading={reading} onRetry={() => void loadRead(url)} />
     );
   }
 
@@ -229,29 +222,17 @@ export function ChangesBody({ url, revisionSha, githubHost }: ChangesBodyProps) 
           : null}
       </p>
       {stale ? (
-        <div className="chg-stale" role="status">
-          <p>
-            A new revision, <span className="mono">{revisionSha.slice(0, 7)}</span>, was
-            delivered after these changes were read.
-            {notes.length > 0
-              ? ` Your ${plural(notes.length, "note is", "notes are")} on ${view.headSha.slice(0, 7)}.`
-              : null}
-          </p>
-          <button
-            type="button"
-            className="btn sm"
-            disabled={reading}
-            onClick={() => {
-              setNotes([]);
-              setDraft(null);
-              void loadRead(url);
-            }}
-          >
-            {notes.length > 0
-              ? `Discard ${plural(notes.length, "note", "notes")} and read the new revision`
-              : "Read the new revision"}
-          </button>
-        </div>
+        <ChangesStaleNotice
+          revisionSha={revisionSha}
+          readSha={view.headSha}
+          noteCount={notes.length}
+          reading={reading}
+          onReread={() => {
+            setNotes([]);
+            setDraft(null);
+            void loadRead(url);
+          }}
+        />
       ) : null}
       {recipient === null ? (
         <p className="chg-note-off">
@@ -281,42 +262,142 @@ export function ChangesBody({ url, revisionSha, githubHost }: ChangesBodyProps) 
         ))}
       </div>
       {recipient !== null ? (
-        <div className="chg-foot">
-          <p className="chg-count" role="status">
-            {notes.length === 0
-              ? "No notes yet. Select a line number to add one, or drag across several."
-              : `${plural(notes.length, "note", "notes")} for @${recipient.name}, sent as one comment.`}
-          </p>
-          <div className="chg-foot-acts">
-            <button
-              type="button"
-              className="btn sm ghost"
-              disabled={notes.length === 0 || sending}
-              onClick={() => {
-                setNotes([]);
-                setDraft(null);
-              }}
-            >
-              Discard notes
-            </button>
-            <button
-              type="button"
-              className="btn sm primary"
-              disabled={notes.length === 0 || sending || stale}
-              aria-busy={sending || undefined}
-              onClick={submit}
-            >
-              <GlyphSwap rest="send" alt="loader" on={sending} spinAlt />
-              {sending ? "Sending…" : `Send to @${recipient.name}`}
-            </button>
-          </div>
-          {sendError ? (
-            <p className="form-err" role="alert">
-              <Icon name="alert" />
-              {sendError}
-            </p>
-          ) : null}
-        </div>
+        <ChangesFoot
+          recipientName={recipient.name}
+          noteCount={notes.length}
+          sending={sending}
+          stale={stale}
+          sendError={sendError}
+          onDiscard={() => {
+            setNotes([]);
+            setDraft(null);
+          }}
+          onSend={submit}
+        />
+      ) : null}
+    </div>
+  );
+}
+
+/** The read failed: why, and Try again. */
+function ChangesReadFailure({
+  reason,
+  reading,
+  onRetry,
+}: {
+  reason: string;
+  reading: boolean;
+  onRetry: () => void;
+}) {
+  return (
+    <div className="chg-fail" role="alert">
+      <p>{reason}</p>
+      <button
+        type="button"
+        className="btn sm"
+        disabled={reading}
+        aria-busy={reading || undefined}
+        onClick={onRetry}
+      >
+        <GlyphSwap rest="refresh" alt="loader" on={reading} spinAlt />
+        {reading ? "Reading…" : "Try again"}
+      </button>
+    </div>
+  );
+}
+
+/** A revision delivered after the read: the notes are on the one read, and
+ *  reading the new one discards them. */
+function ChangesStaleNotice({
+  revisionSha,
+  readSha,
+  noteCount,
+  reading,
+  onReread,
+}: {
+  /** The delivered revision the page knows now. */
+  revisionSha: string;
+  /** The revision the read holds. */
+  readSha: string;
+  noteCount: number;
+  reading: boolean;
+  onReread: () => void;
+}) {
+  return (
+    <div className="chg-stale" role="status">
+      <p>
+        A new revision, <span className="mono">{revisionSha.slice(0, 7)}</span>, was
+        delivered after these changes were read.
+        {noteCount > 0
+          ? ` Your ${plural(noteCount, "note is", "notes are")} on ${readSha.slice(0, 7)}.`
+          : null}
+      </p>
+      <button
+        type="button"
+        className="btn sm"
+        disabled={reading}
+        onClick={onReread}
+      >
+        {noteCount > 0
+          ? `Discard ${plural(noteCount, "note", "notes")} and read the new revision`
+          : "Read the new revision"}
+      </button>
+    </div>
+  );
+}
+
+/** The notes' count, their Discard and their Send to the deliverer, and why
+ *  the last send was refused. */
+function ChangesFoot({
+  recipientName,
+  noteCount,
+  sending,
+  stale,
+  sendError,
+  onDiscard,
+  onSend,
+}: {
+  recipientName: string;
+  noteCount: number;
+  sending: boolean;
+  /** A newer revision was delivered: the notes cannot go. */
+  stale: boolean;
+  sendError: string | null | undefined;
+  onDiscard: () => void;
+  onSend: () => void;
+}) {
+  return (
+    <div className="chg-foot">
+      <p className="chg-count" role="status">
+        {noteCount === 0
+          ? "No notes yet. Select a line number to add one, or drag across several."
+          : `${plural(noteCount, "note", "notes")} for @${recipientName}, sent as one comment.`}
+      </p>
+      <div className="chg-foot-acts">
+        <button
+          type="button"
+          className="btn sm ghost"
+          disabled={noteCount === 0 || sending}
+          onClick={onDiscard}
+        >
+          Discard notes
+        </button>
+        <button
+          type="button"
+          className="btn sm primary"
+          disabled={noteCount === 0 || sending || stale}
+          aria-busy={sending || undefined}
+          onClick={onSend}
+        >
+          <GlyphSwap rest="send" alt="loader" on={sending} spinAlt />
+          {sending ? "Sending…" : `Send to @${recipientName}`}
+        </button>
+      </div>
+      {sendError ? (
+        <p className="form-err" role="alert">
+          <Icon name="alert" />
+          {sendError}
+        </p>
       ) : null}
     </div>
   );
@@ -342,14 +423,26 @@ interface FileDiffProps extends NoteProps {
   defaultOpen: boolean;
 }
 
-/** One changed file: its counts in the summary, its hunks inside. A patch the
- *  panel's read left out for size loads on its own. */
-function FileDiff({ file, url, defaultOpen, ...lines }: FileDiffProps) {
+/** A patch the panel's read left out for size, read on its own when the
+ *  person asks: the file's patch from either read, why the panel's read left
+ *  it out, and that one read's state and failure. */
+function useFilePatch(file: PrDiffFile, url: string) {
   const one = useFetcher<TaskChangesView>();
   const loaded =
     one.data?.ok === true ? (one.data.files.find((f) => f.path === file.path) ?? null) : null;
-  const patch = file.patch ?? loaded?.patch ?? null;
-  const oneFailed = one.data !== undefined && !one.data.ok ? one.data.reason : null;
+  return {
+    patch: file.patch ?? loaded?.patch ?? null,
+    omitted: loaded?.patchOmitted ?? file.patchOmitted,
+    loading: one.state !== "idle",
+    failure: one.data !== undefined && !one.data.ok ? one.data.reason : null,
+    load: () => void one.load(`${url}?path=${encodeURIComponent(file.path)}`),
+  };
+}
+
+/** One changed file: its counts in the summary, its hunks inside. A patch the
+ *  panel's read left out for size loads on its own. */
+function FileDiff({ file, url, defaultOpen, ...lines }: FileDiffProps) {
+  const { patch, omitted, loading, failure, load } = useFilePatch(file, url);
   const rows = useMemo(() => (patch === null ? [] : diffRows(patch)), [patch]);
   const status = STATUS_LABEL.get(file.status) ?? file.status;
   const fileNotes = lines.notes.length;
@@ -374,26 +467,8 @@ function FileDiff({ file, url, defaultOpen, ...lines }: FileDiffProps) {
       </summary>
       {patch !== null ? (
         <DiffLines path={file.path} rows={rows} {...lines} />
-      ) : (loaded?.patchOmitted ?? file.patchOmitted) === "budget" ? (
-        <div className="chg-omitted">
-          <p>This file&rsquo;s changes are larger than one read carries.</p>
-          <button
-            type="button"
-            className="btn sm"
-            disabled={one.state !== "idle"}
-            aria-busy={one.state !== "idle" || undefined}
-            onClick={() => void one.load(`${url}?path=${encodeURIComponent(file.path)}`)}
-          >
-            <GlyphSwap rest="file" alt="loader" on={one.state !== "idle"} spinAlt />
-            {one.state !== "idle" ? "Loading…" : "Load this file"}
-          </button>
-          {oneFailed ? (
-            <p className="form-err" role="alert">
-              <Icon name="alert" />
-              {oneFailed}
-            </p>
-          ) : null}
-        </div>
+      ) : omitted === "budget" ? (
+        <PatchOmitted loading={loading} failure={failure} onLoad={load} />
       ) : (
         <p className="chg-omitted">
           GitHub shows no line changes for this file: a binary file, or one too large for
@@ -401,6 +476,40 @@ function FileDiff({ file, url, defaultOpen, ...lines }: FileDiffProps) {
         </p>
       )}
     </details>
+  );
+}
+
+/** A file whose changes are larger than the panel's read carries: its own
+ *  read, and why that failed. */
+function PatchOmitted({
+  loading,
+  failure,
+  onLoad,
+}: {
+  loading: boolean;
+  failure: string | null;
+  onLoad: () => void;
+}) {
+  return (
+    <div className="chg-omitted">
+      <p>This file&rsquo;s changes are larger than one read carries.</p>
+      <button
+        type="button"
+        className="btn sm"
+        disabled={loading}
+        aria-busy={loading || undefined}
+        onClick={onLoad}
+      >
+        <GlyphSwap rest="file" alt="loader" on={loading} spinAlt />
+        {loading ? "Loading…" : "Load this file"}
+      </button>
+      {failure ? (
+        <p className="form-err" role="alert">
+          <Icon name="alert" />
+          {failure}
+        </p>
+      ) : null}
+    </div>
   );
 }
 
