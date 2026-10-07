@@ -3567,12 +3567,12 @@ describe("F21-2 / ruling 88: the server-side acceptance disclosure", () => {
     // board's terminal column into a door no delivered work could pass, while
     // ruling 53 requires that same ceremony to disclose what it accepts.
     //
-    // Built here the way the COMPONENT builds it (accept-confirm.tsx's
-    // `disclosure`, off the fields the board hands it) so the projection and the
-    // door are proved against each other rather than against the file both are
-    // meant to agree with. CANARY: revert `work_revision_sha` in
-    // rebuilder.server.ts or its mapping — `revision` falls back to "none" and
-    // this fails with `accept_disclosure_stale`.
+    // Built here the way the COMPONENT builds it (`ceremonyFacts`'s
+    // `disclosure` in accept-confirm-derive.ts, off the fields the board hands
+    // it) so the projection and the door are proved against each other rather
+    // than against the file both are meant to agree with. CANARY: revert
+    // `work_revision_sha` in rebuilder.server.ts or its mapping — `revision`
+    // falls back to "none" and this fails with `accept_disclosure_stale`.
     const store = setupProjectedStore(ctx);
     seedReviewed(store);
     const summary = listProjectTasks(store.db, store.slug).find(
