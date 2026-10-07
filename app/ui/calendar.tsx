@@ -195,13 +195,14 @@ export function Calendar({
                 if (isToday) cls.push("today");
                 if (isSelected) cls.push("sel");
                 return (
-                  <td key={iso} role="gridcell">
+                  // The selected state belongs to the cell: `gridcell` supports
+                  // `aria-selected`, a `button` ignores it.
+                  <td key={iso} role="gridcell" aria-selected={isSelected || undefined}>
                     <button
                       type="button"
                       className={cls.join(" ")}
                       data-iso={iso}
                       tabIndex={isFocused ? 0 : -1}
-                      aria-selected={isSelected || undefined}
                       aria-label={dayLabel(day)}
                       onClick={() => onSelect(iso)}
                       onFocus={() => {

@@ -205,10 +205,13 @@ function BrowserToolbar({
       </div>
       {gh.open && (
         <div className="fm-gh">
+          {/* The example URL is a hint that goes as the person types; the
+              field's name stays, as the destination select's does. */}
           <input
             type="text"
             className="mono"
             value={gh.url}
+            aria-label="GitHub repo or folder link"
             placeholder="https://github.com/owner/repo/tree/main/docs"
             onChange={(e) => dispatchGh({ type: "url", url: e.target.value })}
             onKeyDown={(e) => {

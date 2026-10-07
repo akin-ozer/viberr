@@ -293,13 +293,15 @@ describe("StoreBrowser", () => {
   });
 
   it("GitHub bar validates empty input client-side and posts the import", async () => {
-    const { getByText, getByPlaceholderText } = renderBrowser();
+    const { getByText, getByLabelText } = renderBrowser();
     fireEvent.click(getByText("Add from GitHub"));
     fireEvent.click(getByText("Import"));
     expect(getByText(/Paste a GitHub link: a repo, or a folder like/)).toBeTruthy();
     expect(lastForm).toBeNull();
 
-    fireEvent.change(getByPlaceholderText("https://github.com/owner/repo/tree/main/docs"), {
+    // Named in its own right: the placeholder is an example that goes as
+    // the person types.
+    fireEvent.change(getByLabelText("GitHub repo or folder link"), {
       target: { value: "https://github.com/owner/repo/tree/main/docs" },
     });
     fireEvent.click(getByText("Import"));
