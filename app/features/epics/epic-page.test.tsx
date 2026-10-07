@@ -324,11 +324,12 @@ describe("ruling 503(e): About, History and Details", () => {
   });
 
   it("a new line leaves the rows already drawn in place, so a task chip in them keeps the focus", async () => {
-    // Local hours of one fixed past day, so every zone reads one day.
+    // Local hours of one fixed past day, so every zone reads one day. The
+    // eight lines fill the preview, so the new one pushes the oldest out.
     const at = (hour: number) => new Date(2024, 8, 20, hour).toISOString();
     const earlier = [
       { occurredAt: at(11), text: "Arda Kaya added VIB-151." },
-      { occurredAt: at(10), text: "Created by Arda Kaya." },
+      ...Array.from({ length: 7 }, (_, i) => ({ occurredAt: at(10 - i), text: `Entry ${7 - i}` })),
     ];
     const latest = { occurredAt: at(12), text: "Arda Kaya set the status to Paused." };
     const taskLinks = { "VIB-151": "/projects/viberr-core/tasks/VIB-151" };
@@ -344,8 +345,9 @@ describe("ruling 503(e): About, History and Details", () => {
     // a change event leaves the focus on the chip.
     fireEvent.change(screen.getByRole("combobox", { name: "Status" }), { target: { value: "paused" } });
     expect(await within(panel).findByText(latest.text)).toBeTruthy();
-    // CANARY: key a row by its place in its day again and the new line re-keys
-    // the two under it: the chip's row remounts and the focus falls to <body>.
+    // CANARY: key a row by its place in its day again, or count it from the end
+    // of `entries` (a full preview stays eight long), and the new line re-keys
+    // every row under it: the chip's row remounts and the focus falls to <body>.
     expect(chip.isConnected).toBe(true);
     expect(document.activeElement).toBe(chip);
   });
