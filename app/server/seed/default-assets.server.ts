@@ -1,7 +1,10 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import path from "node:path";
+import type { DatabaseSync } from "node:sqlite";
 import { z } from "zod";
+import { recordAudit, SYSTEM_ACTOR } from "~/server/audit/audit-recorder.server";
 import { sha256Hex } from "~/server/files/content-hash.server";
+import { getBuildInfo } from "~/server/ops/build-info.server";
 /**
  * The shipped default agent assets, read from `assets/` at runtime.
  *
@@ -720,11 +723,15 @@ function specialistProfileAssets(): { rel: string; content: string }[] {
  * historical version); anything a human edited is left exactly as it is — and
  * WARNED about (B7), so a store pinned to old doctrine is visible at boot
  * instead of being an invisible behaviour difference between two installs.
+ *
+ * Returns the store-relative paths of the copies it REFRESHED, for the audit
+ * row boot writes once the database is open (`recordShippedAssetRefresh`).
  */
-export function seedDefaultAgentAssets(dataRoot?: string): void {
+export function seedDefaultAgentAssets(dataRoot?: string): string[] {
   const store = getDataRoot(dataRoot);
   const assets = [...STATIC_ASSETS, ...specialistProfileAssets()];
   const manifest = readShippedManifest(store);
+  const refreshed: string[] = [];
   let manifestChanged = false;
   const record = (rel: string, hash: string): void => {
     if (manifest[rel] === hash) return;
@@ -768,6 +775,7 @@ export function seedDefaultAgentAssets(dataRoot?: string): void {
         }
         writeFileSync(dest, asset.content, "utf8");
         record(asset.rel, shippedHash);
+        refreshed.push(asset.rel);
         logger.info("refreshed an unedited shipped agent asset", {
           asset: asset.rel,
           was: onDiskHash.slice(0, 12),
@@ -787,4 +795,29 @@ export function seedDefaultAgentAssets(dataRoot?: string): void {
     }
   }
   if (manifestChanged) writeShippedManifest(store, manifest);
+  return refreshed;
+}
+
+export const SHIPPED_ASSETS_REFRESHED_ACTION = "org.shipped_assets.refreshed";
+
+/**
+ * Ruling 681(f): the record of an upgrade's refresh.
+ *
+ * A refresh replaces a skill, a definition or a profile template that agents
+ * read, and left only a line in the boot log: an admin asking why the
+ * operator's playbook changed had no row to find. One row per boot that
+ * refreshed anything names the build and each file it replaced. It is the
+ * instance's row and is on no board's Activity (the owner, 2026-10-07): an
+ * unedited shipped file is part of the product, as the prompts in code are,
+ * and an upgrade is not a decision anyone on a board made. A boot that
+ * refreshed nothing writes nothing.
+ */
+export function recordShippedAssetRefresh(db: DatabaseSync, refreshed: readonly string[]): void {
+  if (refreshed.length === 0) return;
+  const build = getBuildInfo();
+  recordAudit(db, {
+    action: SHIPPED_ASSETS_REFRESHED_ACTION,
+    actor: SYSTEM_ACTOR,
+    details: { assets: [...refreshed], version: build.version, revision: build.revision },
+  });
 }

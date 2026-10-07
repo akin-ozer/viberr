@@ -35,6 +35,11 @@ import { listScopeViolations } from "./policy-violations.server";
  * stream-visible activity (comments, transitions, github events) stays in
  * the Stream panel, auth/org-scoped rows have no project home. Both panels
  * are capped with loader-driven "show older" pagination (Phase 10).
+ *
+ * Ruling 681: one family of instance rows does have a project home. A write
+ * to a knowledge base, a skill or an MCP server names the boards whose runs
+ * are given it (`details.resource`), and the audit panel of each of those
+ * boards shows it (`RESOURCE_ACTIONS` below).
  */
 
 export interface ActivityStreamRow {
@@ -233,6 +238,9 @@ export interface AuditLogEntry {
   resolvedAt: string | null;
   /** Resolver display name (user id resolved; label fallback). */
   resolvedBy: string | null;
+  /** Ruling 681: the knowledge-base document a resource row wrote, for the
+   *  route to link for a viewer who may open it. Absent on every other row. */
+  doc?: { kb: string; doc: string };
 }
 
 const AUDIT_LOG_LIMIT = 60;
@@ -268,6 +276,11 @@ const AUDIT_ACTION_KINDS = {
   // library profile into the project is the same class of config change as
   // creating one here, and was the only sibling missing.
   "project.agent_profile.deployed": "change",
+  // Ruling 681: which knowledge base the board's rulings are, and a template's
+  // grants pushed into the board's copy of an agent. Both change what the
+  // board's runs are given, and both were recorded and shown nowhere.
+  "project.rulings_kb.updated": "change",
+  "project.agent_profile.resources_synced": "change",
   "project.created": "change",
   // Ruling 462: the GitHub repository a project was created with.
   "project.repository.created": "change",
@@ -332,6 +345,8 @@ const BOUNDARY_LABEL = new Map([
 ]);
 
 type AuditRow = {
+  /** The row's rowid: what orders two rows written in one millisecond. */
+  seq: number;
   id: string;
   occurred_at: string;
   actor_user_id: string | null;
@@ -417,6 +432,8 @@ const auditDetailsSchema = z.object({
   // Ruling 653: a project made from a board file says which file.
   template: detailText,
   file: detailText,
+  // Ruling 681: the knowledge base a board named as its rulings.
+  dir: detailText,
 
   // Ruling 482: the gate list as written, and one gate run's outcome.
   gates: z.array(z.object({ name: z.string().catch("?") })).catch([]),
@@ -533,6 +550,12 @@ function auditText(
       return `${actor} deleted agent profile **${d.name ?? "?"}**.`;
     case "project.agent_profile.deployed":
       return `${actor} deployed agent profile **${d.name ?? "?"}** to the project.`;
+    case "project.agent_profile.resources_synced":
+      return `${actor} set **${d.name ?? "?"}**'s skills, knowledge bases and MCP servers to its template's.`;
+    case "project.rulings_kb.updated":
+      return d.dir
+        ? `${actor} named **${d.dir}** the project's rulings.`
+        : `${actor} cleared the project's rulings.`;
     case "project.created":
       // Ruling 653: an imported board names the file it came from.
       return d.template === "imported" && d.file
@@ -734,6 +757,214 @@ function goalUpdatedText(row: AuditRow, actor: string, d: AuditDetailsRead): str
   }
 }
 
+/* -------------------------------------------- resource writes (ruling 681) */
+
+/**
+ * Ruling 681: the instance rows a board's panel shows when their `resource`
+ * names the board. Each changes what the board's runs are given: a document
+ * of a knowledge base, a skill's text, an MCP server's reach, or the resource
+ * itself going or changing name. A new folder, a re-index and a create are
+ * not here: nothing a run reads changed.
+ */
+const RESOURCE_ACTIONS = [
+  "org.store.doc_written",
+  "org.store.files_added",
+  "org.store.file_deleted",
+  "org.store.folder_deleted",
+  "org.store.github_import",
+  "org.kb.updated",
+  "org.kb.privacy",
+  "org.kb.deleted",
+  "org.skill.updated",
+  "org.skill.deleted",
+  "org.mcp.updated",
+  "org.mcp.tool_policy.changed",
+  "org.mcp.removed",
+  // A template edit reaches the boards whose agent still resolves it live.
+  "org.agent_profile.updated",
+] as const;
+
+/** `details_json` as SQLite's JSON functions take it. They raise on text that
+ *  is not JSON, and the column is free text. */
+const DETAILS_JSON = "CASE WHEN json_valid(a.details_json) THEN a.details_json END";
+
+/**
+ * The instance rows about one board (`audit_events AS a`): one of those actions
+ * whose `resource` names the board. A write that is an agent's correction, or
+ * its undo, on one of the board's own tasks is left out, because that task's
+ * timeline entry is on the Stream beside this panel (ruling 498); another
+ * board given the same knowledge base has no such entry, and sees the row.
+ *
+ * Only a member of `boards` that is an object is asked for its project: a
+ * string there is not JSON to `json_extract`, which raises, and one such row
+ * would take every board's panel down with it.
+ */
+function resourceRowsWhere(slug: string) {
+  return {
+    sql:
+      `a.project_slug IS NULL AND a.action IN (${RESOURCE_ACTIONS.map(() => "?").join(", ")}) ` +
+      `AND EXISTS (SELECT 1 FROM json_each(${DETAILS_JSON}, '$.resource.boards') AS board ` +
+      `WHERE CASE WHEN board.type = 'object' THEN json_extract(board.value, '$.project') END = ?) ` +
+      `AND COALESCE(json_extract(${DETAILS_JSON}, '$.task.project'), '') <> ?`,
+    args: [...RESOURCE_ACTIONS, slug, slug],
+  };
+}
+
+/**
+ * What a resource row's sentence reads of its `details`.
+ *
+ * `edited` is read as whether there was an edit and nothing more: the empty
+ * object drops its keys here. The row keeps the passage an edit replaced and
+ * what replaced it (ruling 637), and a knowledge base can be private (ruling
+ * 578): this panel is read by every member of the board, so no sentence of it
+ * quotes a document. It names the document, as a correction's entry does when
+ * it may not quote (ruling 568).
+ */
+const resourceDetailsSchema = z.object({
+  resource: z
+    .object({
+      kind: z.enum(["kb", "skill", "mcp", "template"]),
+      key: z.string().min(1),
+      boards: z
+        .array(
+          z
+            .object({
+              project: z.string(),
+              rulings: z.boolean().catch(false),
+              agents: z.array(z.string()).catch([]),
+            })
+            .nullable()
+            .catch(null),
+        )
+        .catch([]),
+    })
+    .nullable()
+    .catch(null),
+  path: detailText,
+  replaced: z.boolean().catch(false),
+  appended: z.number().optional().catch(undefined),
+  edited: z.object({}).nullable().catch(null),
+  count: z.number().optional().catch(undefined),
+  fileCount: z.number().optional().catch(undefined),
+  private: z.boolean().catch(false),
+  renamedFrom: detailText,
+  rewritten: z.boolean().catch(false),
+  // A template's row names it; its `key` is the profile id.
+  name: detailText,
+});
+
+const resourceDetails = resourceDetailsSchema.catch(() => resourceDetailsSchema.parse({}));
+
+const RESOURCE_NOUN = {
+  kb: "knowledge base",
+  skill: "skill",
+  mcp: "MCP server",
+  template: "agent template",
+} as const;
+
+/** A board's agents as a sentence names them: one or two by name; past that,
+ *  the first and how many others. */
+function namedAgents(agents: readonly [string, ...string[]]): string {
+  const [first, second] = agents;
+  if (second === undefined) return first;
+  return `${first} and ${agents.length === 2 ? second : `${agents.length - 1} others`}`;
+}
+
+/** ", which A and B read": the board's agents that hold the resource. */
+function heldBy(kind: keyof typeof RESOURCE_NOUN, agents: readonly string[], past: boolean): string {
+  const [first, ...rest] = agents;
+  if (first === undefined) return "";
+  const one = rest.length === 0 && !past;
+  const verb = kind === "kb" ? (one ? "reads" : "read") : past ? "used" : one ? "uses" : "use";
+  return `, which ${namedAgents([first, ...rest])} ${verb}`;
+}
+
+/** One resource row as the board's panel shows it. */
+function resourceEntry(row: AuditRow, slug: string): AuditLogEntry {
+  const actor = auditActorDisplay(row);
+  const d = resourceDetails.parse(row.details_json ? JSON.parse(row.details_json) : {});
+  const entry: AuditLogEntry = {
+    id: row.id,
+    kind: "change",
+    text: `${actor}: ${row.action.replace(/[._]/g, " ")}.`,
+    taskKey: null,
+    occurredAt: row.occurred_at,
+    status: null,
+    resolvedAt: null,
+    resolvedBy: null,
+  };
+  const resource = d.resource;
+  const board = resource?.boards.find((b) => b?.project === slug);
+  if (!resource || !board) return entry;
+  // The rulings are read by every run on the board, so nobody is named.
+  const rulings = resource.kind === "kb" && board.rulings;
+  const thing = (key: string = resource.key) =>
+    rulings ? `the project's rulings **${key}**` : `the ${RESOURCE_NOUN[resource.kind]} **${key}**`;
+  const held = (past = false) => (rulings ? "" : heldBy(resource.kind, board.agents, past));
+  /** The same clause closed by a comma, for a sentence that goes on after it. */
+  const aside = held() ? `${held()},` : "";
+  const path = `**${d.path ?? "a document"}**`;
+  switch (row.action) {
+    case "org.store.doc_written":
+      if (resource.kind === "kb" && d.path) entry.doc = { kb: resource.key, doc: d.path };
+      entry.text = d.edited
+        ? `${actor} edited a passage of ${path} in ${thing()}${held()}.`
+        : d.appended !== undefined
+          ? `${actor} added to ${path} in ${thing()}${held()}.`
+          : d.replaced
+            ? `${actor} replaced ${path} in ${thing()}${held()}.`
+            : `${actor} added the document ${path} to ${thing()}${held()}.`;
+      break;
+    case "org.store.files_added":
+      entry.text = `${actor} added ${countLabel(d.count ?? 0, "file")} to ${thing()}${held()}.`;
+      break;
+    case "org.store.file_deleted":
+      entry.text = `${actor} deleted ${path} from ${thing()}${held()}.`;
+      break;
+    case "org.store.folder_deleted":
+      entry.text = `${actor} deleted the folder ${path} from ${thing()}${held()}.`;
+      break;
+    case "org.store.github_import":
+      entry.text = `${actor} imported ${countLabel(d.fileCount ?? 0, "file")} from GitHub into ${thing()}${held()}.`;
+      break;
+    case "org.kb.updated":
+    case "org.skill.updated":
+    case "org.mcp.updated": {
+      const skill = row.action === "org.skill.updated";
+      entry.text = d.renamedFrom
+        ? `${actor} renamed ${thing(d.renamedFrom)}${aside} to **${resource.key}**${skill && d.rewritten ? " and rewrote it" : ""}.`
+        : `${actor} ${skill ? "rewrote" : "changed"} ${thing()}${held()}.`;
+      break;
+    }
+    case "org.kb.privacy":
+      entry.text = `${actor} made ${thing()}${aside} ${d.private ? "private" : "open again"}.`;
+      break;
+    case "org.mcp.tool_policy.changed":
+      entry.text = `${actor} changed which tools of ${thing()}${aside} are marked as writes.`;
+      break;
+    case "org.kb.deleted":
+    case "org.skill.deleted":
+      entry.text = `${actor} deleted ${thing()}${held(true)}.`;
+      break;
+    case "org.mcp.removed":
+      entry.text = `${actor} removed ${thing()}${held(true)}.`;
+      break;
+    case "org.agent_profile.updated": {
+      // An agent goes by its template's name unless its own copy names it, so
+      // the sentence names the template once and only an agent called otherwise.
+      const template = d.name ?? resource.key;
+      const [first, ...rest] = board.agents.filter((agent) => agent !== template);
+      const followers =
+        first === undefined
+          ? "this board follows"
+          : `${namedAgents([first, ...rest])} ${rest.length === 0 ? "follows" : "follow"}`;
+      entry.text = `${actor} changed ${thing(template)}, which ${followers}.`;
+      break;
+    }
+  }
+  return entry;
+}
+
 /** Rows ending in "on" expect the task chip; drop the dangler when the
  * audit row carries no task ref. */
 function finishText(text: string, taskKey: string | null): string {
@@ -834,15 +1065,21 @@ export function displayAuditActorLabel(raw: string): string {
 }
 
 export function auditFilterActors(db: DatabaseSync, slug: string): AuditActorOption[] {
+  // Ruling 681: and whoever wrote an instance row this board's panel shows.
+  const given = resourceRowsWhere(slug);
   // SAFETY: `actor_label` is NOT NULL; `name` is NOT NULL on users, null only
   // when the LEFT JOIN finds no row.
   const rows = db
     .prepare(
-      `SELECT DISTINCT a.actor_label AS label, u.name AS name
+      `SELECT a.actor_label AS label, u.name AS name
        FROM audit_events a LEFT JOIN users u ON u.id = a.actor_user_id
-       WHERE a.project_slug = ?`,
+       WHERE a.project_slug = ?
+       UNION
+       SELECT a.actor_label AS label, u.name AS name
+       FROM audit_events a LEFT JOIN users u ON u.id = a.actor_user_id
+       WHERE ${given.sql}`,
     )
-    .all(slug) as Array<{ label: string; name: string | null }>;
+    .all(slug, ...given.args) as Array<{ label: string; name: string | null }>;
   // The filter compiles to `COALESCE(u.name, a.actor_label) = ?` (below), so a
   // human's VALUE is their current name — one option per person even when
   // callers recorded them under different labels (email on one path, name on
@@ -922,18 +1159,13 @@ function collectAuditEntries(
         .filter(([, kind]) => kind === filters.kind)
         .map(([action]) => action)
     : Object.keys(AUDIT_ACTION_KINDS);
-  let auditEntries: AuditLogEntry[] = [];
-  if (actions.length > 0) {
-    const placeholders = actions.map(() => "?").join(", ");
-    const parts = [`a.project_slug = ?`, `a.action IN (${placeholders})`];
-    const args: string[] = [slug, ...actions];
+  /** One leg's rows, newest first, under the filters both legs share. */
+  const auditRows = (where: { sql: string; args: string[] }): AuditRow[] => {
+    const parts = [where.sql];
+    const args = [...where.args];
     if (filters.actor?.trim()) {
       parts.push("COALESCE(u.name, a.actor_label) = ?");
       args.push(filters.actor.trim());
-    }
-    if (task) {
-      parts.push("a.task_key = ? COLLATE NOCASE");
-      args.push(task);
     }
     if (fromDay) {
       parts.push("a.occurred_at >= ?");
@@ -943,30 +1175,65 @@ function collectAuditEntries(
       parts.push("a.occurred_at < ?");
       args.push(toBound);
     }
-    // SAFETY: the SELECT names exactly AuditRow's nine members. 0001_baseline
-    // declares `id`, `occurred_at`, `actor_label` and `action` NOT NULL on
-    // `audit_events`; the rest are nullable there, and `actor_name` is null
-    // whenever the LEFT JOIN finds no user — which is how AuditRow types them.
-    const rows = db
+    // SAFETY: the SELECT names exactly AuditRow's ten members. `rowid` is the
+    // table's integer key; 0001_baseline declares `id`, `occurred_at`,
+    // `actor_label` and `action` NOT NULL on `audit_events`; the rest are
+    // nullable there, and `actor_name` is null whenever the LEFT JOIN finds no
+    // user — which is how AuditRow types them.
+    return db
       .prepare(
-        `SELECT a.id, a.occurred_at, a.actor_user_id, a.actor_label, a.action,
-                a.subject_id, a.task_key, a.details_json, u.name AS actor_name
+        `SELECT a.rowid AS seq, a.id, a.occurred_at, a.actor_user_id, a.actor_label,
+                a.action, a.subject_id, a.task_key, a.details_json, u.name AS actor_name
          FROM audit_events a LEFT JOIN users u ON u.id = a.actor_user_id
          WHERE ${parts.join(" AND ")}
          ORDER BY a.occurred_at DESC, a.rowid DESC LIMIT ?`,
       )
       .all(...args, cap) as AuditRow[];
-    auditEntries = rows.map((row) => ({
-      id: row.id,
-      kind: AUDIT_KIND_BY_ACTION.get(row.action) ?? "change",
-      text: finishText(auditText(row, resolveUserName), row.task_key),
-      taskKey: row.task_key,
-      occurredAt: row.occurred_at,
-      status: null,
-      resolvedAt: null,
-      resolvedBy: null,
-    }));
+  };
+  const audited: { row: AuditRow; entry: AuditLogEntry }[] = [];
+  if (actions.length > 0) {
+    const placeholders = actions.map(() => "?").join(", ");
+    const where = {
+      sql: `a.project_slug = ? AND a.action IN (${placeholders})`,
+      args: [slug, ...actions],
+    };
+    if (task) {
+      where.sql += " AND a.task_key = ? COLLATE NOCASE";
+      where.args.push(task);
+    }
+    for (const row of auditRows(where)) {
+      audited.push({
+        row,
+        entry: {
+          id: row.id,
+          kind: AUDIT_KIND_BY_ACTION.get(row.action) ?? "change",
+          text: finishText(auditText(row, resolveUserName), row.task_key),
+          taskKey: row.task_key,
+          occurredAt: row.occurred_at,
+          status: null,
+          resolvedAt: null,
+          resolvedBy: null,
+        },
+      });
+    }
   }
+  // Ruling 681: the instance rows about this board. Each is a change, and none
+  // is on a task, so a kind or a task filter that excludes those excludes them.
+  if ((!filters.kind || filters.kind === "change") && !task) {
+    for (const row of auditRows(resourceRowsWhere(slug))) {
+      audited.push({ row, entry: resourceEntry(row, slug) });
+    }
+  }
+  // Two legs of one table: the order between them is the table's own, and
+  // `rowid` settles two rows written in the same millisecond, as it does
+  // inside each leg.
+  const auditEntries = audited
+    .sort((a, b) =>
+      a.row.occurred_at === b.row.occurred_at
+        ? b.row.seq - a.row.seq
+        : b.row.occurred_at.localeCompare(a.row.occurred_at),
+    )
+    .map(({ entry }) => entry);
 
   const matchesQ = (entry: AuditLogEntry) =>
     !q ||
@@ -1018,7 +1285,15 @@ export function countAuditLog(
       )
       .get(slug, ...actions) as { c: number }
   ).c;
-  return violations + audits;
+  // Ruling 681: and the instance rows about this board.
+  const given = resourceRowsWhere(slug);
+  // SAFETY: the same aggregate guarantee — one row, numeric `c`.
+  const resourceRows = (
+    db
+      .prepare(`SELECT count(*) AS c FROM audit_events a WHERE ${given.sql}`)
+      .get(...given.args) as { c: number }
+  ).c;
+  return violations + audits + resourceRows;
 }
 
 export function listAuditLog(

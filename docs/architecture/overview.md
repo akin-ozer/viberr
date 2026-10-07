@@ -152,13 +152,14 @@ for governed state.
 4. Take `state/writer.lock` (a held root refuses with the holder named and exits 1;
    `VIBERR_FORCE_DATA_ROOT_LOCK` takes it over), arm the SIGINT/SIGTERM shutdown, and
    start the 20 s lock-ownership guard (fails closed).
-5. `seedDefaultAgentAssets`: write the shipped skills, the `agents/definitions/` doctrine
-   files and the base profile templates when missing or still identical to a version the
-   app shipped (`state/shipped-assets.json` plus `PRIOR_SHIPPED_HASHES`).
-6. Self-heal the projection DB if `PRAGMA quick_check` reports corruption (salvage the
+5. Self-heal the projection DB if `PRAGMA quick_check` reports corruption (salvage the
    non-rebuildable tables into a fresh file, move the corrupt one aside).
-7. Open SQLite, apply migrations, ensure the single-flight indexes, backfill the
-   baseline columns an older root lacks (`ensureBaselineColumns`), and widen a
+6. Open SQLite, apply migrations, ensure the single-flight indexes and backfill the
+   baseline columns an older root lacks (`ensureBaselineColumns`).
+7. `seedDefaultAgentAssets`: write the shipped skills, the `agents/definitions/` doctrine
+   files and the base profile templates when missing or still identical to a version the
+   app shipped (`state/shipped-assets.json` plus `PRIOR_SHIPPED_HASHES`), and audit what it
+   replaced in the same step (`org.shipped_assets.refreshed`, ruling 681(f)). Then widen a
    `notifications.kind` CHECK that predates a kind by rebuilding that table in place, rows
    and indexes kept (`widenNotificationKindCheck`, ruling 481).
 8. Bootstrap admin on an empty `users` table (`VIBERR_SEED_ADMIN_EMAIL`, default

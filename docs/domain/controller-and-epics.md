@@ -870,7 +870,9 @@ as intended).
   mid-table or inside a fenced block (ruling 466, F40-13). To change PART of a document,
   `edit_knowledge_base_doc` replaces one passage in place (ruling 637): live, three sentences
   into a 104 KB document had cost a replace that cut it to 19,587 bytes and eight appends
-  that typed the rest back, so every run that read it in between read part of it. Every size a store, KB or
+  that typed the rest back, so every run that read it in between read part of it. A write
+  to a knowledge base, a skill or an MCP server is on the Activity of every board whose
+  runs are given it, without the document's text (ruling 681). Every size a store, KB or
   skill write reports or audits (`org.store.doc_written`'s `bytes`, the reply's
   "Appended N bytes", "its previous N bytes are gone", `read_knowledge_base_doc`'s
   `bytes`) is a UTF-8 byte count (ruling 466).

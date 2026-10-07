@@ -4,6 +4,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import { z } from "zod";
 import { fakeGithubFetch } from "../../../test-support/fake-github";
 import { listAuditEvents } from "../../../test-support/audit-log";
+import { writeBoardHolding } from "../../../test-support/resource-boards";
 import { createTestDbContext } from "../../../test-support/test-db";
 import { insertUser } from "~/server/auth/user-store.server";
 import { isAppError } from "~/server/errors/app-error.server";
@@ -1039,6 +1040,39 @@ describe("in-app writes obey the same dotfile rule as every other store write", 
           expect.objectContaining({ type: "file", name: "notes.md" }),
         ],
       },
+    ]);
+  });
+});
+
+describe("the resource a store write names (ruling 681)", () => {
+  // CANARY: record any of these rows without `recordStoreWrite`'s `resource`
+  // and it names a row id and a path inside the folder, and no board; ask the
+  // boards at read time instead and the first row follows the grant that
+  // changed after it.
+  it("every write into a store folder names the resource and the boards given it at that moment", async () => {
+    const { db, dataRoot, target } = await setupKb();
+    writeBoardHolding(dataRoot, "calc", { kb: ["api-contracts"] }, { rulingsKb: "api-contracts" });
+
+    writeStoreDoc(db, target, [], "rules.md", "# Rules\n", ACTOR);
+    // The board stops naming it as its rulings, and its Scout gives it up.
+    writeBoardHolding(dataRoot, "calc", {});
+    writeStoreFiles(db, target, ["drafts"], [{ relPath: "a.md", data: Buffer.from("a") }], ACTOR);
+    createStoreFolder(db, target, [], "notes", ACTOR);
+    deleteStoreNode(db, target, ["rules.md"], ACTOR);
+
+    const rows = listAuditEvents(db).filter((a) => a.action.startsWith("org.store."));
+    expect(rows.map((a) => [a.action, a.details?.resource])).toEqual([
+      ["org.store.file_deleted", { kind: "kb", key: "api-contracts", boards: [] }],
+      ["org.store.folder_created", { kind: "kb", key: "api-contracts", boards: [] }],
+      ["org.store.files_added", { kind: "kb", key: "api-contracts", boards: [] }],
+      [
+        "org.store.doc_written",
+        {
+          kind: "kb",
+          key: "api-contracts",
+          boards: [{ project: "calc", rulings: true, agents: ["Scout"] }],
+        },
+      ],
     ]);
   });
 });

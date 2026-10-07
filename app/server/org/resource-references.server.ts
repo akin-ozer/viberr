@@ -14,8 +14,20 @@ import {
   parseAgentProfileContent,
   serializeAgentProfile,
 } from "~/server/files/agent-profile-file.server";
+import type {
+  AgentDeployment,
+  AgentDeploymentDefinition,
+  ProjectFrontmatter,
+} from "~/schemas/project-file.schema";
+import {
+  deploymentName,
+  deploymentResources,
+  deploymentRuntimeIdentity,
+  type DeploymentRuntimeIdentity,
+} from "~/server/agents/deployment-view.server";
 import { logger } from "~/server/logging/logger.server";
 import { toError } from "~/shared/errors";
+import type { OrgResourceKind } from "./resource-events.server";
 
 /**
  * Referential integrity for agent RESOURCES (P13-KM-07).
@@ -262,4 +274,137 @@ export function countTemplateGrants(
     }
   }
   return count;
+}
+
+/** The grant list of a deployment each kind is held in. */
+const GRANT_LIST = {
+  kb: "kb",
+  skill: "skills",
+  mcp: "mcps",
+} as const satisfies Record<OrgResourceKind, ResourceKind>;
+
+/** One board whose runs are given a resource. A type literal, not an
+ *  interface: it is written into an audit row's `details`. */
+export type ResourceBoard = {
+  project: string;
+  /** A knowledge base the board names as its rulings (ruling 239): every run
+   *  on the board reads it, whoever holds it. */
+  rulings: boolean;
+  /** The deployed agents that hold it, by name, the operator among them. */
+  agents: string[];
+};
+
+/** The resource a write changed and the boards given it, as the write's audit
+ *  row keeps them. `kind` is the row's `subject_kind` without `org_`, and
+ *  `template` for an agent profile template. */
+export type AuditedResource = {
+  kind: OrgResourceKind | "template";
+  /** The grant key: a knowledge base's store directory, a skill's folder
+   *  name, an MCP server's name. A template's profile id. */
+  key: string;
+  boards: ResourceBoard[];
+};
+
+/**
+ * Ruling 681: the boards whose runs are given one org resource right now, for
+ * the audit row of a write to it.
+ *
+ * A knowledge base, a skill and an MCP server are kept for the instance, and a
+ * write to one is audited with no project: live on 2026-10-07 the controller
+ * edited the AWS calculator board's rulings and three of its agents' skills,
+ * and the board's Activity showed none of it. A board is given a resource
+ * when its `project.md` names it as `rulingsKb` or a deployed agent holds it
+ * (`deploymentResources`: the deployment's own copy, or its template's when
+ * it wrote none). The row keeps the answer as it stood at the write, so a
+ * board's history does not change when a grant does, and a delete is asked
+ * BEFORE it drops the grants.
+ *
+ * `heldAs` is the key the grants still carry when a rename is audited before
+ * its references are rewritten. Never throws: a projects folder that cannot be
+ * listed names no board and a project.md that cannot be read is skipped,
+ * exactly as the rewrite skips it, because a write is never refused for its
+ * audit row.
+ */
+export function auditedResource(
+  kind: OrgResourceKind,
+  key: string,
+  dataRoot?: string,
+  heldAs: string = key,
+): AuditedResource {
+  const boards = boardsWhere(dataRoot, (fm, holders) => ({
+    rulings: kind === "kb" && (fm.rulingsKb ?? "").trim() === heldAs,
+    agents: holders((_deployment, identity) =>
+      deploymentResources(identity)[GRANT_LIST[kind]].includes(heldAs),
+    ),
+  }));
+  return { kind, key, boards: heldAs ? boards : [] };
+}
+
+/**
+ * Ruling 681: the boards an edit of one agent profile template reaches now.
+ * `changed` is what the edit changed, as a deployment's copy names each field.
+ * A deployment of the profile is reached when it wrote no copy at all, or when
+ * its copy leaves one of those fields to the template. A copy that holds them,
+ * as a library deploy holds the fields a save snapshots, keeps its own until a
+ * person takes the template's again, and that is the board's own row
+ * (`project.agent_profile.resources_synced`). An edit that changed nothing
+ * reaches no board.
+ */
+export function auditedTemplate(
+  profileId: string,
+  changed: readonly (keyof AgentDeploymentDefinition)[],
+  dataRoot?: string,
+): AuditedResource {
+  const boards = boardsWhere(dataRoot, (_fm, holders) => ({
+    rulings: false,
+    agents: holders(
+      (deployment, { def, template }) =>
+        deployment.profileId === profileId &&
+        template !== null &&
+        changed.some((field) => def === null || def[field] === undefined),
+    ),
+  }));
+  return { kind: "template", key: profileId, boards };
+}
+
+/** The names of a board's deployed agents a predicate holds for. */
+type Holders = (
+  holds: (deployment: AgentDeployment, identity: DeploymentRuntimeIdentity) => boolean,
+) => string[];
+
+/**
+ * Every board, asked what it is given; one that is given nothing is left out.
+ * Never throws: a projects folder that cannot be listed names no board, and a
+ * board that cannot be read is skipped.
+ */
+function boardsWhere(
+  dataRoot: string | undefined,
+  given: (fm: ProjectFrontmatter, holders: Holders) => Omit<ResourceBoard, "project">,
+): ResourceBoard[] {
+  const boards: ResourceBoard[] = [];
+  const root = projectsDir(dataRoot);
+  let projects: string[] = [];
+  try {
+    if (existsSync(root)) projects = readdirSync(root).sort();
+  } catch {
+    projects = [];
+  }
+  for (const project of projects) {
+    if (!existsSync(path.join(root, project, "project.md"))) continue;
+    try {
+      const read = readProjectFile({ projectSlug: project, dataRoot });
+      if (!read) continue;
+      const fm = read.parsed.frontmatter;
+      const board = given(fm, (holds) =>
+        fm.agents.flatMap((deployment) => {
+          const identity = deploymentRuntimeIdentity(deployment, dataRoot);
+          return holds(deployment, identity) ? [deploymentName(deployment, identity)] : [];
+        }),
+      );
+      if (board.rulings || board.agents.length > 0) boards.push({ project, ...board });
+    } catch {
+      // Unreadable project: it cannot be asked what it holds.
+    }
+  }
+  return boards;
 }

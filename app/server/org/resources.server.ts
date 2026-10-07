@@ -19,6 +19,7 @@ import { countKbFiles } from "~/features/kb-browser/tree";
 import {
   recordAudit,
   type AuditActor,
+  type AuditDetails,
 } from "~/server/audit/audit-recorder.server";
 import { AppError } from "~/server/errors/app-error.server";
 import { startMcpWarmup } from "./mcp-warmup.server";
@@ -48,7 +49,7 @@ import { slugify } from "~/shared/ids/slugify";
 import { isReservedMcpName } from "~/shared/mcp-reserved";
 import { looksLikeWriteTool, MCP_TOOL_NAME_RE, MCP_WRITE_TOOLS_MAX } from "~/shared/mcp-tools";
 import { scanStoreTree, type StoreTarget } from "./store-files.server";
-import { updateResourceReferences } from "./resource-references.server";
+import { auditedResource, updateResourceReferences } from "./resource-references.server";
 import { countLabel, pluralNoun } from "~/shared/text/plural";
 import { toError } from "~/shared/errors";
 import {
@@ -385,7 +386,8 @@ export function setKnowledgeBasePrivacy(
       actor,
       subjectKind: "org_kb",
       subjectId,
-      details: { dir, private: input.private },
+      // Ruling 681: who reads it changes, which the boards it is given to see.
+      details: { dir, private: input.private, resource: auditedResource("kb", dir, ctx.dataRoot) },
     });
     publishResourceUpdated("kb", subjectId);
   }
@@ -398,7 +400,7 @@ type KbCreateAudit = {
   dir: string;
   refresh: KbRefreshMode;
   adopted?: boolean;
-};
+} & AuditDetails;
 
 export async function saveKnowledgeBase(
   db: DatabaseSync,
@@ -469,6 +471,13 @@ export async function saveKnowledgeBase(
       await updateResourceReferences("kb", renamedFrom, dir, ctx.dataRoot);
     }
   };
+  // Ruling 681: a rename changes the name every grant and a board's rulings
+  // carry, so the boards that hold it see it. Asked by the OLD name, which the
+  // grants still carry until the rewrite below. A save that only changes the
+  // display name or the refresh mode changes nothing a run reads.
+  const renameStamp: AuditDetails = renamedFrom
+    ? { renamedFrom, resource: auditedResource("kb", dir, ctx.dataRoot, renamedFrom) }
+    : {};
 
   if (existing) {
     db.prepare(
@@ -480,7 +489,7 @@ export async function saveKnowledgeBase(
       actor,
       subjectKind: "org_kb",
       subjectId: existing.id,
-      details: { name, dir, refresh, renamed: dir !== oldDir },
+      details: { name, dir, refresh, renamed: dir !== oldDir, ...renameStamp },
     });
     publishResourceUpdated("kb", existing.id);
     await rewriteReferences();
@@ -503,7 +512,7 @@ export async function saveKnowledgeBase(
   ).run(id, name, dir, refresh, now, now, now);
   // `adopted` is present only when this create took over a folder that was
   // already on disk — a plain create carries no such key at all.
-  const details: KbCreateAudit = { name, dir, refresh };
+  const details: KbCreateAudit = { name, dir, refresh, ...renameStamp };
   if (oldDir) details.adopted = true;
   recordAudit(db, {
     action: oldDir ? "org.kb.updated" : "org.kb.created",
@@ -529,6 +538,8 @@ export async function deleteKnowledgeBase(
 ): Promise<{ toast: string }> {
   const kb = getKnowledgeBase(db, id, ctx);
   if (!kb) throw AppError.notFound("No such knowledge base.");
+  // Ruling 681: who held it, asked before the grants are dropped below.
+  const held = auditedResource("kb", kb.dir, ctx.dataRoot);
   rmSync(kbDirPath(kb.dir, ctx.dataRoot), { recursive: true, force: true });
   // P13-KM-07: drop the now-dangling grants instead of leaving every profile
   // pointing at a folder that no longer exists.
@@ -541,7 +552,7 @@ export async function deleteKnowledgeBase(
     actor,
     subjectKind: "org_kb",
     subjectId: kb.id,
-    details: { name: kb.name, dir: kb.dir, files: kb.fileCount },
+    details: { name: kb.name, dir: kb.dir, files: kb.fileCount, resource: held },
   });
   publishResourceUpdated("kb", kb.id);
   return { toast: `${kb.name} deleted. Agents lose it on next context load` };
@@ -833,7 +844,7 @@ type McpSaveAudit = {
   requestedScope?: string | null;
   /** Ruling 653: registered by a board import, never probed. */
   unchecked?: boolean;
-};
+} & AuditDetails;
 
 function addedAudit(name: string, transport: string, requestedScope: string | null): McpSaveAudit {
   const details: McpSaveAudit = { name, transport };
@@ -1997,7 +2008,20 @@ export async function saveMcpServer(
     if (existing.name !== name) {
       await updateResourceReferences("mcps", existing.name, name, ctx.dataRoot);
     }
+    // Ruling 681: the boards whose agents are given this server see a change
+    // to it. Asked after the rename above rewrote the grants. A save names
+    // them when it changed what a run reaches (the name, where it points, or
+    // how it signs in); one that changed nothing of those says nothing.
+    const held = auditedResource("mcp", name, ctx.dataRoot);
     const details: McpSaveAudit = { name, transport, renamed: existing.name !== name };
+    const reachChanged =
+      existing.name !== name ||
+      repointed ||
+      rawCred !== "" ||
+      (input.clearCred === true && existing.hasCred) ||
+      oauthDropped;
+    if (reachChanged) details.resource = held;
+    if (existing.name !== name) details.renamedFrom = existing.name;
     if (oauthDropped) details.oauthDropped = true;
     // Ruling 486(c): what the next sign-in asks for, when this save changed it.
     if (requestedScope !== undefined && requestedScope !== (existing.requestedScope ?? null)) {
@@ -2016,7 +2040,7 @@ export async function saveMcpServer(
         actor,
         subjectKind: "org_mcp",
         subjectId: id,
-        details: { name, before: existing.writeTools, after: writeTools },
+        details: { name, before: existing.writeTools, after: writeTools, resource: held },
       });
     }
     publishResourceUpdated("mcp", id);
@@ -2226,6 +2250,8 @@ export async function deleteMcpServer(
 ): Promise<{ toast: string }> {
   const existing = getMcpServer(db, id);
   if (!existing) throw AppError.notFound("No such MCP server.");
+  // Ruling 681: who held it, asked before the grants are dropped below.
+  const held = auditedResource("mcp", existing.name, ctx.dataRoot);
   db.prepare(`DELETE FROM org_mcp_servers WHERE id = ?`).run(id);
   // P13-KM-07: an MCP grant is a name reference like a KB/skill one.
   await updateResourceReferences("mcps", existing.name, null, ctx.dataRoot);
@@ -2234,7 +2260,7 @@ export async function deleteMcpServer(
     actor,
     subjectKind: "org_mcp",
     subjectId: id,
-    details: { name: existing.name },
+    details: { name: existing.name, resource: held },
   });
   publishResourceUpdated("mcp", id);
   return { toast: `${existing.name} removed` };
@@ -2494,7 +2520,7 @@ type SkillCreateAudit = {
   name: string;
   adopted?: boolean;
   filesMode?: boolean;
-};
+} & AuditDetails;
 
 export async function saveSkill(
   db: DatabaseSync,
@@ -2593,12 +2619,31 @@ export async function saveSkill(
   // files-mode create: the folder is the deliverable — SKILL.md arrives via
   // the store browser (upload / GitHub import / New document), so writing an
   // empty one here would only trigger the overwrite-confirm on that upload.
-  if (!keepExistingBody && !filesMode) {
+  //
+  // Ruling 681: whether the write changes the text. The editor sends back the
+  // body it loaded with every save, so a save of the summary alone rewrites
+  // the file with what it already held. Read after the rename above, which
+  // moved the folder, and whole: a body is refused above when the file on
+  // disk is longer than this reader's cap.
+  const writesBody = !keepExistingBody && !filesMode;
+  const rewritten = writesBody && readSkillBody(name, ctx) !== body;
+  if (writesBody) {
     writeFileSync(path.join(dir, "SKILL.md"), body);
   }
   const updatedToast = keepExistingBody
     ? `Skill ${name} updated. Existing SKILL.md kept`
     : `Skill ${name} updated. SKILL.md rewritten`;
+  // Ruling 681: a save that changed SKILL.md's text or renamed the skill
+  // changes what the agents holding it are given, so the boards they are on
+  // see it. Asked after the rename above rewrote the grants. A save that only
+  // changed the summary changes nothing a run reads.
+  const renamedFrom = oldName && name !== oldName ? oldName : null;
+  const stamp: AuditDetails = {};
+  if (oldName && (renamedFrom || rewritten)) {
+    if (renamedFrom) stamp.renamedFrom = renamedFrom;
+    if (rewritten) stamp.rewritten = true;
+    stamp.resource = auditedResource("skill", name, ctx.dataRoot);
+  }
 
   if (existing) {
     db.prepare(
@@ -2610,7 +2655,7 @@ export async function saveSkill(
       actor,
       subjectKind: "org_skill",
       subjectId: existing.id,
-      details: { name, renamed: name !== oldName, bodyKept: keepExistingBody },
+      details: { name, renamed: name !== oldName, bodyKept: keepExistingBody, ...stamp },
     });
     publishResourceUpdated("skill", existing.id);
     return {
@@ -2629,7 +2674,7 @@ export async function saveSkill(
   ).run(id, name, summary, now, now);
   // Each key is present only when it is true of THIS create: `adopted` when it
   // took over a folder already on disk, `filesMode` when no SKILL.md was written.
-  const details: SkillCreateAudit = { name };
+  const details: SkillCreateAudit = { name, ...stamp };
   if (oldName) details.adopted = true;
   if (filesMode) details.filesMode = true;
   recordAudit(db, {
@@ -2657,6 +2702,8 @@ export async function deleteSkill(
 ): Promise<{ toast: string }> {
   const skill = getSkill(db, id, ctx);
   if (!skill) throw AppError.notFound("No such skill.");
+  // Ruling 681: who held it, asked before the grants are dropped below.
+  const held = auditedResource("skill", skill.name, ctx.dataRoot);
   rmSync(skillDirPath(skill.name, ctx.dataRoot), {
     recursive: true,
     force: true,
@@ -2671,7 +2718,7 @@ export async function deleteSkill(
     actor,
     subjectKind: "org_skill",
     subjectId: skill.id,
-    details: { name: skill.name },
+    details: { name: skill.name, resource: held },
   });
   publishResourceUpdated("skill", skill.id);
   return { toast: `Skill ${skill.name} deleted` };
@@ -2692,7 +2739,15 @@ export function resolveStoreTarget(
     if (!kb) return null;
     const rootAbs = kbDirPath(kb.dir, ctx.dataRoot);
     mkdirSync(rootAbs, { recursive: true });
-    return { kind: "kb", id: kb.id, name: kb.name, rootAbs, rootUri: kb.uri };
+    return {
+      kind: "kb",
+      id: kb.id,
+      name: kb.name,
+      rootAbs,
+      rootUri: kb.uri,
+      key: kb.dir,
+      ...storeUnder(ctx),
+    };
   }
   if (kind === "skill") {
     const skill = getSkill(db, id, ctx);
@@ -2705,9 +2760,16 @@ export function resolveStoreTarget(
       name: skill.name,
       rootAbs,
       rootUri: skill.uri,
+      key: skill.name,
+      ...storeUnder(ctx),
     };
   }
   return null;
+}
+
+/** The data root a store target carries, absent for the default one. */
+function storeUnder(ctx: OrgSeedContext): Pick<StoreTarget, "dataRoot"> {
+  return ctx.dataRoot ? { dataRoot: ctx.dataRoot } : {};
 }
 
 /**

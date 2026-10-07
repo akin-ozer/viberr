@@ -14,6 +14,7 @@ import { unreachableFetch } from "../../../test-support/fake-github";
 import { startHttpUpstream, startSseUpstream } from "../../../test-support/mcp-upstream";
 import { createTestDbContext } from "../../../test-support/test-db";
 import { listAuditEvents } from "../../../test-support/audit-log";
+import { writeBoardHolding } from "../../../test-support/resource-boards";
 import { ENV_KEYS } from "~/server/config/env.server";
 import { kbDirPath, skillDirPath } from "~/server/files/file-store-root.server";
 import {
@@ -1571,6 +1572,118 @@ describe("resource reference integrity", () => {
     await deleteMcpServer(db, saved.mcp.id, ACTOR, ctx);
     expect(grantsOf(dataRoot, "scout")).not.toContain("billing-api");
   });
+
+  /** The `resource` an action's newest audit row carries (ruling 681). */
+  const resourceOf = (db: ReturnType<typeof setup>["db"], action: string) =>
+    listAuditEvents(db, { action })[0]?.details?.resource;
+
+  // CANARY: ask `auditedResource` after `updateResourceReferences` dropped the grants,
+  // in any of the three deletes, and its row names a board no agent of which
+  // held the resource.
+  it("ruling 681: a delete's row names the boards that held it, asked before their grants are dropped", async () => {
+    const { db, dataRoot, ctx } = setup();
+    const { kb } = await saveKnowledgeBase(db, { name: "Throwaway", refresh: "manual" }, ACTOR, ctx);
+    const { skill } = await saveSkill(db, { name: "old-craft", summary: "Old craft.", body: "# old" }, ACTOR, ctx);
+    const { mcp } = await saveMcpServer(
+      db,
+      { name: "billing-api", transport: "stdio", target: "node /tmp/bill.mjs", cred: "" },
+      ACTOR,
+      { spawnImpl: fakeMcpSpawn(2) },
+      ctx,
+    );
+    writeBoardHolding(
+      dataRoot,
+      "calc",
+      { kb: ["throwaway"], skills: ["old-craft"], mcps: ["billing-api"] },
+      { rulingsKb: "throwaway" },
+    );
+
+    await deleteKnowledgeBase(db, kb.id, ACTOR, ctx);
+    await deleteSkill(db, skill.id, ACTOR, ctx);
+    await deleteMcpServer(db, mcp.id, ACTOR, ctx);
+
+    expect(resourceOf(db, "org.kb.deleted")).toEqual({
+      kind: "kb",
+      key: "throwaway",
+      boards: [{ project: "calc", rulings: true, agents: ["Scout"] }],
+    });
+    expect(resourceOf(db, "org.skill.deleted")).toEqual({
+      kind: "skill",
+      key: "old-craft",
+      boards: [{ project: "calc", rulings: false, agents: ["Scout"] }],
+    });
+    expect(resourceOf(db, "org.mcp.removed")).toEqual({
+      kind: "mcp",
+      key: "billing-api",
+      boards: [{ project: "calc", rulings: false, agents: ["Scout"] }],
+    });
+  });
+
+  // CANARY: ask a knowledge base's rename by its new name, which no grant
+  // carries until the rewrite after the row, and its row names no board;
+  // name the boards whenever a save arrives with a body, or whenever a server
+  // is saved, and the three saves that change nothing a run is given (a
+  // refresh mode, a skill's summary sent with the body its editor loaded, a
+  // server saved as it was) land on the board's Activity.
+  it("ruling 681: a rename's row names the boards under the name it took, and a save that changes nothing a run is given names none", async () => {
+    const { db, dataRoot, ctx } = setup();
+    const { kb } = await saveKnowledgeBase(db, { name: "Old rules", refresh: "manual" }, ACTOR, ctx);
+    const { skill } = await saveSkill(db, { name: "old-craft", summary: "Old craft.", body: "# old" }, ACTOR, ctx);
+    const { mcp } = await saveMcpServer(
+      db,
+      { name: "vm-memory", transport: "stdio", target: "node /tmp/mem.mjs", cred: "" },
+      ACTOR,
+      { spawnImpl: fakeMcpSpawn(2) },
+      ctx,
+    );
+    writeBoardHolding(
+      dataRoot,
+      "calc",
+      { skills: ["old-craft"], mcps: ["vm-memory"] },
+      { rulingsKb: "old-rules" },
+    );
+
+    // None of these saves changes what a run is given. The skill editor sends
+    // back the body it loaded with every save.
+    const sameServer = { id: mcp.id, name: "vm-memory", transport: "stdio", target: "node /tmp/mem.mjs", cred: "" };
+    await saveKnowledgeBase(db, { id: kb.id, name: "Old rules", refresh: "nightly" }, ACTOR, ctx);
+    await saveSkill(db, { id: skill.id, name: "old-craft", summary: "Older craft.", body: "# old" }, ACTOR, ctx);
+    await saveMcpServer(db, sameServer, ACTOR, { spawnImpl: fakeMcpSpawn(2) }, ctx);
+    expect(resourceOf(db, "org.kb.updated")).toBeUndefined();
+    expect(resourceOf(db, "org.skill.updated")).toBeUndefined();
+    expect(resourceOf(db, "org.mcp.updated")).toBeUndefined();
+
+    await saveKnowledgeBase(db, { id: kb.id, name: "New rules", refresh: "nightly" }, ACTOR, ctx);
+    await saveSkill(db, { id: skill.id, name: "new-craft", summary: "New craft.", body: "" }, ACTOR, ctx);
+    await saveMcpServer(
+      db,
+      { id: mcp.id, name: "vm-graph-memory", transport: "stdio", target: "node /tmp/mem.mjs", cred: "" },
+      ACTOR,
+      { spawnImpl: fakeMcpSpawn(2) },
+      ctx,
+    );
+
+    expect(listAuditEvents(db, { action: "org.kb.updated" })[0]!.details).toMatchObject({
+      renamedFrom: "old-rules",
+      resource: { kind: "kb", key: "new-rules", boards: [{ project: "calc", rulings: true, agents: [] }] },
+    });
+    expect(listAuditEvents(db, { action: "org.skill.updated" })[0]!.details).toMatchObject({
+      renamedFrom: "old-craft",
+      bodyKept: true,
+      resource: { kind: "skill", key: "new-craft", boards: [{ project: "calc", rulings: false, agents: ["Scout"] }] },
+    });
+    expect(listAuditEvents(db, { action: "org.mcp.updated" })[0]!.details).toMatchObject({
+      renamedFrom: "vm-memory",
+      resource: { kind: "mcp", key: "vm-graph-memory", boards: [{ project: "calc", rulings: false, agents: ["Scout"] }] },
+    });
+
+    // A save that changes the skill's text says so.
+    await saveSkill(db, { id: skill.id, name: "new-craft", summary: "New craft.", body: "# new" }, ACTOR, ctx);
+    expect(listAuditEvents(db, { action: "org.skill.updated" })[0]!.details).toMatchObject({
+      rewritten: true,
+      resource: { key: "new-craft", boards: [{ project: "calc", rulings: false, agents: ["Scout"] }] },
+    });
+  });
 });
 
 /* ---------------------- MCP credentials + SSE framing (P13-KM-05/KM-06/LV-10) */
@@ -1910,6 +2023,8 @@ describe("ruling 176: an org MCP server's write tools", () => {
     expect(none.mcp.writeToolsReviewed).toBe(true);
 
     const audits = listAuditEvents(db, { action: "org.mcp.tool_policy.changed" });
+    // Ruling 681: a change to a server that exists names the boards given it.
+    const resource = { kind: "mcp", key: "github", boards: [] };
     expect(audits.map((a) => a.details)).toEqual(
       expect.arrayContaining([
         { name: "github", before: [], after: ["create_pull_request"] },
@@ -1917,8 +2032,14 @@ describe("ruling 176: an org MCP server's write tools", () => {
           name: "github",
           before: ["create_pull_request"],
           after: ["create_pull_request", "merge_pull_request"],
+          resource,
         },
-        { name: "github", before: ["create_pull_request", "merge_pull_request"], after: [] },
+        {
+          name: "github",
+          before: ["create_pull_request", "merge_pull_request"],
+          after: [],
+          resource,
+        },
       ]),
     );
     // The list-less save changed nothing, so it audited nothing.

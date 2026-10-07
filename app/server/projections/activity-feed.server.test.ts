@@ -13,6 +13,41 @@ import {
 } from "./policy-violations.server";
 import { rebuildAll } from "./rebuilder.server";
 import { setupProjectedStore } from "../../../test-support/projected-store";
+import { fakeGithubFetch, unreachableFetch } from "../../../test-support/fake-github";
+import { writeBoardHolding } from "../../../test-support/resource-boards";
+import { deployAgentProfileFromLibrary } from "~/features/agents/agent-profile-actions.server";
+import { setProjectRulingsKb } from "~/features/project-settings/settings-actions.server";
+import { primaryRunBackend, readTemplate } from "~/server/agents/deployment-view.server";
+import { encodeActorRef } from "~/server/files/actor-ref.server";
+import { saveGlobalAgentProfile } from "~/server/org/gagents.server";
+import {
+  editKbPassage,
+  editSkillPassage,
+  mergeKbCorrection,
+  undoKbCorrection,
+} from "~/server/org/kb-corrections.server";
+import {
+  recordNoRepositoryRuling,
+  removeNoRepositoryRuling,
+} from "~/server/org/repository-ruling.server";
+import {
+  deleteKnowledgeBase,
+  deleteMcpServer,
+  deleteSkill,
+  resolveStoreTarget,
+  saveKnowledgeBase,
+  saveMcpServer,
+  saveSkill,
+  setKnowledgeBasePrivacy,
+} from "~/server/org/resources.server";
+import {
+  deleteStoreNode,
+  importGithubSnapshot,
+  writeStoreDoc,
+  writeStoreFiles,
+} from "~/server/org/store-files.server";
+import { propagateTemplateResources } from "~/server/org/template-propagation.server";
+import { seedDefaultAgentAssets } from "~/server/seed/default-assets.server";
 import {
   countActivityStream,
   countAuditLog,
@@ -924,5 +959,474 @@ describe("ruling 503: epic rows on the audit column", () => {
     expect(listAuditLog(store.db, store.slug, { filters: { kind: "audit" } }).map((r) => r.text)).toEqual([
       "Goal **goal-4** became epic **epic-4** (Launch) with 3 tasks.",
     ]);
+  });
+});
+
+/**
+ * Ruling 681: a write to a knowledge base, a skill or an MCP server is audited
+ * for the instance, with no project. The boards whose runs are given the
+ * resource see it on their audit panel, as a sentence that names the document
+ * and quotes none of it. Every row here is written by the writer that writes
+ * it in the app, so a writer and this panel cannot come to disagree about a
+ * detail's name.
+ */
+describe("ruling 681: the instance writes to what a board's runs are given", () => {
+  type Store = ReturnType<typeof setupTestStore>;
+  const personOf = (store: Store) => ({
+    userId: store.users.arda.id,
+    label: store.users.arda.email,
+  });
+
+  /** A knowledge base in the store's own root, and the target writes go through. */
+  async function kbNamed(store: Store, name: string) {
+    const where = { dataRoot: store.dataRoot };
+    const { kb } = await saveKnowledgeBase(store.db, { name, refresh: "manual" }, personOf(store), where);
+    return { id: kb.id, target: resolveStoreTarget(store.db, "kb", kb.id, where)! };
+  }
+
+  /** A board's panel as its sentences, newest first. */
+  const sentences = (store: Store, slug: string = store.slug) =>
+    listAuditLog(store.db, slug).map((e) => e.text);
+
+  // CANARY: put `edited.text` (or `.replaced`) into the edit's sentence and the
+  // passage of a document reaches every member of the board; drop the board
+  // from `resourceRowsWhere` and the other board reads all five rows.
+  it("a board's panel shows a write to its rulings and to what its agents hold, quoting nothing, and no other board's", async () => {
+    const store = setupTestStore(ctx);
+    const arda = store.users.arda;
+    const actor = { userId: arda.id, label: encodeControllerInstrument(arda.email) };
+    const where = { dataRoot: store.dataRoot };
+    const rules = await kbNamed(store, "House rules");
+    const golden = await kbNamed(store, "Golden set");
+    const elsewhere = await kbNamed(store, "Elsewhere");
+    const { skill } = await saveSkill(
+      store.db,
+      { name: "estimating", summary: "How to estimate.", body: "# v1" },
+      actor,
+      where,
+    );
+    writeBoardHolding(
+      store.dataRoot,
+      store.slug,
+      { kb: ["golden-set"], skills: ["estimating"] },
+      { rulingsKb: "house-rules" },
+    );
+    writeBoardHolding(store.dataRoot, "other-board", { skills: ["something-else"] });
+
+    writeStoreDoc(store.db, rules.target, [], "proposal.md", "one\nSECRET-LINE\nthree\n", actor);
+    const edit = await editKbPassage(
+      store.db,
+      { kb: "house-rules", doc: "proposal.md", was: "SECRET-LINE", now: "REPLACED-LINE", actor },
+      where,
+    );
+    expect(edit.ok).toBe(true);
+    writeStoreDoc(store.db, golden.target, [], "key.md", "SECRET-KEY\n", actor);
+    setKnowledgeBasePrivacy(store.db, { id: golden.id, private: true }, actor, where);
+    await saveSkill(
+      store.db,
+      { id: skill.id, name: "estimating", summary: "How to estimate.", body: "# v2 SECRET-SKILL" },
+      actor,
+      where,
+    );
+    // Nobody on either board is given this one.
+    writeStoreDoc(store.db, elsewhere.target, [], "notes.md", "n\n", actor);
+
+    const who = `${arda.name} (via the controller)`;
+    const panel = listAuditLog(store.db, store.slug);
+    expect(panel.map((e) => e.text)).toEqual([
+      `${who} rewrote the skill **estimating**, which Scout uses.`,
+      `${who} made the knowledge base **golden-set**, which Scout reads, private.`,
+      `${who} added the document **key.md** to the knowledge base **golden-set**, which Scout reads.`,
+      `${who} edited a passage of **proposal.md** in the project's rulings **house-rules**.`,
+      `${who} added the document **proposal.md** to the project's rulings **house-rules**.`,
+    ]);
+    expect(panel.every((e) => e.kind === "change" && e.taskKey === null)).toBe(true);
+    expect(JSON.stringify(panel)).not.toMatch(/SECRET|REPLACED/);
+    // The document a row wrote, for the route to link for who may open it.
+    expect(panel.map((e) => e.doc)).toEqual([
+      undefined,
+      undefined,
+      { kb: "golden-set", doc: "key.md" },
+      { kb: "house-rules", doc: "proposal.md" },
+      { kb: "house-rules", doc: "proposal.md" },
+    ]);
+    expect(countAuditLog(store.db, store.slug)).toBe(5);
+    // One option per person, whichever instrument wrote the row.
+    expect(auditFilterActors(store.db, store.slug).map((o) => o.label)).toEqual([arda.name]);
+
+    // They are changes, by a person, on no task.
+    const filtered = (filters: Parameters<typeof listAuditLog>[2] & object) =>
+      listAuditLog(store.db, store.slug, filters).length;
+    expect(filtered({ filters: { kind: "audit" } })).toBe(0);
+    expect(filtered({ filters: { task: "VIB-1" } })).toBe(0);
+    expect(filtered({ filters: { actor: arda.name } })).toBe(5);
+    expect(filtered({ filters: { q: "golden-set" } })).toBe(2);
+
+    expect(listAuditLog(store.db, "other-board")).toEqual([]);
+    expect(countAuditLog(store.db, "other-board")).toBe(0);
+    expect(auditFilterActors(store.db, "other-board")).toEqual([]);
+  });
+
+  // CANARY: drop `onTask` from the correction's store write, or from its
+  // undo's, or the `task.project` term from `resourceRowsWhere`, and the board
+  // whose task already says so on the Stream shows the write again here.
+  it("an agent's correction and its undo are not repeated on the board whose task records them, and are shown on another board given the knowledge base", async () => {
+    const store = setupTestStore(ctx);
+    const where = { dataRoot: store.dataRoot };
+    const facts = await kbNamed(store, "Shared facts");
+    writeStoreDoc(store.db, facts.target, [], "facts.md", "The limit is 10.\n", personOf(store));
+    writeBoardHolding(store.dataRoot, store.slug, { kb: ["shared-facts"] });
+    writeBoardHolding(store.dataRoot, "second-board", { kb: ["shared-facts"] });
+    const scout = encodeActorRef({
+      kind: "agent",
+      backend: "claude",
+      profileId: "scout",
+      roleHint: "Research",
+    });
+
+    const merged = await mergeKbCorrection(
+      store.db,
+      {
+        kb: "shared-facts",
+        doc: "facts.md",
+        replaces: "The limit is 10.",
+        text: "The limit is 25.",
+        evidence: "Measured it.",
+        projectSlug: store.slug,
+        taskKey: "VIB-7",
+        filedBy: "Scout",
+        actorRef: scout,
+        rulings: false,
+        actor: { userId: null, label: scout },
+      },
+      where,
+    );
+    if (!merged.ok) throw new Error(merged.message);
+    const undone = await undoKbCorrection(
+      store.db,
+      { id: merged.correction.id, projectSlug: store.slug, reason: null, byName: "Arda" },
+      personOf(store),
+      where,
+    );
+    expect(undone.outcome).toBe("done");
+
+    expect(sentences(store)).toEqual([]);
+    const seen = listAuditLog(store.db, "second-board");
+    const wrote = "replaced **facts.md** in the knowledge base **shared-facts**, which Scout reads.";
+    expect(seen.map((e) => e.text.slice(-wrote.length))).toEqual([wrote, wrote]);
+    expect(seen[0]!.text).toBe(`${store.users.arda.name} ${wrote}`);
+    // The other board is told what changed, not on whose task.
+    expect(JSON.stringify(seen)).not.toMatch(/VIB-7|viberr-core|limit/);
+  });
+
+  // CANARY: read a detail under another name than its writer gives it (an
+  // import's `fileCount`, a rename's `renamedFrom`, a skill's `rewritten`) and
+  // its sentence loses the fact; print an import's `source` and a repository's
+  // name reaches the board; name every holder instead of the first and a count;
+  // say "read" of a skill, or "uses" of one that is gone.
+  it("each kind of write reads as what its writer did, to what, and who on the board is given it", async () => {
+    const store = setupTestStore(ctx);
+    const arda = store.users.arda;
+    const actor = personOf(store);
+    const where = { dataRoot: store.dataRoot };
+    const probe = { fetchImpl: unreachableFetch() };
+    const facts = await kbNamed(store, "Facts");
+    const { skill } = await saveSkill(
+      store.db,
+      { name: "estimating", summary: "How to estimate.", body: "# v1" },
+      actor,
+      where,
+    );
+    const server = { transport: "HTTP", cred: "" };
+    const { mcp } = await saveMcpServer(
+      store.db,
+      { ...server, name: "aws-pricing", target: "https://x.test/mcp" },
+      actor,
+      probe,
+      where,
+    );
+    const holding = (name: string, resources: { skills?: string[]; kb?: string[]; mcps?: string[] }) => ({
+      profileId: name.toLowerCase(),
+      capabilities: [],
+      extras: [],
+      definition: { name, resources: { skills: ["estimating"], ...resources } },
+    });
+    writeBoardHolding(store.dataRoot, store.slug, {}, {
+      agents: [
+        holding("Operator", {}),
+        holding("Judge", { kb: ["facts"], mcps: ["aws-pricing"] }),
+        holding("Scout", { kb: ["facts"] }),
+        holding("Builder", {}),
+        holding("Analyst", {}),
+      ],
+    });
+
+    writeStoreDoc(store.db, facts.target, [], "log.md", "a\n", actor);
+    writeStoreDoc(store.db, facts.target, [], "log.md", "b\n", actor, { append: true });
+    writeStoreDoc(store.db, facts.target, [], "log.md", "c\n", actor, { overwrite: true });
+    writeStoreFiles(
+      store.db,
+      facts.target,
+      ["drafts"],
+      [
+        { relPath: "a.md", data: Buffer.from("a") },
+        { relPath: "b.md", data: Buffer.from("b") },
+      ],
+      actor,
+    );
+    deleteStoreNode(store.db, facts.target, ["log.md"], actor);
+    deleteStoreNode(store.db, facts.target, ["drafts"], actor);
+    const github = fakeGithubFetch({
+      "GET /repos/acme/private-notes/git/trees/main": {
+        body: { truncated: false, tree: [{ path: "README.md", type: "blob", sha: "s1", size: 4 }] },
+      },
+      "GET /repos/acme/private-notes/git/blobs/s1": {
+        body: { content: Buffer.from("read").toString("base64"), encoding: "base64" },
+      },
+    });
+    const imported = await importGithubSnapshot(
+      store.db,
+      facts.target,
+      "https://github.com/acme/private-notes/blob/main/README.md",
+      actor,
+      { fetchImpl: github.fetchImpl },
+    );
+    expect(imported.status).toBe("imported");
+    setKnowledgeBasePrivacy(store.db, { id: facts.id, private: true }, actor, where);
+    setKnowledgeBasePrivacy(store.db, { id: facts.id, private: false }, actor, where);
+    await saveKnowledgeBase(store.db, { id: facts.id, name: "True facts", refresh: "manual" }, actor, where);
+    // Ruling 680's edit of one passage of a skill is a store write like any other.
+    const passage = await editSkillPassage(
+      store.db,
+      { id: skill.id, was: "# v1", now: "# v1, checked", actor },
+      where,
+    );
+    expect(passage.ok).toBe(true);
+    await saveSkill(
+      store.db,
+      { id: skill.id, name: "pricing", summary: "How to price.", body: "# v2" },
+      actor,
+      where,
+    );
+    const saved = { ...server, id: mcp.id, name: "aws-pricing", target: "https://y.test/mcp" };
+    await saveMcpServer(store.db, saved, actor, probe, where);
+    // Its marks change and nothing a run reaches does: one row, for the marks.
+    await saveMcpServer(store.db, { ...saved, writeTools: ["create_estimate"] }, actor, probe, where);
+    await saveMcpServer(store.db, { ...saved, name: "pricing-api" }, actor, probe, where);
+    await deleteKnowledgeBase(store.db, facts.id, actor, where);
+    await deleteSkill(store.db, skill.id, actor, where);
+    await deleteMcpServer(store.db, mcp.id, actor, where);
+
+    const facts2 = "the knowledge base **facts**, which Judge and Scout read";
+    expect(sentences(store).map((text) => text.slice(arda.name.length + 1))).toEqual([
+      "removed the MCP server **pricing-api**, which Judge used.",
+      "deleted the skill **pricing**, which Operator and 4 others used.",
+      "deleted the knowledge base **true-facts**, which Judge and Scout read.",
+      "renamed the MCP server **aws-pricing**, which Judge uses, to **pricing-api**.",
+      "changed which tools of the MCP server **aws-pricing**, which Judge uses, are marked as writes.",
+      "changed the MCP server **aws-pricing**, which Judge uses.",
+      "renamed the skill **estimating**, which Operator and 4 others use, to **pricing** and rewrote it.",
+      "edited a passage of **SKILL.md** in the skill **estimating**, which Operator and 4 others use.",
+      `renamed ${facts2}, to **true-facts**.`,
+      `made ${facts2}, open again.`,
+      `made ${facts2}, private.`,
+      `imported 1 file from GitHub into ${facts2}.`,
+      `deleted the folder **drafts** from ${facts2}.`,
+      `deleted **log.md** from ${facts2}.`,
+      `added 2 files to ${facts2}.`,
+      `replaced **log.md** in ${facts2}.`,
+      `added to **log.md** in ${facts2}.`,
+      `added the document **log.md** to ${facts2}.`,
+    ]);
+  });
+
+  // CANARY: take the document's own board out of `recordStoreWrite` and the
+  // second board, given the same rulings, reads the first board's slug in a
+  // document's name, whichever door wrote it.
+  it("a board's own ruling document, named after it, is on that board's panel alone, whoever writes it", async () => {
+    const store = setupTestStore(ctx);
+    const actor = personOf(store);
+    const where = { dataRoot: store.dataRoot };
+    const shared = await kbNamed(store, "Shared rules");
+    writeBoardHolding(store.dataRoot, store.slug, {}, { rulingsKb: "shared-rules" });
+    writeBoardHolding(store.dataRoot, "second-board", { kb: ["shared-rules"] }, { rulingsKb: "shared-rules" });
+    const doc = "no-repository-viberr-core.md";
+
+    // The decision's own writer, the controller's edit of one passage, and a
+    // person deleting the document in Instance settings.
+    await recordNoRepositoryRuling(
+      store.db,
+      { projectSlug: store.slug, byName: "Arda", taskKey: "VIB-7", at: "2026-10-07T10:00:00.000Z" },
+      actor,
+      where,
+    );
+    const edit = await editKbPassage(
+      store.db,
+      { kb: "shared-rules", doc, was: "Nothing is committed", now: "Nothing at all is committed", actor },
+      where,
+    );
+    expect(edit.ok).toBe(true);
+    deleteStoreNode(store.db, shared.target, [doc], actor);
+    // And the connection of a repository, which removes one that stands.
+    await recordNoRepositoryRuling(
+      store.db,
+      { projectSlug: store.slug, byName: "Arda", taskKey: "VIB-7", at: "2026-10-07T11:00:00.000Z" },
+      actor,
+      where,
+    );
+    removeNoRepositoryRuling(store.db, { projectSlug: store.slug, repo: "acme/app" }, actor, where);
+
+    const who = store.users.arda.name;
+    const rules = "the project's rulings **shared-rules**";
+    expect(sentences(store)).toEqual([
+      `${who} deleted **${doc}** from ${rules}.`,
+      `${who} added the document **${doc}** to ${rules}.`,
+      `${who} deleted **${doc}** from ${rules}.`,
+      `${who} edited a passage of **${doc}** in ${rules}.`,
+      `${who} added the document **${doc}** to ${rules}.`,
+    ]);
+    expect(listAuditLog(store.db, "second-board")).toEqual([]);
+    expect(countAuditLog(store.db, "second-board")).toBe(0);
+  });
+
+  // CANARY: leave either action out of AUDIT_ACTION_KINDS and the board never
+  // says which knowledge base its rulings became, or that an agent's grants
+  // were replaced by its template's.
+  it("names the knowledge base a board took as its rulings, its clearing, and a sync of an agent's grants", async () => {
+    const store = setupProjectedStore(ctx);
+    const arda = store.users.arda;
+    const actor = { userId: arda.id, label: arda.email };
+    const where = { dataRoot: store.dataRoot };
+    await saveKnowledgeBase(store.db, { name: "House rules", refresh: "manual" }, actor, where);
+    await setProjectRulingsKb(store.db, { projectSlug: store.slug, dir: "house-rules" }, actor, where);
+    await setProjectRulingsKb(store.db, { projectSlug: store.slug, dir: null }, actor, where);
+    seedDefaultAgentAssets(store.dataRoot);
+    rebuildAll(store.db, where);
+    await deployAgentProfileFromLibrary(
+      store.db,
+      { projectSlug: store.slug, profileId: "developer" },
+      actor,
+      where,
+    );
+    await saveGlobalAgentProfile(
+      store.db,
+      {
+        id: "developer",
+        name: "Developer",
+        backend: "claude",
+        summary: "Implements the change.",
+        persona: "",
+        stages: ["ready", "impl"],
+        mcps: ["github"],
+      },
+      actor,
+      where,
+    );
+    await propagateTemplateResources(
+      store.db,
+      { profileId: "developer", projectSlugs: [store.slug] },
+      actor,
+      where,
+    );
+
+    const panel = listAuditLog(store.db, store.slug).map((e) => e.text);
+    expect(panel).toContain(
+      `${arda.name} set **Developer**'s skills, knowledge bases and MCP servers to its template's.`,
+    );
+    expect(panel.slice(-2)).toEqual([
+      `${arda.name} cleared the project's rulings.`,
+      `${arda.name} named **house-rules** the project's rulings.`,
+    ]);
+  });
+
+  // CANARY: leave `org.agent_profile.updated` out of RESOURCE_ACTIONS and a
+  // board whose agent follows a template is not told the template changed;
+  // name every board that deploys the profile and the board whose own copy
+  // the edit never reaches is told of it; compare a template's backends as a
+  // list and the editor's first save, which keeps one, reads as a change.
+  it("an edit of an agent template is on the board whose agent follows it, and not on one that holds its own copy", async () => {
+    const store = setupProjectedStore(ctx);
+    const arda = store.users.arda;
+    const actor = { userId: arda.id, label: arda.email };
+    const where = { dataRoot: store.dataRoot };
+    seedDefaultAgentAssets(store.dataRoot);
+    rebuildAll(store.db, where);
+    // A library deploy holds its own copy of what a save snapshots.
+    await deployAgentProfileFromLibrary(
+      store.db,
+      { projectSlug: store.slug, profileId: "developer" },
+      actor,
+      where,
+    );
+    const developer = { profileId: "developer", capabilities: [], extras: [] };
+    writeBoardHolding(store.dataRoot, "follower", {}, { agents: [developer] });
+    // A copy that names the agent and leaves the rest to the template.
+    writeBoardHolding(store.dataRoot, "renamer", {}, {
+      agents: [{ ...developer, definition: { name: "Builder" } }],
+    });
+    // The template as its editor loads it: the backend a run starts on, and
+    // the summary and stages it has.
+    const shipped = readTemplate("developer", store.dataRoot)!;
+    const loaded = {
+      id: "developer",
+      name: shipped.name,
+      backend: primaryRunBackend(shipped.backends),
+      summary: shipped.desc,
+      persona: "",
+      stages: shipped.stages,
+    };
+
+    // Saved as it was loaded: nothing a run is given changed, so no board is told.
+    await saveGlobalAgentProfile(store.db, loaded, actor, where);
+    expect(sentences(store, "follower")).toEqual([]);
+    const edited = { ...loaded, summary: "Implements the change, and says what it left out." };
+    await saveGlobalAgentProfile(store.db, edited, actor, where);
+    await saveGlobalAgentProfile(store.db, edited, actor, where);
+
+    const changed = `${arda.name} changed the agent template **Developer**, which`;
+    expect(sentences(store, "follower")).toEqual([`${changed} this board follows.`]);
+    expect(sentences(store, "renamer")).toEqual([`${changed} Builder follows.`]);
+    expect(sentences(store).filter((text) => text.includes("agent template"))).toEqual([]);
+  });
+
+  // CANARY: sort the two legs by `occurred_at` alone and the board's own row,
+  // written first, is listed as the newer of the two.
+  it("orders an instance row and a board's own row of one millisecond as they were written", async () => {
+    const store = setupProjectedStore(ctx);
+    // A board that names no rulings gets a knowledge base for them: the
+    // board's own row first, then the document's.
+    await recordNoRepositoryRuling(
+      store.db,
+      { projectSlug: store.slug, byName: "Arda", taskKey: "VIB-7", at: "2026-10-07T10:00:00.000Z" },
+      personOf(store),
+      { dataRoot: store.dataRoot },
+    );
+    store.db.prepare(`UPDATE audit_events SET occurred_at = '2026-10-07T10:00:00.000Z'`).run();
+    const who = store.users.arda.name;
+    expect(sentences(store)).toEqual([
+      `${who} added the document **no-repository-viberr-core.md** to the project's rulings **viberr-core-rulings**.`,
+      `${who} named **viberr-core-rulings** the project's rulings.`,
+    ]);
+  });
+
+  // CANARY: ask every member of `boards` for its project, object or not, and
+  // one such row raises "malformed JSON" on every board's panel.
+  it("a row whose `resource` is not what a writer writes names no board, and breaks no board's panel", () => {
+    const store = setupTestStore(ctx);
+    const odd = (details: AuditEventInput["details"]) =>
+      recordAudit(store.db, { action: "org.store.doc_written", actor: SYSTEM_ACTOR, details });
+    odd({ path: "a.md", resource: { kind: "kb", key: "k", boards: [store.slug] } });
+    odd({ path: "b.md", resource: { kind: "kb", key: "k", boards: store.slug } });
+    odd({ path: "c.md", resource: { kind: "kb", key: "k", boards: { project: store.slug } } });
+    odd({ path: "d.md", resource: store.slug });
+    odd({ path: "e.md" });
+    recordAudit(store.db, { action: "org.store.doc_written", actor: SYSTEM_ACTOR });
+    store.db
+      .prepare(`UPDATE audit_events SET details_json = 'not json' WHERE details_json IS NULL`)
+      .run();
+
+    expect(listAuditLog(store.db, store.slug)).toEqual([]);
+    expect(countAuditLog(store.db, store.slug)).toBe(0);
+    expect(auditFilterActors(store.db, store.slug)).toEqual([]);
   });
 });

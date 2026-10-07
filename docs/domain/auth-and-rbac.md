@@ -410,6 +410,28 @@ raw vendor line never reach an audit row.
   `boundary: approval` is never written (ruling 151).
 - `project.required_reviewers.updated` records the ruling-178 rule (via the controller
   or the project settings form).
+- Every write to a knowledge base, a skill or an MCP server that changes what a run is
+  given carries `resource {kind: "kb" | "skill" | "mcp" | "template", key, boards: [{project,
+  rulings, agents}]}` (ruling 681): the grant key, and the boards that name it as their
+  rulings or whose deployed agents hold it, as they stood at the write. That is every
+  `org.store.*` row (which before named only a row id and a path inside the folder), a
+  knowledge base's rename (`renamedFrom`), `org.kb.privacy` and `org.kb.deleted`, a
+  skill's rewrite (`rewritten`) or rename and `org.skill.deleted`, and `org.mcp.updated`,
+  `org.mcp.tool_policy.changed` (on a server that exists) and `org.mcp.removed`. A
+  delete asks before it drops the grants. A save that changes nothing a run is given
+  carries none: a knowledge base's display name or refresh mode, a skill's summary
+  (its text on disk is compared with what the save sent), an MCP server saved with the
+  name, the address and the credential it had. A document that is one board's own and
+  named after it (`no-repository-<slug>.md`, ruling 672) names that board alone, whoever
+  writes it, and no board when that board is not given the knowledge base.
+  `org.store.doc_written` also carries `task {project, key}` when the write is an
+  agent's correction or its undo (ruling 498). `org.agent_profile.updated` carries the
+  same `resource` with `kind: "template"` and the profile id as its key, naming the
+  boards whose deployment leaves to the template a field the edit changed.
+- `org.shipped_assets.refreshed {assets, version, revision}` is one row per boot that
+  replaced a shipped file with the current version (ruling 681(f)), actor the system:
+  the store-relative paths it replaced and the build that did. It names no board, a
+  file a build adds is not listed, and a boot that refreshed nothing writes none.
 - `task.acceptance.forced` carries `bypassed` (the gate sentences joined with " | "),
   `bypassedGates` (the same list), `skippedStages`, `validation` and `withdrawnPacket`
   (U35-3; null when the force answered the open decision instead, ruling 471).
@@ -440,7 +462,18 @@ Where it is read:
 - **S3 push**: a single `s3_audit_config` row (bucket, region, prefix, optional
   endpoint, access key, sealed secret) and the `audit-export-s3` intent, which PUTs a
   full export with a hand-rolled SigV4 signature.
-- **Project Activity page**: project-scoped rows for members.
+- **Project Activity page**: project-scoped rows for members, and the instance rows
+  about what the board's runs are given (ruling 681). A write to a knowledge base, a
+  skill or an MCP server is audited with no project and names, in `resource`, the boards
+  whose runs are given it at that moment; each of those boards' audit panel shows the row as a
+  change ("<person> edited a passage of **rules.md** in the project's rulings
+  **house-rules**.", "… rewrote the skill **estimating**, which Scout uses.", "… changed
+  the agent template **Developer**, which this board follows."). No
+  sentence quotes a document: an edit's `edited` passage is read as whether there was
+  one, so a private knowledge base (ruling 578) is safe whoever reads the panel. An org
+  admin's row links the knowledge-base document it wrote; nobody else is handed the
+  link. A write that is an agent's correction or its undo names its task (`task`) and
+  is left off that task's board, whose Stream already carries the task's entry.
 - Derived facts: the Policy page's "last change" chip, the GitHub page's "last checked"
   time, and Insights' packet and time-to-review metrics.
 

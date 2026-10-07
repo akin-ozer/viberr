@@ -222,6 +222,31 @@ export function deploymentRuntimeIdentity(
   };
 }
 
+/** A deployment's grant lists: the copy it wrote, else its template's, which a
+ *  deployment with no copy resolves live. The one writing of that rule: the
+ *  roster shows these lists, a run mounts them, and an audit row of a write to
+ *  one of them names the boards that hold it (ruling 681). */
+export function deploymentResources(
+  identity: Pick<DeploymentRuntimeIdentity, "def" | "template">,
+): TemplateProfile["resources"] {
+  const { def, template } = identity;
+  return {
+    skills: def?.resources?.skills ?? template?.resources.skills ?? [],
+    mcps: def?.resources?.mcps ?? template?.resources.mcps ?? [],
+    kb: def?.resources?.kb ?? template?.resources.kb ?? [],
+  };
+}
+
+/** The name a deployment goes by: the operator's one name (ruling 518), else
+ *  the override's, the template's, then the profile id. */
+export function deploymentName(
+  deployment: AgentDeployment,
+  identity: Pick<DeploymentRuntimeIdentity, "def" | "template" | "kind">,
+): string {
+  if (identity.kind === "operator") return OPERATOR_NAME;
+  return identity.def?.name ?? identity.template?.name ?? deployment.profileId;
+}
+
 /**
  * Live `profileId → backend` for a project's DEPLOYED specialist profiles —
  * the backend a run started right now would use (owner report 2026-08-21).
@@ -275,11 +300,11 @@ export function deployedSpecialistIdentities(
     );
     if (!file?.parsed) return map;
     for (const deployment of file.parsed.frontmatter.agents) {
-      const { kind, backends, def, template } = deploymentRuntimeIdentity(deployment, dataRoot);
-      if (kind === "operator") continue;
+      const identity = deploymentRuntimeIdentity(deployment, dataRoot);
+      if (identity.kind === "operator") continue;
       map.set(deployment.profileId, {
-        backend: primaryRunBackend(backends),
-        name: def?.name ?? template?.name ?? deployment.profileId,
+        backend: primaryRunBackend(identity.backends),
+        name: deploymentName(deployment, identity),
       });
     }
   } catch {
