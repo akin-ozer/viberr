@@ -1118,6 +1118,83 @@ describe("ruling 476(h): an epic a turn creates records the conversation it was 
 });
 
 /**
+ * Ruling 684(d): a turn that a follow-up started leaves no further step. The
+ * rule is about the turn, so the tools a turn is handed are told which message
+ * it answers. The first writing judged by the conversation's newest message,
+ * and a person's own turn, still working when the task was accepted, was
+ * refused a step over a message it had not read.
+ */
+describe("ruling 684: a turn's tools know which message the turn answers", () => {
+  it("the turn a follow-up opened is refused a further step by its own continue_when_done", async () => {
+    const { connectFakeBackend, disconnectFakeBackend } = await import(
+      "../../../test-support/backend-credentials"
+    );
+    const { lastRunSpec } = await import("../../../test-support/fake-runtime");
+    const { runControllerTurn } = await import("./controller-run.server");
+    const { createConversation } = await import("./controller-conversations.server");
+    const { claimFollowUp, openFollowUps, recordFollowUpOutcome, setFollowUp } = await import(
+      "./controller-follow-ups.server"
+    );
+    await connectFakeBackend(app.db, user.id, "claude");
+    const conversation = createConversation(app.db, {
+      userId: user.id,
+      userLabel: user.email,
+      projectSlug: "viberr-core",
+    });
+    // The step this conversation left on VIB-142, claimed by its acceptance.
+    setFollowUp(app.db, {
+      conversationId: conversation.id,
+      userId: user.id,
+      projectSlug: "viberr-core",
+      taskKey: "VIB-142",
+      text: "Install the template.",
+    });
+    const [waiting] = openFollowUps(app.db, "viberr-core", "VIB-142");
+    claimFollowUp(app.db, waiting!.id);
+    let turn: Awaited<ReturnType<typeof runControllerTurn>>;
+    try {
+      // The turn the acceptance starts, as the acceptance starts it.
+      turn = await runControllerTurn(app.db, {
+        conversationId: conversation.id,
+        text: "VIB-142 in viberr-core was accepted. …\n\nInstall the template.",
+        user: { ...user, orgRole: "admin" },
+        surface: null,
+        mode: "queue",
+        dataRoot: app.dataRoot,
+      });
+    } finally {
+      await disconnectFakeBackend(app.db, user.id, "claude");
+    }
+    if (turn.state !== "started") throw new Error(`the turn must start, and it was ${turn.state}`);
+    recordFollowUpOutcome(app.db, waiting!.id, turn.state, turn.messageId);
+
+    // The tool the turn was really handed, called the way the model calls it.
+    const server = lastRunSpec()?.mcpServers?.["viberr_controller"];
+    if (!inProcess(server)) throw new Error("the turn must mount viberr_controller in process");
+    const { Client } = await import("@modelcontextprotocol/sdk/client/index.js");
+    const { InMemoryTransport } = await import("@modelcontextprotocol/sdk/inMemory.js");
+    const [clientEnd, serverEnd] = InMemoryTransport.createLinkedPair();
+    await server.instance.connect(serverEnd);
+    const client = new Client({ name: "ruling-684", version: "1" }, { capabilities: {} });
+    await client.connect(clientEnd);
+    const reply = JSON.stringify(
+      (
+        await client.callTool({
+          name: "continue_when_done",
+          arguments: { taskKey: "VIB-142", next: "And then the next thing." },
+        })
+      ).content,
+    );
+    // CANARY: drop `answering: message.id` from the turn's mounts, or the
+    // mounts' hand-off to the toolkit, and no turn is ever known as one a
+    // follow-up opened: each may leave the next step, with no person in it.
+    expect(reply).toContain("[noop] This turn was itself started by a follow-up");
+    expect(openFollowUps(app.db, "viberr-core", "VIB-142")).toEqual([]);
+    await client.close();
+  });
+});
+
+/**
  * Ruling 573: a message's files are named to the turn that reads it, whether
  * it starts a turn or steers one, and the transcript keeps the words alone.
  */
