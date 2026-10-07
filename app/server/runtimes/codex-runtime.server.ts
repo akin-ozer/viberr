@@ -159,9 +159,11 @@ import { errorMessage, toError } from "~/shared/errors";
  * the same `thread.started` / `turn.started` / `error` / `turn.failed` shapes;
  * `login status` still prints "Not logged in"; and the binary still carries
  * `thread/compact/start`, `contextCompaction`, `token_usage_record` and the
- * device-flow "Enter this one-time code". Ruling 541's two rollout facts were
- * re-checked only as far as the record's name: no signed-in model run was
- * available, so the resumed thread's running total is unmeasured on 0.160.1.
+ * device-flow "Enter this one-time code". Ruling 541's two facts were measured
+ * against a scripted local Responses server (a `model_providers` entry, every
+ * call answering 1234 input tokens): the rollout carries one
+ * `token_usage_record` per call, and `exec resume` of the thread reported
+ * `turn.completed.usage.input_tokens` 2468, the thread's running total.
  */
 export const CODEX_SDK_VERIFIED_VERSION = "0.160.1";
 

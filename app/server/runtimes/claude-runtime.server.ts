@@ -84,6 +84,17 @@ import { errorMessage, toError } from "~/shared/errors";
  * where 2.1.261's resolved to `claude-opus-5`). Upgraded to v0.3.284 for
  * Sonnet 5.5, which 0.3.280's `sonnet` alias did not reach (it ran
  * `claude-sonnet-5`); that release only adds to the surface used here.
+ * Upgraded to v0.3.291 (Claude Code 2.1.291) in the 2026-10-07 dependency
+ * refresh: against 0.3.284 its types only add optional fields, a
+ * `get_task_output` control request and a startup-failure reason, and the
+ * `opus`/`sonnet` aliases resolve as before. It is pinned EXACTLY, below
+ * 0.3.292: Claude Code 2.1.292 makes an SDK run wait for a background command
+ * after the final result, where it used to stop it 5 s later, and this
+ * adapter reads until the stream ends, so a run that left `npm run dev` going
+ * under `run_in_background` would sit past its result until the idle guard
+ * settled it as hung. Moving past 0.3.291 needs the run to settle on its
+ * result first. (2.1.292 also negotiates MCP protocol 2026-07-28 with stdio
+ * servers by default.)
  * `query()` returns a
  * `Query` (async generator of `SDKMessage`) whose yielded objects are the
  * SAME envelopes documented in runtime-adapters.md §1.3 (system·init with

@@ -329,7 +329,7 @@ rulings 182(b), 191 and 196):
 curl -s localhost:${PORT:-3000}/resources/health | jq .toolchain
 # {"node":"26.8.2","npm":"11.19.1","git":"2.47.3","python3":null,"go":null,
 #  "make":"4.4.1","docker":null,"pnpm":"12.9.1","yarn":null,"curl":"8.14.1",
-#  "codexCli":"0.160.1","claudeAgentSdk":"0.3.292"}
+#  "codexCli":"0.160.1","claudeAgentSdk":"0.3.291"}
 ```
 
 `make`, `curl` and a pinned `pnpm` (`12.9.1`) ship in the image (ruling 196); `docker` is

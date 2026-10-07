@@ -1911,7 +1911,8 @@ runtime's answer for a missing grant.
   `viberr-agent`, `viberr_browser`, `viberr-browser`, `viberr_controller`,
   `viberr-controller`, `viberr_knowledge`, `viberr-knowledge`, `viberr_ops`, `viberr-ops`.
 - **Browser**: `viberr_browser` = `@playwright/mcp` cli.js run with `process.execPath`,
-  `--headless --isolated --output-dir <attachments>` (+ `--image-responses omit` on
+  `--headless --isolated --no-webmcp --output-dir <attachments>` (`--no-webmcp`: a page's
+  WebMCP tools never reach the tool list; + `--image-responses omit` on
   Codex, + `--executable-path $VIBERR_BROWSER_EXECUTABLE --no-sandbox` when set), under
   `browser-supervisor.server.ts --deadline-ms 90000` (ruling 554): every tool call has a
   90 s deadline, and a call past it gets every waiting request answered with a sentence
