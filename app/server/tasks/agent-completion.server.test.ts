@@ -28,7 +28,7 @@ import { readProjectFile } from "~/server/files/project-writer.server";
 import { taskAttachmentsDir } from "~/server/files/file-store-root.server";
 import { listKeptDeliveries } from "~/server/files/kept-deliveries.server";
 import { readTaskAttachment } from "~/server/files/task-attachments.server";
-import { readTaskSources } from "~/server/files/task-sources.server";
+import { SOURCE_STAGING_PREFIX, readTaskSources } from "~/server/files/task-sources.server";
 import { insertUser } from "~/server/auth/user-store.server";
 import { logger } from "~/server/logging/logger.server";
 import { listAuditEvents } from "../../../test-support/audit-log";
@@ -1393,19 +1393,25 @@ describe("applyAgentCompletionEffects (the shared effects)", () => {
     });
   });
 
-  /** Ruling 690: keep `name` as a source on VIB-1, the way a run's
-   *  `keep_source` does: saved in the attachments folder, then handed over. */
-  function keepSourceInRun(runId: string, name: string, body: string, profileId = "reviewer"): string {
+  /** Ruling 690: stage `name` on VIB-1 as a run's shell does before it calls
+   *  `keep_source`: saved in the attachments folder under the staging prefix. */
+  function stageSource(name: string, body: string): string {
     const dir = taskAttachmentsDir(store.slug, "VIB-1", store.dataRoot);
     mkdirSync(dir, { recursive: true });
-    writeFileSync(path.join(dir, name), body);
+    writeFileSync(path.join(dir, `${SOURCE_STAGING_PREFIX}${name}`), body);
+    return `${SOURCE_STAGING_PREFIX}${name}`;
+  }
+
+  /** Ruling 690: keep `name` as a source on VIB-1, the way a run's
+   *  `keep_source` does: staged in the attachments folder, then handed over. */
+  function keepSourceInRun(runId: string, name: string, body: string, profileId = "reviewer"): string {
     return keepTaskSource(
       store.db,
       { dataRoot: store.dataRoot },
       {
         projectSlug: store.slug,
         taskKey: "VIB-1",
-        file: name,
+        file: stageSource(name, body),
         from: `https://aws.amazon.com/${name}`,
         title: `The page ${name}`,
         actorRef: { kind: "agent", backend: "claude", profileId, roleHint: "Review & validation" },
@@ -1454,6 +1460,65 @@ describe("applyAgentCompletionEffects (the shared effects)", () => {
     const kept = readTaskSources(store.slug, "VIB-1", store.dataRoot);
     expect(kept.sources.map((s) => s.id)).toEqual(["S1", "S2"]);
     expect(kept.deliveries).toEqual([{ deliveredAt: stamp, sources: ["S1"] }]);
+  });
+
+  it("ruling 690: a page one run has staged and not yet kept is not the file of a run that completes beside it, and is still that run's to keep", async () => {
+    // A researcher saves a page and keeps it a model turn later. A deliverer
+    // that finished in between used to take the page as its delivery: posted
+    // on its reply, stamped, copied into the kept delivery, and then refused
+    // to the researcher as somebody's file. CANARY: give SOURCE_STAGING_PREFIX
+    // no leading dot (`source-`) and the deliverer's reply claims the
+    // researcher's page and the kept delivery holds it.
+    writeReviewTask({
+      stage: "impl",
+      workRevision: null,
+      validation: "none",
+      engagements: [{ ...REVIEWER_ENGAGEMENT, delivers: true }],
+    });
+    const runId = await finishedRunWith("Built the estimate; it is on this task.");
+    saveInRunWindow(runId, ["estimate.md"]);
+    // Saved by the researcher's shell while the deliverer was still running.
+    const staged = stageSource("rds-pricing.html", "db.t3.medium $0.068 per hour");
+    await applyAgentCompletionEffects(
+      store.db,
+      { dataRoot: store.dataRoot },
+      {
+        projectSlug: store.slug,
+        taskKey: "VIB-1",
+        backend: "claude",
+        profileId: "reviewer",
+        role: "Calculator Builder",
+        delivers: true,
+        workdir: null,
+        agentHandle: "reviewer",
+      },
+      { id: runId, state: "finished" },
+    );
+    const delivered = taskFile().parsed;
+    const stamp = delivered.frontmatter.deliveredAt!;
+    expect(stamp).toBeTruthy();
+    expect(delivered.timeline.flatMap((e) => e.attachments ?? [])).toEqual(["estimate.md"]);
+    expect(listKeptDeliveries(store.slug, "VIB-1", store.dataRoot)).toEqual([
+      { deliveredAt: stamp, files: ["estimate.md"] },
+    ]);
+
+    // The researcher's keep, a turn later, is answered as its own.
+    expect(
+      keepTaskSource(
+        store.db,
+        { dataRoot: store.dataRoot },
+        {
+          projectSlug: store.slug,
+          taskKey: "VIB-1",
+          file: staged,
+          from: "https://aws.amazon.com/rds/pricing/",
+          title: "RDS pricing",
+          actorRef: { kind: "agent", backend: "codex", profileId: "researcher", roleHint: "Researcher" },
+          runId: "run_research",
+        },
+      ),
+    ).toContain("[kept] S1: rds-pricing.html");
+    expect(taskFile().parsed.frontmatter.deliveredAt).toBe(stamp);
   });
 
   it("ruling 690: a run that kept sources leaves one note naming them, and replaying its effects adds no second", async () => {

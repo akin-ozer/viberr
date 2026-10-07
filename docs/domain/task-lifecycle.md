@@ -636,14 +636,19 @@ agent that may save files on the task keeps what it read to state a fact from ou
 page as fetched, a repository file at a commit, an API answer, a command's output) with
 `keep_source`, and the task holds it under an id, with where the agent said it came from,
 the time, the agent, the run, its size and its hash, and never overwrites it
-([file-formats.md §10](../architecture/file-formats.md)). A kept source is not a file of
-the task: it leaves the attachments folder when it is kept, so no reply posts it and no
-delivery carries it. When a files delivery is stamped, the ids of the sources the task
-holds then are recorded with it (`recordDeliverySources`, beside the kept copy of ruling
-597), so a source a reviewer keeps while checking the work is on the task and not under
-that delivery; a delivery that is a revision rests on what was kept by the time the
-operator summarized it. The reviewers check the work's claims against these with
-`read_task_source`, and a claim with no kept source behind it reads as unsupported.
+([file-formats.md §10](../architecture/file-formats.md)). A kept source is never a file
+of the task, before the keep or after it: the run stages it in the attachments folder
+under a name that starts with `.source-`, which no lister of that folder returns, and the
+keep removes the staged file. So no reply posts it and no delivery carries it, whichever
+run completes while it waits; a page one run had saved under an ordinary name was the
+delivery of the deliverer that finished beside it, and the keep takes only a staged name.
+When a files delivery is stamped, the ids of the sources the task holds then are recorded
+with it (`recordDeliverySources`, beside the kept copy of ruling 597), so a source a
+reviewer keeps while checking the work is on the task and not under that delivery; a
+delivery that is a revision rests on what was kept by the instant the revision was minted
+(`workRevision.createdAt`), not by the time the operator summarized it, which is after the
+reviews. The reviewers check the work's claims against these with `read_task_source`, and
+a claim with no kept source behind it reads as unsupported.
 
 A reviewer's `report_outcome` records a **verdict** (`approve | request_changes`)
 bound to the review subject (§6). A run whose workspace could not be provisioned
@@ -763,9 +768,9 @@ packet goes away (`retryReviewDeadlockEscalation`, ruling 328).
   delivered as a revision), and the reviewers who gave a verdict on the accepted work.
   Ruling 690: the card, before and after the acceptance, also says how many kept sources
   the work under review rests on and lists the first twelve (`sourcesRestedOn`: the ones
-  the delivery recorded, or for a revision the ones kept by the time the packet was
-  written); a result that is files says so when it rests on none, and a revision that
-  rests on none says nothing.
+  the delivery recorded, or for a revision the ones kept by the time it was minted, so a
+  page a reviewer kept while checking it is not counted); a result that is files says so
+  when it rests on none, and a revision that rests on none says nothing.
   The diff reader is the offer's alone, and nobody is shown as still owed a verdict. A
   task accepted with no packet on file (a person's own acceptance before the operator
   offered it, or a force-accept) has no result card. A reader on another task gets the

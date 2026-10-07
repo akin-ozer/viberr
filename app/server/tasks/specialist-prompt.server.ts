@@ -480,6 +480,10 @@ export interface AnalyzePromptInput {
    *  the task), so the contract says how a source is kept. A run without it
    *  is told it cannot keep one, and why. */
   sourceKeeper?: boolean;
+  /** Ruling 690: the run's `use-web-search-fetch` grant is withheld, so the
+   *  contract's word on sources names no page and no `curl`: a profile that
+   *  may not fetch from the web is not handed another way to it. */
+  webWithheld?: boolean;
   /**
    * Ruling 422 (F39-45): the knowledge-base folders this run's instructions
    * index (ABSOLUTE), rendered as a READ-ONLY exception inside the workspace
@@ -635,7 +639,7 @@ export function buildAnalyzePrompt(input: AnalyzePromptInput): string {
   // names what was not kept.
   const sourcesLine =
     input.sourceKeeper && input.attachmentsDropDir
-      ? sourcesKeepLine(input.attachmentsDropDir, input.taskFileReader === true)
+      ? sourcesKeepLine(input.attachmentsDropDir, input.taskFileReader === true, input.webWithheld !== true)
       : sourcesNotKeptLine(input.attachmentsDropDir ? SOURCES_NOT_KEPT_NO_TOOL : SOURCES_NOT_KEPT_NO_GRANT);
   // Ruling 690: a supporting run that can read the kept sources checks the
   // work's claims against them.

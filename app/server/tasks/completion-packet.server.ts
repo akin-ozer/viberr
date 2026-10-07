@@ -10,6 +10,7 @@ import {
   type TaskAttachmentEntry,
 } from "~/server/files/task-attachments.server";
 import {
+  deliverySourceIds,
   readTaskSources,
   sourceFromShown,
   type TaskSource,
@@ -168,22 +169,24 @@ function resultFileCandidates(fm: PacketState, ref: StoreRef): string[] {
  * A delivery that is files recorded the sources the task held when it was
  * stamped (`recordDeliverySources`), so those are read back; a delivery whose
  * line was never written rests on what was kept at or before its stamp. A
- * revision records no line: it rests on what was kept by the time the
- * operator summarized it, and on everything kept so far while nobody has. A
- * source a reviewer keeps afterwards is on the task and not among these.
- * Empty while nothing is delivered.
+ * revision records no line and is anchored the same way: it rests on what
+ * was kept by the instant it was minted (`workRevision.createdAt`). Either
+ * way a source a reviewer keeps afterwards, while checking the work, is on
+ * the task and not among these. The packet's own time is no anchor: the
+ * operator writes it after the reviews, so every page a reviewer fetched to
+ * check a claim would read as what the developer's result stood on. Empty
+ * while nothing is delivered.
  */
 export function sourcesRestedOn(kept: TaskSourcesRead, fm: PacketState): TaskSource[] {
   if (reviewSubjectId(fm) === null) return [];
-  const keptBy = (at: string) => kept.sources.filter((s) => Date.parse(s.keptAt) <= Date.parse(at));
   if (deliveredAsFiles(fm) && fm.deliveredAt) {
-    const recorded = kept.deliveries.find((d) => d.deliveredAt === fm.deliveredAt);
-    if (!recorded) return keptBy(fm.deliveredAt);
-    const ids = new Set(recorded.sources);
+    const ids = new Set(deliverySourceIds(kept, fm.deliveredAt));
     return kept.sources.filter((s) => ids.has(s.id));
   }
-  const packet = currentCompletionPacket(fm);
-  return packet ? keptBy(packet.at) : kept.sources;
+  const rev = activeWorkRevision(fm.workRevision);
+  if (!rev) return [];
+  const minted = Date.parse(rev.createdAt);
+  return kept.sources.filter((s) => Date.parse(s.keptAt) <= minted);
 }
 
 /** How many candidate names a refusal or the snapshot lists. */

@@ -72,7 +72,7 @@ import {
 import {
   BOARD_READ_TOOL,
   BOARD_TOOLS,
-  KEEP_SOURCE_TOOL,
+  KEEP_SOURCE_NAME,
   TASK_ATTACHMENT_TOOL,
   TASK_SOURCE_TOOL,
   TIMELINE_ENTRY_TOOL,
@@ -83,6 +83,7 @@ import {
   keepSourceArgsRefusal,
   keepSourceArgsSchema,
   keepSourceResult,
+  keepSourceTool,
   taskAttachmentArgsSchema,
   taskAttachmentResult,
   taskSourceArgsSchema,
@@ -1421,8 +1422,9 @@ function openBoardSession(grant: RunGrant, server: string, mount: BoardMount): P
     // Ruling 648: what the run's knowledge server lets it read.
     readerKbs: [...grant.knowledge.values()].flatMap((knowledge) => knowledge.kb),
   };
-  // Ruling 690: a run that may save files on its task keeps sources here.
-  const tools = mount.sources ? [...BOARD_TOOLS, KEEP_SOURCE_TOOL] : BOARD_TOOLS;
+  // Ruling 690: a run that may save files on its task keeps sources here,
+  // told how for what its web grant lets it reach.
+  const tools = mount.sources ? [...BOARD_TOOLS, keepSourceTool(mount.sources.web)] : BOARD_TOOLS;
   return openOwnSession(grant, server, tools, async (tool, raw) => {
     if (tool === BOARD_READ_TOOL.name) {
       const args = boardReadArgsSchema.safeParse(raw);
@@ -1445,7 +1447,7 @@ function openBoardSession(grant: RunGrant, server: string, mount: BoardMount): P
     // And the keep, on the run's own task, as the run's agent and run. A run
     // whose mount carries no `sources` is answered that the server has no
     // such tool.
-    if (tool === KEEP_SOURCE_TOOL.name && mount.sources) {
+    if (tool === KEEP_SOURCE_NAME && mount.sources) {
       const args = keepSourceArgsSchema.safeParse(raw);
       return args.success
         ? await keepSourceResult({ ...context, runId: grant.runId }, args.data)

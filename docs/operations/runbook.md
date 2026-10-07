@@ -580,9 +580,17 @@ personal data, a takedown), stop the app, then delete that source's bytes file,
 `sources/S<n>` with its extension, from the volume and leave `sources/index.jsonl` alone:
 the record stays, a delivery that rested on the id still names it, the id is never given
 to another source, the task page's link answers 404 and `read_task_source` says the bytes
-are not in the store. When the record's own `title` or `from` must go too, blank those two
+are not in the store. The removal holds: an agent that fetches the same bytes again and
+hands them to `keep_source` is refused and told that source was removed, so they do not
+come back under a new id (a page that has changed by one byte is a different source, and
+is kept). When the record's own `title` or `from` must go too, blank those two
 values in its line and keep the line. Never edit the folder while the app runs: one
 process writes a data root.
+
+A file an agent staged for a keep and never kept (a refused keep it gave up on, a run that
+stopped between saving and keeping) stays in the task's `attachments/` under its
+`.source-…` name. Nothing lists, posts or delivers a dot-name there, nothing prunes it,
+and it goes with the task's directory; it may be deleted by hand at any time.
 
 **Two audit actions are exempt from the 90-day delete** because boot recovery uses them
 as idempotency keys: `task.agent.replied` (read by `recoverUnreactedAgentRuns`) and
