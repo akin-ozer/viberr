@@ -15,8 +15,9 @@ import {
   RECOMMENDATION_DECLINED_TITLE,
   stageMoveLead,
 } from "~/shared/timeline-leads";
-import { verdictNoteView } from "~/shared/verdict-note";
+import { VERDICT_NOTE_TITLE } from "~/shared/verdict-note";
 import { resolveStageRoles } from "~/shared/workflow/stage-roles";
+import { isRelayComment } from "./task-relay.server";
 
 /**
  * Ruling 693: what a task took.
@@ -43,7 +44,10 @@ import { resolveStageRoles } from "~/shared/workflow/stage-roles";
  * The rework counts the file already keeps (`verdicts[].rounds`, the
  * snapshot's `consecutiveRequestChanges`) are one reviewer's current streak:
  * last write wins per reviewer and subject, and an approval ends the streak.
- * A total needs every objection, so it is read from the `quality` notes.
+ * A total needs every objection, so it is read from the `quality` notes: the
+ * ones titled "Changes requested" and nothing after it, which is how
+ * `recordAgentCompletion` titles an objection that bound to a delivery and
+ * fought a round.
  */
 
 /** One span of wall time, measured from the task's filing. */
@@ -54,21 +58,29 @@ export interface TookSpan {
   /** The part of it some agent's ended run covered. */
   agentMinutes: number;
   /** The part of it that passed, with no agent running, before a person next
-   *  acted. */
+   *  acted. The stretch a run cut by a restart or still going may have been
+   *  running is in neither part. */
   waitedOnPersonMinutes: number;
 }
 
 /** The runs that started, and what is not in their time. */
 export interface TookRuns {
-  /** Runs that started. A row that never started is in `neverStarted`. */
+  /** Runs the store stamped as started. A run refused before its agent was
+   *  launched (no credential, a launch that could not be prepared) is one:
+   *  the store records it as a run that started and ended in error, and the
+   *  run console lists it. */
   total: number;
   operator: number;
   agentMinutes: number;
   /** Started runs whose time is not in `agentMinutes`: still going, or cut
    *  by a restart (boot recovery stamps those with the boot instant). */
   unmeasured: TookUnmeasured;
+  /** Runs waiting behind the run cap: about to start, and in no other count. */
+  queued: number;
+  /** Runs that ended without starting: dropped while they were queued. */
   neverStarted: number;
-  /** False when agents wrote on the timeline and no run row is left. */
+  /** False when agents that ran on this task wrote on its timeline and no run
+   *  row is left. An entry relayed from another task is no run of this one. */
   recordKept: boolean;
 }
 
@@ -91,16 +103,20 @@ export interface TookUnreported {
 }
 
 export interface TookAsked {
-  /** Decisions put to a person: each one answered, plus the one open now. */
+  /** Decisions put to a person: each one answered, plus the one open now.
+   *  An open decision that offers acceptance is not one until it is answered
+   *  another way, so answering never lowers the count. */
   rounds: number;
   /** Of the questions, the ones an agent raised itself. */
   byAgents: number;
-  /** A decision is waiting for its answer. */
+  /** A decision that counts as a round is waiting for its answer. */
   open: boolean;
 }
 
 export interface TookSentBack {
-  /** Reviewers' requests for changes. */
+  /** Reviewers' requests for changes that bound to a delivery and fought a
+   *  round. One that bound to nothing, or repeated an objection to work
+   *  nobody had reworked, sent nothing back. */
   byReviewers: number;
   /** A person's moves of the task back to an earlier stage. */
   byPeople: number;
@@ -153,8 +169,8 @@ export interface TookAgents {
 /** The whole figure, as the operator's and the controller's task reads carry it. */
 export type TaskTook = WhatItTook & TookAgents;
 
-/** The run part alone, as a board listing carries it per task. */
-export interface TookRunTotals {
+/** The run part alone: one agent's share, or a task's line on a board listing. */
+interface TookRunTotals {
   runs: number;
   agentMinutes: number;
   costUsd: number | null;
@@ -202,6 +218,8 @@ function byPerson(entry: TaskFileEvent): boolean {
   return entry.actor.kind === "human" || entry.actor.kind === "controller";
 }
 
+type Interval = readonly [number, number];
+
 /** A started run that has not ended. */
 function isLive(row: TookRunRow): boolean {
   return row.state === "running" || row.state === "queued";
@@ -215,7 +233,7 @@ function cutByRestart(row: TookRunRow): boolean {
 
 /** The run's own interval, or null when its time is not measured: it never
  *  started, is still going, was cut by a restart, or a stamp does not parse. */
-function measuredInterval(row: TookRunRow): readonly [number, number] | null {
+function measuredInterval(row: TookRunRow): Interval | null {
   if (isLive(row) || cutByRestart(row)) return null;
   const start = stampMs(row.started_at);
   const end = stampMs(row.finished_at);
@@ -229,6 +247,7 @@ interface RunMeasure {
   agentMs: number;
   live: number;
   cutByRestart: number;
+  queued: number;
   neverStarted: number;
   costUsd: number | null;
   unreported: TookUnreported;
@@ -245,6 +264,7 @@ function measureRuns(rows: readonly TookRunRow[]): RunMeasure {
     agentMs: 0,
     live: 0,
     cutByRestart: 0,
+    queued: 0,
     neverStarted: 0,
     costUsd: null,
     unreported: { claude: 0, codex: 0 },
@@ -252,7 +272,9 @@ function measureRuns(rows: readonly TookRunRow[]): RunMeasure {
   for (const row of rows) {
     if (row.kind === "controller") continue;
     if (!row.started_at) {
-      out.neverStarted += 1;
+      // Parked behind the run cap, or dropped from there before it started.
+      if (row.state === "queued") out.queued += 1;
+      else out.neverStarted += 1;
       continue;
     }
     out.started += 1;
@@ -271,7 +293,7 @@ function measureRuns(rows: readonly TookRunRow[]): RunMeasure {
 }
 
 /** Runs that started, their agent minutes and the dollars they reported. */
-export function runTotals(rows: readonly TookRunRow[]): TookRunTotals {
+function runTotals(rows: readonly TookRunRow[]): TookRunTotals {
   const measure = measureRuns(rows);
   return {
     runs: measure.started,
@@ -319,18 +341,11 @@ function tookByAgent(rows: readonly TookRunRow[]): TookAgents {
   return { byAgent: all.slice(0, BY_AGENT_MAX), moreAgents: Math.max(0, all.length - BY_AGENT_MAX) };
 }
 
-/** The measured runs' intervals as one sorted set with no overlap, so two
- *  agents running at once count the wall time once. */
-function busyIntervals(rows: readonly TookRunRow[]): (readonly [number, number])[] {
-  const sorted = rows
-    .flatMap((row) => {
-      if (row.kind === "controller") return [];
-      const interval = measuredInterval(row);
-      return interval ? [interval] : [];
-    })
-    .sort((a, b) => a[0] - b[0]);
+/** Intervals as one sorted set with no overlap, so two agents running at
+ *  once count the wall time once. */
+function mergeIntervals(intervals: readonly Interval[]): Interval[] {
   const merged: [number, number][] = [];
-  for (const [start, end] of sorted) {
+  for (const [start, end] of intervals.toSorted((a, b) => a[0] - b[0])) {
     const last = merged[merged.length - 1];
     if (last && start <= last[1]) last[1] = Math.max(last[1], end);
     else merged.push([start, end]);
@@ -338,12 +353,37 @@ function busyIntervals(rows: readonly TookRunRow[]): (readonly [number, number])
   return merged;
 }
 
+/** When some measured run was running. */
+function busyIntervals(rows: readonly TookRunRow[]): Interval[] {
+  return mergeIntervals(
+    rows.flatMap((row) => {
+      if (row.kind === "controller") return [];
+      const interval = measuredInterval(row);
+      return interval ? [interval] : [];
+    }),
+  );
+}
+
+/**
+ * When a started run whose time is not measured may have been running: one
+ * still going from its start on, one cut by a restart from its start to the
+ * boot that ended it. Nobody was waited on in that stretch and how long the
+ * agent worked in it is not known, so a span counts it as neither.
+ */
+function unmeasuredIntervals(rows: readonly TookRunRow[]): Interval[] {
+  return rows.flatMap((row): Interval[] => {
+    if (row.kind === "controller") return [];
+    const start = stampMs(row.started_at);
+    if (start === null) return [];
+    if (isLive(row)) return [[start, Number.POSITIVE_INFINITY]];
+    if (!cutByRestart(row)) return [];
+    const end = stampMs(row.finished_at);
+    return end === null ? [] : [[start, Math.max(start, end)]];
+  });
+}
+
 /** How much of `[from, to]` the intervals cover. */
-function coveredMs(
-  intervals: readonly (readonly [number, number])[],
-  from: number,
-  to: number,
-): number {
+function coveredMs(intervals: readonly Interval[], from: number, to: number): number {
   let total = 0;
   for (const [start, end] of intervals) {
     total += Math.max(0, Math.min(end, to) - Math.max(start, from));
@@ -414,12 +454,14 @@ function acceptedAtOf(input: WhatItTookInput): string | null {
  * The span from filing to `at`. Waiting on a person is a proxy the record can
  * answer: for each entry a person wrote inside the span, the time since the
  * entry before it (whoever wrote that), less the time an agent was running in
- * between. A wait still open is not counted until the person acts.
+ * between (`occupied`: the measured runs and the unmeasured ones alike). A
+ * wait still open is not counted until the person acts.
  */
 function spanTo(
   at: string,
   filedMs: number,
-  busy: readonly (readonly [number, number])[],
+  busy: readonly Interval[],
+  occupied: readonly Interval[],
   entries: readonly { ms: number; byPerson: boolean }[],
 ): TookSpan | null {
   const atMs = stampMs(at);
@@ -431,7 +473,7 @@ function spanTo(
     if (entry.ms > endMs) break;
     const from = Math.max(previousMs, filedMs);
     if (entry.byPerson && entry.ms > from) {
-      waitedMs += entry.ms - from - coveredMs(busy, from, entry.ms);
+      waitedMs += entry.ms - from - coveredMs(occupied, from, entry.ms);
     }
     previousMs = entry.ms;
   }
@@ -526,12 +568,15 @@ function notesOf(
         : `Codex reports no cost, so ${codex} Codex runs are not in the dollar figure.`,
     );
   }
+  // A Claude run reports its cost with its result, so one refused before
+  // its agent launched, stopped or failed has none. The sentence says what
+  // the row shows and no more: the run ended, and no cost came with it.
   const claude = cost.unreported.claude;
   if (claude > 0) {
     notes.push(
       claude === 1
-        ? "1 Claude run ended before reporting a cost."
-        : `${claude} Claude runs ended before reporting a cost.`,
+        ? "1 Claude run ended without reporting a cost, so it is not in the dollar figure."
+        : `${claude} Claude runs ended without reporting a cost, so they are not in the dollar figure.`,
     );
   }
   if (firstDeliveryByReview) {
@@ -562,12 +607,18 @@ export function whatItTook(input: WhatItTookInput): WhatItTook {
   let agentWrote = false;
   for (const entry of file.timeline) {
     const person = byPerson(entry);
-    if (entry.actor.kind === "agent") agentWrote = true;
+    // An agent's entry is the trace a run of this task leaves, except the
+    // comment another task's agent relayed here (ruling 488): that agent ran
+    // there, and this task may not have been run at all.
+    if (entry.actor.kind === "agent" && !isRelayComment(entry)) agentWrote = true;
     // One packet leaves one decision entry, whoever raised it and however
     // many options it carried. A declined recommendation speaks the same
-    // lead and is no round: nobody was asked a question.
+    // lead and is no round: nobody was asked a question. Nor is a comment
+    // that happens to open with the words: a comment is free prose, and no
+    // answer to a packet is written as one.
     if (
       person &&
+      entry.type !== "comment" &&
       entry.text.startsWith(DECISION_LEAD) &&
       entry.title !== RECOMMENDATION_DECLINED_TITLE
     ) {
@@ -576,7 +627,12 @@ export function whatItTook(input: WhatItTookInput): WhatItTook {
     if (entry.type === "blocked" && entry.actor.kind === "agent" && entry.text.startsWith(QUESTION_LEAD)) {
       agentQuestions += 1;
     }
-    if (verdictNoteView(entry)?.result === "request_changes") byReviewers += 1;
+    // The bare title alone: an objection that bound to nothing, or repeated
+    // one on work nobody had reworked, carries a longer one and sent nothing
+    // back.
+    if (entry.type === "quality" && entry.title === VERDICT_NOTE_TITLE.changesRequested) {
+      byReviewers += 1;
+    }
     if (
       person &&
       entry.type === "transition" &&
@@ -586,7 +642,13 @@ export function whatItTook(input: WhatItTookInput): WhatItTook {
     }
   }
   // A packet decided and kept open for its goal edit has its entry already.
-  const open = file.packet !== null && !file.packet.awaiting;
+  // One that offers acceptance is no round while it waits: accepting it
+  // leaves no decision entry (that answer is the acceptance), and any other
+  // answer leaves one, so the count never falls when the person answers.
+  const open =
+    file.packet !== null &&
+    !file.packet.awaiting &&
+    !file.packet.options.some((option) => option.kind === "accept_completion");
 
   const filedAt = file.frontmatter.createdAt;
   const filedMs = stampMs(filedAt);
@@ -596,14 +658,15 @@ export function whatItTook(input: WhatItTookInput): WhatItTook {
   let acceptance: TookSpan | null = null;
   if (filedMs !== null && (delivery || acceptedAt)) {
     const busy = busyIntervals(rows);
+    const occupied = mergeIntervals([...busy, ...unmeasuredIntervals(rows)]);
     const entries = file.timeline
       .flatMap((entry) => {
         const ms = stampMs(entry.occurredAt);
         return ms === null ? [] : [{ ms, byPerson: byPerson(entry) }];
       })
       .sort((a, b) => a.ms - b.ms);
-    if (delivery) firstDelivery = spanTo(delivery.at, filedMs, busy, entries);
-    if (acceptedAt) acceptance = spanTo(acceptedAt, filedMs, busy, entries);
+    if (delivery) firstDelivery = spanTo(delivery.at, filedMs, busy, occupied, entries);
+    if (acceptedAt) acceptance = spanTo(acceptedAt, filedMs, busy, occupied, entries);
   }
 
   const took: Omit<WhatItTook, "facts" | "notes"> = {
@@ -612,8 +675,9 @@ export function whatItTook(input: WhatItTookInput): WhatItTook {
       operator: measure.operator,
       agentMinutes: minutesOf(measure.agentMs),
       unmeasured: { live: measure.live, cutByRestart: measure.cutByRestart },
+      queued: measure.queued,
       neverStarted: measure.neverStarted,
-      recordKept: measure.started + measure.neverStarted > 0 || !agentWrote,
+      recordKept: measure.started + measure.queued + measure.neverStarted > 0 || !agentWrote,
     },
     cost: { usd: measure.costUsd, unreported: measure.unreported },
     asked: { rounds: answered + (open ? 1 : 0), byAgents: agentQuestions, open },
@@ -625,6 +689,21 @@ export function whatItTook(input: WhatItTookInput): WhatItTook {
     facts: factsOf(took, measure.agentMs),
     notes: notesOf(took, firstDelivery !== null && delivery?.byReview === true),
   };
+}
+
+/**
+ * The run part of the figure on one line, as a board listing carries it for a
+ * task (the controller's `list_tasks`): the runs that started, their agent
+ * minutes and the dollars they reported. Null for a task no run started on,
+ * so a listing spends nothing on it. A board is listed whole in one reply,
+ * and that reply has a size a turn can carry (ruling 677): three numbers as
+ * an object cost a row five lines there, a line costs it one.
+ */
+export function runTotalsLine(rows: readonly TookRunRow[]): string | null {
+  const { runs, agentMinutes, costUsd } = runTotals(rows);
+  if (runs === 0) return null;
+  const cost = costUsd === null ? "cost not reported" : formatCost(costUsd);
+  return `${countLabel(runs, "run")}, ${agentMinutes} min, ${cost}`;
 }
 
 /** The figure with who spent it: what a task read hands an operator or the

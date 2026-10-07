@@ -23,6 +23,7 @@ import { readProjectFile } from "~/server/files/project-writer.server";
 import { readTaskFile, updateTaskFile } from "~/server/files/task-writer.server";
 import { NO_REVIEW_SUBJECT, upsertRun } from "~/server/runtimes/run-store.server";
 import { rebuildAll } from "~/server/projections/rebuilder.server";
+import { getTaskDetail } from "~/server/projections/task-query.server";
 import { forceAcceptCompletion, acceptanceStanding } from "./task-acceptance.server";
 import { recordAgentCompletion } from "./agent-completion.server";
 import { resolvePacket } from "./packet-resolution.server";
@@ -387,10 +388,20 @@ describe("the verdict binds — a verification revision is minted at review time
     });
     expect(task().frontmatter.verdicts).toEqual([]);
     const quality = task().timeline.find((e) => e.type === "quality");
-    expect(quality?.title).toBe("Changes requested");
+    // Ruling 693: its title says so too, which keeps it out of the count of
+    // times the work was sent back.
+    expect(quality?.title).toBe("Changes requested, not counted");
     expect(quality?.text).toContain(
       "requested changes, but nothing on this task has been delivered for the verdict to bind to, so it does not count.",
     );
+    // The timeline still draws it as the reviewer's verdict (ruling 526): the
+    // card with the cross, and why it does not count under its head.
+    // CANARY: read the bare title alone as a request for changes in
+    // `verdictNoteView` and this note is drawn as a line of text, with no
+    // card and no mark.
+    const card = getTaskDetail(store.db, store.slug, "VIB-1")!.timeline.find((e) => e.type === "quality")!.verdict;
+    expect(card).toMatchObject({ result: "request_changes", sha: null });
+    expect(card?.detail).toContain("so it does not count.");
   });
 
   it("ruling 543: an approval of the files a result was delivered in says it bound to them", async () => {

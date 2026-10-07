@@ -315,7 +315,14 @@ run does not (ruling 216).
   "Changes requested"; "Review passed"; "Approval noted, rework still needed" only when
   another required reviewer requested changes (`failing`, naming them); "Approval noted,
   waiting on <names>" while required reviewers still owe a verdict (`changed`); otherwise
-  "Approval noted" (ruling 478(g)).
+  "Approval noted" (ruling 478(g)). A request for changes that sent nothing back says so
+  in its title (ruling 693, `VERDICT_NOTE_TITLE`): "Changes requested, not counted" when it
+  bound to no delivery (nothing delivered yet, ruling 583; the reviewer made the delivery
+  itself, ruling 556; the delivery moved while it read, ruling 544), and "Changes
+  requested, on unchanged work" when the same reviewer objects again to a delivery nobody
+  has reworked since its last objection (the repeat that adds no round, ruling 416). The
+  timeline draws each as the reviewer's verdict all the same; what a task took counts the
+  bare title alone (§9).
 
 **Nothing moving.** `sweepStrandedTasks` (`stranded-sweep.server.ts`, ruling 330) runs
 after each schedule tick and finds a task untouched for 15 minutes
@@ -792,30 +799,49 @@ packet goes away (`retryReviewDeadlockEscalation`, ruling 328).
   A project member or an org admin sees it, the run console's bar, so a task's dollars
   are read by its project ([auth-and-rbac.md §6](auth-and-rbac.md)). Each number, where it
   comes from and what it misses:
-  - `runs.total`, `runs.operator`: the run rows with `started_at` set (the operator's by
-    `kind`). A row that never started is counted in `runs.neverStarted`, not in the total.
-    A controller turn spent on the task is not a task run and is not counted. The rows
-    live in the projection database alone: when agents wrote on the timeline and no row is
-    left (a rebuilt or restored database), `runs.recordKept` is false and the card says the
-    runs, agent time and cost are not known.
+  - `runs.total`, `runs.operator`: the run rows the store stamped as started (`started_at`
+    set; the operator's by `kind`). That is the store's own meaning of a run, and the run
+    console's: a run refused before its agent was launched (no credential, a launch that
+    could not be prepared) is stamped as started and ended in error by the run service, so
+    it is in the total, with no time and no cost. A run waiting behind the run cap is
+    counted in `runs.queued` and one dropped from there before it started in
+    `runs.neverStarted`, neither in the total. A controller turn spent on the task is not a
+    task run and is not counted. The rows live in the projection database alone: when
+    agents that ran on the task wrote on its timeline and no row is left (a rebuilt or
+    restored database), `runs.recordKept` is false and the card says the runs, agent time
+    and cost are not known. A comment another task's agent relayed here (ruling 488) is no
+    trace of a run on this task, so a task that was only relayed to reads as not run.
   - `runs.agentMinutes`: the sum of `finished_at - started_at` over ended runs. A run cut
     by a restart is left out and counted in `runs.unmeasured.cutByRestart` (boot recovery
     stamps its `finished_at` with the boot instant, so the gap is the outage); a run still
     going is counted in `runs.unmeasured.live`.
   - `cost.usd`: the sum of the costs the runs reported, each run's own share (ruling 542).
     Null when no run reported one, never zero. `cost.unreported` counts the ended runs
-    with none, by backend: every Codex run, and a Claude run stopped before its result.
+    with none, by backend: every Codex run, and a Claude run that ended without the result
+    its cost comes with (refused before launch, stopped, or failed). The card's note says
+    what the row shows: the run ended without reporting a cost, so it is not in the dollar
+    figure.
   - `asked.rounds`: the decisions a person recorded (an entry by a person, or by the
-    controller for one, that opens with `**Decision:**`), plus one while a decision is
+    controller for one, that opens with `**Decision:**` and is not a comment: a comment is
+    free prose, and no answer to a packet is written as one), plus one while a decision is
     open (`asked.open`). One packet is one round, whoever raised it and however many
     options it carried. Not counted: a declined recommendation (nobody was asked a
     question), a packet withdrawn or superseded unanswered, and a decision answered by
-    accepting, which is the acceptance. `asked.byAgents` counts the questions agents
-    raised themselves (`**Question for a human:**`), on either backend.
-  - `sentBack.byReviewers`: the reviewers' requests for changes, read from the `quality`
-    notes titled "Changes requested", because the `verdicts[]` row is one reviewer's
-    current answer and an approval on the same delivery replaces the objection. Two
-    reviewers objecting to one delivery count two.
+    accepting, which is the acceptance. So an open decision that offers acceptance is not
+    counted while it waits (accepting it leaves no decision entry, and any other answer
+    leaves one), and the count never falls when a person answers. It falls by one only
+    when an open decision is withdrawn or superseded unanswered. A packet decided and kept
+    open for its goal edit is counted once, by its entry. `asked.byAgents` counts the
+    questions agents raised themselves (`**Question for a human:**`), on either backend.
+  - `sentBack.byReviewers`: the reviewers' requests for changes that bound to a delivery
+    and fought a round, read from the `quality` notes titled "Changes requested" and
+    nothing more, because the `verdicts[]` row is one reviewer's current answer and an
+    approval on the same delivery replaces the objection. Two reviewers objecting to one
+    delivery count two. An objection that bound to nothing ("Changes requested, not
+    counted") and the same reviewer's repeat on work nobody reworked ("Changes requested,
+    on unchanged work") sent nothing back and are not counted; the writer titles them
+    apart (§6). A note written before ruling 693 carries the bare title in those cases
+    too, and is counted.
   - `sentBack.byPeople`: a person's moves of the task to an earlier stage, by the board's
     stage order and names as they stand now (the move's own sentence on the timeline). A
     decision answered with a request for changes is an asked round, not a send-back, and
@@ -831,6 +857,10 @@ packet goes away (`retryReviewDeadlockEscalation`, ruling 328).
   - Each span's `agentMinutes` is the wall time some ended run covered (two agents running
     at once count once); its `waitedOnPersonMinutes` is, for each entry a person wrote in
     the span, the time since the entry before it less the time an agent ran in between.
+    A run cut by a restart (from its start to the boot that ended it) and a run still
+    going (from its start on) are taken out of the wait as well and added to no agent
+    time: nobody was waited on while one may have been running, and how long it worked is
+    not known, so that stretch is in neither part.
     That is a proxy: time a run sat queued behind the run cap just before a person acted
     reads as waiting on them, and a wait still open is not counted until the person acts.
 - **Schedules** live in `task.md` `schedules[]`: `run-operator` (optional steer) or

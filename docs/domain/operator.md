@@ -421,7 +421,8 @@ disagree with.
   `unfinishedReport` (ruling 397), `unansweredRefusal` (ruling 408).
 - **What it took** (ruling 693): `whatItTook`, what the task has cost so far, derived at
   this read from its run rows and its own timeline: `runs` (the runs that started, the
-  operator's among them, their agent minutes, and the ones not in that time), `cost`
+  operator's among them, their agent minutes, the ones not in that time, and the ones
+  queued behind the run cap or dropped from there), `cost`
   (`usd`, null when no run reported one and never zero, with the unreported runs by
   backend), `asked` (the rounds a person was asked), `sentBack` (by reviewers, by
   people), `wall` (the spans to the first delivery and to acceptance, each with the part
