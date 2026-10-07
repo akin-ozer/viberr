@@ -14,6 +14,7 @@ import {
   startMcpGateway,
   stopMcpGateway,
 } from "~/server/mcp-proxy/gateway.server";
+import { logger } from "~/server/logging/logger.server";
 import { RESERVED_MCP_NAMES } from "~/shared/mcp-reserved";
 import {
   resolveSpecialistMcpServers,
@@ -85,6 +86,70 @@ function crashSpawn(stderrText: string): McpSpawn {
       kill() {},
     };
   };
+}
+
+/** One child of {@link heldSpawn}: its command line, and how the test ends its handshake. */
+interface HeldChild {
+  command: string;
+  /** Answer the handshake with one tool, as `handshakeSpawn(1)`'s child does. */
+  answer(): void;
+  /** Die the way `crashSpawn`'s child does. */
+  crash(stderrText: string): void;
+}
+
+/**
+ * Ruling 684(b): children that hold their handshake until the test ends it, so
+ * a test decides which probe finishes when. `aliveAtSpawn` records, at each
+ * spawn, how many children were alive (spawned and not yet killed by the
+ * probe) counting the new one.
+ */
+function heldSpawn() {
+  const held: HeldChild[] = [];
+  const aliveAtSpawn: number[] = [];
+  let alive = 0;
+  const spawnImpl: McpSpawn = (command, args) => {
+    const io = new EventEmitter();
+    let answering = false;
+    let killed = false;
+    alive += 1;
+    aliveAtSpawn.push(alive);
+    const emit = (reply: HandshakeReply) =>
+      queueMicrotask(() => io.emit("stdout", Buffer.from(`${JSON.stringify(reply)}\n`)));
+    held.push({
+      command: [command, ...args].join(" "),
+      answer() {
+        answering = true;
+        emit({ jsonrpc: "2.0", id: 1, result: { capabilities: {} } });
+      },
+      crash(stderrText) {
+        queueMicrotask(() => {
+          io.emit("stderr", Buffer.from(stderrText));
+          io.emit("exit", 1);
+        });
+      },
+    });
+    return {
+      stdin: {
+        write(data: string) {
+          if (answering && rpcRequestSchema.parse(JSON.parse(data)).method === "tools/list") {
+            emit({ jsonrpc: "2.0", id: 2, result: { tools: [{ name: "t0" }] } });
+          }
+        },
+        end() {},
+      },
+      stdout: { on: (_e, cb) => io.on("stdout", cb) },
+      stderr: { on: (_e, cb) => io.on("stderr", cb) },
+      on: (e, cb) => {
+        if (e === "exit") io.on("exit", cb);
+      },
+      kill() {
+        if (killed) return;
+        killed = true;
+        alive -= 1;
+      },
+    };
+  };
+  return { spawnImpl, held, aliveAtSpawn };
 }
 
 process.env.VIBERR_SESSION_SECRET ??= "test-session-secret-0123456789abcdef";
@@ -580,5 +645,112 @@ describe("resolveSpecialistMcpServersDetailed — marked write tools (ruling 176
       { spawnImpl: handshakeSpawn(2), timeoutMs: 200 },
     );
     expect(healthy.toolDenials).toEqual([{ server: "gh-stdio", tools: ["create_pull_request"] }]);
+  });
+});
+
+/**
+ * Ruling 684(b): the run-start stdio pre-flight runs two handshakes at a time
+ * instead of one after another, and applies their verdicts in mount order, so
+ * what the run, the registry rows and the log say is what the serial check said.
+ */
+describe("verifyStdioMcpMountsForRun: the bounded pre-flight (ruling 684(b))", () => {
+  /** One stdio server per name, each its own command, resolved for one run. */
+  function mountStdio(names: string[]) {
+    const store = setupTestStore(ctx);
+    for (const name of names) addMcp(store.db, name, "stdio", `npx -y ${name}-mcp`);
+    return { store, resolved: resolveSpecialistMcpServersDetailed(store.db, names) };
+  }
+  /** A probe clock no test here reaches: each handshake ends when the test ends it. */
+  const timeoutMs = 10_000;
+
+  it("keeps two handshakes in flight, never more", async () => {
+    const names = ["a", "b", "c", "d"];
+    const { store, resolved } = mountStdio(names);
+    const fake = heldSpawn();
+    const verifying = verifyStdioMcpMountsForRun(store.db, resolved, {
+      spawnImpl: fake.spawnImpl,
+      timeoutMs,
+    });
+
+    // CANARY: probe the mounts one after another again and only one handshake
+    // is ever held, so this wait times out; raise the bound to 3, or drop it,
+    // and three or four are held at once.
+    await vi.waitFor(() => expect(fake.held).toHaveLength(2));
+    fake.held[1]!.answer();
+    await vi.waitFor(() => expect(fake.held).toHaveLength(3));
+    fake.held[0]!.answer();
+    await vi.waitFor(() => expect(fake.held).toHaveLength(4));
+    fake.held[2]!.answer();
+    fake.held[3]!.answer();
+
+    const verified = await verifying;
+    expect(fake.aliveAtSpawn).toEqual([1, 2, 2, 2]);
+    expect(Object.keys(verified.servers)).toEqual(names);
+  });
+
+  it("applies verdicts in mount order, each as soon as every earlier mount's is in", async () => {
+    const { store, resolved } = mountStdio(["a", "b", "c"]);
+    const fake = heldSpawn();
+    const child = (name: string) => fake.held.find((h) => h.command === `npx -y ${name}-mcp`)!;
+    const warn = vi.spyOn(logger, "warn");
+    const dropped = () =>
+      warn.mock.calls
+        .filter(([message]) => message === "org MCP server failed to start at run-mount; dropped and flagged")
+        .map(([, fields]) => fields?.mcp);
+    const down = () =>
+      listMcpServers(store.db)
+        .filter((m) => m.up === false)
+        .map((m) => m.name)
+        .sort();
+    try {
+      const verifying = verifyStdioMcpMountsForRun(store.db, resolved, {
+        spawnImpl: fake.spawnImpl,
+        timeoutMs,
+      });
+      await vi.waitFor(() => expect(fake.held).toHaveLength(2));
+
+      // b, mounted second, fails first and waits for a. CANARY: apply each
+      // verdict as its probe settles and b's warn and row land here, ahead of a's.
+      child("b").crash("Error: Cannot find module 'ajv'\n");
+      await vi.waitFor(() => expect(fake.held).toHaveLength(3)); // b's slot went to c
+      expect([dropped(), down()]).toEqual([[], []]);
+
+      // a fails: a's verdict and then b's land, while c is still held. CANARY:
+      // hold every verdict until the whole batch settles and this wait times out.
+      child("a").crash("Error: Cannot find module 'zod'\n");
+      await vi.waitFor(() => expect(dropped()).toEqual(["a", "b"]));
+      expect(down()).toEqual(["a", "b"]);
+
+      child("c").answer();
+      const verified = await verifying;
+      expect(Object.keys(verified.servers)).toEqual(["c"]);
+      expect(verified.unresolved.map((u) => u.name)).toEqual(["a", "b"]);
+    } finally {
+      warn.mockRestore();
+    }
+  });
+
+  it("never handshakes two mounts of one command at once", async () => {
+    // One server registered twice (two credentials, say). On a cold cache both
+    // probes would run the same first-run install into one npx folder.
+    const store = setupTestStore(ctx);
+    addMcp(store.db, "gh-work", "stdio", "npx -y gh-mcp");
+    addMcp(store.db, "gh-personal", "stdio", "npx -y gh-mcp");
+    const fake = heldSpawn();
+    const verifying = verifyStdioMcpMountsForRun(
+      store.db,
+      resolveSpecialistMcpServersDetailed(store.db, ["gh-work", "gh-personal"]),
+      { spawnImpl: fake.spawnImpl, timeoutMs },
+    );
+
+    // CANARY: drop the wait on the command's previous probe and both are held at once.
+    await vi.waitFor(() => expect(fake.held).toHaveLength(1));
+    fake.held[0]!.answer();
+    await vi.waitFor(() => expect(fake.held).toHaveLength(2));
+    fake.held[1]!.answer();
+
+    const verified = await verifying;
+    expect(fake.aliveAtSpawn).toEqual([1, 1]);
+    expect(Object.keys(verified.servers)).toEqual(["gh-work", "gh-personal"]);
   });
 });

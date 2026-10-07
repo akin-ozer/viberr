@@ -14,6 +14,7 @@ import {
   markMcpServerUnreachableFromRun,
   splitMcpCommand,
   type McpSpawn,
+  type StdioDiscovery,
 } from "~/server/org/resources.server";
 import { toError } from "~/shared/errors";
 import { sortedBy } from "~/server/runtimes/prompt-prefix.server";
@@ -482,6 +483,17 @@ export function resolveBoardMcp(input: {
 }
 
 /**
+ * Ruling 684(b): how many stdio pre-flight handshakes a run start keeps in
+ * flight. Each may take its full 20 s, so a run mounting four waited 80 s
+ * before it began; two halves that. Three would save more only on a run
+ * mounting three or more, at the price of a third concurrent first-run
+ * `npx`/`uvx` install (each CPU, disk and network heavy) eating into the 20 s
+ * every other handshake is given, and a healthy server that times out under
+ * that contention is dropped from the run and marked down.
+ */
+const STDIO_PREFLIGHT_CONCURRENCY = 2;
+
+/**
  * F20-10: verify the STDIO mounts actually START before a run trusts them.
  *
  * `resolveSpecialistMcpServersDetailed` mounts a stdio server whenever its row
@@ -491,13 +503,14 @@ export function resolveBoardMcp(input: {
  * spawn (live: a half-installed `npx` tree crashing in <1s with `Cannot find
  * module 'ajv'`, contributing zero tools while every surface said healthy).
  *
- * This re-runs the real discovery handshake for each mounted stdio server. On a
- * failure it (1) DROPS the server from the config so the run is not told it has
- * tools it will never get, (2) joins the existing `unresolved` disclosure by
- * name with `mounted: false` (a hard mount failure, distinct from the stale
- * `mounted: true` "probe was old" note), and (3) writes the row-health back
- * through {@link markMcpServerUnreachableFromRun} so Settings stops claiming the
- * dead server is up. HTTP mounts are not spawned here and are left untouched.
+ * This re-runs the real discovery handshake for each mounted stdio server, two
+ * at a time (ruling 684(b), below). On a failure it (1) DROPS the server from
+ * the config so the run is not told it has tools it will never get, (2) joins
+ * the existing `unresolved` disclosure by name with `mounted: false` (a hard
+ * mount failure, distinct from the stale `mounted: true` "probe was old" note),
+ * and (3) writes the row-health back through
+ * {@link markMcpServerUnreachableFromRun} so Settings stops claiming the dead
+ * server is up. HTTP mounts are not spawned here and are left untouched.
  *
  * Best-effort and idempotent: a registry read failure returns the resolution
  * unchanged, and a healthy server is left exactly as it was mounted.
@@ -531,16 +544,28 @@ export async function verifyStdioMcpMountsForRun(
   const servers = { ...resolution.servers };
   const unresolved = [...resolution.unresolved];
 
-  for (const name of names) {
+  // Ruling 684(b): the handshakes run STDIO_PREFLIGHT_CONCURRENCY at a time,
+  // taken in mount order, and each verdict is applied in mount order as soon
+  // as every earlier mount's verdict is in. The mounted set, the health rows,
+  // the warn lines and `unresolved` therefore come out as the one-at-a-time
+  // check left them for the same verdicts. A verdict waits only for the mounts
+  // before it, never for the whole batch: held back longer, an old failure
+  // would land on its row after a Retest pressed meanwhile.
+  //
+  // Every credential is read here, in mount order, before any probe starts.
+  // The resolver that built `resolution` has just read each one (and re-sealed
+  // one opened under a retired key), so this read writes nothing; the one line
+  // it can still log, a re-seal that failed there too, now comes before the
+  // verdicts' lines instead of between them.
+  const probes = names.flatMap((name) => {
     const row = byName.get(name);
-    if (!row || row.transport !== "stdio") continue; // HTTP is not spawned here
+    if (!row || row.transport !== "stdio") return []; // HTTP is not spawned here
     const credential = getMcpCredentialState(db, name);
-    const disc = await discoverStdioMcpTools(row.target, {
-      spawnImpl: options.spawnImpl,
-      timeoutMs: options.timeoutMs,
-      token: credential.state === "ok" ? credential.token : null,
-    });
-    if (disc.kind === "up") continue; // it starts — leave the mount as it was
+    return [{ name, row, token: credential.state === "ok" ? credential.token : null }];
+  });
+
+  const applyVerdict = ({ name, row, token }: (typeof probes)[number], disc: StdioDiscovery) => {
+    if (disc.kind === "up") return; // it starts — leave the mount as it was
 
     // The mount failed at run-spawn: drop it, disclose it for THIS run, and
     // correct the shared row so Settings stops calling it healthy.
@@ -555,12 +580,7 @@ export async function verifyStdioMcpMountsForRun(
     if (installing) {
       startMcpWarmup(
         db,
-        {
-          id: row.id,
-          name,
-          target: row.target,
-          token: credential.state === "ok" ? credential.token : null,
-        },
+        { id: row.id, name, target: row.target, token },
         { spawnImpl: options.spawnImpl, capMs: options.capMs },
       );
     }
@@ -578,7 +598,41 @@ export async function verifyStdioMcpMountsForRun(
       mcp: name,
       reason: disc.reason,
     });
-  }
+  };
+
+  // Verdicts by mount index; the first `applied` of them have been applied.
+  const verdicts: (StdioDiscovery | undefined)[] = [];
+  let applied = 0;
+  // Two mounts of ONE command (a server registered twice, say under two
+  // credentials) never handshake at once: the second waits for the first, as
+  // it did serially, and finds the first one's finished install instead of
+  // racing it into the same npx/uvx cache.
+  const lastProbeOf = new Map<string, Promise<unknown>>();
+  let next = 0;
+  const worker = async (): Promise<void> => {
+    for (;;) {
+      const index = next++;
+      const probe = probes[index];
+      if (probe === undefined) return;
+      const { row, token } = probe;
+      const discovery = (lastProbeOf.get(row.target) ?? Promise.resolve()).then(() =>
+        discoverStdioMcpTools(row.target, {
+          spawnImpl: options.spawnImpl,
+          timeoutMs: options.timeoutMs,
+          token,
+        }),
+      );
+      lastProbeOf.set(row.target, discovery);
+      verdicts[index] = await discovery;
+      for (let ready = verdicts[applied]; ready; ready = verdicts[applied]) {
+        applyVerdict(probes[applied], ready);
+        applied += 1;
+      }
+    }
+  };
+  await Promise.all(
+    Array.from({ length: Math.min(STDIO_PREFLIGHT_CONCURRENCY, probes.length) }, worker),
+  );
   // A dropped server exposes nothing, so it has nothing left to deny.
   const toolDenials = resolution.toolDenials.filter((d) => d.server in servers);
   const proxied = resolution.proxied.filter((name) => name in servers);

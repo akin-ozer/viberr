@@ -1915,10 +1915,13 @@ runtime's answer for a missing grant.
   reported "unresolved"; an unhealthy row is still mounted but flagged; a credential that
   cannot be opened drops the server; stdio servers get a real discovery handshake, WITH
   the credential on both backends, before the run and are dropped (and marked
-  unreachable) on failure. A handshake that timed out on a visible install (a first-run
-  or `@latest` download) also starts the background install a Retest starts (ruling 606,
-  ruling 74's `startMcpWarmup`), so a later run finds the server installed; the run's
-  prompt says so.
+  unreachable) on failure. The handshakes run two at a time, each with its own 20 s
+  limit, and two mounts of one command never at once (ruling 684(b)); each verdict is
+  applied in mount order as soon as every earlier server's is in, so the mounts, the
+  registry rows, the log lines and the prompt read as a one-at-a-time check left them.
+  A handshake that timed out on a visible install (a first-run or `@latest` download)
+  also starts the background install a Retest starts (ruling 606, ruling 74's
+  `startMcpWarmup`), so a later run finds the server installed; the run's prompt says so.
   Every grant that produced no usable server is listed in the prompt with the reason its
   own probe returned and an instruction not to infer another cause
   (`unavailableMcpSection`, `specialist-mcp.server.ts`, shared by the specialist and
