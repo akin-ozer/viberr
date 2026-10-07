@@ -1,8 +1,8 @@
 // @vitest-environment jsdom
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { cleanup, fireEvent, render, waitFor } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, waitFor, within } from "@testing-library/react";
 import { renderToString } from "react-dom/server";
-import { createRoutesStub, useFetcher } from "react-router";
+import { createRoutesStub, useFetcher, useLoaderData, useRevalidator } from "react-router";
 import { ToastProvider } from "~/ui/toast";
 import { PROFILE_DATA as BASE } from "../../../test-support/profile-data";
 import { MemoryStorage } from "../../../test-support/memory-storage";
@@ -17,44 +17,45 @@ afterEach(cleanup);
 let lastSubmit: Record<string, string> | null = null;
 let lastTheme: string | null = null;
 
+/** The page with one fetcher per panel, as the route mounts it. A submit is
+ *  recorded in `lastSubmit` and never reaches a server. */
+function ProfileOver({ data }: { data: ProfileData }) {
+  const identity = useFetcher<ProfileActionData>();
+  const prefs = useFetcher<ProfileActionData>();
+  // UI-56: Appearance has its own fetcher now (one per panel).
+  const appearance = useFetcher<ProfileActionData>();
+  const password = useFetcher<ProfileActionData>();
+  const github = useFetcher<ProfileActionData>();
+  const backends = useFetcher<ProfileActionData>();
+  return (
+    <ToastProvider>
+      <ProfilePage
+        data={data}
+        theme="system"
+        onTheme={(v) => {
+          lastTheme = v;
+        }}
+        fetchers={{
+          identity,
+          prefs,
+          appearance,
+          password,
+          github,
+          backends,
+        }}
+        submitWith={() => (fields) => {
+          lastSubmit = fields;
+        }}
+      />
+    </ToastProvider>
+  );
+}
+
 function profileElement(data: ProfileData = BASE) {
   lastSubmit = null;
   lastTheme = null;
   const Stub = createRoutesStub([
-    {
-      path: "/profile",
-      Component: () => {
-        const identity = useFetcher<ProfileActionData>();
-        const prefs = useFetcher<ProfileActionData>();
-        // UI-56: Appearance has its own fetcher now (one per panel).
-        const appearance = useFetcher<ProfileActionData>();
-        const password = useFetcher<ProfileActionData>();
-        const github = useFetcher<ProfileActionData>();
-        const backends = useFetcher<ProfileActionData>();
-        return (
-          <ToastProvider>
-            <ProfilePage
-              data={data}
-              theme="system"
-              onTheme={(v) => {
-                lastTheme = v;
-              }}
-              fetchers={{
-                identity,
-                prefs,
-                appearance,
-                password,
-                github,
-                backends,
-              }}
-              submitWith={() => (fields) => {
-                lastSubmit = fields;
-              }}
-            />
-          </ToastProvider>
-        );
-      },
-    },
+    { path: "/profile", Component: () => <ProfileOver data={data} /> },
   ]);
   return <Stub initialEntries={["/profile"]} />;
 }
@@ -328,6 +329,52 @@ describe("ProfilePage", () => {
       getByText("Disconnect GitHub", { selector: ".confirm-actions button.btn.danger" }),
     );
     expect(lastSubmit).toEqual({ intent: "github-disconnect" });
+  });
+
+  it("GitHub identity: a connection that goes away elsewhere takes its Disconnect confirm with it", async () => {
+    // The confirm asks about the connection on screen. Disconnected in another
+    // tab while "Disconnect GitHub?" was open here, the dialog went with the
+    // connected box but its state stayed set, so the revalidation that found
+    // GitHub connected again opened the dialog with nobody asking.
+    // CANARY: drop the `!gh` reset of `confirmDisconnect` in `ProfileGithub`
+    // (profile-page.tsx) and the reconnect reopens "Disconnect GitHub?".
+    const server = { connected: true };
+    let revalidate: () => Promise<void> = async () => {};
+    const Stub = createRoutesStub([
+      {
+        path: "/profile",
+        // The connection the loader reads changes between loads; `revalidate`
+        // is a live event or another panel's post reaching the page.
+        loader: (): ProfileData => ({
+          ...BASE,
+          user: {
+            ...BASE.user,
+            idp: server.connected ? "github" : "local",
+            githubConnected: server.connected,
+            githubHandle: "arda-kaya",
+          },
+        }),
+        Component: () => {
+          revalidate = useRevalidator().revalidate;
+          return <ProfileOver data={useLoaderData<ProfileData>()} />;
+        },
+      },
+    ]);
+    const view = render(<Stub initialEntries={["/profile"]} />);
+    await view.findByText("GitHub identity");
+    const github = githubPanel(view.getByText);
+    fireEvent.click(within(github).getByRole("button", { name: "Disconnect" }));
+    expect(view.getByRole("alertdialog", { name: "Disconnect GitHub?" })).toBeTruthy();
+
+    server.connected = false;
+    await act(() => revalidate());
+    expect(github.querySelector(".cred-warn")).not.toBeNull();
+    expect(view.queryByRole("alertdialog")).toBeNull();
+
+    server.connected = true;
+    await act(() => revalidate());
+    expect(github.querySelector(".cred-ok")).not.toBeNull();
+    expect(view.queryByRole("alertdialog", { name: "Disconnect GitHub?" })).toBeNull();
   });
 
   it("ruling 148(b): Change password is a row on the Profile card whose button opens a modal", () => {

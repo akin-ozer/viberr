@@ -655,6 +655,14 @@ function ProfileGithub({
   const [connectBusy, setConnectBusy] = useState(false);
   const [connectErr, setConnectErr] = useState<string | null>(null);
   const [confirmDisconnect, setConfirmDisconnect] = useState(false);
+  // The confirm asks about the connection on screen, so it goes when that
+  // connection does. A confirmed Disconnect closes it itself (ruling 459); a
+  // connection that goes away otherwise (disconnected in another tab while
+  // "Disconnect GitHub?" is open here) takes the dialog off with the connected
+  // box but not this state, and the next load that finds GitHub connected
+  // again would open the dialog with nobody asking. Adjusted during render,
+  // React's pattern for state a prop invalidates, not in an effect.
+  if (confirmDisconnect && !gh) setConfirmDisconnect(false);
 
   // Start better-auth's GitHub OAuth link and follow the returned provider URL
   // — the same flow the login screen uses. (The old `/auth/github` href had no
