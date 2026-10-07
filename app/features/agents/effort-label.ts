@@ -1,5 +1,6 @@
-// Lives apart from create-profile-modal.tsx so that file exports only
-// components (Fast Refresh boundary, as app/ui/initials.ts is for avatar.tsx).
+// Lives apart from create-profile-modal.tsx for react-doctor's
+// only-export-components. That file still exports the `useModelCatalog` hook,
+// so it is not a Fast Refresh boundary (see use-command-palette.ts).
 
 const EFFORT_LABEL = new Map<string, string>([
   ["minimal", "Minimal"],

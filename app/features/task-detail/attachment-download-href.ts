@@ -1,5 +1,6 @@
-// Lives apart from attachment-lightbox.tsx so that file exports only components
-// (Fast Refresh boundary, as app/ui/initials.ts is for avatar.tsx).
+// Lives apart from attachment-lightbox.tsx for react-doctor's
+// only-export-components. That file still exports the `useAttachmentLightbox`
+// hook, so it is not a Fast Refresh boundary (see use-command-palette.ts).
 
 /**
  * The serving-route URL with the save-dialog flag. D04-U11 (pass 32): the

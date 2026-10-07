@@ -2,8 +2,9 @@ import type { EpicStatus } from "~/schemas/epic-file.schema";
 import type { EpicProgress, EpicSummary } from "~/server/projections/epic-query.server";
 import type { PillKind } from "~/ui/pill";
 
-// Lives apart from epic-parts.tsx so that file exports only components
-// (Fast Refresh boundary, as app/ui/initials.ts is for avatar.tsx).
+// Lives apart from epic-parts.tsx for react-doctor's only-export-components.
+// That file still exports the `useEpicActionToast` and `useArchiveEpicTasks`
+// hooks, so it is not a Fast Refresh boundary (see use-command-palette.ts).
 
 /**
  * The status as a pill. `in_progress` takes the board's "waiting on you" blue

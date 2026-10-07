@@ -176,18 +176,30 @@ scan run from inside an agent worktree under `.claude/` sees no files at all.
 - `react-doctor/js-set-map-lookups` / `js-combine-iterations` — `.includes()` or
   chained passes over bounded tiny arrays: project workflow stages (3–5 items,
   agents-page/create-profile-modal chip rows, controller-toolkit, operator-moves stage
-  walk, board-import and settings-actions per-rule lookups), module-init constants built
+  walk, settings-actions per-rule lookups), module-init constants built
   once (capability-catalog.ts), the per-reviewer-row `activeReviewerIds.includes()` in
   execution-profile.tsx and agent-select.tsx (bounded by reviewers actively running on ONE
   task — well under the rule's ~10-item threshold), and lists capped by a constant: one
   message's or comment's files (ATTACHMENT_BATCH_MAX = 10: controller-dock,
   controller-page, timeline), event attachments (EVENT_ATTACHMENTS_MAX = 20,
-  task-file.schema.ts), one MCP server's write tools (MCP_WRITE_TOOLS_MAX = 200:
-  resource-modals chips, resources.server.ts), the `Fact` union (5 members,
-  revalidation-policy `overlaps`), `codexVendor().pathDirs` (0 or 1), and order-keeping
-  de-duplication of one profile's grant list (`kbDirsOf`, `resolveOne`, `nextList`,
-  `difference`). Verify the array is stages, a hardcoded catalog, one task's/run's/
-  profile's own list, or capped by a named constant.
+  task-file.schema.ts), one MCP server's saved write tools (MCP_WRITE_TOOLS_MAX = 200:
+  resources.server.ts `sameNameSet`, both sides saved or checked), the `Fact` union (5
+  members, revalidation-policy `overlaps`), `codexVendor().pathDirs` (0 or 1), and
+  order-keeping de-duplication of one profile's grant list (`kbDirsOf`, `resolveOne`,
+  `nextList`, `difference`). Two more are small in practice, not by a constant. The MCP
+  editor's write-tool chips (resource-modals `marked.includes(tool)` in each chip's class
+  and `aria-pressed`) scan one server's own tools: the discovered `tools/list` names (no
+  cap), the saved write tools and names typed in. `marked` starts as the discovery
+  suggestion on a server nobody has reviewed, and MCP_WRITE_TOOLS_MAX caps it only on
+  save (`checkedWriteTools`, whose own de-duplication runs before that check, over the
+  admin's submission for that one server). Two scans per chip cost less than rendering
+  the chips; if revisited, one `new Set(marked)` above the map, and only with a
+  measurement. The org's GitHub connections, one chip per owner (boards-panel `owners`):
+  each is a PAT an admin pasted, checked against GitHub behind the per-actor
+  `patValidationThrottle` (connections.server.ts); no constant caps them, but they stay
+  a handful, on a settings panel. Verify the array is stages, a hardcoded catalog, one
+  task's/run's/profile's/MCP server's own list, the org's GitHub connections, or capped
+  by a named constant.
 
 - `react-doctor/js-set-map-lookups` — the live ledger's settle filter
   (revalidation-policy.ts `!due.includes(o)` in `flushLive`): both lists are the data
@@ -231,7 +243,13 @@ scan run from inside an agent worktree under `.claude/` sees no files at all.
   `appendTimelineEvent` is synchronous fs plus `node:sqlite`. A loop whose awaits bottom
   out there (or in the `append*` / `resolveScopeViolationWithEvent` wrappers over them)
   overlaps nothing under `Promise.all` and only reorders audit, timeline and notification
-  rows. Verify no `fetch`, `exec` or spawn anywhere in the iteration.
+  rows. Verify no `fetch`, `exec` or spawn anywhere in the iteration. The same holds for
+  repository-ask.server.ts's `resolvePacket` loop after a repository is connected: with
+  `fanOutOrigin` set, the connect_repository arm returns (or refuses) before
+  `changeProjectRepo`, its only GitHub call; the kind is in `NO_REQUEUE`, so no operator
+  is re-invoked; and the fan-out is suppressed. The loop's in-order `answered` list feeds
+  `carryOnAfterConnection` after it. Verify the arm still stops before
+  `changeProjectRepo` when `fanOutOrigin` is set.
 
 - `react-doctor/async-await-in-loop` — loops whose iterations are ordered, dependent
   mutations: the operator decision-plan executors (operator-run.server.ts and
@@ -242,15 +260,46 @@ scan run from inside an agent worktree under `.claude/` sees no files at all.
   (run-recovery.server.ts — serial `applyAgentCompletionEffects` / operator re-invokes,
   deliberately avoiding an operator stampede at startup), and the schedule-tick claim/
   finalize loops (schedule.server.ts — each occurrence read-modify-writes its task.md via
-  `updateTaskFile`). The same holds for dispatch loops (`startAgentRun`,
-  `autoInvokeOperator`, `runOperator`, `resolvePacket`, `releaseTask`: the concurrent-run
-  cap, and ruling 241's queued-questions-before-operator order), stop-at-first-failure
+  `updateTaskFile`). The same holds for stop-at-first-failure
   contracts (board-import `step()`, epic-archive's `try/finally`, template-propagation's
   stale-fingerprint throw), one-shot boot migrations (goal-epic-conversion,
   evidence-result-restore, review-entry-conversion), and GitHub per-token or poller-tick
   loops (connections.server.ts per ruling 540, reconcile-poller's per-project budget,
   repo-health, github-reconciler's sibling PRs, pr-review-relay). Verify the dependency
   before suppressing; independent loops should still be parallelized.
+
+- `react-doctor/async-await-in-loop` — loops of agent or operator starts (`startAgentRun`,
+  `releaseTask`, `autoInvokeOperator`), kept serial. Not for the concurrent-run cap:
+  `reserveRun` / `admitRun` (run-service.server.ts) check and take or park a slot with no
+  await between, and a start resolves once its run is launched or parked, so a serial loop
+  neither enforces the cap nor bounds the turns that then run. Nor for ruling 241: its
+  drain-then-operator order lives inside one release (`announceRelease`). What each start
+  does await is its setup: the workspace clone, whose mirror work already queues on the
+  project's mirror lock, and the stdio-MCP pre-flight (`verifyStdioMcpMountsForRun`),
+  which spawns each mounted stdio server and, on a failure, writes the shared health row
+  and drops the server from the run. Parallel starts would probe the same org stdio
+  servers at once (every operator in a project mounts the same ones; reviewers do when
+  granted the same), the unmeasured contention of the specialist-mcp deferral below. Per
+  loop: dependencies.server.ts `drainQueuedQuestions` must stay serial regardless.
+  Queued questions can name the same reviewer twice; a supporting run's `cloneRepo`
+  removes and re-clones its `workspace/support/<profileId>` checkout; `dispatchAgentRun`'s
+  same-engagement check reads run rows before its awaits; and
+  `idx_agent_runs__one_live_per_support` refuses only at a row write, which `reserveRun`
+  skips when the cap is full. A parallel duplicate would re-clone under the first run
+  before `startRun` refuses it, where serially the check refuses it first ("Queued
+  question not put"). `releaseDependents` and the dependency runner's per-project tick
+  (`releaseDueDependents`): each release awaits its operator's start. The tick is ruling
+  131(e)'s once-a-minute backstop, never overlapped (`running`); the task-write hooks
+  (`maybeReleaseDependents`) are the live release path, and `releaseTask` re-checks the
+  wait under the lock, so a late sweep loses nothing. One project's slow start (a first
+  clone can take minutes) holds later projects' backstop releases for as long as it
+  runs, not one tick. stranded-sweep.server.ts: a background pass on the schedule tick,
+  and its note-first idempotence key is per task, so order changes nothing.
+  task-acceptance.server.ts `refreshAndReview`: the reviewers are distinct profiles, so
+  single-flight never orders them, but the person's click waits through each start in
+  turn (one per reviewer with a standing verdict, unmeasured); revisit with the
+  pre-flight's concurrency bound. Verify each loop body still awaits a start, and for
+  `drainQueuedQuestions` that queued questions are still not de-duplicated by profile.
 
 - `react-doctor/server-sequential-independent-await` / `async-parallel` — awaits of cached
   dynamic `import("~/…")` that break import cycles (controller-toolkit, run-recovery,
@@ -349,12 +398,24 @@ scan run from inside an agent worktree under `.claude/` sees no files at all.
   lives in a sibling `.ts` module (the `initials.ts` / `avatar.tsx` pattern). Verify each
   still reads the private table or is still that `memo`'s comparator.
 
-- `react-doctor/rerender-memo-with-default-value` — `= []`/`= {}` prop defaults on
-  task-detail-page.tsx, board-page.tsx `epics` and controller-page.tsx `examples`: the one
-  route always supplies a never-`undefined` loader field, so the default fires only in bare
-  test renders, and every memoised consumer stabilises the value by content first
-  (`useStableValue`, ruling 457(c)) because each revalidation decodes new objects anyway.
-  Verify the route's prop and that consumers stabilise before memo/deps.
+- `react-doctor/rerender-memo-with-default-value` — `= []`/`= {}` prop defaults, each for
+  its own reason. task-detail-page.tsx: the one route always supplies a never-`undefined`
+  loader field, so the default fires only in bare test renders, and every memoised
+  consumer stabilises the value by content first (`useStableValue`, ruling 457(c)) because
+  each revalidation decodes new objects anyway; verify the route's prop and that consumers
+  stabilise before memo/deps. board-page.tsx `epics`: the one route passes
+  `loaderData.epics` (`listEpicChips`, a parsed array, never `undefined`), so the default
+  fires only in bare test renders; the one memo, `openEpics`, keys on the loader's
+  identity, which holds between revalidations and is new on each one regardless, and
+  FilterBar and NewTaskModal are not memoised. Verify the route still passes the loader
+  field and no other memo, deps array or `memo()` consumer of `epics` has appeared.
+  controller-page.tsx `examples`: `Transcript` is private and not memoised. Its
+  open-conversation call site passes no `examples`, so the default fires there, but
+  only the `!view.conversation` empty state reads it; the empty-transcript call site
+  passes a fresh `controllerExamples(...)` array every render anyway, to
+  `ControllerExampleList`, which is not memoised either, so nothing compares its
+  identity. Verify both components are still unmemoised and `examples` is in no deps
+  array.
 
 - `react-doctor/no-array-index-as-key` — settings-page.tsx draft rows (required reviewers,
   file leases, gates): every control is controlled from `draft[i]` and `remove(i)` filters
@@ -368,8 +429,15 @@ scan run from inside an agent worktree under `.claude/` sees no files at all.
   phrasing-only content (the console `.lx` span). A `div role="separator"` in a
   `role="menu"` (`.menu-sep`) is the same markup as the user menu's Radix separator.
 
-- `react-doctor/design-no-vague-button-label` — "Done" where nothing is pending (the store
-  browser footer, the "Other accounts" list, each of whose actions has already saved).
+- `react-doctor/design-no-vague-button-label` — "Done" closing a view whose actions save
+  as they happen (the store browser footer; the "Other accounts" section, ruling 616(b)'s
+  own word). An open draft is NOT saved by it. Done, like the header X, unmounts the store
+  browser with its open document, and a save still in flight then lands with nothing to
+  show its result; Escape and the card's Cancel drop the document too. The accounts
+  section's Done drops an open rename, and because the card keeps one `renaming` id it
+  also closes a rename open on the account in use above the section. Whether any exit
+  should ask before discarding a draft is the owner's call (none in the app does), and
+  another label would change neither. Verify the button only closes the view.
 
 - `react-doctor/js-hoist-intl` — `Intl.ListFormat` built once per request on cold paths
   (settings-actions remove-repo, board-import toast). If revisited, one shared `LIST_AND`
@@ -410,6 +478,34 @@ design-system or cross-file decision — revisit deliberately, not per lint run.
   that would mark a healthy server unreachable in the shared health record and drop it
   from the run. Needs measurement against real servers and a concurrency bound (results
   still applied in mount order).
+
+- `react-doctor/async-await-in-loop` — backend-credentials.server.ts `retireUserBackends`,
+  run when an admin removes a person (`deleteOrgUser`): each account retires in turn, and
+  each retirement is process I/O, the vendor logout (`execFile` as the person, up to
+  LOGOUT_TIMEOUT_MS = 20 s) and the `removeAgentTree` steps. It is NOT a governed-writer
+  loop (it fails that entry's no-exec check). A person with k login accounts waits up to
+  k × 20 s when a vendor hangs. Nothing orders the accounts: each retires only its own
+  files (ruling 507), the logout → files → row order stays inside `retireAccount`, and
+  `activeAccountChanged` runs after the loop. Kept serial for the owner's call: a rare
+  admin action over at most 2 × MAX_ACCOUNTS_PER_BACKEND rows, and concurrent vendor
+  logouts sharing the person's agent `$HOME` and the launcher's backend-home hand-back
+  are unmeasured. If parallelised, `Promise.all` over the per-account body, with the
+  after-loop work unchanged.
+
+- `react-doctor/js-index-maps` — board-import.server.ts: a `.find()` per row over lists
+  read from the uploaded board.md (each required-reviewer rule's stage in `checkBoard`;
+  each knowledge base's and skill's own row, by dir or name, in `planBoardImport`). Real
+  O(n·m) shapes: on this path nothing caps those rows (CUSTOM_STAGE_MAX is the create
+  path's, and BOARD_FILE_LIMITS bounds zip entries and bytes, not YAML rows), and the
+  plan runs synchronously on every `board-import-preview`, so an admin previewing a
+  crafted file blocks the event loop for seconds to minutes. A first-wins `Map` per site
+  is not worth it alone: the same file reaches other quadratic passes
+  (`realignChainToStages`' stages × workflow, the preview's `stageName`, `NameClaims`
+  walking colliding names), and parsing a board.md near the size limits already takes
+  minutes. What would close it is a row or byte cap on board.md, a format change to
+  ruling 653's limits and file-formats.md §9 that needs the owner's ruling, starting
+  with whether a hostile board file is in the threat model. Exports carry a handful of
+  each.
 
 - `react-doctor/no-high-complexity-react-function` / `no-giant-component` — the large
   surfaces (TaskDetailPage, BoardPage, SettingsPage, DecisionPacket, Timeline, the
