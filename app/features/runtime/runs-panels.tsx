@@ -19,6 +19,7 @@ import { Icon } from "~/ui/icon";
 import { NumberTicker } from "~/ui/number-ticker";
 import { useHydrated } from "~/ui/local-time";
 import { useDismiss } from "~/ui/use-dismiss";
+import { useCopied } from "~/ui/use-copied";
 import { useFreshLine } from "~/ui/use-fresh-line";
 import { useLiveStreamFailed } from "~/features/live-updates/use-live-updates";
 // Ruling 457: backend labels and count plurals are spelled inline here, not
@@ -785,14 +786,13 @@ function SessionIdChip({
   exportable?: boolean;
 }) {
   const [expanded, setExpanded] = useState(false);
-  const [copied, setCopied] = useState(false);
+  const [copied, setCopied] = useCopied(false);
   if (!sid) return <span className="faint">none</span>;
   const short = sid.length > 10 ? sid.slice(0, 8) + "…" : sid;
   const copy = async () => {
     try {
       await navigator.clipboard.writeText(sid);
       setCopied(true);
-      window.setTimeout(() => setCopied(false), 1400);
     } catch {
       setExpanded(true);
     }
@@ -1043,12 +1043,11 @@ function ArgumentRows({ input, keys }: { input: NonNullable<LogLine["input"]>; k
  * to rule out. Copy hands the reader the whole thing regardless of scroll.
  */
 function ConsoleCode({ block }: { block: ConsoleCodeBlock }) {
-  const [copied, setCopied] = useState(false);
+  const [copied, setCopied] = useCopied(false);
   const copy = async () => {
     try {
       await navigator.clipboard.writeText(block.code);
       setCopied(true);
-      window.setTimeout(() => setCopied(false), 1400);
     } catch {
       // Clipboard denied (permissions, insecure origin): the text is on screen
       // and selectable, which is the fallback that always works.

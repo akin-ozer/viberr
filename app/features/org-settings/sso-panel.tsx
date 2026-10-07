@@ -6,6 +6,7 @@ import { CopyGlyph } from "~/ui/copy-glyph";
 import { Icon } from "~/ui/icon";
 import { inFlightIntent } from "~/ui/in-flight";
 import { Pill } from "~/ui/pill";
+import { useCopied } from "~/ui/use-copied";
 import { ConfirmDelete } from "./confirm-delete";
 import { MiniModal } from "./mini-modal";
 import { useModalAction } from "./resource-helpers";
@@ -155,12 +156,11 @@ function ProviderModal({
 }
 
 function CallbackUrl({ url }: { url: string }) {
-  const [copied, setCopied] = useState(false);
+  const [copied, setCopied] = useCopied(false);
   const copy = async () => {
     try {
       await navigator.clipboard.writeText(url);
       setCopied(true);
-      window.setTimeout(() => setCopied(false), 1400);
     } catch {
       // Clipboard denied (permissions, insecure origin) — the URL is on screen
       // and selectable, which is the fallback that always works.

@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState, type RefObject } from "react";
 import { CopyGlyph } from "~/ui/copy-glyph";
 import { Icon } from "~/ui/icon";
+import { useCopied } from "~/ui/use-copied";
 import { useRefusalShake, type RefusalShake } from "~/ui/use-refusal-shake";
 import type { LoginState } from "~/server/runtimes/backend-login.server";
 import { hostOf, statusLine, VENDOR } from "./agent-accounts-derive";
@@ -80,7 +81,7 @@ export function SignInSteps({
   // has a copy-link button and step 2 (on codex) still has the copy-code one,
   // inside the same component — one boolean made both read "Copied" at once,
   // and the later reset would have blanked the other's confirmation early.
-  const [copied, setCopied] = useState<Copied>(null);
+  const [copied, setCopied] = useCopied<Copied>(null);
   const group = useRef<HTMLDivElement | null>(null);
   const codeField = useRef<HTMLInputElement | null>(null);
 
@@ -108,11 +109,6 @@ export function SignInSteps({
     try {
       await navigator.clipboard.writeText(value);
       setCopied(what);
-      // Clears only its OWN key: copying the code and then the link must not
-      // cancel the link's confirmation when the code's timer comes due.
-      window.setTimeout(() => {
-        setCopied((cur) => (cur === what ? null : cur));
-      }, 1400);
     } catch {
       // Clipboard denied (permissions, insecure origin). The link and the code
       // are both on screen and a click selects either, which is the fallback

@@ -1897,6 +1897,57 @@ describe("ruling 451(c): copy controls trade their glyph in place", () => {
     // The same element carries the change: nothing remounted.
     expect(container.querySelector(".copy-glyph")).toBe(glyph);
   });
+
+  describe("the confirmation's 1.4 s lapse", () => {
+    afterEach(() => {
+      vi.useRealTimers();
+    });
+
+    it("runs from the first copy, gives each later copy its full window, and dies with the chip", async () => {
+      // CANARY: arm a bare `window.setTimeout(() => setCopied(false), 1400)`
+      // per click again (useState in place of useCopied): the re-copy's
+      // leftover timer ends the third confirmation 500 ms early, and closing
+      // the panel leaves a timer that sets state on the gone chip (after a
+      // suite's jsdom is torn down, an unhandled "window is not defined").
+      vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+      Object.defineProperty(navigator, "clipboard", {
+        value: { writeText: async () => {} },
+        configurable: true,
+      });
+      const { container, getByRole, unmount } = render(
+        <Logs runtime={[mkRun({})]} sel="primary" onSel={() => {}} linesByThread={{}} />,
+      );
+      const button = getByRole("button", { name: "Copy full session id" });
+      const copy = () =>
+        act(async () => {
+          fireEvent.click(button);
+        });
+      const wait = (ms: number) =>
+        act(() => {
+          vi.advanceTimersByTime(ms);
+        });
+      const copied = () => container.querySelector(".session-id-copy .copy-glyph")!.hasAttribute("data-copied");
+
+      await copy();
+      expect(copied()).toBe(true);
+      // A re-copy inside the window does not restart it.
+      wait(1000);
+      await copy();
+      wait(400);
+      expect(copied()).toBe(false);
+      // The next copy stands its full 1.4 s.
+      wait(100);
+      await copy();
+      wait(1399);
+      expect(copied()).toBe(true);
+      wait(1);
+      expect(copied()).toBe(false);
+
+      await copy();
+      unmount();
+      expect(vi.getTimerCount()).toBe(0);
+    });
+  });
 });
 
 /**
