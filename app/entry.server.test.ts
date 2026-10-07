@@ -240,7 +240,7 @@ describe("X-Request-Id on every response (ruling 458(d))", () => {
   });
 });
 
-describe("React Router's action-origin check is off (ruling 683)", () => {
+describe("React Router's action-origin check is off (ruling 687)", () => {
   // CANARY: drop allowedActionOrigins from react-router.config.ts and, behind
   // the TLS proxy, every https:// form post answers 400 before the app's own
   // origin check (assertTrustedOrigin) can accept it.

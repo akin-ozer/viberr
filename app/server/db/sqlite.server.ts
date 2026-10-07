@@ -348,7 +348,7 @@ function ensureSingleFlightIndexes(db: DatabaseSync): void {
 /**
  * Columns the baseline gained AFTER a data root may already have applied it
  * (migrations stay squashed into 0001 by ruling, so an existing root never
- * re-runs the file). Each is nullable and additive — exactly the
+ * re-runs the file). Each is nullable or carries a constant DEFAULT, and is additive — exactly the
  * "additive drift" the boot integrity WARN names `ALTER TABLE … ADD COLUMN` as
  * the remedy for — so the remedy is applied here, idempotently, instead of
  * being left to an operator: a missing column would otherwise fail every
@@ -362,7 +362,7 @@ function ensureSingleFlightIndexes(db: DatabaseSync): void {
  * page. The boot WARN could not have caught it either: `projectionMissingColumns`
  * inspects the rebuilder's tables, and these are app-owned.
  *
- * What ALTER TABLE cannot carry is the conversation-scope CHECK. It is a
+ * What the healer does not add is the conversation-scope CHECK. It is a
  * constraint, not a column, so an upgraded root keeps rows without it and
  * `createConversation`'s own validation is the enforcement there — which is
  * why that validation exists in code rather than leaning on the schema.
@@ -400,7 +400,7 @@ const BASELINE_COLUMNS: readonly {
       // Pass 35 U35-7: the reason an `interrupted` run stopped ('restart' from
       // boot recovery, NULL for a person's interrupt). `patchRun` names it on
       // every orphan sweep and the run projection reads it on every task page.
-      // ALTER TABLE cannot carry the baseline's CHECK; the two writers only
+      // The ddl below leaves out the baseline's CHECK; the two writers only
       // ever store 'restart', which is the enforcement on an upgraded root.
       { name: "interrupted_reason", ddl: "interrupted_reason TEXT" },
       // F35-1: the sink patches it on every persisted line, so a root that
@@ -752,7 +752,7 @@ export function ensureBaselineColumns(db: DatabaseSync): void {
       }
     } catch (error) {
       logger.warn(
-        "baseline columns could not be ensured: writers that name them will fail until the root is re-baselined",
+        "baseline columns could not be ensured: writers that name them fail until the columns exist; it is retried on the next open, and if it keeps failing, add them by hand with the app stopped (ALTER TABLE … ADD COLUMN with the definition in db/migrations/0001_baseline.sql; docs/operations/deployment.md, Re-baselining the projection database), never by deleting the database",
         { table, err: toError(error) },
       );
     }
@@ -762,7 +762,7 @@ export function ensureBaselineColumns(db: DatabaseSync): void {
       db.exec(ddl);
     } catch (error) {
       logger.warn(
-        "a baseline table could not be ensured: readers that name it degrade until the root is re-baselined",
+        "a baseline table could not be ensured: readers that name it degrade until it exists; it is retried on the next open, and if it keeps failing, create it by hand with the app stopped from its CREATE TABLE in db/migrations/0001_baseline.sql, never by deleting the database",
         { err: toError(error) },
       );
     }

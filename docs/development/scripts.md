@@ -42,7 +42,7 @@ Every script that imports the app's config loads `.env` from the working directo
 | `npm test` | none | `vitest run` over `app/**/*.test.{ts,tsx}` (`vitest.config.ts`) |
 | `npm run e2e [-- <playwright args>]` | n/a (Docker) | `tsx scripts/e2e.ts`: production-image Playwright run in the isolated `viberr-e2e` compose project; `VIBERR_E2E_KEEP=1` keeps the stack up. See [testing.md](testing.md#4-end-to-end-suite-playwright) |
 | `npm run deploy [-- --no-up]` | n/a (Docker) | `tsx scripts/deploy.ts` (ruling 345): stamps `VIBERR_BUILD_VERSION`/`SHA`/`TIME` from `package.json` and git, `docker compose build`, then (unless `--no-up`) `docker compose up -d` and polls `/resources/health` on the port compose publishes (`PORT` from the shell, else `.env`, else 3000) for up to 180 s, exiting 1 unless the running build reports the stamped sha. See [deployment.md](../operations/deployment.md#upgrades) |
-| `npm run seed [-- --reset]` | **writer** | product baseline: bootstrap admin, three agent profile templates, org KBs and skills, domain allowlist. No projects, tasks, notifications or run history |
+| `npm run seed [-- --reset]` | **writer** | product baseline: bootstrap admin, three agent profile templates, org KBs and skills. No projects, tasks, notifications or run history |
 | `npm run seed:demo [-- --reset]` | **writer** | test/dev fixture: five users, three projects, twelve tasks, notifications, one scope violation; refuses in the production image (no `test-support/`) |
 | `npm run rescan [-- --force]` | **writer** | `rescanProjections` (hash short-circuit unless `--force`) and a report of untrusted files from the `diagnostics` table |
 | `npm run store:check` | none, no DB | parses every `project.md`, `tasks/*/task.md`, `epics/*.md`; exit 1 when any file is untrusted |
@@ -81,9 +81,8 @@ runbook's "Agent runtimes").
    `rebuildAll(force)`; audit `seed.baseline`.
 5. `seedOrgResources`: three KBs (`architecture-notes`, `api-contracts`,
    `deploy-runbooks`, 15 files), four skills (`conventional-commits`,
-   `terraform-review`, `api-design`, `changelog-writer`), one allowlist row
-   `@viberr.dev → member`; existing KB/skill folders are skipped on a plain re-seed;
-   zero MCP servers and zero GitHub connections; audit `seed.org_resources`.
+   `terraform-review`, `api-design`, `changelog-writer`); existing KB/skill folders are
+   skipped on a plain re-seed; zero allowlisted domains (ruling 688), zero MCP servers and zero GitHub connections; audit `seed.org_resources`.
 
 Survives `--reset`: every auth table, `github_connections`, `github_pats`,
 `project_github_credentials`, `instance_settings`, `s3_audit_config`,

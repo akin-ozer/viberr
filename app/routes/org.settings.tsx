@@ -146,7 +146,7 @@ export async function loader({ request }: Route.LoaderArgs) {
     // callback URL the card tells an admin to register is identical in the SSR
     // markup and after hydration. It is BETTER_AUTH_URL's origin when set,
     // the one better-auth sends; behind the TLS proxy the request's own origin
-    // is the proxy's plain-HTTP upstream (ruling 683).
+    // is the proxy's plain-HTTP upstream (ruling 687).
     callbackOrigin: publicOrigin(request),
     // Instance run-concurrency: the configured cap and the live/queued counts,
     // for the admin control below StorageLine.

@@ -60,9 +60,8 @@ Example content for agents is optional, and is one command run while nothing hol
 store's writer lock (before the first `up`, or after `docker compose down`):
 `docker compose run --rm app npm run seed`. It adds three example knowledge bases
 (architecture notes, API contracts, deploy runbooks), four skills (conventional commits,
-Terraform review, API design, a changelog writer) and the `@viberr.dev` domain to the
-Google sign-in allowlist; remove that domain in *Instance settings → Sign-in & SSO* if you
-enable Google sign-in. A seed that finds the users table empty also creates the bootstrap
+Terraform review, API design, a changelog writer); it allowlists no Google sign-in domain
+(ruling 688), so add the domains you mean in *Instance settings → Sign-in & SSO*. A seed that finds the users table empty also creates the bootstrap
 admin, with `VIBERR_SEED_ADMIN_PASSWORD` or else the development default
 `viberr-dev-2828`, so set the variable on any instance other people can reach.
 
@@ -194,12 +193,15 @@ and [domain/operator.md](domain/operator.md). The vocabulary is in
   [operations/runbook.md](operations/runbook.md#health--liveness).
 - **Upgrades.** `git pull && npm run deploy`. Migrations apply at boot and the volume
   carries the state; take a backup before a major upgrade. Schema changes edit one
-  baseline rather than adding to a migration chain. On an older database, boot adds the
-  columns and tables the release lists, and warns when a projection table lacks a column
-  or a CHECK refuses a new value, naming the remedy (a manual `ADD COLUMN`, or a
-  [re-baseline](operations/deployment.md#re-baselining-the-projection-database)); other
-  drift is not detected, and file formats carry no back-compat promise. Check what
-  changed before you upgrade an instance that holds real work.
+  baseline rather than adding to a migration chain. At boot, an older database gets the
+  columns, tables and indexes the release lists for it, and `notifications` is rebuilt
+  when its `kind` CHECK lags and `user_backend_credentials` when it still has its
+  one-account shape. The `projection schema drift` warning names, with its remedy, a
+  column `task_projections` or `task_events` lacks (a manual `ADD COLUMN`) and a value one
+  of four checked CHECK constraints refuses (a
+  [re-baseline](operations/deployment.md#re-baselining-the-projection-database)). Any
+  other drift is neither repaired nor reported, and file formats carry no back-compat
+  promise. Check what changed before you upgrade an instance that holds real work.
 
 ## 7. Run from source
 

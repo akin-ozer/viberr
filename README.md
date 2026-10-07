@@ -182,7 +182,7 @@ Most other settings live in the app, not the environment:
 | `npm run build` / `npm start` | Production build, and serve it |
 | `npm run lint` / `npm run typecheck` / `npm test` | oxlint with the vendored anti-slop rules / route typegen and `tsc` / the vitest suite |
 | `npm run e2e` | Playwright against the production Docker image |
-| `npm run seed` | Baseline content and the bootstrap admin; `-- --reset` returns the store to a clean sheet |
+| `npm run seed` | Baseline content and the bootstrap admin; `-- --reset` deletes the board, its run history, agent profiles and the org knowledge bases, skills, MCP servers (with their credentials) and domain allowlist before reseeding; users, auth, GitHub and backend credentials survive, and it makes no schema change of its own ([details](docs/development/scripts.md#npm-run-seed)) |
 | `npm run seed:demo` | The demo board the route and e2e suites use (development only) |
 | `npm run rescan` | Reconcile the projections with the file store |
 | `npm run store:check` | Read-only: list every canonical file the app cannot trust, with the offending line |
@@ -236,12 +236,14 @@ Deliberate V1 boundaries, documented rather than half-built:
 
 - **Single node.** SQLite, a local file store and an in-process event bus: one app
   process per data root, enforced by a writer lock.
-- **One schema baseline, no migration chain.** Schema changes edit
-  `0001_baseline.sql`. On an older database, boot adds the columns, tables and indexes
-  each release lists for it, and warns when a projection table lacks a column or a CHECK
-  refuses a value the build now writes, naming the remedy (a manual `ADD COLUMN`, or
-  re-baselining the projection database). Other drift is neither repaired nor reported,
-  and file formats carry no back-compat promise. Back up before upgrading.
+- **One schema baseline, no migration chain.** Schema changes edit `0001_baseline.sql`. At
+  boot, an older database gets the columns, tables and indexes the release lists for it,
+  and `notifications` is rebuilt when its `kind` CHECK lags and `user_backend_credentials`
+  when it still has its one-account shape. The `projection schema drift` warning names,
+  with its remedy, a column `task_projections` or `task_events` lacks (a manual `ADD
+  COLUMN`) and a value one of four checked CHECK constraints refuses (re-baselining the
+  projection database). Any other drift is neither repaired nor reported, and file formats
+  carry no back-compat promise. Back up before upgrading.
 - **No email.** Notifications are in-app, plus an opt-in browser notification for a new
   decision. Admins hand new users their one-time password themselves.
 - **TLS is the deployment's job.** The app serves plain HTTP and expects a reverse proxy.

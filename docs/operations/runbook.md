@@ -89,18 +89,20 @@ names `task_projections` / `task_events` columns it lacks, each with the impact 
 remedy (see [deployment.md](./deployment.md#re-baselining-the-projection-database)). Grep
 for both after a deploy.
 
-**Most additive drift self-repairs and needs no remedy.** A baseline column or table
-ADDED after a data root was created is applied at open by `ensureBaselineColumns`
-(`app/server/db/sqlite.server.ts`), which `ALTER TABLE … ADD COLUMN`s each missing entry
-of `BASELINE_COLUMNS` (on `agent_runs`, `controller_conversations`,
-`controller_messages`, `org_mcp_servers`, `projects` and `task_projections`; the list is
-under [deployment.md](./deployment.md#re-baselining-the-projection-database)) and creates
-the missing `BASELINE_TABLES` and indexes, idempotently, logging `added a baseline column
-this data root predated`, and runs a column's one-time backfill in the same step when the
-DEFAULT would misdescribe the rows that predate it (`usage_final = 1` on the `finished`
-runs, so an upgraded root keeps its Insights token history). Without that backstop every
-writer naming those columns would fail "no such column" (on `agent_runs`, every agent
-completion). A failure to ALTER is warned, not fatal, and retried next boot. The
+**Most additive drift self-repairs and needs no remedy.** Every read-write open of the
+database through `getDb` runs `ensureSingleFlightIndexes` and `ensureBaselineColumns`
+(`app/server/db/sqlite.server.ts`): each missing entry of `BASELINE_COLUMNS` is
+`ALTER TABLE … ADD COLUMN`ed, the missing `BASELINE_TABLES` and `BASELINE_INDEXES` are
+created and `user_backend_credentials` is created or brought to its several-accounts shape
+(ruling 507), idempotently, logging `added a baseline column this data root predated` for
+each column (the lists, table by table, are in
+[data-model.md §6](../architecture/data-model.md#6-schema-changes)). A column's one-time
+backfill runs in the same step when the DEFAULT would misdescribe the rows that predate it
+(`usage_final = 1` on the `finished` runs, so an upgraded root keeps its Insights token
+history). Without that backstop every writer naming those columns would fail "no such
+column" (on `agent_runs`, every agent completion). A failure to ALTER is warned, not fatal,
+and retried next boot. Boot also widens a lagging `notifications.kind` CHECK in place
+(ruling 481). The
 re-baseline remains the remedy for the shape that cannot be patched additively — a CHECK
 constraint that refuses a value the running build produces.
 
@@ -209,7 +211,7 @@ Records from boot, the watchers and the timers, and from a run they started, car
 A few answers carry no header: static assets (served before the app sees the request),
 a document form post whose `Origin` header is not a URL, which React Router refuses
 before routing (a plain `400 Bad Request`, whose log record does carry an id; a
-cross-origin post gets the app's own 403, which carries the header, ruling 683), the route
+cross-origin post gets the app's own 403, which carries the header, ruling 687), the route
 manifest, and React Router's last-resort
 answers (a document it could not render at all). Match those by time, method and path.
 

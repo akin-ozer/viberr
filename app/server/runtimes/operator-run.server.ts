@@ -2147,7 +2147,7 @@ async function startCodexOperatorRun(
   };
   if (!start.principal.ok) spec.principalRefusal = start.principal.refusal;
   // An absent effort is sent as the Codex catalog default, `medium`, by
-  // startRun (ruling 683); an absent mcpServers key is what the adapters read
+  // startRun (ruling 687); an absent mcpServers key is what the adapters read
   // as "this run mounts none".
   if (authority.effort) spec.effort = authority.effort;
   if (Object.keys(orgMcpServers).length) spec.mcpServers = orgMcpServers;

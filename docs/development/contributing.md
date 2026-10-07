@@ -107,11 +107,22 @@ supersedes an earlier one obliges the earlier one to carry an inline marker
 ## 4. Data and schema changes
 
 There is one squashed migration, `db/migrations/0001_baseline.sql`, and no
-back-compat obligation (ruling 683 kept this convention at launch). To change a table or a CHECK constraint, edit the baseline and
-recreate your local `state/projection.sqlite`. The boot WARN `projection schema drift`
-tells you when a root lags the baseline and names the refused CHECK values and the
-missing columns; a purely additive column drift can be closed with
-`ALTER TABLE <table> ADD COLUMN <column>` instead. Recreating the file also drops the
+back-compat obligation (ruling 683 kept this convention at launch). To change a table or a CHECK constraint, edit the baseline and, in the same change, give
+existing roots a way to get it: a new column goes into `BASELINE_COLUMNS` in a form `ALTER TABLE … ADD COLUMN`
+accepts on a table that has rows (with a backfill when the default misdescribes older rows),
+a new table into `BASELINE_TABLES` and a new index into `BASELINE_INDEXES`
+(`app/server/db/sqlite.server.ts`); a column added to a table `BASELINE_TABLES` creates also
+goes into that entry's DDL, a hand-kept copy that a root older than the table is created from. A changed constraint reaches existing roots only through an in-place change (an
+`ALTER TABLE` the bundled SQLite accepts, or a rebuild of the table as
+`widenNotificationKindCheck` and `ensureBackendAccountsTable` do) or a re-baseline. Those two
+rebuilds are safe because no other table references theirs; a table others reference must
+be rebuilt with `PRAGMA foreign_keys = OFF` set before its transaction, or `DROP TABLE` first
+deletes its rows, which cascades into or is refused by the tables that reference it; listing a CHECK over an enum the build derives into in `projectionCheckGaps`
+(`app/server/boot.server.ts`) only makes boot name the gap, and only for a CHECK written as
+`<col> TEXT NOT NULL CHECK (<col> IN (...))`, the one shape its `checkListGaps` reads. Recreating your local `state/projection.sqlite` hides a missing entry. The boot WARN `projection schema drift` names only a column
+`task_projections` / `task_events` lacks and a value one of the four CHECKs
+`projectionCheckGaps` reads refuses, and any other lag is silent; a missing column can be
+closed with `ALTER TABLE <table> ADD COLUMN <column>`. Recreating the file also drops the
 rows no rescan can rebuild (users, sessions, sealed PATs, audit, notifications), so run
 `npm run backup` first ([../operations/deployment.md](../operations/deployment.md)
 §Re-baselining the projection database). Canonical file formats change the same way:

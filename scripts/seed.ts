@@ -1,15 +1,18 @@
 /**
  * Seeds the PRODUCT baseline — a clean sheet, no demo/mock board data:
  * the built-in agent catalog templates (operator, developer, reviewer),
- * org resources (knowledge bases with real files, skills, the domain
- * allowlist), and — on an EMPTY users table — the bootstrap admin from
+ * org resources (knowledge bases with real files, skills), and — on an EMPTY users table — the bootstrap admin from
  * VIBERR_SEED_ADMIN_EMAIL / VIBERR_SEED_ADMIN_PASSWORD (defaults
  * admin@viberr.dev / the seed default password).
  *
  *   npm run seed             — idempotent upsert/overwrite
  *   npm run seed -- --reset  — wipe projects/, agents/profiles, runtime
- *                              transcripts and all derived tables first
- *                              (users/auth + runtime credential homes survive)
+ *                              transcripts and all derived tables first,
+ *                              then kb/, skills/ and the org KB, skill, MCP
+ *                              server and domain-allowlist rows (users/auth,
+ *                              GitHub connections and PATs, backend
+ *                              credentials and runtime credential homes
+ *                              survive; docs/development/scripts.md §3)
  *
  * Takes the data-root WRITER lock first (B-FD1) and refuses to run while
  * another Viberr process holds it. There is NO in-app equivalent of this
@@ -44,8 +47,8 @@ await runWithDataRootWriterLock(
         : { password: adminPassword },
     });
 
-    // Org resources: KBs with real files, skills, domain allowlist. No MCP
-    // servers and no GitHub connection are fabricated (honest empty slate).
+    // Org resources: KBs with real files and skills. No MCP servers, no GitHub
+    // connection and no Google allowlist domain (ruling 688) are fabricated.
     const org = seedOrgResources(getDb(), {
       dataRoot: env.VIBERR_DATA_ROOT,
       reset,
@@ -59,7 +62,6 @@ await runWithDataRootWriterLock(
         `  org kbs        ${org.kbs} (${org.kbFiles} files)`,
         `  org skills     ${org.skills}`,
         `  org mcps       ${org.mcps}`,
-        `  org domains    ${org.domains}`,
         `  gh connections ${org.connections}`,
         "",
         summary.adminCreated

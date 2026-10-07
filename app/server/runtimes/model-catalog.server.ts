@@ -145,7 +145,7 @@ const CODEX_EFFORTS = ["low", "medium", "high", "xhigh", "max"] as const;
 /** GPT-5.5's catalog entry stops at `xhigh`. */
 const CODEX_EFFORTS_TO_XHIGH = ["low", "medium", "high", "xhigh"] as const;
 
-// Ruling 683 (owner, 2026-10-07): GPT-6.1 Sol is listed FIRST, so it is the
+// Ruling 687 (owner, 2026-10-07): GPT-6.1 Sol is listed FIRST, so it is the
 // fallback default (`defaultModelFor("codex")` = `CODEX_MODELS[0]`, the
 // "default is the first model" invariant), which is what an operator, or any
 // profile, with no concrete Codex model resolves to. F20-33 had put Terra
@@ -243,7 +243,7 @@ const CODEX_CURATED: ModelCatalog = {
   models: CODEX_MODELS,
   efforts: [...CODEX_EFFORTS],
   // Default = the first available model (a changeable starting point): GPT-6.1
-  // Sol since ruling 683, see `CODEX_MODELS`.
+  // Sol since ruling 687, see `CODEX_MODELS`.
   defaultModel: CODEX_MODELS[0]!.value,
   defaultEffort: "medium",
 };

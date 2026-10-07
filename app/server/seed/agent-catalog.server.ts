@@ -123,7 +123,7 @@ export const SEED_AGENT_PROFILES: SeedAgentProfile[] = [
       // ChatGPT-account Codex here is over quota until Sep 18). Codex stays a
       // secondary backend the profile still OFFERS — an admin flips it in the
       // editor, where switching to Codex reselects its own catalog default
-      // (gpt-6.1-sol since ruling 683; F20-33 had made it gpt-5.6-terra,
+      // (gpt-6.1-sol since ruling 687; F20-33 had made it gpt-5.6-terra,
       // because this account can't run gpt-5.6-sol, per R20-8).
       // TRADEOFF (accepted): this inverts the prior default, so a fresh install
       // with ONLY Codex credentials now needs the admin to flip the profile

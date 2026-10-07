@@ -17,9 +17,9 @@ import { ensureOrgStoreDirs } from "./resources.server";
 /**
  * Org-resource seed (Phase 9B) — ADDITIVE to the phase-3/8 demo seed:
  * knowledge bases with REAL files under ${DATA_ROOT}/kb/, skills with real
- * SKILL.md folders under /skills/, and the @viberr.dev Google domain
- * allowlist row. Honest empty slate (owner ruling): NO MCP servers and NO
- * GitHub connection are seeded — an admin installs real ones; nothing
+ * SKILL.md folders under /skills/. Honest empty slate (owner ruling): NO MCP
+ * servers, NO GitHub connection and NO Google allowlist domain (ruling 688)
+ * are seeded — an admin installs real ones; nothing
  * fabricated is presented as configured (see the note by the seed body).
  *
  * Non-destructive re-seed (seed #5): a KB or skill whose folder already exists
@@ -29,7 +29,7 @@ import { ensureOrgStoreDirs } from "./resources.server";
  * file mtimes so the browser shows the mock's date spread. Any GitHub
  * connection an admin already installed is left intact and survives `--reset`
  * (like the phase-7 PAT tables). `--reset` wipes kb/, skills/ and the resource
- * tables + domain rows, then reseeds them.
+ * tables + domain rows, then reseeds the knowledge bases and skills.
  */
 
 export interface OrgSeedSummary {
@@ -37,7 +37,6 @@ export interface OrgSeedSummary {
   kbFiles: number;
   skills: number;
   mcps: number;
-  domains: number;
   connections: number;
 }
 
@@ -292,7 +291,6 @@ export function seedOrgResources(
   options: { dataRoot: string; reset?: boolean },
 ): OrgSeedSummary {
   const now = new Date();
-  const nowIso = now.toISOString();
   const ctx = { dataRoot: options.dataRoot };
 
   if (options.reset) {
@@ -367,19 +365,15 @@ export function seedOrgResources(
   // No MCP servers and no GitHub connection are seeded — see the honest-empty-
   // slate note above. Any connection an admin already installed is left intact.
 
-  // Google domain allowlist — @viberr.dev joins as member.
-  db.prepare(
-    `INSERT OR REPLACE INTO google_domain_allowlist
-       (id, domain, role, created_at)
-     VALUES ('dom_seed_viberr', '@viberr.dev', 'member', ?)`,
-  ).run(nowIso);
+  // Ruling 688: no Google sign-in domain is allowlisted. A seeded domain would
+  // let anyone at it sign in once Google sign-in is configured; an admin adds
+  // the domains they mean in Instance settings.
 
   const summary: OrgSeedSummary = {
     kbs: KB_SEEDS.length,
     kbFiles,
     skills: SKILL_SEEDS.length,
     mcps: 0,
-    domains: 1,
     // SAFETY: `count(*)` always returns exactly one row holding one integer.
     connections: (
       db.prepare(`SELECT count(*) AS c FROM github_connections`).get() as {
