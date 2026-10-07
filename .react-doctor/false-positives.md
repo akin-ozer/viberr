@@ -284,8 +284,10 @@ scan run from inside an agent worktree under `.claude/` sees no files at all.
   repo-health, github-reconciler's sibling PRs, pr-review-relay). Verify the dependency
   before suppressing; independent loops should still be parallelized.
 
-- `react-doctor/async-await-in-loop` — loops of agent or operator starts (`startAgentRun`,
-  `releaseTask`, `autoInvokeOperator`), kept serial. Not for the concurrent-run cap:
+- `react-doctor/async-await-in-loop` — loops of agent, operator or controller starts
+  (`startAgentRun`, `releaseTask`, `autoInvokeOperator`, and controller-continuation.server.ts
+  `maybeContinueController`, whose follow-ups each start a turn, write an audit row and may
+  note the same task.md, one failure never holding back the next by ruling 685), kept serial. Not for the concurrent-run cap:
   `reserveRun` / `admitRun` (run-service.server.ts) check and take or park a slot with no
   await between, and a start resolves once its run is launched or parked, so a serial loop
   neither enforces the cap nor bounds the turns that then run. Nor for ruling 241: its
@@ -295,8 +297,8 @@ scan run from inside an agent worktree under `.claude/` sees no files at all.
   which spawns each mounted stdio server and, on a failure, writes the shared health row
   and drops the server from the run. Parallel starts would probe the same org stdio
   servers at once (every operator in a project mounts the same ones; reviewers do when
-  granted the same), the unmeasured contention of the specialist-mcp deferral below. Per
-  loop: dependencies.server.ts `drainQueuedQuestions` must stay serial regardless.
+  granted the same), the contention ruling 689(b) bounds within one run to two
+  handshakes at a time. Per loop: dependencies.server.ts `drainQueuedQuestions` must stay serial regardless.
   Queued questions can name the same reviewer twice; a supporting run's `cloneRepo`
   removes and re-clones its `workspace/support/<profileId>` checkout; `dispatchAgentRun`'s
   same-engagement check reads run rows before its awaits; and
@@ -486,13 +488,6 @@ design-system or cross-file decision — revisit deliberately, not per lint run.
 - `react-doctor/no-pass-data-to-parent` — timeline.tsx comment-posted callback: the
   canonical fix lifts the fetcher to the parent route (cross-file data-flow change); the
   callback is a once-per-success event notification after the fetcher settles.
-
-- `react-doctor/async-await-in-loop` — specialist-mcp.server.ts stdio MCP health checks at
-  run start: one handshake per mounted server, up to 20 s each, before the run begins.
-  Parallel checks risk concurrent `npx`/`uvx` first-run installs and contention timeouts
-  that would mark a healthy server unreachable in the shared health record and drop it
-  from the run. Needs measurement against real servers and a concurrency bound (results
-  still applied in mount order).
 
 - `react-doctor/async-await-in-loop` — backend-credentials.server.ts `retireUserBackends`,
   run when an admin removes a person (`deleteOrgUser`): each account retires in turn, and
