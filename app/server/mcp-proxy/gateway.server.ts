@@ -1415,6 +1415,7 @@ async function openBoardSession(grant: RunGrant, server: string, mount: BoardMou
   const tools = pageCaptureStatus().available ? [...BOARD_TOOLS, PAGE_CAPTURE_TOOL] : BOARD_TOOLS;
   const context = {
     db: grant.db,
+    runId: grant.runId,
     projectSlug: grant.projectSlug,
     taskKey: grant.taskKey,
     mount,

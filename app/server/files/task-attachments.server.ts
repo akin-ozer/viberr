@@ -25,7 +25,7 @@ import {
   READABLE_TEXT_EXTENSIONS,
 } from "~/shared/attachment-kinds";
 import path from "node:path";
-import { isPageCaptureName } from "~/shared/page-capture";
+import { pageCapturesAmong } from "~/shared/page-capture";
 import { isGateLogName } from "~/shared/project-gates";
 import {
   resolveStoredSegment,
@@ -162,6 +162,8 @@ export function attachmentNamesSince(
   } catch {
     return []; // no attachments dir yet — the common case
   }
+  // Ruling 691: Viberr's own pictures of the pages this folder holds.
+  const pagePictures = pageCapturesAmong(names);
   const inWindow: { name: string; at: string }[] = [];
   for (const name of names) {
     if (name.startsWith(".")) continue;
@@ -171,8 +173,9 @@ export function attachmentNamesSince(
     if (isGateLogName(name)) continue;
     // Ruling 691: so is a page capture, written by the renderer's job after
     // a delivery is stamped. No run made it, and a reviewer's window that
-    // held it would move `deliveredAt` by "re-saving" it (ruling 587).
-    if (isPageCaptureName(name)) continue;
+    // held it would move `deliveredAt` by "re-saving" it (ruling 587). A
+    // screenshot an agent named like one, of no page here, is that run's.
+    if (pagePictures.has(name)) continue;
     try {
       const st = statSync(path.join(dir, name));
       if (!st.isFile()) continue;

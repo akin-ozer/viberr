@@ -11,7 +11,7 @@ import {
   listTaskAttachmentNames,
 } from "~/server/files/task-attachments.server";
 import { keepDelivery } from "~/server/files/kept-deliveries.server";
-import { isPageCaptureName } from "~/shared/page-capture";
+import { pageCapturesAmong, recordedPageCaptures } from "~/shared/page-capture";
 import type { FileLease } from "~/shared/file-leases";
 import { isRelayComment } from "./task-relay.server";
 import type { DatabaseSync } from "node:sqlite";
@@ -548,13 +548,13 @@ export function keepStampedDelivery(
   const stamp = written.frontmatter.deliveredAt;
   if (!stamp || stamp === stampBefore) return null;
   try {
+    const onTask = listTaskAttachmentNames(projectSlug, taskKey, ctx.dataRoot);
+    const pagePictures = pageCapturesAmong(onTask, recordedPageCaptures(written.frontmatter.pageCaptures));
     keepDelivery(
       projectSlug,
       taskKey,
       stamp,
-      listTaskAttachmentNames(projectSlug, taskKey, ctx.dataRoot).filter(
-        (name) => !isBrowserWorkingArtifact(name) && !isPageCaptureName(name),
-      ),
+      onTask.filter((name) => !isBrowserWorkingArtifact(name) && !pagePictures.has(name)),
       ctx.dataRoot,
     );
   } catch (error) {

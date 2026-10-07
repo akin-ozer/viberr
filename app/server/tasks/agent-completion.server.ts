@@ -163,7 +163,12 @@ import {
   suppressedReplyReason,
 } from "./task-replies.server";
 import { acceptanceRefusalFor } from "./task-acceptance.server";
-import { deliveryCapturesSettled, requestDeliveryCaptures } from "./page-capture.server";
+import {
+  deliveryCapturesSettled,
+  removeRunPageCaptures,
+  requestDeliveryCaptures,
+} from "./page-capture.server";
+import { recordedPageCaptures } from "~/shared/page-capture";
 
 /**
  * The agent's most-recent reply comment text on a task, or null when it has
@@ -1585,6 +1590,13 @@ export async function applyAgentCompletionEffects(
   let raisedDeadlockPacket = false;
   /** Ruling 691: the render of the files delivery this completion stamped. */
   let deliveryCaptures: Promise<void> | null = null;
+  // Ruling 691: the run has ended, so the pictures `capture_page` kept for it
+  // go with it. Never awaited and never a reason for the effects to fail.
+  void removeRunPageCaptures(db, ctx, {
+    projectSlug: input.projectSlug,
+    taskKey: input.taskKey,
+    runId: finished.id,
+  });
   const actorRef: FileActorRef = {
     kind: "agent",
     backend: input.backend,
@@ -1713,7 +1725,13 @@ export async function applyAgentCompletionEffects(
   const onTask = [
     ...new Set([...listTaskAttachmentNames(input.projectSlug, input.taskKey, ctx.dataRoot), ...runAttachmentsRaw]),
   ];
-  const someoneElses = new Set([...carriedHere, ...heldForOthers].map((name) => storedNameAmong(onTask, name)));
+  // Ruling 691: and a picture the record says Viberr's own render wrote. The
+  // window's listing already left out the picture of every page the folder
+  // holds; this is the one whose page has since left the task.
+  const viberrs = recordedPageCaptures(completionFm?.pageCaptures);
+  const someoneElses = new Set(
+    [...carriedHere, ...heldForOthers, ...viberrs].map((name) => storedNameAmong(onTask, name)),
+  );
   const runSaved = runAttachmentsRaw.filter((name) => !someoneElses.has(name));
   const verdictEngagement =
     input.profileId && completionFm

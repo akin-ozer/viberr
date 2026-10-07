@@ -13,6 +13,13 @@
 #     screen tall in a picture three screens tall;
 #   - the pictures come back at the two widths, with a sibling file drawn;
 #   - a markdown file is set as a page;
+#   - a page that stops on `alert()` is pictured behind its dialog, and the
+#     report says it opened one;
+#   - the renderer reads its pages from a folder it can only pass through, the
+#     way the server hands it a kept delivery: it cannot list the folder or put
+#     a file in it, and it still finds a page and the picture beside it stored
+#     in the other Unicode form (ruling 675), on a disk that holds names byte
+#     for byte;
 #   - the image's fonts give `system-ui` a proportional face and draw an emoji
 #     (the Dockerfile's chromium layer);
 #   - nothing of the browser is left running.
@@ -86,7 +93,7 @@ done
 # The fixtures, the stand-in for "another port on this host", and the reading
 # of what came back, in one helper: Node is what the image has.
 cat >"$WORK/check.mjs" <<'EOF'
-import { appendFileSync, existsSync, readFileSync, writeFileSync } from "node:fs";
+import { appendFileSync, existsSync, readFileSync, readdirSync, writeFileSync } from "node:fs";
 import { createServer } from "node:http";
 import path from "node:path";
 import zlib from "node:zlib";
@@ -214,6 +221,18 @@ fetch("http://localhost:${port}/hit-fetch-localhost").then(() => mark("check-loc
     path.join(dir, "notes.md"),
     "# Estimate\n\n| Item | Cost |\n|---|---|\n| EC2 | $12 |\n\n![chart](chart.png)\n",
   );
+  // A page that stops on a dialog while it loads.
+  writeFileSync(
+    path.join(dir, "alert.html"),
+    `<!doctype html><html><head><meta charset="utf-8"><script>alert("Welcome")</script></head><body><p>behind the dialog</p></body></html>`,
+  );
+  // A page and its picture stored decomposed, as a file uploaded from a Mac
+  // was, and named in the composed form everybody types.
+  writeFileSync(
+    path.join(dir, "\u00d6zet.html".normalize("NFD")),
+    `<!doctype html><html><head><meta charset="utf-8"></head><body><img src="${"\u015eema.png".normalize("NFC")}" width="100" height="100"></body></html>`,
+  );
+  writeFileSync(path.join(dir, "\u015eema.png".normalize("NFD")), solidPng(100, 100, [255, 0, 0]));
 }
 
 if (command === "job") {
@@ -221,6 +240,9 @@ if (command === "job") {
   process.stdout.write(
     JSON.stringify({
       root: path.join(work, "files"),
+      // The renderer may pass through this folder and not list it, so it is
+      // told what the folder holds, as the server tells it.
+      names: readdirSync(path.join(work, "files")),
       out: path.join(work, "out"),
       profile: path.join(work, "profile"),
       browser,
@@ -228,6 +250,8 @@ if (command === "job") {
         { file: "page.html", kind: "html" },
         { file: "notes.md", kind: "markdown" },
         { file: "leave.html", kind: "html" },
+        { file: "alert.html", kind: "html" },
+        { file: "\u00d6zet.html".normalize("NFC"), kind: "html" },
       ],
       views: [
         { id: "desktop", width: 1280, height: 800, maxHeight: 4800, mobile: false, from: 0 },
@@ -253,7 +277,7 @@ if (command === "verify") {
     process.exit(1);
   }
   const report = JSON.parse(readFileSync(reportFile, "utf8"));
-  const [page, notes, leave] = report.pages;
+  const [page, notes, leave, alerting, stored] = report.pages;
   const picture = (name) => (existsSync(path.join(out, name)) ? decodePng(readFileSync(path.join(out, name))) : null);
 
   check(page.error === null && page.shots.length === 2, "the page is pictured at both widths", page.error ?? "");
@@ -287,6 +311,19 @@ if (command === "verify") {
 
   check(leave.shots.length === 0 && leave.error !== null, "a page that sends the browser elsewhere is not pictured", String(leave.error));
 
+  check(
+    alerting.error === null && alerting.shots.length === 2 && alerting.dialogs === 2,
+    "a page that stops on alert() is pictured behind its dialog at both widths, and the report says it opened one each time",
+    `${alerting.error ?? "no error"}, ${alerting.shots.length} picture(s), ${alerting.dialogs} dialog(s)`,
+  );
+
+  check(
+    stored.error === null && stored.shots.length === 2 && stored.missing.length === 0,
+    "a page and the picture beside it are found in the other Unicode form than they were asked for in",
+    stored.error ?? stored.missing.join(" "),
+  );
+  check(picture("5-desktop.png")?.at(10, 10) === "255,0,0", "and that picture is drawn");
+
   const hits = existsSync(path.join(work, "hits")) ? readFileSync(path.join(work, "hits"), "utf8").split("\n").filter(Boolean) : [];
   check(hits.includes("GET /control"), "the other loopback port answers this host");
   check(hits.length === 1, "and no request of a page reached it", hits.join(" "));
@@ -312,6 +349,32 @@ fi
 "$NODE" "$WORK/check.mjs" fixtures "$WORK/files" "$PORT"
 JOB=$("$NODE" "$WORK/check.mjs" job "$WORK" "$BROWSER")
 
+# --- the input folder, as the server hands a kept delivery over ----------------
+# page-capture.server.ts copies a delivery's files into a folder of its own that
+# the agent group passes through and reads (0710, each file 0640): the renderer
+# opens a file by the name it is given, and can neither list the folder nor put
+# anything in it.
+chgrp -R viberr-agents "$WORK/files" && chmod 0640 "$WORK/files"/* && chmod 0710 "$WORK/files"
+as_agent() {
+  VIBERR_LAUNCH_UID=$UID_C VIBERR_LAUNCH_EXEC=/bin/sh "$LAUNCH" -c "$1" >/dev/null 2>&1
+}
+if as_agent "cat '$WORK/files/page.html'"; then
+  pass "an agent uid reads a file of the input folder by its name"
+else
+  fail "an agent uid cannot read a file of the input folder"
+fi
+if as_agent "ls '$WORK/files'"; then
+  fail "an agent uid can list the input folder"
+else
+  pass "an agent uid cannot list the input folder"
+fi
+as_agent "echo planted > '$WORK/files/planted.html'"
+if [ -e "$WORK/files/planted.html" ]; then
+  fail "an agent uid put a file in the input folder"
+else
+  pass "an agent uid cannot put a file in the input folder"
+fi
+
 started=$(date +%s)
 (
   cd "$WORK" || exit 1
@@ -322,7 +385,7 @@ started=$(date +%s)
 code=$?
 took=$(($(date +%s) - started))
 if [ "$code" -eq 0 ]; then
-  pass "the renderer ran as uid $UID_C through the launcher (three pages in ${took} s)"
+  pass "the renderer ran as uid $UID_C through the launcher (five pages in ${took} s)"
 else
   fail "the renderer exited $code"
 fi

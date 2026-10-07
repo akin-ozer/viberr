@@ -32,7 +32,8 @@ import {
   isSmallChange,
 } from "~/shared/completion-packet";
 import {
-  isPageCaptureName,
+  pageCapturesAmong,
+  recordedPageCaptures,
   pageKindOf,
   pageOfCaptureName,
   type PageCaptureViewId,
@@ -85,7 +86,7 @@ import { reprojectTask, taskRef, type TaskMutationContext } from "./task-mutatio
  * names none, and it opens one before it writes how a page looks.
  */
 export const PAGE_PICTURES_PACKET_SENTENCE =
-  "Viberr pictures each result file that is a page and shows the pictures beside it (`completionPacket.pageCaptures`), so never name one of those as a screenshot. Open a page's picture with `read_task_attachment` before you say how it looks, and when a page has no picture the fact says why.";
+  "When Viberr pictured the delivery's pages, `completionPacket.pageCaptures` lists each page with its pictures, which show beside it on the result, so never name one of those as a screenshot. Open a page's picture with `read_task_attachment` before you say how it looks. A page listed with no picture carries the reason, and a page that is not listed was not pictured.";
 /** The same, in the space a plan field's description has. */
 export const PAGE_PICTURES_PLAN_SENTENCE =
   "Never one of Viberr's own pictures of a result page (`completionPacket.pageCaptures`): those show beside the page without being named.";
@@ -148,9 +149,13 @@ export function completionPacketRefusal(fm: PacketState, taskKey: string): strin
 }
 
 /** The image attachments a packet may show, newest first. Ruling 691: never
- *  Viberr's own picture of a delivered page, which shows beside that page. */
-function screenshotCandidates(entries: readonly TaskAttachmentEntry[]): string[] {
-  return entries.filter((e) => IMAGE_RE.test(e.name) && !isPageCaptureName(e.name)).map((e) => e.name);
+ *  Viberr's own picture of a page on the task (`pagePictures`), which shows
+ *  beside that page. A screenshot an agent named like one is offered. */
+function screenshotCandidates(
+  entries: readonly TaskAttachmentEntry[],
+  pagePictures: ReadonlySet<string>,
+): string[] {
+  return entries.filter((e) => IMAGE_RE.test(e.name) && !pagePictures.has(e.name)).map((e) => e.name);
 }
 
 type StoreRef = { projectSlug: string; taskKey: string; dataRoot?: string | undefined };
@@ -163,17 +168,27 @@ type StoreRef = { projectSlug: string; taskKey: string; dataRoot?: string | unde
  * a result (ruling 570), and neither is Viberr's own picture of a delivered
  * page (ruling 691). Empty when the delivery is a revision.
  */
-function resultFileCandidates(fm: PacketState, ref: StoreRef): string[] {
+function resultFileCandidates(fm: PacketState, ref: StoreRef, files: TaskFiles): string[] {
   if (!deliveredAsFiles(fm)) return [];
-  const onTask = listTaskAttachmentNames(ref.projectSlug, ref.taskKey, ref.dataRoot).filter(
-    (name) => !isBrowserWorkingArtifact(name) && !isPageCaptureName(name),
-  );
+  const onTask = files.names.filter((name) => !isBrowserWorkingArtifact(name) && !files.pagePictures.has(name));
   const kept = listKeptDeliveries(ref.projectSlug, ref.taskKey, ref.dataRoot).find(
     (d) => d.deliveredAt === fm.deliveredAt,
   );
   if (!kept) return onTask.sort();
   const delivered = new Set(kept.files);
   return onTask.filter((name) => delivered.has(name)).sort();
+}
+
+/** The names a task's attachments hold, and which of them are Viberr's own
+ *  pictures of the pages among them (ruling 691). */
+interface TaskFiles {
+  names: string[];
+  pagePictures: Set<string>;
+}
+
+function taskFiles(ref: StoreRef, fm: Pick<TaskFrontmatter, "pageCaptures">): TaskFiles {
+  const names = listTaskAttachmentNames(ref.projectSlug, ref.taskKey, ref.dataRoot);
+  return { names, pagePictures: pageCapturesAmong(names, recordedPageCaptures(fm.pageCaptures)) };
 }
 
 /** How many candidate names a refusal or the snapshot lists. */
@@ -241,10 +256,12 @@ export function completionPacketFact(
   }
   const current = currentCompletionPacket(fm);
   const state = current ? "current" : fm.completionPacket ? "stale" : "none";
+  const files = taskFiles(input, fm);
   const candidates = screenshotCandidates(
     listTaskAttachments(input.projectSlug, input.taskKey, input.dataRoot),
+    files.pagePictures,
   ).slice(0, 20);
-  const resultFiles = resultFileCandidates(fm, input);
+  const resultFiles = resultFileCandidates(fm, input, files);
   const size = deliveredAsFiles(fm)
     ? resultFiles.length > 0
       ? "The delivery is files on the task, so the packet names the ones that are the result (`files`, from `resultFileCandidates`), each with a line saying what it is."
@@ -392,15 +409,16 @@ export async function writeCompletionPacket(
   const asFiles = deliveredAsFiles(fm);
   const files: CompletionPacket["files"] = [];
   const namedFiles = new Set<string>();
-  // Ruling 691: Viberr's own picture of a page is neither a result file nor a
-  // screenshot to pick: it shows beside its page. One named is left out, and
-  // the reply says so.
+  // Ruling 691: Viberr's own picture of a page on the task is neither a
+  // result file nor a screenshot to pick: it shows beside its page. One named
+  // is left out, and the reply says so.
+  const onTask = taskFiles({ projectSlug, taskKey, dataRoot: ctx.dataRoot }, fm);
   const capturesLeftOut: { name: string; from: "files" | "screenshots" }[] = [];
   for (const file of input.files ?? []) {
     const name = file.name.trim();
     if (name === "" || namedFiles.has(name)) continue;
     namedFiles.add(name);
-    if (isPageCaptureName(name)) {
+    if (onTask.pagePictures.has(name)) {
       capturesLeftOut.push({ name, from: "files" });
       continue;
     }
@@ -409,7 +427,7 @@ export async function writeCompletionPacket(
   const filesLeftOut = !asFiles && files.length > 0;
   if (filesLeftOut) files.length = 0;
   const candidates = asFiles
-    ? resultFileCandidates(fm, { projectSlug, taskKey, dataRoot: ctx.dataRoot })
+    ? resultFileCandidates(fm, { projectSlug, taskKey, dataRoot: ctx.dataRoot }, onTask)
     : [];
   // A delivery none of whose files is still on the task has nothing to name.
   if (asFiles && candidates.length === 0) files.length = 0;
@@ -456,7 +474,7 @@ export async function writeCompletionPacket(
     const name = shot.name.trim();
     if (name === "" || seen.has(name)) continue;
     seen.add(name);
-    if (isPageCaptureName(name)) {
+    if (onTask.pagePictures.has(name)) {
       capturesLeftOut.push({ name, from: "screenshots" });
       continue;
     }
@@ -474,7 +492,10 @@ export async function writeCompletionPacket(
     .filter((s) => !taskAttachmentExists(projectSlug, taskKey, s.name, ctx.dataRoot))
     .map((s) => s.name);
   if (notImages.length > 0 || missing.length > 0) {
-    const candidates = screenshotCandidates(listTaskAttachments(projectSlug, taskKey, ctx.dataRoot));
+    const candidates = screenshotCandidates(
+      listTaskAttachments(projectSlug, taskKey, ctx.dataRoot),
+      onTask.pagePictures,
+    );
     const problems = [
       notImages.length > 0
         ? `${notImages.map((n) => `\`${n}\``).join(", ")} ${notImages.length === 1 ? "is not an image" : "are not images"} (png, jpg, webp or gif)`
@@ -599,9 +620,9 @@ export interface CompletionFile {
   name: string;
   caption: string;
   /** Ruling 691: null for a file that is not a page, for a packet written
-   *  for earlier work, and while no record pictures the delivery under
-   *  review (a server without a browser, or a delivery from before the
-   *  ruling), so nothing extra is drawn there. */
+   *  for earlier work, for a page the record does not name, and while no
+   *  record pictures the delivery under review (a server without a browser,
+   *  or a delivery from before the ruling), so nothing extra is drawn there. */
   page: CompletionFilePage | null;
 }
 
@@ -671,8 +692,10 @@ export function completionView(
     const pictured = onFile.subject === subject ? currentPageCaptures(fm) : null;
     const pageOf = (name: string): CompletionFilePage | null => {
       if (!pictured || !canSee || pageKindOf(name) === null) return null;
+      // A page the record does not name was not this render's to picture (a
+      // person's own upload, say), and the card has nothing true to add.
       const page = pictured.pages.find((p) => p.file === name);
-      if (!page) return { shots: [], note: "Viberr made no picture of this page." };
+      if (!page) return null;
       return {
         shots: page.shots
           .filter((shot) => canSee(shot.name))

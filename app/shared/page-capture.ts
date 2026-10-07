@@ -59,20 +59,62 @@ export function pageCaptureName(file: string, view: PageCaptureViewId): string {
 
 const CAPTURE_NAME_RE = /\.capture-(desktop|phone)\.png$/i;
 
-/** True for a name only Viberr's own page pictures carry. */
-export function isPageCaptureName(name: string): boolean {
-  return CAPTURE_NAME_RE.test(name);
-}
-
 /** The page a picture's name says it is of. */
 export function pageOfCaptureName(name: string): string {
   return name.replace(CAPTURE_NAME_RE, "");
 }
 
-/** The width a picture's name says it was taken at; null for any other name. */
+/** The width a picture's name says it was taken at; null for any other name.
+ *  The lightbox opens a tall picture in a scroller by this: how a picture
+ *  opens, never whose it is, so the suffix alone decides there. */
 export function viewOfCaptureName(name: string): PageCaptureViewId | null {
   const view = CAPTURE_NAME_RE.exec(name)?.[1]?.toLowerCase();
   return view === "desktop" || view === "phone" ? view : null;
+}
+
+/**
+ * True for a name that ends the way Viberr's own page pictures do
+ * (`post.html.capture-desktop.png`). The ending alone: whether a file of that
+ * name IS Viberr's own is {@link pageCapturesAmong}'s to say, which also asks
+ * whose page it pictures.
+ */
+export function isPageCaptureName(name: string): boolean {
+  return CAPTURE_NAME_RE.test(name);
+}
+
+/**
+ * The names among `files` (one folder's listing) that are Viberr's own page
+ * pictures: ending like one, and either of a page that is itself among
+ * `files` or among the names `recorded`, which the task's record says the
+ * last render wrote (the page it pictured may since have left the task).
+ *
+ * The suffix alone is not enough. An agent that screenshots its own work may
+ * name the file `landing.capture-desktop.png`, or picture a page that is not
+ * on the task: that file is the agent's, to be claimed by its run, kept with
+ * the delivery and offered as a screenshot like any other. Only the picture
+ * of a page the folder holds is the name the renderer writes and replaces.
+ * The page is matched in either Unicode form (ruling 675): the store keeps a
+ * picture's name composed whatever form its page was stored in.
+ */
+export function pageCapturesAmong(files: readonly string[], recorded: Iterable<string> = []): Set<string> {
+  const pages = new Set<string>();
+  for (const file of files) {
+    if (pageKindOf(file) !== null) pages.add(file.normalize("NFC"));
+  }
+  const written = new Set(recorded);
+  const own = new Set<string>();
+  for (const file of files) {
+    if (!isPageCaptureName(file)) continue;
+    if (written.has(file) || pages.has(pageOfCaptureName(file).normalize("NFC"))) own.add(file);
+  }
+  return own;
+}
+
+/** The pictures a task's `pageCaptures` record names. */
+export function recordedPageCaptures(
+  record: { pages: readonly { shots: readonly { name: string }[] }[] } | null | undefined,
+): string[] {
+  return (record?.pages ?? []).flatMap((page) => page.shots.map((shot) => shot.name));
 }
 
 /** The system actor that writes a delivery's capture note. */
@@ -84,3 +126,6 @@ export const PAGE_CAPTURE_MAX_PAGES = 8;
 /** A source name past this is not pictured: the picture's own name must fit
  *  the 200 characters a timeline entry allows an attachment name. */
 export const PAGE_CAPTURE_MAX_NAME_CHARS = 178;
+/** The furthest down a page an agent's stretch may start: the walk to it
+ *  stays well inside a page's 25 seconds. */
+export const PAGE_CAPTURE_MAX_FROM = 40_000;

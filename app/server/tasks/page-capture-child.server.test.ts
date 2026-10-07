@@ -33,6 +33,8 @@ const reportSchema = z.object({
     z.object({
       file: z.string(),
       shots: z.array(shotSchema),
+      ended: z.array(z.object({ view: z.string(), pageHeight: z.number() })),
+      dialogs: z.number(),
       asked: z.array(z.string()),
       askedCount: z.number(),
       missing: z.array(z.string()),
@@ -151,12 +153,13 @@ describe("the page capture's renderer child (ruling 691)", () => {
     expect(served!.resources).toEqual([{ src: "chart.png", status: 200, bytes: 39 }]);
   });
 
-  it("serves a page only its own task files and starts the browser with no way out: a symlink, a nested path and the network are refused", async () => {
+  it("serves a page only its own task files, refusing a symlink, a nested path and a dot name, and starts the browser with every flag that closes the network to it", async () => {
     const b = bench({
       "page.html":
         '<img src="chart.png"><img src="linked.png"><img src="sub/inner.png"><img src=".hidden.png"><img src="https://cdn.example.com/lib.js">',
       "chart.png": "picture",
       ".hidden.png": "a dot name is never a task file",
+      ".draft.html": "<p>a dot name is never a page either</p>",
     });
     const outside = path.join(path.dirname(b.root), "outside.png");
     writeFileSync(outside, "a file outside the task");
@@ -168,8 +171,12 @@ describe("the page capture's renderer child (ruling 691)", () => {
     // open before the browser starts and the picture is of the page server's
     // "not found".
     symlinkSync(outside, path.join(b.root, "linked.html"));
-    const report = await b.run({ pages: ["page.html", "linked.html"], views: [DESKTOP] });
+    const report = await b.run({ pages: ["page.html", "linked.html", ".draft.html"], views: [DESKTOP] });
     expect(report.pages[1]).toMatchObject({ file: "linked.html", shots: [], error: "the file is not there to render" });
+    // Nor is a page the page server would not answer: every reader hides a
+    // dot name. CANARY: open the page without asking `servable` first and
+    // `.draft.html` comes back pictured, error null, as the words "not found".
+    expect(report.pages[2]).toMatchObject({ file: ".draft.html", shots: [], error: "the file is not there to render" });
     const [served] = b.browser.pages();
     // CANARY: open files without O_NOFOLLOW and the symlinked file is served.
     expect(served!.resources).toEqual([
@@ -197,7 +204,10 @@ describe("the page capture's renderer child (ruling 691)", () => {
     // One browser, for the one page there was to picture.
     expect(b.browser.launches()).toHaveLength(1);
     const [launch] = b.browser.launches();
-    // CANARY: drop --proxy-server and the browser reaches the network.
+    // The flags a browser is started with, which is all a stand-in can show:
+    // that a real one then loads nothing but the page server's answers is the
+    // in-image check's to prove (`scripts/check-page-capture.sh`, run by the
+    // e2e job). CANARY: drop any one of them from `browserArgs`.
     expect(launch!.argv).toEqual(
       expect.arrayContaining([
         "--headless=new",
@@ -207,6 +217,11 @@ describe("the page capture's renderer child (ruling 691)", () => {
         // Loopback is proxied too, so the app's own port is as closed as any
         // other host; only the page server is let through.
         `--proxy-bypass-list=<-loopback>;127.0.0.1:${address.port}`,
+        // A peer connection would send UDP past the proxy.
+        "--force-webrtc-ip-handling-policy=disable_non_proxied_udp",
+        // No system keyring to wait on before the first request.
+        "--password-store=basic",
+        "--use-mock-keychain",
         `--user-data-dir=${path.join(path.dirname(b.root), "profile", "1")}`,
       ]),
     );
@@ -255,10 +270,35 @@ describe("the page capture's renderer child (ruling 691)", () => {
     expect(stretch.browser.shots()[0]!.clip).toEqual({ x: 0, y: 2000, width: 1280, height: 2000, scale: 1 });
     const last = await stretch.run({ pages: ["long.html"], views: [{ ...DESKTOP, maxHeight: 2000, from: 4000 }] });
     expect(last.pages[0]!.shots[0]).toMatchObject({ height: 1000, from: 4000, cut: false });
-    const past = await stretch.run({ pages: ["long.html"], views: [{ ...DESKTOP, maxHeight: 2000, from: 5000 }] });
+
+    // A phone lays a page out taller than a desktop does, so a stretch may
+    // start past one layout's end and inside the other's. That width is said
+    // to have ended and the other is still pictured. CANARY: fail the page
+    // at the first width with nothing at `from` and the phone is never loaded.
+    const uneven = bench({ "short.html": "<p>one screen: 800 px on a desktop, 844 on a phone</p>" });
+    const tool = (from: number) => [
+      { ...DESKTOP, maxHeight: 2000, from },
+      { ...PHONE, maxHeight: 2000, from },
+    ];
+    const between = await uneven.run({ pages: ["short.html"], views: tool(820) });
+    expect(between.pages[0]).toMatchObject({
+      error: null,
+      ended: [{ view: "desktop", pageHeight: 800 }],
+      shots: [{ view: "phone", from: 820, height: 24, cut: false }],
+    });
+    expect(uneven.browser.pages().map((page) => page.metrics.width)).toEqual([1280, 390]);
+    // Past the end at every width is the only case that is the page's own
+    // failure, and it names each width with where the page ends there.
+    const past = await uneven.run({ pages: ["short.html"], views: tool(5000) });
     expect(past.pages[0]).toMatchObject({
       shots: [],
-      error: "the page is 5000 px tall at this width, so nothing starts at 5000 px",
+      ended: [
+        { view: "desktop", pageHeight: 800 },
+        { view: "phone", pageHeight: 844 },
+      ],
+      error:
+        "the page ends at 800 px at the desktop width (1280 px) and at 844 px at the phone width (390 px), " +
+        "so nothing starts at 5,000 px",
     });
 
     // A phone shrinks a page it lays out wider than its screen: the picture
@@ -285,6 +325,38 @@ describe("the page capture's renderer child (ruling 691)", () => {
       shots: [],
       error: "the picture of one screen of it is too large to keep",
     });
+  });
+
+  it("dismisses a dialog a page opens while it loads, pictures the page behind it, and says the page opened one", async () => {
+    const b = bench({ "alert.html": "<script>alert(\"Welcome\")</script><p>the page behind it</p>" });
+    // The stand-in finishes this load only once its dialog is answered, as a
+    // page stopped on `alert()` does. CANARY: drop the
+    // `Page.javascriptDialogOpening` arm of the session listener and the page
+    // waits on its dialog until "the render ran past 3 seconds".
+    const report = await b.run({ pages: ["alert.html"], mode: "dialog:alert.html", pageTimeoutMs: 3_000 });
+    expect(report.pages[0]).toMatchObject({ file: "alert.html", error: null, dialogs: 2 });
+    expect(report.pages[0]!.shots.map((shot) => shot.view)).toEqual(["desktop", "phone"]);
+    // Dismissed, once per load: nobody is there to press OK.
+    expect(b.browser.dialogs()).toEqual([{ accept: false }, { accept: false }]);
+  });
+
+  it("finds a page and the file beside it in whichever Unicode form they are stored", async () => {
+    // Ruling 675's rule in the renderer's own process: a file uploaded from a
+    // Mac may be stored decomposed, and a page names its picture the way its
+    // author typed it. CANARY: open every name with `openRegular` alone and,
+    // on a file system that holds names byte for byte (the image's), the
+    // page is "not there to render" and its picture is reported missing. A
+    // file system that folds the two forms together (APFS, on a developer's
+    // Mac) finds both files either way, so this case cannot go red there.
+    const decomposed = (name: string) => name.normalize("NFD");
+    const b = bench({
+      [decomposed("Özet.html")]: `<img src="${"Şema.png".normalize("NFC")}"><p>summary</p>`,
+      [decomposed("Şema.png")]: "the diagram",
+    });
+    const report = await b.run({ pages: ["Özet.html".normalize("NFC")], views: [DESKTOP] });
+    expect(report.pages[0]).toMatchObject({ error: null, missing: [] });
+    expect(report.pages[0]!.shots).toHaveLength(1);
+    expect(b.browser.pages()[0]!.resources).toEqual([{ src: "Şema.png".normalize("NFC"), status: 200, bytes: 11 }]);
   });
 
   it("stops a page at its timeout and still pictures the next one", async () => {

@@ -20,6 +20,7 @@ import { recordAudit, type AuditActor } from "~/server/audit/audit-recorder.serv
 import { runAgentGithubRead } from "~/server/github/agent-github-read.server";
 import { encodeActorRef, agentRoleDisplay } from "~/server/files/actor-ref.server";
 import { readAgentTaskAttachment, readBoardList, readBoardTask, readTimelineEntry } from "./board-read.server";
+import { PAGE_CAPTURE_MAX_FROM } from "~/shared/page-capture";
 import { captureTaskPage, pageCaptureStatus } from "./page-capture.server";
 import {
   KB_DOC_KB_DESCRIPTION,
@@ -35,7 +36,6 @@ import {
   READ_TASK_ATTACHMENT_DESCRIPTION,
   CAPTURE_PAGE_DESCRIPTION,
   CAPTURE_PAGE_FIELDS,
-  CAPTURE_PAGE_MAX_FROM,
   READ_TASK_ATTACHMENT_FIELDS,
   READ_TIMELINE_ENTRY_AT_DESCRIPTION,
   READ_TIMELINE_ENTRY_DESCRIPTION,
@@ -823,7 +823,7 @@ export function buildAgentToolkit(deps: AgentToolkitDeps): AgentToolkit | null {
           {
             name: z.string().describe(CAPTURE_PAGE_FIELDS.name),
             view: z.enum(["desktop", "phone"]).optional().describe(CAPTURE_PAGE_FIELDS.view),
-            from: z.number().int().min(0).max(CAPTURE_PAGE_MAX_FROM).optional().describe(CAPTURE_PAGE_FIELDS.from),
+            from: z.number().int().min(0).max(PAGE_CAPTURE_MAX_FROM).optional().describe(CAPTURE_PAGE_FIELDS.from),
           },
           async (args) => {
             try {
@@ -833,6 +833,8 @@ export function buildAgentToolkit(deps: AgentToolkitDeps): AgentToolkit | null {
                 name: args.name,
                 view: args.view,
                 from: args.from,
+                // The run this toolkit serves: its pictures go when it ends.
+                runId: runIdForOutcomeKey(db, outcomeKey),
               });
               return reply.images.length > 0 ? imageResult(reply.text, reply.images) : textResult(reply.text);
             } catch (error) {

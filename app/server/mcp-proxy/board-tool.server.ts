@@ -3,6 +3,7 @@ import type { CallToolResult, Tool } from "@modelcontextprotocol/sdk/types.js";
 import { z } from "zod";
 import { logger } from "~/server/logging/logger.server";
 import { toError } from "~/shared/errors";
+import { PAGE_CAPTURE_MAX_FROM } from "~/shared/page-capture";
 import { READ_PAGE_BYTES } from "~/server/runtimes/read-page-budget.server";
 
 /**
@@ -111,12 +112,8 @@ export const CAPTURE_PAGE_DESCRIPTION =
 export const CAPTURE_PAGE_FIELDS = {
   name: "The page's file name among this task's files, exactly as `read_board` lists it.",
   view: "One width to picture, `desktop` (1280 px) or `phone` (390 px). Omit for both.",
-  from: "Where the stretch starts, in px from the top of the page: the `nextFrom` an earlier reply gave. Omit for the top.",
+  from: "Where the stretch starts, in px from the top of the page: the `nextFrom` an earlier reply gave. Omit for the top. At most 40000.",
 } as const;
-
-/** The furthest down a page a stretch may start: the walk to it stays well
- *  inside a page's 25 seconds. */
-export const CAPTURE_PAGE_MAX_FROM = 40_000;
 
 export const PAGE_CAPTURE_TOOL: Tool = {
   name: "capture_page",
@@ -127,7 +124,7 @@ export const PAGE_CAPTURE_TOOL: Tool = {
     properties: {
       name: { type: "string", description: CAPTURE_PAGE_FIELDS.name },
       view: { type: "string", enum: ["desktop", "phone"], description: CAPTURE_PAGE_FIELDS.view },
-      from: { type: "integer", minimum: 0, maximum: CAPTURE_PAGE_MAX_FROM, description: CAPTURE_PAGE_FIELDS.from },
+      from: { type: "integer", minimum: 0, maximum: PAGE_CAPTURE_MAX_FROM, description: CAPTURE_PAGE_FIELDS.from },
     },
     required: ["name"],
   },
@@ -138,7 +135,7 @@ export const PAGE_CAPTURE_TOOL: Tool = {
 export const pageCaptureArgsSchema = z.object({
   name: z.string(),
   view: z.enum(["desktop", "phone"]).optional(),
-  from: z.number().int().min(0).max(CAPTURE_PAGE_MAX_FROM).optional(),
+  from: z.number().int().min(0).max(PAGE_CAPTURE_MAX_FROM).optional(),
 });
 export type PageCaptureArgs = z.infer<typeof pageCaptureArgsSchema>;
 
@@ -165,6 +162,8 @@ export type TimelineEntryArgs = z.infer<typeof timelineEntryArgsSchema>;
 /** The run a board call reads for: its database, project and task. */
 interface BoardCallContext {
   db: DatabaseSync;
+  /** The run itself: a page it asks to see is kept for it until it ends. */
+  runId: string;
   projectSlug: string;
   taskKey: string;
   mount: BoardMount;
@@ -261,6 +260,7 @@ export async function pageCaptureResult(input: BoardCallContext, args: PageCaptu
       name: args.name,
       view: args.view,
       from: args.from,
+      runId: input.runId,
     });
     return {
       content: [

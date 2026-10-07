@@ -516,12 +516,14 @@ describe("ruling 691: Viberr's own pictures of a delivered page", () => {
   const AT = "2026-10-07T12:00:09.412Z";
   const PICTURES = ["post.html.capture-desktop.png", "post.html.capture-phone.png"];
   const PAGES = ["extra.htm", "figures.csv", "notes.md", "post.html"];
+  const AGENTS_OWN = "other.html.capture-desktop.png";
   const nameOf = (id: string) => id;
 
   /** VIB-1 delivered as files at `STAMP`, as the render of that delivery
    *  leaves it: the pictures on the task and in the kept delivery, and the
    *  record bound to the stamp. `extra.htm` is a page the record does not
-   *  name. */
+   *  name (a person's own upload is never pictured), and `AGENTS_OWN` is an
+   *  agent's screenshot of a page this task does not hold. */
   function seedPictured(): void {
     seed({
       workRevision: null,
@@ -544,8 +546,8 @@ describe("ruling 691: Viberr's own pictures of a delivered page", () => {
         ],
       },
     });
-    for (const name of [...PAGES, ...PICTURES, "chart.png"]) attach(name);
-    keepDelivery(store.slug, "VIB-1", STAMP, [...PAGES, ...PICTURES, "chart.png"], store.dataRoot);
+    for (const name of [...PAGES, ...PICTURES, "chart.png", AGENTS_OWN]) attach(name);
+    keepDelivery(store.slug, "VIB-1", STAMP, [...PAGES, ...PICTURES, "chart.png", AGENTS_OWN], store.dataRoot);
   }
 
   const fact = () =>
@@ -567,8 +569,11 @@ describe("ruling 691: Viberr's own pictures of a delivered page", () => {
     expect((await write({ files: PAGES.map((name) => ({ name })) })).outcome).toBe("done");
     // The phone picture has since left the store: only what the viewer can
     // open is drawn.
+    // A page the record does not name gets no row of its own. CANARY: answer
+    // it with a sentence and the card reads "No picture of this page: Viberr
+    // made no picture of this page", which says nothing.
     expect(pagesOf((name) => name !== PICTURES[1])).toEqual([
-      ["extra.htm", { shots: [], note: "Viberr made no picture of this page." }],
+      ["extra.htm", null],
       ["figures.csv", null],
       ["notes.md", { shots: [], note: "the render ran past 25 seconds" }],
       ["post.html", { shots: [{ view: "desktop", name: PICTURES[0], at: AT, cut: false }], note: null }],
@@ -604,13 +609,15 @@ describe("ruling 691: Viberr's own pictures of a delivered page", () => {
   it("a page capture is never offered as a result file or a screenshot, and one named as a screenshot is left out with a sentence", async () => {
     seedPictured();
     // CANARY: drop the filter in resultFileCandidates and
-    // post.html.capture-desktop.png is offered as a result.
-    expect(fact().resultFileCandidates).toEqual(["chart.png", ...PAGES]);
-    expect(fact().screenshotCandidates).toEqual(["chart.png"]);
+    // post.html.capture-desktop.png is offered as a result. Take every name
+    // with the suffix for Viberr's own and the agent's screenshot of a page
+    // this task does not hold is offered nowhere.
+    expect(fact().resultFileCandidates).toEqual(["chart.png", ...PAGES, AGENTS_OWN].sort());
+    expect(fact().screenshotCandidates.sort()).toEqual(["chart.png", AGENTS_OWN]);
 
     const result = await write({
       files: [{ name: "post.html", caption: "The launch post" }],
-      screenshots: [{ name: PICTURES[0]!, caption: "How it looks" }, { name: "chart.png" }],
+      screenshots: [{ name: PICTURES[0]!, caption: "How it looks" }, { name: "chart.png" }, { name: AGENTS_OWN }],
     });
     expect(result.outcome).toBe("done");
     expect(result.message).toContain(
@@ -618,7 +625,11 @@ describe("ruling 691: Viberr's own pictures of a delivered page", () => {
     );
     expect(parsed().frontmatter.completionPacket).toMatchObject({
       files: [{ name: "post.html", caption: "The launch post" }],
-      screenshots: [{ name: "chart.png", caption: "" }],
+      screenshots: [
+        { name: "chart.png", caption: "" },
+        { name: AGENTS_OWN, caption: "" },
+      ],
     });
+    expect(result.message).not.toContain("`other.html`");
   });
 });

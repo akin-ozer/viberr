@@ -19,18 +19,26 @@ import { z } from "zod";
  * says how large it is in its own text: `fake-height:3000`, `fake-width:612`
  * and `fake-scale:0.398` anywhere in the document (markdown included) are the
  * page's content height, content width and phone scale; without them a page
- * is one screen. A screenshot is a real PNG of the clip it was asked for.
+ * is one screen. `fake-crash-at:390` ends the browser when the page is loaded
+ * at that viewport width, so one width is pictured and the other is not. A
+ * screenshot is a real PNG of the clip it was asked for.
  *
  * It records itself in the evidence directory: `launches.jsonl` (argv, the
- * whole environment, the uid) and `pages.jsonl` (one line per page load: the
- * address, the viewport, the HTML it was served, each sub-resource's status).
+ * whole environment, the uid), `pages.jsonl` (one line per page load: the
+ * address, the viewport, the HTML it was served, each sub-resource's status),
+ * `shots.jsonl` (each screenshot's clip) and `dialogs.jsonl` (how each dialog
+ * it opened was answered).
  *
  * Behaviour is switched by {@link FAKE_BROWSER_MODE_ENV} on the SUITE's
  * process (an undeclared name, so it survives `filteredSpawnEnv`): a
  * comma-separated list of `mode` or `mode:needle`, where a rule with a needle
  * applies only to a page whose address or HTML contains it. `hang` never
  * answers the load, `crash` ends the process at the load, `big` pads every
- * screenshot by 1,000 bytes per px of height.
+ * screenshot by 1,000 bytes per px of height, `dialog` opens an alert during
+ * the load and finishes the load only once the dialog is answered (as a page
+ * stopped on `alert()` does), and `hold` finishes the load only once the suite
+ * calls {@link FakeBrowser.release}, so a test can act while a render is in
+ * flight.
  */
 export const FAKE_BROWSER_MODE_ENV = "VIBERR_FAKE_BROWSER_MODE";
 export const FAKE_BROWSER_EVIDENCE_ENV = "VIBERR_FAKE_BROWSER_EVIDENCE_DIR";
@@ -81,6 +89,10 @@ function modeFor(url, html) {
   return hit ? hit.mode : "ok";
 }
 
+const pause = (ms) => new Promise((done) => setTimeout(done, ms));
+/** The dialog a page is stopped on, until the client answers it. */
+let answerDialog = null;
+
 function declared(name, fallback) {
   const found = new RegExp("fake-" + name + ":([0-9.]+)").exec(page.html);
   return found ? Number(found[1]) : fallback;
@@ -113,8 +125,23 @@ async function navigate(message) {
   const main = await get(url);
   const html = main.body.toString("utf8");
   const mode = modeFor(url, html);
-  if (mode === "crash") process.exit(7);
+  const crashAt = /fake-crash-at:([0-9]+)/.exec(html);
+  if (mode === "crash" || (crashAt && Number(crashAt[1]) === metrics.width)) process.exit(7);
   if (mode === "hang") return;
+  if (mode === "hold") {
+    while (!fs.existsSync(path.join(evidenceDir, "release"))) await pause(20);
+  }
+  if (mode === "dialog") {
+    const answered = new Promise((done) => {
+      answerDialog = done;
+    });
+    send({
+      method: "Page.javascriptDialogOpening",
+      sessionId: message.sessionId,
+      params: { url, message: "Welcome", type: "alert", hasBrowserHandler: false, defaultPrompt: "" },
+    });
+    await answered;
+  }
   const resources = [];
   for (const found of html.matchAll(/src="([^"]+)"/g)) {
     const src = found[1];
@@ -151,6 +178,14 @@ function handle(message) {
       return void navigate(message);
     case "Runtime.evaluate":
       return reply({ result: { type: "string", value: page.url } });
+    case "Page.handleJavaScriptDialog": {
+      evidence("dialogs.jsonl", { accept: message.params.accept });
+      reply({});
+      const answer = answerDialog;
+      answerDialog = null;
+      if (answer) answer();
+      return;
+    }
     case "Page.getLayoutMetrics": {
       const scale = metrics.mobile ? declared("scale", 1) : 1;
       return reply({
@@ -207,6 +242,10 @@ export interface FakeBrowser {
   launches(): FakeBrowserLaunch[];
   pages(): FakeBrowserPage[];
   shots(): FakeBrowserShot[];
+  /** How each dialog a `dialog` page opened was answered. */
+  dialogs(): FakeBrowserDialog[];
+  /** Let every load a `hold` rule is holding finish, and every later one. */
+  release(): void;
 }
 
 const launchSchema = z.object({
@@ -234,6 +273,9 @@ const shotSchema = z.object({
 });
 export type FakeBrowserShot = z.infer<typeof shotSchema>;
 
+const dialogSchema = z.object({ accept: z.boolean() });
+export type FakeBrowserDialog = z.infer<typeof dialogSchema>;
+
 function readLines<T>(file: string, schema: z.ZodType<T>): T[] {
   if (!existsSync(file)) return [];
   return readFileSync(file, "utf8")
@@ -256,5 +298,10 @@ export function writeFakeBrowser(dir: string): FakeBrowser {
     launches: () => readLines(path.join(evidenceDir, "launches.jsonl"), launchSchema),
     pages: () => readLines(path.join(evidenceDir, "pages.jsonl"), pageSchema),
     shots: () => readLines(path.join(evidenceDir, "shots.jsonl"), shotSchema),
+    dialogs: () => readLines(path.join(evidenceDir, "dialogs.jsonl"), dialogSchema),
+    release: () => {
+      mkdirSync(evidenceDir, { recursive: true });
+      writeFileSync(path.join(evidenceDir, "release"), "");
+    },
   };
 }

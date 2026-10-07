@@ -8,6 +8,7 @@ import {
   mkdirSync,
   openSync,
   readFileSync,
+  readdirSync,
   writeFileSync,
 } from "node:fs";
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
@@ -48,7 +49,12 @@ import { z } from "zod";
  *  - **Pictures it at each width**: loads it at that viewport, walks it once
  *    from top to bottom so lazy pictures and scroll-in sections are drawn as
  *    for a reader who scrolled, then takes the page from `from` down to the
- *    view's cap. A picture too large to hand to an agent is retaken shorter.
+ *    view's cap. A picture too large to hand to an agent is retaken shorter,
+ *    and a width at which the page ends before `from` is reported as ended
+ *    while the other width is still pictured.
+ *  - **Dismisses a dialog the page opens.** `alert()`, `confirm()` and
+ *    `prompt()` stop a page until somebody answers, and nobody is there: each
+ *    is dismissed and counted, so the page loads on and the report says so.
  *
  * Run as `node page-capture-child.server.ts '<job json>'`. It writes
  * `<out>/<n>-<view>.png` and `<out>/report.json` and prints nothing the server
@@ -59,6 +65,9 @@ import { z } from "zod";
 const jobSchema = z.object({
   /** The folder the page and its sibling files are served from. */
   root: z.string().min(1),
+  /** The names `root` holds, when it is a folder this process may pass
+   *  through and not list; absent when it can read the listing itself. */
+  names: z.array(z.string()).optional(),
   /** Where the pictures and the report go. */
   out: z.string().min(1),
   /** A scratch folder for the browser's profile, one below it per page. */
@@ -104,10 +113,21 @@ interface Shot {
   cut: boolean;
 }
 
+/** A width at which the page is over before the stretch asked for starts. */
+interface Ended {
+  view: string;
+  /** The page's height at this view, in the picture's px. */
+  pageHeight: number;
+}
+
 /** One page as the report states it. */
 interface PageReport {
   file: string;
   shots: Shot[];
+  /** The views with nothing at `from`: no picture, and no failure either. */
+  ended: Ended[];
+  /** How many script dialogs the page opened, each dismissed. */
+  dialogs: number;
   /** Hosts the page asked the network for, and how many addresses in all. */
   asked: string[];
   askedCount: number;
@@ -228,6 +248,47 @@ function openRegular(root: string, name: string): OpenFile | null {
   return null;
 }
 
+/** A name the page server answers at all: one file name deep (the task
+ *  folder is flat), and never a dot name, which is never a task file. */
+function servable(name: string): boolean {
+  return name !== "" && !/[/\\\0]/.test(name) && !name.startsWith(".");
+}
+
+/**
+ * Ruling 675's rule, restated here because this script imports nothing from
+ * the app: among a folder's `entries`, a written name means the entry spelled
+ * exactly so, else the single entry that composes to the same name. A Linux
+ * directory holds names byte for byte, a file uploaded from a Mac may be
+ * stored decomposed, and a page names its picture in the form its author
+ * typed.
+ */
+function storedNameAmong(entries: readonly string[], name: string): string | null {
+  if (entries.includes(name)) return name;
+  const wanted = name.normalize("NFC");
+  const same = entries.filter((entry) => entry.normalize("NFC") === wanted);
+  return same.length === 1 ? same[0]! : null;
+}
+
+/** {@link openRegular} for a name somebody wrote: the file of exactly that
+ *  name, else the one stored in the other Unicode form. `names` is the
+ *  folder's listing when this process may not read it itself. */
+function openStored(root: string, name: string, names: readonly string[] | undefined): OpenFile | null {
+  const exact = openRegular(root, name);
+  if (exact) return exact;
+  let entries = names;
+  if (!entries) {
+    try {
+      entries = readdirSync(root);
+    } catch {
+      return null;
+    }
+  }
+  const stored = storedNameAmong(entries, name);
+  // The entry of exactly that name was refused above (a link, a folder): its
+  // twin in the other form is never served in its place.
+  return stored === null || stored === name ? null : openRegular(root, stored);
+}
+
 /** The loopback server a page is loaded from. */
 interface PageServer {
   /** `http://127.0.0.1:<port>`. */
@@ -244,7 +305,7 @@ interface PageServer {
 
 const listenAddressSchema = z.looseObject({ port: z.number().int().positive() });
 
-function startPageServer(root: string): Promise<PageServer> {
+function startPageServer(root: string, names: readonly string[] | undefined): Promise<PageServer> {
   const token = randomBytes(8).toString("hex");
   const prefix = `/${token}/`;
   let article: string | null = null;
@@ -273,10 +334,7 @@ function startPageServer(root: string): Promise<PageServer> {
       res.end(req.method === "HEAD" ? undefined : article);
       return;
     }
-    // One file name deep: the task folder is flat, and a dot name is never a
-    // task file.
-    const flat = name !== "" && !/[/\\\0]/.test(name) && !name.startsWith(".");
-    const file = flat ? openRegular(root, name) : null;
+    const file = servable(name) ? openStored(root, name, names) : null;
     if (!file) {
       if (name !== "") missing.add(name);
       refuse(res);
@@ -549,6 +607,10 @@ const blockedEventSchema = z.looseObject({
   }),
 });
 
+/** A script dialog the page opened: `alert`, `confirm`, `prompt`, or the
+ *  question a page asks before it lets the browser leave it. */
+const dialogEventSchema = z.looseObject({ type: z.string().optional() });
+
 /** What one page asked for beyond its own server. */
 interface Asked {
   hosts: Set<string>;
@@ -581,6 +643,8 @@ interface ViewContext {
 }
 
 const pause = (ms: number): Promise<void> => new Promise((done) => setTimeout(done, ms));
+/** A number of px as a sentence prints it. */
+const count = (n: number): string => n.toLocaleString("en-US");
 
 /** Resolves at the session's next load event. */
 function nextLoad(browser: Browser, sessionId: string): Promise<void> {
@@ -647,8 +711,11 @@ function pngSize(bytes: Buffer): PictureSize | null {
 /** Picture the page at one view. The stretch starts at `view.from`, is never
  *  less than one screen and never more than the view's cap. Heights and
  *  widths are in the picture's own px: what the screen shows, after a phone
- *  has shrunk a page it lays out wider than itself. */
-async function pictureView(ctx: ViewContext, view: JobView, file: string): Promise<Shot> {
+ *  has shrunk a page it lays out wider than itself. A page that is over
+ *  before `view.from` at this width is this view's own outcome, not a
+ *  failure: a phone lays a page out taller than a desktop does, so a stretch
+ *  further down one may not exist on the other. */
+async function pictureView(ctx: ViewContext, view: JobView, file: string): Promise<Shot | Ended> {
   const { browser, sessionId } = ctx;
   await browser.send(
     "Emulation.setDeviceMetricsOverride",
@@ -666,9 +733,7 @@ async function pictureView(ctx: ViewContext, view: JobView, file: string): Promi
   const contentHeight = Math.round(layout.cssContentSize.height * scale);
   // A page shorter than the screen is still pictured as one screen.
   const pageHeight = Math.max(contentHeight, view.height);
-  if (view.from >= pageHeight) {
-    throw new Error(`the page is ${pageHeight} px tall at this width, so nothing starts at ${view.from} px`);
-  }
+  if (view.from >= pageHeight) return { view: view.id, pageHeight };
   let height = Math.min(pageHeight - view.from, view.maxHeight);
   for (;;) {
     const shot = screenshotSchema.parse(
@@ -716,9 +781,13 @@ const sessionSchema = z.looseObject({ sessionId: z.string() });
 async function picturePage(job: Job, server: PageServer, page: JobPage, index: number): Promise<PageReport> {
   const asked: Asked = { hosts: new Set(), urls: new Set() };
   const shots: Shot[] = [];
+  const ended: Ended[] = [];
+  const dialogs = { count: 0 };
   const report = (error: string | null): PageReport => ({
     file: page.file,
     shots,
+    ended,
+    dialogs: dialogs.count,
     asked: [...asked.hosts].slice(0, REPORT_LIST_MAX),
     askedCount: asked.urls.size,
     missing: server.missing(),
@@ -727,9 +796,10 @@ async function picturePage(job: Job, server: PageServer, page: JobPage, index: n
 
   let url = server.base + encodeURIComponent(page.file);
   let article: string | null = null;
-  // Opened here first, the way the page server will open it: a name that is
-  // gone, or a link, would otherwise be pictured as the server's "not found".
-  const source = openRegular(job.root, page.file);
+  // Opened here first, by the page server's own rule: a name it would not
+  // answer (a dot name, a path), one that is gone, or a link would otherwise
+  // be pictured as the server's "not found".
+  const source = servable(page.file) ? openStored(job.root, page.file, job.names) : null;
   if (!source) return report("the file is not there to render");
   try {
     if (page.kind === "markdown") {
@@ -771,6 +841,15 @@ async function picturePage(job: Job, server: PageServer, page: JobPage, index: n
           const blocked = event.data.issue.details.contentSecurityPolicyIssueDetails.blockedURL;
           noteRequest(asked, blocked, server.origin);
         }
+      } else if (method === "Page.javascriptDialogOpening") {
+        // With this client attached the page waits on its dialog until it is
+        // answered, and nobody is there to answer: it is dismissed, so the
+        // page loads on. Only the question asked before leaving a page is
+        // accepted, or the next width's load would never start.
+        const event = dialogEventSchema.safeParse(params);
+        const leaving = event.success && event.data.type === "beforeunload";
+        if (!leaving) dialogs.count += 1;
+        browser.send("Page.handleJavaScriptDialog", { accept: leaving }, sessionId).catch(() => {});
       }
     });
     const ctx: ViewContext = { browser, sessionId, url, origin: server.origin, out: job.out, maxBytes: job.maxBytes };
@@ -779,7 +858,9 @@ async function picturePage(job: Job, server: PageServer, page: JobPage, index: n
       await browser.send("Network.enable", {}, sessionId);
       await browser.send("Audits.enable", {}, sessionId);
       for (const view of job.views) {
-        shots.push(await pictureView(ctx, view, `${index + 1}-${view.id}.png`));
+        const pictured = await pictureView(ctx, view, `${index + 1}-${view.id}.png`);
+        if ("pageHeight" in pictured) ended.push(pictured);
+        else shots.push(pictured);
       }
     } finally {
       stop();
@@ -804,6 +885,14 @@ async function picturePage(job: Job, server: PageServer, page: JobPage, index: n
   browser.kill();
   await browser.ended;
   current = null;
+  // Nothing at `from` at any width asked for: said with each width's own end.
+  if (error === null && shots.length === 0 && ended.length > 0) {
+    const viewOf = (end: Ended): JobView | undefined => job.views.find((view) => view.id === end.view);
+    const ends = ended.map(
+      (end) => `at ${count(end.pageHeight)} px at the ${end.view} width (${viewOf(end)?.width ?? 0} px)`,
+    );
+    error = `the page ends ${ends.join(" and ")}, so nothing starts at ${count(viewOf(ended[0]!)?.from ?? 0)} px`;
+  }
   return report(error);
 }
 
@@ -831,7 +920,7 @@ async function main(): Promise<number> {
   };
   process.on("SIGTERM", stopped);
   process.on("SIGINT", stopped);
-  const server = await startPageServer(job.root);
+  const server = await startPageServer(job.root, job.names);
   try {
     for (const [index, page] of job.pages.entries()) {
       pages.push(await picturePage(job, server, page, index));

@@ -896,6 +896,10 @@ describe("report_outcome's evidence field (P13-D-26)", () => {
         '<img src="https://fonts.example.com/a.css"><img src="assets/chart.png"><p>fake-height:3412</p>',
       );
       writeFileSync(path.join(dir, "data.csv"), "a,b\n");
+      // One screen of page: 800 px on a desktop, 844 on a phone.
+      writeFileSync(path.join(dir, "short.html"), "<p>one screen</p>");
+      writeFileSync(path.join(dir, "endless.html"), "<p>fake-height:50000</p>");
+      writeFileSync(path.join(dir, ".draft.html"), "<p>a dot name is no file of the task to any reader</p>");
       type Block = { type: "text"; text: string } | { type: "image"; data: string; mimeType: string };
       const call = async (args: { name: string; view?: string; from?: number }) => {
         // SAFETY: the tool answers with text and image blocks, the SDK's own
@@ -917,8 +921,8 @@ describe("report_outcome's evidence field (P13-D-26)", () => {
             "Phone, 390 px wide: 0 to 2,000 px of 3,412 \\(`nextFrom`: 2000\\)\\. " +
             "It asked the network for 1 thing \\(fonts\\.example\\.com\\), which a capture never loads, " +
             "and for `assets/chart\\.png`, which is not among this task's files \\(the folder is flat\\)\\. " +
-            "Saved for this run at `\\S+/workspace/\\.captures/\\S+/out/1-desktop\\.png` and `\\S+/out/1-phone\\.png`: " +
-            "scratch, nobody else sees it, and the next capture on this task replaces it\\.$",
+            "Saved at `\\S+/workspace/\\.captures/\\S+/out/1-desktop\\.png` and `\\S+/out/1-phone\\.png`: " +
+            "scratch, and the next capture on this task replaces it\\.$",
         ),
       );
       // One picture per width, each a stretch a model can read.
@@ -932,8 +936,31 @@ describe("report_outcome's evidence field (P13-D-26)", () => {
       expect(rest.text).not.toContain("Desktop");
       expect(rest.pictures).toEqual([{ mimeType: "image/png", width: 390, height: 1412 }]);
 
+      // A phone lays a page out taller than a desktop does. Past the shorter
+      // layout's end the other width is still handed over, and the reply says
+      // which width ended where. CANARY: fail the call when one width has
+      // nothing at `from` and following the phone's `nextFrom` ends in an
+      // error that names no width.
+      const uneven = await call({ name: "short.html", from: 820 });
+      expect(uneven.text).toMatch(
+        /^\[done\] `short\.html` as a reader sees it\. Desktop, 1280 px wide: the page ends at 800 px, so nothing starts at 820 px\. Phone, 390 px wide: 820 to 844 px of 844, the end of the page\. Saved at /,
+      );
+      expect(uneven.pictures).toEqual([{ mimeType: "image/png", width: 390, height: 24 }]);
+      // Past the end at both widths nothing failed: there is nothing there.
+      expect(await call({ name: "short.html", from: 5000 })).toEqual({
+        text:
+          "[noop] `short.html` ends at 800 px at the desktop width (1280 px) and at 844 px at the phone width (390 px), " +
+          "so nothing starts at 5,000 px.",
+        pictures: [],
+      });
+      // A reply never hands out a `nextFrom` the tool would then refuse.
+      // CANARY: print `nextFrom` for every cut stretch and this one says 42000.
+      expect((await call({ name: "endless.html", view: "desktop", from: 40_000 })).text).toContain(
+        "Desktop, 1280 px wide: 40,000 to 42,000 px of 50,000; the page runs on, and a stretch starts no further down than 40,000 px.",
+      );
+
       // It saved nothing on the task: no file, no entry, no audit row.
-      expect(readdirSync(dir).sort()).toEqual(["data.csv", "post.html"]);
+      expect(readdirSync(dir).sort()).toEqual([".draft.html", "data.csv", "endless.html", "post.html", "short.html"]);
       const file = readTaskFile({ projectSlug: store.slug, taskKey: "VIB-3", dataRoot: store.dataRoot })!.parsed;
       expect(file.timeline).toEqual([]);
       expect(file.frontmatter.pageCaptures).toBeUndefined();
@@ -947,6 +974,10 @@ describe("report_outcome's evidence field (P13-D-26)", () => {
       const missing = (await call({ name: "nope.html" })).text;
       expect(missing).toMatch(/^\[noop\] VIB-3 has no attachment `nope\.html`\. It holds: /);
       expect(missing).toContain("post.html");
+      // A dot name is hidden from every listing, so it is no page to look at
+      // either. CANARY: let a dot name through to the renderer and the answer
+      // is no longer the reader's own sentence.
+      expect((await call({ name: ".draft.html" })).text).toMatch(/^\[noop\] VIB-3 has no attachment `\.draft\.html`\. It holds: /);
     });
   });
 
