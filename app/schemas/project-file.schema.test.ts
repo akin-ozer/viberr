@@ -231,29 +231,38 @@ describe("parseProjectFrontmatter — fallback wording (ruling 458(h))", () => {
 
 /**
  * Ruling 684(a): every checkout path is `<taskDir>/workspace/<name>`, so a
- * hand-edited `owner/..` made the checkout the task directory itself, and the
- * operator's "no `.git/HEAD`, remove and re-clone" step could remove it.
+ * hand-edited `owner/..` made the checkout the task directory itself, and
+ * `owner/.` made it the whole workspace, support checkouts included. The
+ * "no `.git/HEAD`, remove and re-clone" step could remove either.
  */
 describe("parseProjectFrontmatter — repo (ruling 684(a))", () => {
-  it("reads a repository GitHub could not name as none, with an error an admin's store check lists", () => {
-    // CANARY: read `repo` with the bare `repoSchema` (drop the `REPO_SLUG_RE`
-    // refine) and `akin-ozer/..` loads as the project's repository, with no
-    // diagnostic.
-    const read = (repo: string) =>
-      parseProjectFrontmatter({ slug: "proj", repo }, { fallbackSlug: "proj" });
+  const read = (repo: string) =>
+    parseProjectFrontmatter({ slug: "proj", repo }, { fallbackSlug: "proj" });
 
-    const traversal = read("akin-ozer/..");
-    expect(traversal.frontmatter.repo).toBeNull();
-    expect(traversal.diagnostics.filter((d) => d.path === "repo")).toEqual([
-      {
-        severity: "error",
-        code: "frontmatter.invalid_field",
-        path: "repo",
-        message:
-          "Frontmatter field `repo` is invalid (not a GitHub owner/name, so the project reads as having no repository); using null.",
-      },
-    ]);
-    // A name GitHub allows that starts with a dot is still a repository.
+  it.each(["akin-ozer/..", "akin-ozer/."])(
+    "reads %s, a repository GitHub could not name, as none with an error-severity diagnostic",
+    (repo) => {
+      // CANARY: read `repo` with the bare `repoSchema` (drop the
+      // `REPO_SLUG_RE` refine) and both rows load as the project's repository,
+      // with no diagnostic; drop the `?` from the name's `(?!\.\.?$)` and the
+      // `akin-ozer/.` row does.
+      const parsed = read(repo);
+      expect(parsed.frontmatter.repo).toBeNull();
+      expect(parsed.diagnostics.filter((d) => d.path === "repo")).toEqual([
+        {
+          severity: "error",
+          code: "frontmatter.invalid_field",
+          path: "repo",
+          message:
+            "Frontmatter field `repo` is invalid (not a GitHub owner/name, so the project reads as having no repository); using null.",
+        },
+      ]);
+    },
+  );
+
+  it("keeps a name GitHub allows that starts with a dot", () => {
+    // CANARY: refuse a name's leading dot, as the mirror's old rule did, and
+    // this reads null.
     expect(read("akin-ozer/.github").frontmatter.repo).toBe("akin-ozer/.github");
   });
 });
