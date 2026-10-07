@@ -282,6 +282,15 @@ export const OTHER_TASK_FILES_SENTENCE =
   " Another task's files are read with `read_task_attachment` and that task's `taskKey`, never from its folder.";
 
 /**
+ * Ruling 691: the contract's word on looking at a page. A run that holds
+ * `capture_page` is told so where it is told about the task's files, in the
+ * per-run instruction: an agent that delivers or judges a page from its source
+ * cannot see a broken table or a layout that falls apart on a phone.
+ */
+export const PAGE_CAPTURE_SENTENCE =
+  " A file here that is a page (.html, .htm, .md, .markdown) can be looked at as a reader sees it: `capture_page` with its name hands you the picture at a desktop and a phone width. Look before you deliver a page, and judge the picture as well as the source when you review one. A page must carry what it needs or point at files saved beside it: a capture loads nothing from the network.";
+
+/**
  * Ruling 592: why the workspace contract lets a run read the task's
  * attachments folder.
  *

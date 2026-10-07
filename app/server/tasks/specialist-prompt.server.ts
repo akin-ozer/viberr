@@ -35,6 +35,7 @@ import {
   type DeployedSpecialistView,
   KB_CONTRACT_CORRECTION_SENTENCE,
   OTHER_TASK_FILES_SENTENCE,
+  PAGE_CAPTURE_SENTENCE,
 } from "./specialist-roster.server";
 
 /**
@@ -470,6 +471,10 @@ export interface AnalyzePromptInput {
    *  the gateway's board server on Codex), so the contract names it as the way
    *  to another task's files. */
   taskFileReader?: boolean;
+  /** Ruling 691: the run holds `capture_page` (the same readers, on a server
+   *  that can render a page), so the contract says a page among the task's
+   *  files can be looked at. */
+  pageCapture?: boolean;
   /**
    * Ruling 422 (F39-45): the knowledge-base folders this run's instructions
    * index (ABSOLUTE), rendered as a READ-ONLY exception inside the workspace
@@ -605,6 +610,7 @@ export function buildAnalyzePrompt(input: AnalyzePromptInput): string {
         ` Copying a file into it is how a file is posted on the task ` +
         `thread (see "Files on the task thread").` +
         (input.taskFileReader ? OTHER_TASK_FILES_SENTENCE : ``) +
+        (input.pageCapture ? PAGE_CAPTURE_SENTENCE : ``) +
         ` Everything else ` +
         `outside the working directory` +
         (kbDirs.length > 0 ? `, apart from reading the knowledge-base folders above,` : ``) +
@@ -615,6 +621,7 @@ export function buildAnalyzePrompt(input: AnalyzePromptInput): string {
           ATTACHMENTS_READ_SENTENCE +
           ` Never write into it.` +
           (input.taskFileReader ? OTHER_TASK_FILES_SENTENCE : ``) +
+          (input.pageCapture ? PAGE_CAPTURE_SENTENCE : ``) +
           ` Everything else outside the working directory` +
           (kbDirs.length > 0 ? `, apart from reading the knowledge-base folders above,` : ``) +
           ` stays off-limits.\n`

@@ -22,11 +22,14 @@ import {
   queueFakeRun,
 } from "../../../test-support/fake-runtime";
 import { settle, waitFor } from "../../../test-support/polling";
+import { withEnv } from "../../../test-support/env";
+import { writeFakeBrowser } from "../../../test-support/fake-browser";
 import { startHttpUpstream, type UpstreamHandle } from "../../../test-support/mcp-upstream";
 import { appendTimelineEvent, readTaskFile } from "~/server/files/task-writer.server";
 import { readProjectFile } from "~/server/files/project-writer.server";
 import { taskAttachmentsDir } from "~/server/files/file-store-root.server";
 import { keepDelivery } from "~/server/files/kept-deliveries.server";
+import { imageHeader } from "~/server/files/task-attachments.server";
 import { rebuildAll } from "~/server/projections/rebuilder.server";
 import { interruptRun, startRun } from "~/server/runtimes/run-service.server";
 import { getRun } from "~/server/runtimes/run-store.server";
@@ -525,6 +528,84 @@ describe("ruling 589: the gateway answers a Codex run's board server itself", ()
     await interrupt(runId);
     await settle();
     expect(await gatewayAnswers(board.url, board.headers.Authorization)).toBe(401);
+  });
+});
+
+describe("ruling 691: the gateway's board server pictures a page for a Codex run", () => {
+  it("a Codex run's board server lists capture_page and answers it with the same pictures and the saved paths", async () => {
+    const fake = writeFakeBrowser(ctx.makeTempDir("viberr-fake-browser-"));
+    const dir = taskAttachmentsDir(store.slug, "VIB-1", store.dataRoot);
+    mkdirSync(dir, { recursive: true });
+    writeFileSync(path.join(dir, "post.html"), "<h1>Launch</h1><p>fake-height:2600</p>");
+    const mount = resolveBoardMcp({ backend: "codex", collaborates: true, dataRoot: store.dataRoot });
+    queueFakeRun({ lines: [{ t: "1", ev: "text", tag: "assistant", text: "writing" }], sessionId: "s", backend: "codex", keepRunning: true }, "codex");
+    const { runId } = await startRun(store.db, {
+      projectSlug: store.slug,
+      taskKey: "VIB-1",
+      role: "Writer",
+      kind: "primary",
+      backend: "codex",
+      model: defaultModelFor("codex"),
+      prompt: "go",
+      dataRoot: store.dataRoot,
+      mcpServers: { viberr_board: mount! },
+      agentProfileId: "writer",
+      credentialUserId: store.users.arda.id,
+    });
+    await settle();
+    const board = mountSchema.parse(lastRunSpec()?.mcpServers?.viberr_board);
+    const connect = async () => {
+      const client = new Client({ name: "codex-cli", version: "1.0.0" });
+      await client.connect(new StreamableHTTPClientTransport(new URL(board.url), { requestInit: { headers: board.headers } }));
+      return client;
+    };
+    // A server with no browser offers no tool it could not answer.
+    const without = await connect();
+    expect((await without.listTools()).tools.map((tool) => tool.name)).not.toContain("capture_page");
+    expect((await without.callTool({ name: "capture_page", arguments: { name: "post.html" } })).isError).toBe(true);
+    await without.close();
+
+    await withEnv({ VIBERR_BROWSER_EXECUTABLE: fake.executable, ...fake.env() }, async () => {
+      const client = await connect();
+      // CANARY: leave PAGE_CAPTURE_TOOL out of openBoardSession's list and the
+      // call answers that the server has no such tool.
+      expect((await client.listTools()).tools.map((tool) => tool.name)).toEqual([
+        "read_board",
+        "read_timeline_entry",
+        "read_task_attachment",
+        "capture_page",
+      ]);
+      const result = await client.callTool({ name: "capture_page", arguments: { name: "post.html", view: "desktop" } });
+      const content = z
+        .array(
+          z.union([
+            z.object({ type: z.literal("text"), text: z.string() }),
+            z.object({ type: z.literal("image"), data: z.string(), mimeType: z.string() }),
+          ]),
+        )
+        .parse(result.content);
+      expect(result.isError).toBeFalsy();
+      const [text, picture] = content;
+      // The text names where the picture was saved: whether a Codex model is
+      // handed an image block is not established, and the run can open the
+      // file with its own viewer.
+      expect(text).toMatchObject({ type: "text" });
+      expect(text?.type === "text" ? text.text : "").toMatch(
+        /^\[done\] `post\.html` as a reader sees it\. Desktop, 1280 px wide: 0 to 2,000 px of 2,600 \(`nextFrom`: 2000\)\. Saved for this run at `\S+\/workspace\/\.captures\/\S+\/out\/1-desktop\.png`: scratch/,
+      );
+      expect(content).toHaveLength(2);
+      expect(picture?.type === "image" ? imageHeader(Buffer.from(picture.data, "base64")) : null).toEqual({
+        mimeType: "image/png",
+        width: 1280,
+        height: 2000,
+      });
+      const refused = await client.callTool({ name: "capture_page", arguments: { name: "post.html", view: "tablet" } });
+      expect(refused.isError).toBe(true);
+      await client.close();
+    });
+
+    await interrupt(runId);
+    await settle();
   });
 });
 

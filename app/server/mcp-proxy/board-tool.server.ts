@@ -104,6 +104,44 @@ export const TASK_ATTACHMENT_TOOL: Tool = {
   annotations: { title: "Read one attachment of a task", ...READ_ONLY },
 };
 
+/** Ruling 691: what `capture_page` says it does, on either backend. */
+export const CAPTURE_PAGE_DESCRIPTION =
+  "Look at ONE page on this task as a reader sees it. `name` is a .html, .htm, .md or .markdown file among this task's files, exactly as `read_board` lists it. Viberr renders it in a real browser at a desktop width (1280 px) and a phone width (390 px), or the one `view` names, scrolls it once from top to bottom, and hands you the picture: one stretch of the page, up to 2000 px tall, sized so you can read it. When the page runs on, the reply gives `nextFrom`; call again with `from` set to it. A markdown file is set as a plain article first. The page loads only its own bytes and the files saved beside it on the task, nothing from the network, and the reply names what it asked for and did not get. Look before you deliver a page, and when you review one: the source tells you the words, the picture tells you what a reader gets. Viberr pictures every delivered page the same way and keeps those pictures on the task as `<file>.capture-desktop.png` and `<file>.capture-phone.png`. This call saves nothing on the task.";
+
+export const CAPTURE_PAGE_FIELDS = {
+  name: "The page's file name among this task's files, exactly as `read_board` lists it.",
+  view: "One width to picture, `desktop` (1280 px) or `phone` (390 px). Omit for both.",
+  from: "Where the stretch starts, in px from the top of the page: the `nextFrom` an earlier reply gave. Omit for the top.",
+} as const;
+
+/** The furthest down a page a stretch may start: the walk to it stays well
+ *  inside a page's 25 seconds. */
+export const CAPTURE_PAGE_MAX_FROM = 40_000;
+
+export const PAGE_CAPTURE_TOOL: Tool = {
+  name: "capture_page",
+  title: "Look at one page as a reader sees it",
+  description: CAPTURE_PAGE_DESCRIPTION,
+  inputSchema: {
+    type: "object",
+    properties: {
+      name: { type: "string", description: CAPTURE_PAGE_FIELDS.name },
+      view: { type: "string", enum: ["desktop", "phone"], description: CAPTURE_PAGE_FIELDS.view },
+      from: { type: "integer", minimum: 0, maximum: CAPTURE_PAGE_MAX_FROM, description: CAPTURE_PAGE_FIELDS.from },
+    },
+    required: ["name"],
+  },
+  annotations: { title: "Look at one page as a reader sees it", ...READ_ONLY },
+};
+
+/** `capture_page`'s arguments, parsed where the gateway receives the call. */
+export const pageCaptureArgsSchema = z.object({
+  name: z.string(),
+  view: z.enum(["desktop", "phone"]).optional(),
+  from: z.number().int().min(0).max(CAPTURE_PAGE_MAX_FROM).optional(),
+});
+export type PageCaptureArgs = z.infer<typeof pageCaptureArgsSchema>;
+
 /** The three tools, in the order the gateway lists them. */
 export const BOARD_TOOLS: Tool[] = [BOARD_READ_TOOL, TIMELINE_ENTRY_TOOL, TASK_ATTACHMENT_TOOL];
 
@@ -205,6 +243,34 @@ export async function taskAttachmentResult(
   } catch (error) {
     logger.warn("gateway read_task_attachment failed", { taskKey: input.taskKey, err: toError(error) });
     return textResult("[error] The attachment could not be read.", true);
+  }
+}
+
+/**
+ * `capture_page`: the same pictures a Claude run's gets. Whether the Codex CLI
+ * hands an image block in a tool result to the model is not established (the
+ * browser mount leaves them out for that reason), so the text names where the
+ * pictures were saved, which the run opens with its own image viewer.
+ */
+export async function pageCaptureResult(input: BoardCallContext, args: PageCaptureArgs): Promise<CallToolResult> {
+  try {
+    const { captureTaskPage } = await import("~/server/tasks/page-capture.server");
+    const reply = await captureTaskPage(input.db, input.mount.dataRoot ? { dataRoot: input.mount.dataRoot } : {}, {
+      projectSlug: input.projectSlug,
+      taskKey: input.taskKey,
+      name: args.name,
+      view: args.view,
+      from: args.from,
+    });
+    return {
+      content: [
+        { type: "text", text: reply.text },
+        ...reply.images.map((image) => ({ type: "image" as const, data: image.data, mimeType: image.mimeType })),
+      ],
+    };
+  } catch (error) {
+    logger.warn("gateway capture_page failed", { taskKey: input.taskKey, err: toError(error) });
+    return textResult("[error] The page could not be captured.", true);
   }
 }
 

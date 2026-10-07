@@ -78,6 +78,18 @@ import { reprojectTask, taskRef, type TaskMutationContext } from "./task-mutatio
  * operator's summary of it and the paths it changed.
  */
 
+/**
+ * Ruling 691: the operator's word on a delivered page's pictures, said where
+ * `write_completion_packet` is described on either backend (and in the
+ * operator's definition). Viberr puts them on the card itself, so the operator
+ * names none, and it opens one before it writes how a page looks.
+ */
+export const PAGE_PICTURES_PACKET_SENTENCE =
+  "Viberr pictures each result file that is a page and shows the pictures beside it (`completionPacket.pageCaptures`), so never name one of those as a screenshot. Open a page's picture with `read_task_attachment` before you say how it looks, and when a page has no picture the fact says why.";
+/** The same, in the space a plan field's description has. */
+export const PAGE_PICTURES_PLAN_SENTENCE =
+  "Never one of Viberr's own pictures of a result page (`completionPacket.pageCaptures`): those show beside the page without being named.";
+
 /** The slice of the frontmatter the packet binds to. */
 type PacketState = Pick<TaskFrontmatter, "workRevision" | "deliveredAt" | "completionPacket">;
 

@@ -99,8 +99,6 @@ const TOOL_QUEUE_WAIT_MS = 15_000;
 /** The tallest stretch an agent is handed: legible to a model, and inside the
  *  model API's 2000 px limit once a request holds more than 20 images. */
 const TOOL_STRETCH_PX = 2_000;
-/** The furthest down a page an agent's stretch may start. */
-export const PAGE_CAPTURE_MAX_FROM = 40_000;
 /** The largest source set as a page, by kind. */
 const SOURCE_MAX_BYTES = { html: 10 * 1024 * 1024, markdown: 2 * 1024 * 1024 } satisfies Record<PageKind, number>;
 /** A delivery's files are copied where the renderer can read them: each up to

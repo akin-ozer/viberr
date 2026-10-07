@@ -746,7 +746,12 @@ card until one of the person's runs has made a model call (ruling 604). A readin
   (`board-tool.server.ts`), fresh and resumed. It has `read_board`,
   `read_timeline_entry` and `read_task_attachment` (ruling 594), the same readers and
   descriptions as Claude's toolkit, over the run's own project and task; the mount carries only the store, and the run is handed the
-  URL and its token. A profile with no collaboration grant mounts nothing, and neither
+  URL and its token. On a server that can render a page it also lists `capture_page`
+  (ruling 691, §4.2), answered with the text and one image block per width. Whether the
+  Codex CLI hands an image block in a tool result to the model is not established (the
+  browser mount leaves them out on Codex for the same reason), so the text names where
+  each picture was saved in the run's scratch folder, which the run opens with its own
+  image viewer. A profile with no collaboration grant mounts nothing, and neither
   does a run when the gateway is not running.
 
 ## 3. A run's life
@@ -1339,7 +1344,10 @@ operator bursts under it (ruling 505; ui/surfaces.md).
   the run's to READ as well as to copy into, and names it read-only to a run that cannot
   post files, with why (`ATTACHMENTS_READ_SENTENCE`, ruling 592), and a run that holds
   `read_task_attachment` is told another task's files are read with it, never from that
-  task's folder (`OTHER_TASK_FILES_SENTENCE`, ruling 594); the workspace contract also lets
+  task's folder (`OTHER_TASK_FILES_SENTENCE`, ruling 594), and a run that holds
+  `capture_page` is told that a page among the task's files can be looked at as a reader
+  sees it, to look before it delivers one and to judge the picture as well as the source
+  when it reviews one (`PAGE_CAPTURE_SENTENCE`, ruling 691); the workspace contract also lets
   the run READ its knowledge-base folders, its profile's plus the project's rulings KB,
   `knowledgeBaseReadDirs`, ruling 422, and never write them; a run that holds
   `correct_knowledge_doc` is told there that the tool is how a passage changes,
@@ -1429,6 +1437,7 @@ which Viberr's gateway answers for a Codex run (rulings 585 and 589).
 | `github_read {path}` | `read-github-api` | GET-only, repo-scoped read through the project PAT on the server (≤ 32,000 bytes, ruling 624), audit `task.agent.github_read` |
 | `read_board {taskKey?}` | none; built when the run holds any collaboration grant (`holdsCollaborationGrant`), so only beside another tool; on Codex the gateway's `viberr_board` server (ruling 589) | this project's board, read-only: one task (title, stage, readiness, what it waits on, archived, goal, and its `outcome` once it has one: the current completion summary and each verdict's report on what it delivered, ruling 569) or the list; archived tasks included (ruling 281, `board-read.server.ts`). One task also lists its `timeline`, every entry as `<occurredAt> · <type> · <author> · <title>`, newest first, the newest 200 and a line counting the rest (ruling 596), and its kept `deliveries`, each stamp with the files as that delivery held them, newest first (ruling 597) |
 | `read_task_attachment {name, taskKey?, offset?, delivery?}` | none; built with `read_board`, on both backends | one attachment of this task, or of another task of the project with `taskKey`, read where it is: text in pages of up to 32,000 bytes (ruling 624), a spreadsheet as CSV, an image as the picture, a binary refused (the operator's reader, `readAgentTaskAttachment`, ruling 594); `read_board` lists each task's `files` for it. With `delivery`, a stamp from the task's `deliveries`, the file as that delivery held it (ruling 597) |
+| `capture_page {name, view?, from?}` | none; built with `read_board`, on both backends, only while the server can render a page (`pageCaptureStatus`: `VIBERR_BROWSER_EXECUTABLE` set and on disk) | one page of THIS task as a reader sees it (ruling 691, `captureTaskPage`): `name` is a `.html`, `.htm`, `.md` or `.markdown` file among the task's files; Viberr renders it at a desktop width (1280 px) and a phone width (390 px), or the one `view` names, and answers with one stretch of the page per width, up to 2,000 px tall from `from` (at most 40,000), as an image block each, with `nextFrom` when the page runs on, what the page asked the network for, which sibling names it asked for and did not find, and where the pictures were saved for the run. It saves nothing on the task and writes no audit row or timeline entry. `[noop]` for a name the task does not hold, a file that is not a page and a source over 10 MB (markdown 2 MB); `[busy]` when the renderer has not started the call within 15 s; `[error]` with the reason for a render that failed, a task with no owner under isolation included |
 | `read_timeline_entry {occurredAt, taskKey?}` | none; built with `read_board`, on both backends | one timeline entry, whole, of this task or, with `taskKey`, of another task of the project, by its stamp: the prompt's recent timeline (five entries, each cut at 220 characters) prints it after a clipped entry ("(clipped; the whole entry is at `<occurredAt>`)") and counts the older entries it leaves out, naming `read_board` for them to a run that holds it, and `read_board` on a task lists every entry's; entries written in one millisecond (a verdict's report and its quality marker) come back together under `entries`, in the order they were written, sharing the 40,000-character budget; a `kb_correction` entry comes with `correction`: the passage it replaced, the text it wrote and the evidence, whole from the record, and whether a person undid it, to a run given that knowledge base; to any other run it quotes nothing while a deployed agent is not given the knowledge base (rulings 568, 648); read-only (rulings 563, 596, 644, 645 and 648, `readTimelineEntry`; the Codex board server takes the run's knowledge mounts as what it is given) |
 | `read_knowledge_doc {kb, path}` | the run has a knowledge base attached | one document of an attached knowledge base, whole (§6; ruling 283) |
 | `correct_knowledge_doc {kb, path, replaces?, text, evidence}` | the run has a knowledge base attached; built after `read_board`, so a knowledge base alone never mounts `read_board` | writes `text` into that document in place of `replaces`, the exact passage (an empty `text` deletes it, ruling 581), or at its end (`correctKnowledgeDoc`, rulings 483 and 498; the rules are [file-formats.md §8](../architecture/file-formats.md)): only in a knowledge base this run was given; a refusal writes nothing and says what to fix; a `kb_correction` timeline event under the agent's own name, quoting the passages only when every deployed specialist is given that knowledge base (ruling 568), and audit `task.kb_correction.merged`, and no notification; a person undoes it from the Controller page |
@@ -1946,6 +1955,35 @@ runtime's answer for a missing grant.
   Requires effective `use-browser: direct` **and** `use-web-search-fetch: direct`, the
   package and the supervisor on disk and, when `VIBERR_BROWSER_EXECUTABLE` is set, that
   binary. `/resources/health.browser` is the instance-level probe.
+- **Page capture** (ruling 691; `page-capture.server.ts`, `page-capture-child.server.ts`):
+  the same pinned browser, driven by Viberr itself and not by an agent, with no grant.
+  The renderer is a script Node runs as TypeScript, started through the ruling 460
+  launcher as the TASK OWNER's agent uid (`taskOwnerLaunch`, `runPersonCommand`: its own
+  process group, `filteredSpawnEnv()`, the person's `$HOME`, a temp folder in its scratch,
+  `VIBERR_RUN_ID` for the sweep; SIGTERM at 10 s plus 25 s a page, then the group killed).
+  With isolation on and no owner nothing is rendered; with no launcher (the host dev
+  server, tests) it runs as the server's own user, as runs and gates do. It serves the
+  page and its sibling files from a loopback server on a random port under a random token
+  path, one file name deep, opened without following a link, and loads it over http, so a
+  page cannot pull a `file://` resource into the picture. It starts one Chromium per page
+  over `--remote-debugging-pipe` with `--headless=new --no-sandbox` (the sandbox cannot
+  start in the image, which is why this is never the server's process) and
+  `--proxy-server=http://127.0.0.1:9 --proxy-bypass-list=<-loopback>;127.0.0.1:<port>`:
+  every request but the page server's, loopback included, goes to a closed port, and the
+  page's own response carries `default-src 'self' data: blob: 'unsafe-inline'
+  'unsafe-eval'`. Scripts run, with no network, on an origin that holds no cookie. Each
+  width loads the page afresh (1280 by 800; 390 by 844 as a phone), walks it top to bottom
+  so lazy content is drawn, and takes the page from the top to the view's cap with
+  `captureBeyondViewport` and a clip, which leaves the layout alone (a `100vh` section
+  stays one screen). A markdown file is first set as an article with react-markdown and
+  remark-gfm, raw HTML left as text. A page past 25 s is stopped with its browser and the
+  next one starts. The server reads back `out/report.json` and each PNG through
+  `readAttachmentBytes`, and keeps a picture only when its own header says PNG at the
+  view's width. A kept delivery's files are the server's own, which an agent uid cannot
+  read, so a delivery's job first copies them into its scratch (`files/`, each up to
+  25 MB, 200 MB in all), readable by the agent group and not writable by it. Measured in
+  the image (Debian Chromium 154, 2026-10-07): 1.6 s for an HTML page at both widths in a
+  fresh browser, 1.25 s for a markdown page.
 - **Shell inventory** (rulings 191, 196, 275; `shellInventoryPrompt`,
   `app/server/ops/toolchain.server.ts`): every specialist run, operator run and controller
   turn carries "## Shell inventory (measured on this host, not a guess)": the versions

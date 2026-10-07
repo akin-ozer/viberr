@@ -72,12 +72,15 @@ import {
 import {
   BOARD_READ_TOOL,
   BOARD_TOOLS,
+  PAGE_CAPTURE_TOOL,
   TASK_ATTACHMENT_TOOL,
   TIMELINE_ENTRY_TOOL,
   boardArgsRefusal,
   boardMountSchema,
   boardReadArgsSchema,
   boardReadResult,
+  pageCaptureArgsSchema,
+  pageCaptureResult,
   taskAttachmentArgsSchema,
   taskAttachmentResult,
   timelineEntryArgsSchema,
@@ -1404,7 +1407,12 @@ function openKnowledgeSession(grant: RunGrant, server: string, mount: KnowledgeM
  * Claude run's toolkit calls; ruling 594 adds `read_task_attachment`, one
  * file of any task in the project.
  */
-function openBoardSession(grant: RunGrant, server: string, mount: BoardMount): Promise<Session> {
+async function openBoardSession(grant: RunGrant, server: string, mount: BoardMount): Promise<Session> {
+  // Ruling 691: `capture_page` is listed only while this server can render a
+  // page. Loaded here, not at the top: the capture reaches the task layer,
+  // which reaches the run service that binds this gateway.
+  const { pageCaptureStatus } = await import("~/server/tasks/page-capture.server");
+  const tools = pageCaptureStatus().available ? [...BOARD_TOOLS, PAGE_CAPTURE_TOOL] : BOARD_TOOLS;
   const context = {
     db: grant.db,
     projectSlug: grant.projectSlug,
@@ -1413,7 +1421,7 @@ function openBoardSession(grant: RunGrant, server: string, mount: BoardMount): P
     // Ruling 648: what the run's knowledge server lets it read.
     readerKbs: [...grant.knowledge.values()].flatMap((knowledge) => knowledge.kb),
   };
-  return openOwnSession(grant, server, BOARD_TOOLS, async (tool, raw) => {
+  return openOwnSession(grant, server, tools, async (tool, raw) => {
     if (tool === BOARD_READ_TOOL.name) {
       const args = boardReadArgsSchema.safeParse(raw);
       return args.success ? await boardReadResult(context, args.data) : boardArgsRefusal(BOARD_READ_TOOL);
@@ -1426,6 +1434,11 @@ function openBoardSession(grant: RunGrant, server: string, mount: BoardMount): P
     if (tool === TASK_ATTACHMENT_TOOL.name) {
       const args = taskAttachmentArgsSchema.safeParse(raw);
       return args.success ? await taskAttachmentResult(context, args.data) : boardArgsRefusal(TASK_ATTACHMENT_TOOL);
+    }
+    // Ruling 691: one page of the run's own task, as a reader sees it.
+    if (tool === PAGE_CAPTURE_TOOL.name && tools.includes(PAGE_CAPTURE_TOOL)) {
+      const args = pageCaptureArgsSchema.safeParse(raw);
+      return args.success ? await pageCaptureResult(context, args.data) : boardArgsRefusal(PAGE_CAPTURE_TOOL);
     }
     return null;
   });
