@@ -131,7 +131,8 @@ interface PageReport {
   /** Hosts the page asked the network for, and how many addresses in all. */
   asked: string[];
   askedCount: number;
-  /** Names it asked the page server for that are not among the files. */
+  /** What it asked the page server for and was not served: a name that is not
+   *  among the files, or (starting with `/`) a path outside its own folder. */
   missing: string[];
   error: string | null;
 }
@@ -289,6 +290,15 @@ function openStored(root: string, name: string, names: readonly string[] | undef
   return stored === null || stored === name ? null : openRegular(root, stored);
 }
 
+/** A request path as its page wrote it, where it can be decoded. */
+function pathAsWritten(raw: string): string {
+  try {
+    return decodeURIComponent(raw);
+  } catch {
+    return raw;
+  }
+}
+
 /** The loopback server a page is loaded from. */
 interface PageServer {
   /** `http://127.0.0.1:<port>`. */
@@ -297,7 +307,7 @@ interface PageServer {
   base: string;
   port: number;
   /** Set the article served for a markdown page (null for an HTML page) and
-   *  start a fresh list of names asked for and not found. */
+   *  start a fresh list of what was asked for and not served. */
   begin(article: string | null): void;
   missing(): string[];
   close(): Promise<void>;
@@ -318,7 +328,16 @@ function startPageServer(root: string, names: readonly string[] | undefined): Pr
 
   const answer = (req: IncomingMessage, res: ServerResponse): void => {
     const raw = (req.url ?? "").split("?")[0] ?? "";
-    if ((req.method !== "GET" && req.method !== "HEAD") || !raw.startsWith(prefix)) {
+    if (req.method !== "GET" && req.method !== "HEAD") {
+      refuse(res);
+      return;
+    }
+    if (!raw.startsWith(prefix)) {
+      // A path from the site's root (`/css/site.css`) or above the page's
+      // folder (`../up.png`): never served, and said, or the page is pictured
+      // unstyled with no word of why. The path keeps its leading slash, which
+      // no file name has. The browser asks for `/favicon.ico` by itself.
+      if (raw !== "/favicon.ico") missing.add(pathAsWritten(raw));
       refuse(res);
       return;
     }
@@ -326,6 +345,8 @@ function startPageServer(root: string, names: readonly string[] | undefined): Pr
     try {
       name = decodeURIComponent(raw.slice(prefix.length));
     } catch {
+      // A name with a broken escape is no file's name: reported as written.
+      missing.add(raw.slice(prefix.length));
       refuse(res);
       return;
     }

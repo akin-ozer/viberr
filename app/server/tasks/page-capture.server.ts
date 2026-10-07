@@ -352,7 +352,8 @@ interface RenderedPage {
   /** Hosts the page asked the network for, and how many addresses in all. */
   asked: string[];
   askedCount: number;
-  /** Names it asked for that the renderer did not have. */
+  /** What it asked the renderer's page server for and was not served: a
+   *  name, or (starting with `/`) a path outside its own folder. */
   missing: string[];
   error: string | null;
 }
@@ -763,11 +764,20 @@ function askedClause(page: RenderedPage): string | null {
  *  flat)", one clause per kind of miss. */
 function missingClauses(page: RenderedPage, notCarried: ReadonlySet<string>): string[] {
   const tooLarge = page.missing.filter((name) => notCarried.has(name));
-  const absent = page.missing.filter((name) => !notCarried.has(name));
+  // A path the page server refuses whatever the folder holds: from the
+  // site's root, or above the page's own folder. No file name starts so.
+  const outside = page.missing.filter((name) => !notCarried.has(name) && name.startsWith("/"));
+  const absent = page.missing.filter((name) => !notCarried.has(name) && !name.startsWith("/"));
   const clauses: string[] = [];
   if (absent.length > 0) {
     clauses.push(
       `${LIST_AND.format(absent.map(code))}, which ${absent.length === 1 ? "is" : "are"} not among this task's files (the folder is flat)`,
+    );
+  }
+  if (outside.length > 0) {
+    clauses.push(
+      `${LIST_AND.format(outside.map(code))}, ${outside.length === 1 ? "a path" : "paths"} from the site's root or above the page's folder, ` +
+        "which a capture does not serve (it serves the task's own files by name)",
     );
   }
   if (tooLarge.length > 0) {

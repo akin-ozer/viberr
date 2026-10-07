@@ -1000,27 +1000,33 @@ describe("a delivered page is pictured (ruling 691)", () => {
     expect(readdirSync(attachments("VIB-3"))).toEqual(["report.html"]);
   });
 
-  it("the note says what a picture cannot show by itself: a page cut short, one a phone shrinks, one wider than its screen, one that opens a dialog, and one pictured at one width only", async () => {
+  it("the note says what a picture cannot show by itself: a page cut short, one a phone shrinks, one wider than its screen, one that opens a dialog, one that asks for a path it is never served, and one pictured at one width only", async () => {
     await deliver(
       {
         "alert.html": '<script>alert("Welcome")</script><p>behind the dialog</p>',
         "half.html": "<p>fake-crash-at:390</p>",
         "long.html": "<p>fake-height:20000</p>",
+        "rooted.html": '<script src="/css/site.js"></script><img src="../up.png"><p>styled from the site\'s root</p>',
         "shrunk.html": "<p>no viewport setting, so a phone lays it out 980 px wide: fake-scale:0.398</p>",
         "wide.html": "<p>fake-width:612</p>",
       },
       "dialog:alert.html",
     );
     // CANARY: delete any one branch of `pageRemarks` (the cut, the scale, the
-    // width, the dialog, the error) and its sentence leaves the note.
+    // width, the dialog, the error) and its sentence leaves the note. Take a
+    // path for a file name in `missingClauses` and `rooted.html` is said to
+    // have asked for files "not among this task's files (the folder is
+    // flat)", which sends its author looking for a file to add.
     expect(captureNote()!.text).toBe(
-      "Viberr rendered `alert.html`, `half.html`, `long.html`, `shrunk.html`, and `wide.html` as a reader sees them, " +
+      "Viberr rendered `alert.html`, `half.html`, `long.html`, `rooted.html`, `shrunk.html`, and `wide.html` as a reader sees them, " +
         "at a desktop width (1,280 px) and a phone width (390 px). " +
         "The pictures are attached and show beside each file on the result. " +
         "`alert.html` opens a dialog as it loads (an alert, a confirm or a prompt). A capture dismisses it, so the picture shows the page behind it. " +
         "Not every picture of `half.html` was made: the browser ended before the page was pictured. " +
         "`long.html` runs longer than its desktop picture, which shows the first 4,800 px of 20,000. " +
         "`long.html` runs longer than its phone picture, which shows the first 5,064 px of 20,000. " +
+        "`rooted.html` asked for `/css/site.js` and `/up.png`, paths from the site's root or above the page's folder, " +
+        "which a capture does not serve (it serves the task's own files by name). " +
         "A phone lays `shrunk.html` out 980 px wide and shrinks it to fit its 390 px screen, so its text is small. " +
         "`wide.html` is 612 px wide on a 390 px screen, so a reader scrolls sideways.",
     );
@@ -1030,6 +1036,11 @@ describe("a delivered page is pictured (ruling 691)", () => {
       shots: [{ view: "desktop", name: "half.html.capture-desktop.png", cut: false }],
       error: "the browser ended before the page was pictured",
     });
+    // An agent that looks is told the same about the paths.
+    expect((await withBrowser("", () => ask("rooted.html"))).text).toContain(
+      "It asked for `/css/site.js` and `/up.png`, paths from the site's root or above the page's folder, " +
+        "which a capture does not serve (it serves the task's own files by name).",
+    );
   });
 
   it("an agent's ask finds a page in either Unicode form and renders it under the name the folder holds", async () => {

@@ -227,6 +227,34 @@ describe("the page capture's renderer child (ruling 691)", () => {
     );
   });
 
+  it("reports what a page asked for by a path it is never served: from the site's root, above its own folder, or under a name with a broken escape", async () => {
+    const b = bench({
+      "post.html":
+        '<script src="/css/site.js"></script><img src="/images/hero.png"><img src="../up.png">' +
+        '<img src="%E0%A4%A.png"><img src="/favicon.ico"><img src="chart.png">',
+      "chart.png": "picture",
+    });
+    const report = await b.run({ pages: ["post.html"], views: [DESKTOP] });
+    // Each is answered "not found", like any other path outside the token.
+    expect(b.browser.pages()[0]!.resources.map((resource) => [resource.src, resource.status])).toEqual([
+      ["/css/site.js", 404],
+      ["/images/hero.png", 404],
+      ["../up.png", 404],
+      ["%E0%A4%A.png", 404],
+      ["/favicon.ico", 404],
+      ["chart.png", 200],
+    ]);
+    // CANARY: refuse a path outside the token prefix, or a name that will
+    // not decode, before it is recorded, as the first version did, and
+    // `missing` is empty for a page pictured unstyled with broken pictures.
+    // Record `/favicon.ico` too and every page a browser asks an icon for
+    // is said to have asked for one.
+    expect(report.pages[0]).toMatchObject({
+      error: null,
+      missing: ["/css/site.js", "/images/hero.png", "/up.png", "%E0%A4%A.png"],
+    });
+  });
+
   it("pictures the whole page up to the cap and never less than one screen, and marks a longer page as cut", async () => {
     const b = bench({
       "short.html": "<p>one line</p>",

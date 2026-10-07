@@ -666,7 +666,9 @@ attachments, a copy in the kept delivery they picture, the `pageCaptures` record
 that delivery's stamp, and one timeline note from "Page capture" that claims them and
 says what the pictures do not show by themselves (a page that runs longer than its
 picture, one a phone shrinks or that is wider than its screen, one that opens a dialog as
-it loads, what the page asked the network for). Pages a person uploaded or a relay carried
+it loads, what the page asked the network for, and what it asked its own folder for and
+was not served: a file that is not there, or a path from the site's root or above the
+folder). Pages a person uploaded or a relay carried
 in are inputs and are not pictured; a delivery is pictured up to 8 pages, the deliverer's
 own first, and the record names the next pages with that as the reason they have no
 picture. The next delivery's pictures replace these under the same names, a page it no
