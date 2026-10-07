@@ -655,9 +655,10 @@ export function Timeline({
   useEffect(() => {
     if (!targetTime || steppedFor.current === location.key) return;
     if (target) {
-      if (shownBy(f, target)) return;
+      // Spent once found, even when the tab already shows it: a later tab
+      // that hides it is the person's choice.
       steppedFor.current = location.key;
-      setF("all");
+      if (!shownBy(f, target)) setF("all");
       return;
     }
     // Newest first: when the oldest event loaded is older than the target,
