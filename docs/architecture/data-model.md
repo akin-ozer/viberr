@@ -81,13 +81,25 @@ Created by the code that needs them:
                                                     lands in attachments/ as
                                                     `gate-<sha7>-<NN>-<name>-<stamp>.log`
   projects/<slug>/tasks/<KEY>/workspace/.captures/<captureId>/
-                                                    one page render's scratch (ruling 691): `files/`
-                                                    (a delivery's files, copied where the renderer can
-                                                    read them), `out/` (the pictures and the report),
-                                                    `tmp/` and `profile/` (the browser's), written by
-                                                    the task owner's agent uid; a delivery's is removed
-                                                    when its render finishes, an agent's stretch by the
+                                                    one page render's scratch (ruling 691): `out/`
+                                                    (the pictures and the report), `tmp/` and
+                                                    `profile/` (the browser's), written by the task
+                                                    owner's agent uid; a delivery's is removed when
+                                                    its render finishes. An agent's `capture_page`
+                                                    keeps `<runId>/<captureId>/out/` alone, replaced
+                                                    by that run's next capture and removed when the
+                                                    run ends; whatever a restart left goes before the
                                                     next render on the task
+  projects/<slug>/tasks/<KEY>/.capture-input/<captureId>/
+                                                    a kept delivery's files, copied for the one render
+                                                    that pictures it and removed with it, or, when a
+                                                    restart cut that render, before the task's next
+                                                    one (ruling 691):
+                                                    the server's own, 0710 in the agent group with
+                                                    each file 0640, so the renderer reads a file by
+                                                    its name and no agent lists the folder or writes
+                                                    in it. Beside `deliveries/`, never under
+                                                    `workspace/`, which agents write
   projects/<slug>/tasks/<KEY>/.operator-scratch/    the Codex operator's working directory
   projects/<slug>/epics/<epic-id>.md                epics (ruling 503)
   projects/<slug>/goals/converted/<goal-id>.md      ruling 99's chained goals, filed by the

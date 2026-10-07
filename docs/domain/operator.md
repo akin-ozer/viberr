@@ -512,7 +512,7 @@ A withheld capability means the tool is **not built**; the model cannot reach it
 | `lease_files` | `operatorLeaseFiles` (ruling 417: lease path globs to THIS task until it merges) | `deliver-review-pr` |
 | `update_branch_from_base` | `operatorUpdateBranchFromBase` (merge, never rebase; conflict → the delivering agent, or a packet when no agent can take it, ruling 475) | `update-task-branch` |
 | `transition_stage` | `operatorTransitionStage` | `stage-transitions` |
-| `write_completion_packet` | `operatorWriteCompletionPacket` → `writeCompletionPacket` (ruling 521: records `completionPacket` in task.md for the review subject, the operator's `summary`, its `changes` summary, required for a change of more than 200 lines, and up to 6 `screenshots` named from the task's image attachments with a caption each; ruling 668: also `considerations`, `assumptions` and `gaps`, each optional markdown of at most 2,000 characters, and `files`, up to 12 result files with a caption each, required on a task delivered as files and taken only from that delivery as it was kept (ruling 597) and still on the task, while a revision's `files` are left out with a line saying its pull request holds them; refuses (`noop`) while nothing is delivered, an empty or oversized summary or note, a large change without `changes`, a files delivery that names no result file or one outside the delivery, listing the delivered files, and a screenshot that is not an image or not among the attachments, listing the images it has; ruling 691: its description tells the operator that Viberr pictures each result file that is a page and shows the pictures beside it, never to name one as a screenshot, and to open a page's picture with `read_task_attachment` before it says how the page looks (`PAGE_PICTURES_PACKET_SENTENCE`; the Codex plan's `screenshots` field carries the short form), and a capture named anyway is left out with a sentence; writes a `note` titled "Completion packet" and audit `task.completion_packet.written`; the Codex plan carries the summary in `text`, the changes in `reason`, the notes and the files in `result`) | `completion-for-acceptance` |
+| `write_completion_packet` | `operatorWriteCompletionPacket` → `writeCompletionPacket` (ruling 521: records `completionPacket` in task.md for the review subject, the operator's `summary`, its `changes` summary, required for a change of more than 200 lines, and up to 6 `screenshots` named from the task's image attachments with a caption each; ruling 668: also `considerations`, `assumptions` and `gaps`, each optional markdown of at most 2,000 characters, and `files`, up to 12 result files with a caption each, required on a task delivered as files and taken only from that delivery as it was kept (ruling 597) and still on the task, while a revision's `files` are left out with a line saying its pull request holds them; refuses (`noop`) while nothing is delivered, an empty or oversized summary or note, a large change without `changes`, a files delivery that names no result file or one outside the delivery, listing the delivered files, and a screenshot that is not an image or not among the attachments, listing the images it has; ruling 691: its description tells the operator that when Viberr pictured the delivery's pages, `completionPacket.pageCaptures` lists each with its pictures, which show beside it on the result, never to name one as a screenshot, to open a page's picture with `read_task_attachment` before it says how the page looks, that a page listed with no picture carries the reason and that a page not listed was not pictured (`PAGE_PICTURES_PACKET_SENTENCE`; the Codex plan's `screenshots` field carries the short form), and a capture named anyway is left out with a sentence; writes a `note` titled "Completion packet" and audit `task.completion_packet.written`; the Codex plan carries the summary in `text`, the changes in `reason`, the notes and the files in `result`) | `completion-for-acceptance` |
 | `accept_completion` | `operatorAcceptCompletion` | `completion-for-acceptance` |
 
 Every action returns `OperatorActionResult` with `outcome: done | recommended |
@@ -617,12 +617,17 @@ Details that matter:
   `screenshotCandidates`, the newest 20 image attachments, `resultFilesRequired` and
   `resultFileCandidates`, the delivered files a packet may name as the result (ruling
   668), `pageCaptures`, and a `note` saying what to do). Ruling 691: `pageCaptures` lists,
-  for the files delivery under review, each page Viberr pictured (`file`), the pictures'
-  names among the attachments (`pictures`) and why a page has none (`problem`); it is
-  empty when the delivery holds no page or the record on file pictures an earlier
-  delivery. The card shows those pictures beside each result file that is a page without
-  the operator naming them, so neither candidate list offers one, and a capture named
-  under `files` or `screenshots` is left out with a sentence naming the page it pictures.
+  for the files delivery under review, each page of the record (`file`), the pictures'
+  names among the attachments (`pictures`) and why a page has none (`problem`, which for
+  a page past the 8 a delivery is pictured for says so); it is empty when the delivery
+  holds no page, when the server names no browser, while the render has not finished,
+  and when the record on file pictures an earlier delivery. A page it does not list was
+  not pictured (a person's own upload never is). The card shows those pictures beside
+  each result file that is a page without the operator naming them, so neither candidate
+  list offers one, and a capture named under `files` or `screenshots` is left out with a
+  sentence naming the page it pictures. Viberr's own picture is the one of a page the
+  task holds, or one the record names: an agent's own screenshot that only ends
+  `.capture-desktop.png` is offered and accepted like any other image.
 - **Delivery.** Its description says it never serves a task whose deliverable is a
   result, which is delivered on the task (ruling 531, §4). `deliver_for_review` runs
   `performDelivery`, with NO cached-state short-circuit (ruling 134): rework on a task whose PR is already open is pushed to

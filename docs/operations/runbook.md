@@ -534,12 +534,24 @@ history opens with "Converted from goal-N …", and the project's Activity colum
   before the page was pictured", "the task has no owner to render it as" (isolation is on
   and the task has no owner: give it one and the next delivery is pictured), "the pinned
   browser executable (VIBERR_BROWSER_EXECUTABLE) is not on disk" (health's `browser` says
-  the same), and a source over 10 MB (markdown 2 MB). No note at all on a files delivery
-  means the deployment names no browser, or the delivery held no page. A picture that
-  shows boxes where text should be is a script the image has no font for (it ships
-  Liberation and an emoji font). Renders are one at a time for the whole instance, so a
-  burst of deliveries queues; an agent's `capture_page` goes ahead of waiting deliveries
-  and answers `[busy]` when it has not started within 15 s. A restart during a render
+  the same), a source over 10 MB (markdown 2 MB), "a delivery is pictured up to 8 pages"
+  for a page past the eighth, and "the delivered files could not be handed to the
+  renderer": the server could not make `<task>/.capture-input/` its own folder in the
+  agent group (the log line `a delivery's files could not be handed to the page renderer`
+  carries the cause; check the store layout and that the server's user is in the agent
+  group), and it copies a delivery nowhere else. The note ends by naming `capture_page`
+  only when that tool can still show the page. A result file that is a page with no row
+  at all under it was not this render's to picture: a person's own upload, a relayed
+  file, or a page past the 40 one record names. No note at all on a files delivery means
+  the deployment names no browser, the delivery held no page, or the task's delivery is
+  a revision. A picture that shows boxes where text should be is a script the image has
+  no font for (it ships Liberation and an emoji font). A page that opens `alert()`,
+  `confirm()` or `prompt()` as it loads is pictured with the dialog dismissed, and the
+  note says so. Renders are one at a time for the whole instance, so a burst of
+  deliveries queues; an agent's `capture_page` goes ahead of waiting deliveries and
+  answers `[busy]` when it has not started within 15 s. Its pictures stay under
+  `workspace/.captures/<runId>/` until the run ends; a folder there whose run is no
+  longer live is removed before the next render on the task. A restart during a render
   loses that delivery's pictures: the next delivery is pictured, and an agent can look
   with `capture_page` meanwhile. `docker compose exec -T app sh
   scripts/check-page-capture.sh` checks the renderer against the image's own browser.

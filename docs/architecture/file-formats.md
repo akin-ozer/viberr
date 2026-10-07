@@ -484,18 +484,20 @@ pageCaptures:                     # optional; ruling 691 — Viberr's own pictur
   deliveredAt: 2026-10-07T12:00:00.000Z  # pages of one files delivery, bound to that
   at: 2026-10-07T12:00:09.412Z    # delivery's `deliveredAt` like a verdict; `at` is when
   pages:                          # the render finished. One entry per delivered page
-    - file: post.html             # (.html, .htm, .md, .markdown; at most 8): its shots,
-      shots:                      # each a view (desktop | phone), the picture's name in
-        - view: desktop           # the attachments store and whether the page runs on
+    - file: post.html             # (.html, .htm, .md, .markdown): its shots, each a
+      shots:                      # view (desktop | phone), the picture's name in the
+        - view: desktop           # attachments store and whether the page runs on
           name: post.html.capture-desktop.png   # below it (`cut`), and `error`, why it
-          cut: false              # could not be pictured (null when it was). Written by
-        - view: phone             # the server alone, once the render of a stamped
-          name: post.html.capture-phone.png     # delivery finishes; the latest delivery
-          cut: true               # only. A reader pairs a picture with a file only while
-      error: null                 # this stamp is the task's own. A malformed record
-    - file: notes.md              # reads as absent (no picture is drawn; the next
-      shots: []                   # delivery's render rewrites it)
-      error: the render ran past 25 seconds
+          cut: false              # could not be pictured (null when it was). The first
+        - view: phone             # 8 pages are pictured; the next ones, up to 40 entries
+          name: post.html.capture-phone.png     # in all, are named with `error` "a
+          cut: true               # delivery is pictured up to 8 pages". Written by the
+      error: null                 # server alone, once the render of a stamped files
+    - file: notes.md              # delivery finishes; the latest delivery only. A reader
+      shots: []                   # pairs a picture with a file only while this stamp is
+      error: the render ran past 25 seconds   # the task's own. A malformed record reads
+                                  # as absent (no picture is drawn; the next delivery's
+                                  # render rewrites it)
 completionPacket:                 # optional; ruling 521 — what Operator hands over at
   subject: rev_9f2c               # the acceptance boundary, bound like a verdict to the
   headSha: a91f7c2e…              # review subject it describes (the workRevision.id, or

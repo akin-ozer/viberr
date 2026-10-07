@@ -638,18 +638,29 @@ the pictures: `<file>.capture-desktop.png` and `<file>.capture-phone.png` in the
 attachments, a copy in the kept delivery they picture, the `pageCaptures` record bound to
 that delivery's stamp, and one timeline note from "Page capture" that claims them and
 says what the pictures do not show by themselves (a page that runs longer than its
-picture, one wider than a phone's screen, what the page asked the network for). Pages a
-person uploaded or a relay carried in are inputs and are not pictured; a delivery is
-pictured up to 8 pages, the deliverer's own first. The next delivery's pictures replace
-these under the same names, a page it no longer holds loses its picture, and each kept
-delivery keeps its own. The render reads the kept copy, runs as the task owner's agent
-user with no network, and is one job at a time for the whole instance
-(`page-capture.server.ts`). The completion waits up to 45 s for it before the operator
-reacts, so the operator and the reviewers it dispatches start with the pictures there; a
-slower render finishes in the background. A page that cannot be pictured says why in the
-note and in the record, and the delivery stands without it. A delivery that is a revision
-is not pictured: its pages live in the pull request. With no browser named
-(`VIBERR_BROWSER_EXECUTABLE` unset) nothing is pictured and nothing is said on the task.
+picture, one a phone shrinks or that is wider than its screen, one that opens a dialog as
+it loads, what the page asked the network for). Pages a person uploaded or a relay carried
+in are inputs and are not pictured; a delivery is pictured up to 8 pages, the deliverer's
+own first, and the record names the next pages with that as the reason they have no
+picture. The next delivery's pictures replace these under the same names, a page it no
+longer holds loses its picture, and each kept delivery keeps its own. The render reads the
+kept copy and never the files as they are now (a verdict binds to the kept copy), runs as
+the task owner's agent user with no network, and is one job at a time for the whole
+instance (`page-capture.server.ts`): a newer delivery of a task replaces one still
+waiting, and a delivery that lands while an older one is being pictured gets no record,
+note or picture from the older render. The completion waits up to 45 s for it before the
+operator reacts, so the operator and the reviewers it dispatches start with the pictures
+there; a slower render finishes in the background. A page that cannot be pictured says why
+in the note and in the record, and the delivery stands without it; the note names
+`capture_page` only for a page that tool can still show (it shares the renderer, the
+owner it runs as and the source's size limit with this render). A delivery that is a
+revision is not pictured, whatever files its run saved beside the commit: its pages live
+in the pull request, and the pictures and record of an earlier files delivery are taken
+down. With no browser named (`VIBERR_BROWSER_EXECUTABLE` unset) nothing is pictured and
+nothing is said on the task. Only the picture of a page the task holds, or one the record
+names, is Viberr's own (`pageCapturesAmong`): an agent's own file that merely ends
+`.capture-desktop.png` is claimed by its run, kept with the delivery and offered as a
+screenshot like any other.
 
 A reviewer's `report_outcome` records a **verdict** (`approve | request_changes`)
 bound to the review subject (§6). A run whose workspace could not be provisioned
