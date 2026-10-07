@@ -4444,8 +4444,8 @@ describe("save_knowledge_base's reply carries the id the next call needs (U36-4)
     // kept as one, with its customer's name and figures in every run's reach.
     const refused =
       "[noop] `report.html` marks no place for a task's content. A template marks each one with a placeholder, " +
-      "`[[what goes here]]`: on one line, opening on a letter, in the text a reader sees (what a page's script and style " +
-      "hold is not read for them). So as it stands this is a finished result with VIB-142's content in it, " +
+      "`[[what goes here]]`: on one line, opening on a letter. The code a page runs and its style are not read for them. " +
+      "So as it stands this is a finished result with VIB-142's content in it, " +
       "or a template that marks those places some other way. A finished result kept as the template puts that content " +
       "where every run reads it, and a result built from it can repeat it. " +
       "Have an agent make the template first: file a task for the agent that makes such results, asking for the same layout " +
@@ -4461,16 +4461,20 @@ describe("save_knowledge_base's reply carries the id the next call needs (U36-4)
     // own part of the rule.
     // CANARY: count anything in double brackets and a finished report passes
     // on its numbered citations or a shell test in its notes.
-    // CANARY: read a page's script and style and it passes on a chart
-    // library's arrays, which open on a name as often as on a number.
+    // CANARY: read the code a page runs and its style and it passes on a
+    // chart library's arrays, which open on a name as often as on a number.
     // CANARY: count a link's bracketed text and it passes on a cited source.
     // CANARY: let a placeholder run on and it passes on a bracketed paragraph.
+    // CANARY: count JSON's own words and it passes on a table of flags in
+    // the data a page was drawn from.
     const finished = [
       "<p>See [[1]](https://example.test) and [[2]].</p><pre>if [[ -f x ]]; then</pre>",
       '<script>new Map([[key,value]]);const s=[[a,b]];const t=[["acme",13381.01]]</script><STYLE media="print">.a{content:"[[x]]"}</STYLE >',
+      '<script type="text/javascript">const u=[[c,d]]</script><script type=module>export const v=[[e,f]]</script>',
       "<p>Source: [[Gartner 2024]](https://example.test).</p>",
       `<p>[[${"Aidea ".repeat(27)}]]</p>`,
       "<p>Unclosed</p><script>const rows=[[a,b]];",
+      '<script type="application/json">{"visible":[[true,false]],"rows":[[null,1],["acme",2]],"on":[[ false ]]}</script>',
     ];
     for (const [at, body] of finished.entries()) {
       writeTaskAttachment(SLUG, "VIB-142", `finished-${at}.html`, page(body), app.dataRoot);
@@ -4490,6 +4494,21 @@ describe("save_knowledge_base's reply carries the id the next call needs (U36-4)
       app.dataRoot,
     );
     expect(await copy({ kind: "template", name: "spaced.html" })).toContain("its text holds 1 `[[placeholder]]`, which");
+    // A page drawn from a block of data is marked in that block.
+    // CANARY: leave every script unread and a template that keeps its
+    // content in a data block is called a finished result, with no way to
+    // mark it that would be read.
+    writeTaskAttachment(
+      SLUG,
+      "VIB-142",
+      "drawn.html",
+      page(
+        '<script type="application/json" id="data">{"customer":"[[Müşteri adı]]","total":"[[Aylık toplam]]"}</script>' +
+          "<script>render([[a,b]])</script><div id=app></div>",
+      ),
+      app.dataRoot,
+    );
+    expect(await copy({ kind: "template", name: "drawn.html" })).toContain("its text holds 2 `[[placeholder]]`s, which");
 
     // The one an agent made is a template, and the reply says what was found.
     // CANARY: say it holds no task's content and the reply vouches for what
@@ -4519,6 +4538,7 @@ describe("save_knowledge_base's reply carries the id the next call needs (U36-4)
         "say in the rule that it shows what a good result looks like and that nothing in it carries over to another task. ",
     );
     expect(readdirSync(folder).sort()).toEqual([
+      "drawn.html",
       "proposal-template.html",
       "rulings.md",
       "sample-vib-142-good.html",
