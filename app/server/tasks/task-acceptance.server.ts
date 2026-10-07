@@ -1801,6 +1801,30 @@ interface ClosedDecisionRef {
 }
 
 /**
+ * Ruling 686: what follows every acceptance, once the task stands at the
+ * board's last stage. Two writes set that stage: `applyAcceptanceWrite` below
+ * (a person's Accept or board move, a recommendation card, a force-accept,
+ * the operator's own acceptance) and the decision packet's "accept
+ * completion" option, which writes the stage itself. Both end here, so a
+ * step added for one is not forgotten for the other: the packet's option ran
+ * none of these until ruling 685 gave it the third, and an epic whose last
+ * task was accepted from a decision was never told it was done.
+ *
+ * Each is fire-and-forget and reads the store as it stands, so a call that
+ * finds nothing to do costs a read.
+ */
+export function afterAcceptance(db: DatabaseSync, ctx: TaskActionContext, projectSlug: string, taskKey: string): void {
+  // Ruling 503: an acceptance is the usual way an epic's last task is done.
+  maybeNoteEpicComplete(db, ctx, projectSlug, taskKey);
+  // Ruling 131(e): and the usual way a waited-on task is done. The runner's
+  // minute tick would release its dependents too; this does it now.
+  maybeReleaseDependents(db, ctx, projectSlug);
+  // Ruling 685: and the moment a controller conversation that waited for
+  // this task takes its next step.
+  maybeContinueController(db, ctx, projectSlug, taskKey);
+}
+
+/**
  * The ONE Done write every acceptance path shares (B-WF6). Exported for
  * `operatorAcceptCompletion`, whose full-autonomy branch historically
  * re-implemented this block inline and drifted gate by gate.
@@ -2102,16 +2126,7 @@ export async function applyAcceptanceWrite(
     // operator's "Accept completion" card; its row stayed unread, and every
     // tab's title counted that decision for a day and a half.
     markTaskPacketApprovalRead(db, input.projectSlug, input.taskKey);
-    // Ruling 503: an acceptance is the usual way an epic's last task is done.
-    maybeNoteEpicComplete(db, ctx, input.projectSlug, input.taskKey);
-    // Ruling 131(e): an acceptance is the usual way a waited-on task is done.
-    maybeReleaseDependents(db, ctx, input.projectSlug);
-    // Ruling 685: and the moment a controller conversation that waited for
-    // this task takes its next step. This write is one of the two that set
-    // the last stage (a person's Accept or board drag, a recommendation card,
-    // a force-accept, the operator's own acceptance); the other is the
-    // decision packet's "accept completion" option, which calls the hook too.
-    maybeContinueController(db, ctx, input.projectSlug, input.taskKey);
+    afterAcceptance(db, ctx, input.projectSlug, input.taskKey);
   }
   // U3: `false` means a concurrent acceptance had already closed this task —
   // the caller's audit row and follow-up effects belong to THAT write, not to

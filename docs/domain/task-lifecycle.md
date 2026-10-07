@@ -1067,7 +1067,11 @@ checked for being all done (ruling 503: its history says so once and its lead is
 held dependents are swept (ruling 131(e): a task whose every `blockedBy`
 entry is now done is released), a controller conversation that left itself a step for this
 acceptance has its next turn started with it, as the person who asked (ruling 685), and the
-board renders "accepted" (or "merged").
+board renders "accepted" (or "merged"). Both writes that set the last stage run the epic
+check, the release and the controller's turn through one list (`afterAcceptance`, ruling
+686): the shared acceptance write, and the decision packet's "accept completion" option,
+which writes the stage itself. A person's acceptance by either also ends the task's live
+runs (ruling 177).
 
 **A post-merge proof is a follow-up read task** (ruling 492, the owner's F40-64 decision).
 Acceptance moves the task to Done and no stage sits after it, so nothing that happens after
