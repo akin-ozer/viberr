@@ -154,8 +154,8 @@ describe("assertTrustedOrigin and the configured public origin", () => {
     ["passes the public origin's Origin", PUBLIC, { Origin: PUBLIC }, "passed"],
     // CANARY: compare Referer with the request's own origin only.
     ["passes the public origin's Referer", PUBLIC, { Referer: `${PUBLIC}/x` }, "passed"],
-    // CANARY: replace the request's own origin with the configured one and the
-    // app reached under another name, such as the upstream port, refuses posts.
+    // CANARY: replace the request's own origin with the configured one and
+    // setting BETTER_AUTH_URL starts refusing a post the guard passed without it.
     [
       "passes the request's own origin under another name",
       PUBLIC,

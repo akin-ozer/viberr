@@ -167,8 +167,10 @@ and [domain/operator.md](domain/operator.md). The vocabulary is in
 
 - **TLS.** The app speaks plain HTTP on port 3000. Put a TLS-terminating reverse proxy in
   front, then set `BETTER_AUTH_URL` to the public `https://` origin and
-  `VIBERR_TRUST_PROXY=1` in `.env`. Skipping either gives a sign-in loop, not an insecure
-  but working app. Example proxy configs:
+  `VIBERR_TRUST_PROXY=1` in `.env`. Without `BETTER_AUTH_URL` every sign-in behind the
+  proxy answers 403 "Cross-origin request rejected.", and without `VIBERR_TRUST_PROXY`
+  the sign-in throttle cannot tell one client from another. Skipping the proxy gives a
+  sign-in loop, not an insecure but working app. Example proxy configs:
   [operations/deployment.md](operations/deployment.md#tls-and-the-reverse-proxy).
 - **CPU ceiling.** One agent run can fork a test worker per CPU it sees. On a machine
   someone also works on, set `VIBERR_CPUS` to roughly the core count minus 3.
@@ -225,7 +227,8 @@ The gates, the code layout and the definition of done:
 
 | Symptom | Where to look |
 |---|---|
-| Signing in loops back to the login page | `BETTER_AUTH_URL` and `VIBERR_TRUST_PROXY` behind a proxy (§6) |
+| Signing in answers 403 "Cross-origin request rejected." | `BETTER_AUTH_URL` unset, or not the origin people use, behind a proxy (§6) |
+| Signing in loops back to the login page | The app is served over plain HTTP with no TLS proxy in front (§6) |
 | Lost the bootstrap password | Another org admin resets it in *Users & access*; on a fresh instance, `docker compose down -v` and start again |
 | `npm run seed` (or `rescan`, `restore`) is refused | The app holds the store's writer lock; stop it first ([runbook](operations/runbook.md#the-single-writer-lock-and-cli-refusals)) |
 | A task says it cannot run agents | It has no owner, or its owner has no connected Claude or Codex account |

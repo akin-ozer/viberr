@@ -1779,7 +1779,9 @@ export interface ResumeRunInput {
   /** Override the model for the resumed turns (defaults to the prior run's).
    *  Lets a comment-resume pick up the agent profile's CURRENT model. */
   model?: string;
-  /** Reasoning effort for the resumed turns (defaults to none). */
+  /** Reasoning effort for the resumed turns. Absent, a Claude run is left on
+   *  the SDK default and a Codex run gets the catalog's `medium` (startRun,
+   *  ruling 683). */
   effort?: string;
   /** Carry/override the agent identity onto the resumed run so it groups
    *  with the prior run in the Agent-logs picker. Defaults to the prior

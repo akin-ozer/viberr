@@ -139,8 +139,8 @@ const CLAUDE_CURATED: ModelCatalog = {
  *  sub-agents, the orchestration Viberr reserves for the operator (Claude
  *  denies the whole Task family for the same reason).
  *  `persistent` is supported by no bundled model. The union's `minimal` is
- *  deliberately not OFFERED either; `resolveCodexReasoningEffort` still accepts
- *  it so a profile that already stored it keeps running on its tier. */
+ *  deliberately not OFFERED either; a profile that already stored it runs on
+ *  `low`, the nearest listed tier (`resolveRunEffort` at run start). */
 const CODEX_EFFORTS = ["low", "medium", "high", "xhigh", "max"] as const;
 /** GPT-5.5's catalog entry stops at `xhigh`. */
 const CODEX_EFFORTS_TO_XHIGH = ["low", "medium", "high", "xhigh"] as const;

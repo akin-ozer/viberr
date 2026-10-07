@@ -77,8 +77,11 @@ export function publicOrigin(request: Request): string {
  * proxy deployment.md requires, react-router-serve builds `request.url` from
  * the plain-HTTP socket, so the request's own origin is `http://` while the
  * browser sends `Origin: https://…`; the configured origin is the one the
- * browser actually used. The request's own origin still counts when the app
- * is reached under another name, such as the upstream port on loopback.
+ * browser actually used. The request's own origin is kept so that setting the
+ * variable takes nothing away but the downgrade below: unset, it is the one
+ * that counts, as before. It does not make the app usable under another name
+ * once the variable is set, because better-auth trusts only the configured
+ * origin (and `BETTER_AUTH_TRUSTED_ORIGINS`) for the sign-in itself.
  *
  * It does not count when it is the configured https host over plain http.
  * With the proxy forwarding `Host`, that is what the request's own origin
