@@ -98,7 +98,7 @@ import { errorMessage, toError } from "~/shared/errors";
  * `npm run dev` going under `run_in_background` would have sat past its result
  * until the idle guard settled it as hung, and 0.3.291 was pinned exactly
  * until the run could settle on its result. The result grace
- * (`RESULT_GRACE_MS`, ruling 683) replaced that pin: the first result, a
+ * (`RESULT_GRACE_MS`, ruling 687) replaced that pin: the first result, a
  * success or an error, starts a 5 s window for the stream to end, and later
  * results do not extend it. A stream still open when it closes has its CLI
  * stopped, and the run settles from the last result it read, so a run cut off
@@ -451,7 +451,7 @@ export const INTERRUPT_GRACE_MS = 20_000;
 export const INTERRUPT_ABORT_GRACE_MS = 10_000;
 
 /**
- * Ruling 683: how long a run's stream may stay open after its first result,
+ * Ruling 687: how long a run's stream may stay open after its first result,
  * successful or not, before the adapter stops the CLI itself. Claude Code
  * 2.1.292 keeps an SDK run open after its final result until every background
  * command the agent started has ended (a dev server under `run_in_background`
@@ -1801,7 +1801,7 @@ export function createClaudeAdapter(deps: ClaudeAdapterDeps = {}): RuntimeAdapte
       let interrupted = false;
       let settled = false;
       let idleTimedOut = false;
-      /** Ruling 683: a result has armed the result grace, and the grace has
+      /** Ruling 687: a result has armed the result grace, and the grace has
        *  run out and stopped the CLI. */
       let resultGraceArmed = false;
       let stoppedAfterResult = false;
@@ -1885,7 +1885,7 @@ export function createClaudeAdapter(deps: ClaudeAdapterDeps = {}): RuntimeAdapte
       };
       const armIdle = () => {
         disarmIdle();
-        // Ruling 683: once the result grace is armed it is the run's watchdog,
+        // Ruling 687: once the result grace is armed it is the run's watchdog,
         // and the lines that still arrive inside it must not re-arm this one.
         if (resultGraceArmed) return;
         idleTimer = setTimeout(() => {
@@ -2194,7 +2194,7 @@ export function createClaudeAdapter(deps: ClaudeAdapterDeps = {}): RuntimeAdapte
         const settleEnded = () => {
           // Once only: the result grace's backstop settles a stream that never
           // ended, and when it does end or throw later, its classified line
-          // has already been written (ruling 683).
+          // has already been written (ruling 687).
           if (settled) return;
           // A stream that ENDS (rather than throwing) after the abort still has
           // to report the hang, not a plain "no result" error.
@@ -2226,7 +2226,7 @@ export function createClaudeAdapter(deps: ClaudeAdapterDeps = {}): RuntimeAdapte
         };
 
         /**
-         * Ruling 683: the first result, a success or an error, gives the
+         * Ruling 687: the first result, a success or an error, gives the
          * stream `RESULT_GRACE_MS` to end on its own (see the constant for why
          * 2.1.292 may not). Lines that arrive meanwhile are read and emitted as
          * before, and a later result replaces what the run settles from without
@@ -2361,7 +2361,7 @@ export function createClaudeAdapter(deps: ClaudeAdapterDeps = {}): RuntimeAdapte
           if (idleTimedOut) return settleIdleTimeout();
           // AbortError from interrupt() is expected; anything else is a fault.
           if (interrupted) return settle("interrupted");
-          // Ruling 683: the throw is the abort the result grace sent, not a
+          // Ruling 687: the throw is the abort the result grace sent, not a
           // transport drop or the run's failure, so the run settles as an
           // ended stream does, from its last result: an error result's cut-off
           // or classified line is written there, once, never the abort's.
@@ -2383,7 +2383,7 @@ export function createClaudeAdapter(deps: ClaudeAdapterDeps = {}): RuntimeAdapte
           // and `sawResult` is stronger evidence still: the result closes the
           // run's own work. Since Claude Code 2.1.292 a backgrounded command's
           // completion can wake a further turn behind it, which the result
-          // grace cuts at 5 s (ruling 683); the run stays `finished` unless
+          // grace cuts at 5 s (ruling 687); the run stays `finished` unless
           // the last result it read was an error.
           if (sawResult && !resultIsError) {
             logger.info("claude stream threw after its result", {
@@ -2437,7 +2437,7 @@ export function createClaudeAdapter(deps: ClaudeAdapterDeps = {}): RuntimeAdapte
           void queryHandle?.interrupt().catch(() => {
             // The generator may already have completed.
           });
-          // Ruling 683: after a result the grace's clock is already running.
+          // Ruling 687: after a result the grace's clock is already running.
           // It aborts the CLI 5 s after that result, never later than the
           // cooperative window would from now, and its backstop settles the
           // run, `interrupted` now like any stopped run. Keep that clock.

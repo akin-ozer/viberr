@@ -172,7 +172,7 @@ sign-ins and form submissions from. Unset behind the proxy, a sign-in answers 40
 "Cross-origin request rejected." and a form or fetcher post answers 403 "That request
 expired (security token mismatch). Try again." React Router's own action-origin check, which
 from 8.3.1 compares the whole origin the same way and cannot see the public one, is off
-(`allowedActionOrigins: ["**"]` in `react-router.config.ts`, ruling 683), which leaves the
+(`allowedActionOrigins: ["**"]` in `react-router.config.ts`, ruling 687), which leaves the
 app's guard as the one origin check. The exception is `/api/auth/*` (the OAuth start and
 callbacks): it never runs the app's guard, and better-auth checks it against its own
 `trustedOrigins`, which it builds from the same `BETTER_AUTH_URL`. Do not make the server

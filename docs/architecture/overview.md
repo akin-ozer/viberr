@@ -25,7 +25,7 @@ is vertical; run one instance per data root.
 | Concern | Choice |
 |---|---|
 | Runtime | Node ≥ 26 (`engines`, `.nvmrc`, image `node:26-slim`), ESM, TypeScript 7, `~/*` → `app/*` |
-| Framework | React Router 8.4 framework mode, `ssr: true`, served by `@react-router/serve`; its action-origin check is off (`allowedActionOrigins: ["**"]`) and the app's `assertTrustedOrigin` is the origin check (ruling 683, [deployment.md §TLS and the reverse proxy](../operations/deployment.md#tls-and-the-reverse-proxy)); React 19 |
+| Framework | React Router 8.4 framework mode, `ssr: true`, served by `@react-router/serve`; its action-origin check is off (`allowedActionOrigins: ["**"]`) and the app's `assertTrustedOrigin` is the origin check (ruling 687, [deployment.md §TLS and the reverse proxy](../operations/deployment.md#tls-and-the-reverse-proxy)); React 19 |
 | Build / test | Vite 8, Vitest 5 (`app/**/*.test.{ts,tsx}`, 20 s per-test budget), Playwright 1.63 (chromium only, against the production image), oxlint 1.87 + the vendored `tools/oxlint/anti-slop` plugin (15 rules, CI gate) |
 | Data | `node:sqlite` `DatabaseSync`, `journal_mode=WAL`, `foreign_keys=ON`, `busy_timeout=5000`; one file `state/projection.sqlite`; one squashed migration `db/migrations/0001_baseline.sql` applied at open, plus an idempotent open-time healer (`ensureSingleFlightIndexes`, `ensureBaselineColumns`) that adds the listed columns, tables and indexes the baseline gained after an existing root first applied it and brings `user_backend_credentials` to its several-accounts shape |
 | Validation | Zod 4 for env, files, SSE, DB row decoding |

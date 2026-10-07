@@ -426,7 +426,7 @@ export interface StartRunInput {
   model: string;
   /** Reasoning/effort level (claude options.effort · codex
    *  modelReasoningEffort). Optional: when absent, Claude takes the SDK
-   *  default and Codex the catalog default (ruling 683). */
+   *  default and Codex the catalog default (ruling 687). */
   effort?: string;
   /** The deployed agent's display name persisted on the run (Agent-logs
    *  picker label). Null → the projection falls back to the backend name. */
@@ -1050,7 +1050,7 @@ export async function startRun(
   // came from the other backend's scale ("minimal" from Codex, "max" from
   // Claude) shipped a tier the target SDK does not accept. An unset effort
   // stays unset on Claude, where the SDK default applies. On Codex it is the
-  // catalog default, `medium` (ruling 683): the CLI's own default is set per
+  // catalog default, `medium` (ruling 687): the CLI's own default is set per
   // model, and in 0.160.1 it is `low` on gpt-6.1-sol, the model every
   // model-less operator and undeployed fallback runs, while the picker and the
   // catalog say `medium`.
@@ -1781,7 +1781,7 @@ export interface ResumeRunInput {
   model?: string;
   /** Reasoning effort for the resumed turns. Absent, a Claude run is left on
    *  the SDK default and a Codex run gets the catalog's `medium` (startRun,
-   *  ruling 683). */
+   *  ruling 687). */
   effort?: string;
   /** Carry/override the agent identity onto the resumed run so it groups
    *  with the prior run in the Agent-logs picker. Defaults to the prior

@@ -360,7 +360,7 @@ describe("run-service lifecycle", () => {
     expect(JSON.parse(run.raw[0]!).line.ev).toBe("init");
   });
 
-  it("forwards input.effort onto the RunSpec handed to the adapter; an unset one is the SDK's on Claude and the catalog's on Codex (ruling 683)", async () => {
+  it("forwards input.effort onto the RunSpec handed to the adapter; an unset one is the SDK's on Claude and the catalog's on Codex (ruling 687)", async () => {
     const specs = captureSpecs();
 
     await startTestRun(store.db, {
@@ -380,7 +380,7 @@ describe("run-service lifecycle", () => {
     await settle();
     expect(specs[1]?.effort).toBeUndefined();
 
-    // Ruling 683: on Codex an omitted effort is the catalog's `medium`. The
+    // Ruling 687: on Codex an omitted effort is the catalog's `medium`. The
     // CLI's own default for gpt-6.1-sol is `low`, so an operator with no
     // stored effort would reason less than the picker says. CANARY: leave an
     // unset effort unset on Codex and this is undefined.

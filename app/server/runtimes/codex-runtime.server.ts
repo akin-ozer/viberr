@@ -1345,7 +1345,7 @@ export function createCodexAdapter(
         // Absent when the spec's tier is not one this SDK accepts, so the CLI
         // applies its own default rather than being handed an empty value.
         // startRun always resolves a Codex run's tier to a listed one (ruling
-        // 683), so this guards a spec built outside it.
+        // 687), so this guards a spec built outside it.
         if (reasoningEffort) {
           threadOptions.modelReasoningEffort = reasoningEffort;
         }

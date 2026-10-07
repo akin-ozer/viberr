@@ -1724,7 +1724,7 @@ describe("claude CLI process lifecycle (ruling 174)", () => {
   });
 
   /**
-   * Ruling 683: Claude Code 2.1.292 keeps an SDK run open after its final
+   * Ruling 687: Claude Code 2.1.292 keeps an SDK run open after its final
    * result while a command the agent backgrounded still runs, and a dev server
    * never ends. The run used to sit past its result for the whole idle window
    * and then settle `run·error·idle_timeout`, holding its slot, and a run cut
@@ -1732,7 +1732,7 @@ describe("claude CLI process lifecycle (ruling 174)", () => {
    * that still arrives after the result is read as before, and does not extend
    * the grace.
    */
-  describe("ruling 683: a CLI still open after the run's result", () => {
+  describe("ruling 687: a CLI still open after the run's result", () => {
     const INIT = { type: "system", subtype: "init", session_id: "s-683", model: "claude-opus-5-5", tools: ["Bash"], mcp_servers: [] };
     /** Well short of the default 15-minute idle window. */
     const A_MINUTE = 60_000;
@@ -2809,7 +2809,7 @@ describe("claude adapter compact() (ruling 376)", () => {
  * the SDK had just told us succeeded was reported as a failure. `sawResult` is
  * the stronger evidence of the two: the result closes the run's own work, and a
  * turn a background command's completion wakes behind it (Claude Code 2.1.292)
- * is cut by the result grace (ruling 683).
+ * is cut by the result grace (ruling 687).
  */
 describe("ruling 394: the stream threw after the query's own result", () => {
   const MESSAGES = [

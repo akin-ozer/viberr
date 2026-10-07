@@ -141,7 +141,7 @@ const envSchema = z.object({
    * Absolute public origin of the app, e.g. https://viberr.example.com. Used
    * by better-auth to build OAuth callback + cookie URLs, and by
    * `assertTrustedOrigin` as the origin form posts are accepted from (ruling
-   * 683). Optional in dev (better-auth infers the origin from the request);
+   * 687). Optional in dev (better-auth infers the origin from the request);
    * REQUIRED behind a reverse proxy so redirects, cookies and form posts
    * resolve to the public host.
    */
