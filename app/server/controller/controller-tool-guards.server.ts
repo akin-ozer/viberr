@@ -44,48 +44,53 @@ export type ControllerToolText = {
 };
 
 /**
- * Ruling 677: the most text one controller tool reply carries, in UTF-8 bytes.
+ * Ruling 677: the most text one controller tool reply carries, in characters.
  *
- * The Claude CLI refuses an MCP result over 25,000 tokens (ruling 436), and
- * what it hands the model instead is a path to a file with advice to grep it,
- * tools the controller is denied. Live on the AWS calculator board
- * `get_project` came to 93,696 characters, and on all three turns that called
- * it the controller was told to read a file it could not open. Pretty-printed
- * JSON runs about three bytes to a token, so 60,000 bytes stays under the cap
- * with room for a reply that is denser than that.
+ * The Claude CLI checks an MCP result in two steps (read from the bundle of
+ * its 2.1.284): a text result whose length is at most four times half its
+ * token limit, 50,000 characters at the default 25,000 tokens, passes as it
+ * is; only a longer one is counted in tokens, and over the limit the model is
+ * handed a path to a file with advice to grep it, tools the controller is
+ * denied. Live on the AWS calculator board `get_project` came to 93,696
+ * characters, and on all three turns that called it the controller was told
+ * to read a file it could not open. So the cap sits on the first step, where
+ * no reply is refused however many tokens its characters make: a list of ids
+ * and timestamps runs near two characters to a token, and a cap reckoned from
+ * the token limit would let that reply through to be refused.
  */
-const CONTROLLER_REPLY_MAX_BYTES = 60_000;
+const CONTROLLER_REPLY_MAX_CHARS = 50_000;
 
-/** How far back from the cut a line break is worth stepping to. */
+/** How far back from the cut, in characters, a line break is worth stepping to. */
 const LINE_BREAK_REACH = 4_000;
 
 /**
- * Ruling 677: a reply a turn can carry. One within {@link CONTROLLER_REPLY_MAX_BYTES}
+ * Ruling 677: a reply a turn can carry. One within {@link CONTROLLER_REPLY_MAX_CHARS}
  * is returned as it is. A longer one is cut at the last line break that fits
  * (or, when none is near, where the room ends), and its first line says so,
- * with the sizes, before anything else is read: a
- * head the model can use and a plain account of what is missing, where the CLI
- * would have returned neither. Each tool still bounds its own reply (a page, a
- * limit, an excerpt); this is what stands behind the one that did not.
+ * with the sizes, before anything else is read: a head the model can use and
+ * a plain account of what is missing, where the CLI would have returned
+ * neither. Each tool still bounds its own reply (a page, a limit, an
+ * excerpt); this is what stands behind the one that did not.
  */
 function carriedReply(text: string): string {
-  const bytes = Buffer.byteLength(text, "utf8");
-  if (bytes <= CONTROLLER_REPLY_MAX_BYTES) return text;
+  if (text.length <= CONTROLLER_REPLY_MAX_CHARS) return text;
   const size = (n: number) => n.toLocaleString("en-US");
   const note = (kept: number) =>
-    `[cut] This reply is ${size(bytes)} bytes and a turn carries ${size(CONTROLLER_REPLY_MAX_BYTES)}: ` +
+    `[cut] This reply is ${size(text.length)} characters and a turn carries ${size(CONTROLLER_REPLY_MAX_CHARS)}: ` +
     `what follows is its first ${size(kept)}, and the rest is not here. ` +
     "Ask for less (one item, a limit, a later page) rather than taking this as the whole of it.\n";
-  // Room for the note at its longest, then back to a line break and off any
-  // character the byte cut would have split.
-  const room = CONTROLLER_REPLY_MAX_BYTES - Buffer.byteLength(note(bytes), "utf8");
-  const head = Buffer.from(text, "utf8").subarray(0, room).toString("utf8").replace(/\uFFFD+$/, "");
+  // Room for the note at its longest, and never between the two halves of a
+  // character that takes two code units.
+  let room = CONTROLLER_REPLY_MAX_CHARS - note(text.length).length;
+  const last = text.charCodeAt(room - 1);
+  if (last >= 0xd800 && last <= 0xdbff) room -= 1;
+  const head = text.slice(0, room);
   // Back to a line break when one is near, so whole lines are kept. A reply
   // that is mostly one line (a document inside a JSON string) is cut where it
-  // stands: stepping back to its last break would keep its first few bytes.
+  // stands: stepping back to its last break would keep its first few lines.
   const lineEnd = head.lastIndexOf("\n");
   const kept = lineEnd > head.length - LINE_BREAK_REACH ? head.slice(0, lineEnd) : head;
-  return note(Buffer.byteLength(kept, "utf8")) + kept;
+  return note(kept.length) + kept;
 }
 
 /** Uniform not-visible copy: a missing project and a forbidden one read

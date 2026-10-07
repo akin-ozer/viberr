@@ -10,6 +10,7 @@ import {
   type TestStore,
 } from "../../../test-support/test-store";
 import { listAuditEvents } from "../../../test-support/audit-log";
+import { diskFoldsUnicodeForms } from "../../../test-support/unicode-forms";
 import type { TaskFileEvent } from "~/schemas/task-file.schema";
 import { taskAttachmentsDir, taskFilePath } from "~/server/files/file-store-root.server";
 import { readTaskFile } from "~/server/files/task-writer.server";
@@ -111,6 +112,35 @@ describe("removeTaskAttachment (ruling 582)", () => {
     expect(existsSync(attachment(decomposed))).toBe(false);
     const [, newer, older] = timeline();
     expect(newer!.attachments).toEqual(["notes.md"]);
+    expect(older!.attachments ?? []).toEqual([]);
+  });
+
+  it.skipIf(diskFoldsUnicodeForms)("ruling 675: removing one of two files that differ only in Unicode form keeps the other's claims", async () => {
+    // A folder can hold both: a person's upload stored decomposed before
+    // names were composed, and a file a run's shell wrote under the composed
+    // name. They are two files on the disk this runs on in production.
+    // CANARY: take claims off by composed name alone and the run's file loses
+    // its tile and its place among the files an upload may not overwrite.
+    const composed = "Çözüm Anahtarı.md";
+    const decomposed = composed.normalize("NFD");
+    seedTask(
+      [
+        comment("2026-09-28T10:00:00.000Z", { attachments: [composed] }),
+        comment("2026-09-28T09:00:00.000Z", { attachments: [decomposed] }),
+      ],
+      { [decomposed]: "a person's upload" },
+    );
+    writeFileSync(attachment(composed), "a run's own file");
+    await removeTaskAttachment(
+      store.db,
+      { projectSlug: store.slug, taskKey: "VIB-1", name: decomposed, reason: null },
+      arda(),
+      ctxOf(),
+    );
+    expect(existsSync(attachment(composed))).toBe(true);
+    expect(existsSync(attachment(decomposed))).toBe(false);
+    const [, newer, older] = timeline();
+    expect(newer!.attachments).toEqual([composed]);
     expect(older!.attachments ?? []).toEqual([]);
   });
 

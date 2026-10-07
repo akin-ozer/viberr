@@ -222,10 +222,26 @@ export function resolveStoredSegment(root: string, name: string): string {
   } catch {
     return exact;
   }
-  if (entries.includes(name)) return exact;
+  const stored = storedNameAmong(entries, name);
+  return stored === null ? exact : resolveStoreSegment(root, stored);
+}
+
+/**
+ * Ruling 675: the one of `entries` a written name means, by the rule
+ * {@link resolveStoredSegment} states: the entry of exactly that name, else
+ * the single entry that composes to the same name. Null when none does, or
+ * when two do and the name is neither of them.
+ *
+ * Every place that matches a name somebody wrote down (a typed file name, a
+ * claim on a task's timeline, a hold) against names a folder holds asks this,
+ * so a folder that holds both forms as two files keeps them apart: a name
+ * means the entry spelled exactly so before it means its twin.
+ */
+export function storedNameAmong(entries: readonly string[], name: string): string | null {
+  if (entries.includes(name)) return name;
   const wanted = storedFileName(name);
   const same = entries.filter((entry) => storedFileName(entry) === wanted);
-  return same.length === 1 ? resolveStoreSegment(root, same[0]!) : exact;
+  return same.length === 1 ? same[0]! : null;
 }
 
 /** Knowledge-base store root: ${DATA_ROOT}/kb (store://kb/…). Phase 9B. */

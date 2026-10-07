@@ -5,10 +5,12 @@
  */
 
 import { lstatSync, unlinkSync } from "node:fs";
-import { storedFileName } from "~/server/files/file-store-root.server";
+import path from "node:path";
+import { storedFileName, storedNameAmong } from "~/server/files/file-store-root.server";
 import {
   checkAttachmentBatch,
   checkAttachmentUpload,
+  listTaskAttachmentNames,
   resolveTaskAttachment,
   withAttachmentClaims,
   writeTaskAttachment,
@@ -695,13 +697,16 @@ export async function removeTaskAttachment(
     throw missing();
   }
   const reason = input.reason?.trim() || null;
-  const composed = storedFileName(name);
+  // Ruling 675: a claim is this file's when it names it as the store finds it,
+  // in either Unicode form, so no tile is left that opens nothing. A folder
+  // that holds both forms as two files keeps the other one's claims.
+  const stored = path.basename(abs);
+  const held = [...new Set([...listTaskAttachmentNames(input.projectSlug, input.taskKey, ctx.dataRoot), stored])];
+  const claimsIt = (claim: string) => storedNameAmong(held, claim) === stored;
   await updateTaskFile(taskRef(ctx, input.projectSlug, input.taskKey), (parsed) => {
     for (const event of parsed.timeline) {
-      // Ruling 675: by composed name, as the store found the file, so a claim
-      // typed in the other Unicode form does not keep a tile that opens nothing.
-      if (event.attachments?.some((n) => storedFileName(n) === composed)) {
-        event.attachments = event.attachments.filter((n) => storedFileName(n) !== composed);
+      if (event.attachments?.some(claimsIt)) {
+        event.attachments = event.attachments.filter((claim) => !claimsIt(claim));
       }
     }
     parsed.timeline.unshift({

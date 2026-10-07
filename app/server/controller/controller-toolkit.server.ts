@@ -9,12 +9,15 @@ import { KB_DOC_OFFSET_DESCRIPTION, isInjectableKbDoc, readKbDocForRun } from "~
 import { pageEnd } from "~/server/runtimes/read-page-budget.server";
 import { type CopyTaskFileToKbInput, copyTaskFileToKnowledgeBase } from "~/server/org/kb-task-file.server";
 import {
+  CONTROLLER_GUIDE_SKILL,
   CONTROLLER_SKILL_BUDGET,
   SKILL_INJECTION_BUDGET,
   type SkillBodySize,
+  controllerSkillRoom,
   skillBodyOverBudget,
 } from "~/server/files/skill-body.server";
 import { resolveControllerConfig } from "./controller-profile.server";
+import { sortedNames } from "~/server/runtimes/prompt-prefix.server";
 import { readTimelineEntry } from "~/server/tasks/board-read.server";
 import {
   attachmentImageHeader,
@@ -448,6 +451,12 @@ interface SkillListing {
   charsPastBudget?: number;
 }
 
+/** Ruling 679: a skill's size against what its holder is given. */
+interface SkillSizeAsHeld extends SkillBodySize {
+  /** Whether `over` is what a controller turn loses of it, not an agent's run. */
+  ofATurn: boolean;
+}
+
 /** Ruling 302: present on a `get_task` reply ONLY when entries were left out,
  *  naming the count and both ways to reach them. */
 interface TimelineWindowNote {
@@ -502,7 +511,7 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
     const size = skillSize(name);
     if (!size || size.over === 0) return "";
     const n = (value: number) => value.toLocaleString("en-US");
-    if (heldByController(name)) {
+    if (size.ofATurn) {
       return (
         ` Its body is ${n(size.chars)} characters, and a controller turn is given at most ${n(CONTROLLER_SKILL_BUDGET)} characters ` +
         `of its skills together, its guide first: the last ${n(size.over)} characters of this one reach no turn. Shorten it, or move ` +
@@ -518,16 +527,25 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
     );
   }
 
-  /** Ruling 679: a skill the controller's own profile holds is read under the
-   *  controller's budget. One an agent holds as well is measured here as the
-   *  controller's: the list cannot know every deployment that grants it. */
-  function heldByController(name: string): boolean {
-    return resolveControllerConfig(dataRoot).skills.includes(name);
-  }
-
-  /** A skill's size against the budget of whoever holds it. */
-  function skillSize(name: string): SkillBodySize | null {
-    return skillBodyOverBudget(name, dataRoot, heldByController(name) ? CONTROLLER_SKILL_BUDGET : SKILL_INJECTION_BUDGET);
+  /**
+   * Ruling 679: a skill's size against what its holder is given. An agent's
+   * skills share 24,000 characters. A skill the controller's own profile
+   * holds draws from the controller's 40,000 in its turn's order, the guide
+   * first, so it is measured against what is left when its turn to draw
+   * comes. The guide is the controller's alone; any other skill it holds may
+   * be an agent's too (this list cannot know every deployment that grants
+   * it), so that one is measured both ways and the larger loss is reported.
+   */
+  function skillSize(name: string): SkillSizeAsHeld | null {
+    const asAnAgents = skillBodyOverBudget(name, dataRoot);
+    if (!asAnAgents) return null;
+    const room = controllerSkillRoom(sortedNames(resolveControllerConfig(dataRoot).skills), name, dataRoot);
+    if (room === null) return { chars: asAnAgents.chars, over: asAnAgents.over, ofATurn: false };
+    const pastATurn = Math.max(0, asAnAgents.chars - room);
+    if (name !== CONTROLLER_GUIDE_SKILL && asAnAgents.over > pastATurn) {
+      return { chars: asAnAgents.chars, over: asAnAgents.over, ofATurn: false };
+    }
+    return { chars: asAnAgents.chars, over: pastATurn, ofATurn: true };
   }
 
   /**
@@ -1388,7 +1406,7 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
   add(
     tool(
       "list_skills",
-      "List the org skills (grant key, name, summary, size). Org admins only. `grantKey` is the skill FOLDER NAME, the only form save_global_agent's `skills` accepts; `id` is for save_skill. `chars` is the length of the skill's body, and `charsPastBudget`, when present, is how much of its end a run handed its skills as prompt text is never given (ruling 679: 24,000 characters for all of an agent's skills together; a skill your own profile holds is measured against the 40,000 a controller turn is given).",
+      "List the org skills (grant key, name, summary, size). Org admins only. `grantKey` is the skill FOLDER NAME, the only form save_global_agent's `skills` accepts; `id` is for save_skill. `chars` is the length of the skill's body, and `charsPastBudget`, when present, is how much of its end a run handed its skills as prompt text is never given (ruling 679: 24,000 characters for all of an agent's skills together; a skill your own profile holds is also measured against what a controller turn has left for it, of 40,000 with your guide drawn first, and the larger loss is the one listed).",
       {},
       run(() => {
         requireOrgAdmin("read the org skills");

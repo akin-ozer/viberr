@@ -106,6 +106,15 @@ describe("GET /projects/:slug/tasks/:key/attachments/:file (R19-19)", () => {
       expect(disposition.startsWith('inline; filename="Aidea _ ')).toBe(true);
       expect(disposition).toContain(`; filename*=UTF-8''${encodeURIComponent(composed.normalize("NFD"))}`);
     }
+
+    // CANARY: leave `'`, `(`, `)` and `*` as `encodeURIComponent` leaves them
+    // and the extended value is not one RFC 5987 allows: its own quote ends
+    // the charset part a second time.
+    writeFileSync(path.join(dir, "it's (final)*.txt"), "notes");
+    const res = await get(ardaId, "it's (final)*.txt");
+    expect(res.headers.get("content-disposition")).toBe(
+      `inline; filename="it's (final)*.txt"; filename*=UTF-8''it%27s%20%28final%29%2A.txt`,
+    );
   });
 
   it("NEVER renders stored HTML on the app origin — download-only, generic type", async () => {

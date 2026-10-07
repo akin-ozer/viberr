@@ -41,6 +41,7 @@ import {
 } from "../../../test-support/fake-runtime";
 import { connectFakeBackend } from "../../../test-support/backend-credentials";
 import { pollUntil } from "../../../test-support/polling";
+import { diskFoldsUnicodeForms } from "../../../test-support/unicode-forms";
 import { emptyRunFailureFacts } from "~/shared/run-failure";
 import { stageOutcome } from "./agent-outcome.server";
 import { OPERATOR_NOTIFY_FROM } from "./task-mutation.server";
@@ -879,6 +880,39 @@ describe("applyAgentCompletionEffects (the shared effects)", () => {
     const parsed = taskFile().parsed;
     expect(parsed.frontmatter.deliveredAt).toBeNull();
     expect(parsed.timeline.some((e) => (e.attachments ?? []).some((n) => n.normalize("NFC") === composed))).toBe(false);
+  });
+
+  it.skipIf(diskFoldsUnicodeForms)("ruling 675: a hold on one of two files that differ only in Unicode form leaves the other the run's", async () => {
+    // The folder holds a person's file stored decomposed and the run's own
+    // under the composed name: two files on the disk production runs on.
+    // CANARY: tell the held file from the run's by composed name alone and
+    // the deliverer's own file is nobody's, with no delivery stamped.
+    writeReviewTask({ stage: "impl", workRevision: null, validation: "none" });
+    const runId = await finishedRunWith("Saved the output.");
+    const { withAttachmentClaims } = await import("~/server/files/task-attachments.server");
+    const composed = "Müşteri Envanteri.csv";
+    const decomposed = composed.normalize("NFD");
+    await withAttachmentClaims(store.slug, "VIB-1", [decomposed], async () => {
+      saveInRunWindow(runId, [decomposed, composed]);
+      await applyAgentCompletionEffects(
+        store.db,
+        { dataRoot: store.dataRoot },
+        {
+          projectSlug: store.slug,
+          taskKey: "VIB-1",
+          backend: "claude",
+          profileId: "dev",
+          role: "Developer",
+          delivers: true,
+          workdir: null,
+          agentHandle: "dev",
+        },
+        { id: runId, state: "finished" },
+      );
+    });
+    const parsed = taskFile().parsed;
+    expect(parsed.frontmatter.deliveredAt).not.toBeNull();
+    expect(parsed.timeline.flatMap((e) => e.attachments ?? [])).toEqual([composed]);
   });
 
   /** Ruling 558's writers: each puts `SAMPLE` on VIB-1 for someone other

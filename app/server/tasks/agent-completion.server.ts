@@ -103,7 +103,7 @@ import {
 } from "~/server/files/task-writer.server";
 import { readProjectFile } from "~/server/files/project-writer.server";
 import {
-  storedFileName,
+  storedNameAmong,
   taskAttachmentsDir,
   taskDir,
 } from "~/server/files/file-store-root.server";
@@ -1595,8 +1595,13 @@ export async function applyAgentCompletionEffects(
   // event below so the panel can say who added each file and from which
   // message; without a recorded start there is no honest window, so nothing is
   // claimed.
-  const { attachmentClaimsInFlight, attachmentNamesSince, pruneBrowserWorkingArtifacts, savedFilesText } =
-    await import("~/server/files/task-attachments.server");
+  const {
+    attachmentClaimsInFlight,
+    attachmentNamesSince,
+    listTaskAttachmentNames,
+    pruneBrowserWorkingArtifacts,
+    savedFilesText,
+  } = await import("~/server/files/task-attachments.server");
   const runAttachmentsRaw = thisRunStartedAt
     ? attachmentNamesSince(
         input.projectSlug,
@@ -1673,23 +1678,25 @@ export async function applyAgentCompletionEffects(
   // another RUN is not excluded: the deliverer claims its whole window even
   // when a run beside it named one of its files (ruling 627 narrows what a run
   // that does not deliver claims, below).
-  // Ruling 675: by composed name on both sides. A hold is taken under the
-  // name as it will be stored, while an upload that replaces a file stored
-  // decomposed keeps that file's own name, so the two can differ in form.
-  const carriedHere = new Set(
+  // Ruling 675: each such name is taken as the file the folder holds for it.
+  // A hold is taken under the name as checked, while an upload that replaces
+  // a file stored decomposed keeps that file's own name, so the two can
+  // differ in form; a folder holding both forms as two files keeps them apart.
+  const carriedHere =
     thisRunStartedAt && completionFile
       ? completionFile.timeline
           .filter(
             (e) => e.occurredAt >= thisRunStartedAt && (e.actor.kind === "human" || isRelayComment(e)),
           )
-          .flatMap((e) => (e.attachments ?? []).map(storedFileName))
-      : [],
-  );
-  const heldComposed = new Set([...heldForOthers].map(storedFileName));
-  const runSaved = runAttachmentsRaw.filter((name) => {
-    const composed = storedFileName(name);
-    return !carriedHere.has(composed) && !heldComposed.has(composed);
-  });
+          .flatMap((e) => e.attachments ?? [])
+      : [];
+  // Every name the folder was seen to hold: its listing, and the window's own
+  // names, which were read a moment earlier and by their own rule.
+  const onTask = [
+    ...new Set([...listTaskAttachmentNames(input.projectSlug, input.taskKey, ctx.dataRoot), ...runAttachmentsRaw]),
+  ];
+  const someoneElses = new Set([...carriedHere, ...heldForOthers].map((name) => storedNameAmong(onTask, name)));
+  const runSaved = runAttachmentsRaw.filter((name) => !someoneElses.has(name));
   const verdictEngagement =
     input.profileId && completionFm
       ? completionFm.engagements.find((e) => e.profileId === input.profileId)

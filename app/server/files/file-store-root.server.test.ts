@@ -7,6 +7,7 @@ import {
   resolveStoreSegment,
   resolveStoredSegment,
   skillDirPath,
+  storedNameAmong,
 } from "./file-store-root.server";
 
 describe("resolveStoreSegment — traversal containment (F10-18)", () => {
@@ -71,6 +72,26 @@ describe("ruling 675: a typed name finds the file in whichever Unicode form it w
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }
+  });
+
+  it("keeps two entries that differ only in form apart: a name means the one spelled exactly so", () => {
+    // A folder on the disk production runs on can hold both forms as two
+    // files (an old upload, and a file a run's shell wrote). This is the rule
+    // every caller asks, so it is stated on a list, whatever the test's disk.
+    // CANARY: answer by composed name alone and a claim on one of the pair is
+    // read as a claim on the other: removing a person's file takes the run's
+    // tile with it.
+    expect(storedNameAmong([decomposed, composed, "plain.md"], decomposed)).toBe(decomposed);
+    expect(storedNameAmong([decomposed, composed, "plain.md"], composed)).toBe(composed);
+    // One entry: either spelling means it.
+    expect(storedNameAmong([decomposed, "plain.md"], composed)).toBe(decomposed);
+    expect(storedNameAmong([composed], decomposed)).toBe(composed);
+    // A third spelling of a pair means neither, and a stranger means nothing.
+    // Its first accented letter composed, the rest decomposed.
+    const third = `${composed.slice(0, 9)}${composed.slice(9).normalize("NFD")}`;
+    expect([composed, decomposed]).not.toContain(third);
+    expect(storedNameAmong([decomposed, composed], third)).toBeNull();
+    expect(storedNameAmong([decomposed], "Çıktı.pdf")).toBeNull();
   });
 
   it("still refuses a name that is not one path segment", () => {

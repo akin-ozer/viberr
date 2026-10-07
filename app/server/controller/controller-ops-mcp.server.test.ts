@@ -904,10 +904,12 @@ describe("read_run_log: every page is bounded, and says where it sits", () => {
     // CANARY: return every line the count allows and this reply is 125 KB,
     // which the guards cut mid-line with the page's cursors already wrong.
     const reply = await wordy({});
-    expect(Buffer.byteLength(reply, "utf8")).toBeLessThan(60_000);
+    // Under the 50,000 characters the guards let through, so nothing is cut.
+    expect(reply.length).toBeLessThan(50_000);
+    expect(reply.startsWith("[cut]")).toBe(false);
     const newest = parsed(RUN_LOG_REPLY, reply);
     // Fewer than the 60 the run holds and the 200 the page allows, and more
-    // than a handful: the bound is the reply's size, 48,000 bytes of lines.
+    // than a handful: the bound is the reply's size, 44,000 bytes of lines.
     expect(newest.lines.length).toBeGreaterThan(15);
     expect(newest.lines.length).toBeLessThan(30);
     // CANARY: keep the oldest of a backward page and the failure at the end

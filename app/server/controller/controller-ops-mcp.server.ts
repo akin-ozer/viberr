@@ -131,10 +131,10 @@ const MAX_LOG_LINES = 250;
  * Ruling 677: the most a page's lines come to, in UTF-8 bytes as the reply
  * prints them. A count alone bounds nothing: a line's `display` runs from a
  * few bytes to kilobytes, and 500 of the smallest already printed as 82 KB,
- * more than a turn carries. Under the reply's own cap, with room for the
- * run and page blocks above the lines.
+ * more than a turn carries. Under the reply's own cap of 50,000 characters,
+ * with room for the run and page blocks above the lines.
  */
-const RUN_LOG_PAGE_BYTES = 48_000;
+const RUN_LOG_PAGE_BYTES = 44_000;
 
 /**
  * The lines of `page` that fit {@link RUN_LOG_PAGE_BYTES}, kept from the end
@@ -486,7 +486,7 @@ export function buildControllerOpsMcp(deps: ControllerOpsDeps): ControllerOpsMcp
   add(
     tool(
       "read_run_log",
-      `One PAGE of an agent run's log lines, newest page by default (which is where a failure is). Readable by a member of the run's project; a controller conversation's own turns are readable by the person whose conversation it is (and by org admins). Two ways to move: \`before\` pages BACKWARD (the lines older than that sequence number) and \`since\` pages FORWARD (the lines after it). Name only one of them. Every call returns at most \`limit\` lines (${DEFAULT_LOG_LINES} by default, ${MAX_LOG_LINES} at most), and fewer when they are long (ruling 677: a page's lines come to at most 48,000 bytes, kept from the end the cursor reads from), so read \`page\` to see where you are: it reports whether older or newer lines exist and hands you the exact argument for the next call. \`run.logLines\` is the run's total.`,
+      `One PAGE of an agent run's log lines, newest page by default (which is where a failure is). Readable by a member of the run's project; a controller conversation's own turns are readable by the person whose conversation it is (and by org admins). Two ways to move: \`before\` pages BACKWARD (the lines older than that sequence number) and \`since\` pages FORWARD (the lines after it). Name only one of them. Every call returns at most \`limit\` lines (${DEFAULT_LOG_LINES} by default, ${MAX_LOG_LINES} at most), and fewer when they are long (ruling 677: a page's lines come to at most 44,000 bytes, kept from the end the cursor reads from), so read \`page\` to see where you are: it reports whether older or newer lines exist and hands you the exact argument for the next call. \`run.logLines\` is the run's total.`,
       {
         runId: z
           .string()

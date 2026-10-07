@@ -15,7 +15,7 @@ import {
   attachedResourcesBlock,
   readKbIndexes,
 } from "~/server/files/kb-injection.server";
-import { CONTROLLER_GUIDE_SKILL, CONTROLLER_SKILL_BUDGET, readSkillBodies } from "~/server/files/skill-body.server";
+import { CONTROLLER_SKILL_BUDGET, controllerSkillDrawOrder, readSkillBodies } from "~/server/files/skill-body.server";
 import { getMaxRunSpendUsd } from "~/server/settings/instance-settings.server";
 import {
   recordRunInputs,
@@ -1509,17 +1509,9 @@ export function buildControllerSystemPrompt(input: SystemPromptInput): Controlle
   const configSkills = sortedNames(input.config.skills);
   const mountedMcps = sortedNames(input.mountedMcps);
   const unresolvedMcps = sortedBy(input.unresolvedMcps, (u) => u.name);
-  // Ruling 679: the controller's own budget, and its guide draws from it
-  // first, whatever its name sorts behind: a skill an org admin attached must
-  // not be what cuts the doctrine short. The block still renders sorted.
-  const drawn = readSkillBodies(
-    [
-      ...configSkills.filter((name) => name === CONTROLLER_GUIDE_SKILL),
-      ...configSkills.filter((name) => name !== CONTROLLER_GUIDE_SKILL),
-    ],
-    input.dataRoot,
-    CONTROLLER_SKILL_BUDGET,
-  );
+  // Ruling 679: the controller's own budget, its guide drawn from it first.
+  // The block still renders sorted.
+  const drawn = readSkillBodies(controllerSkillDrawOrder(configSkills), input.dataRoot, CONTROLLER_SKILL_BUDGET);
   const skillSet = { parts: sortedBy(drawn.parts, (part) => part.name), unresolved: drawn.unresolved };
   // Ruling 239: a controller conversation SCOPED to a project reads that
   // project's rulings, like every agent the project runs. The controller is

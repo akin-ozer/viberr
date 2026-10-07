@@ -55,9 +55,39 @@ export const SKILL_INJECTION_BUDGET = 24_000;
  */
 export const CONTROLLER_SKILL_BUDGET = 40_000;
 
-/** The skill the controller always loads: its own guide. It draws from the
- *  controller's budget before any skill an org admin attached beside it. */
+/** The controller's own guide, the one skill it holds unless its stored list
+ *  leaves it out. It draws from the controller's budget before any skill an
+ *  org admin attached beside it. */
 export const CONTROLLER_GUIDE_SKILL = "controller-guide";
+
+/**
+ * Ruling 679: the order a controller turn draws its skills in, from the list
+ * as its turn sorts it: the guide first, whatever its name sorts behind, so a
+ * skill an org admin attached is never what cuts the doctrine short. One
+ * home, so the turn and the size a save reports cannot disagree.
+ */
+export function controllerSkillDrawOrder(names: readonly string[]): string[] {
+  return [
+    ...names.filter((name) => name === CONTROLLER_GUIDE_SKILL),
+    ...names.filter((name) => name !== CONTROLLER_GUIDE_SKILL),
+  ];
+}
+
+/**
+ * Ruling 679: how many characters of a controller turn's budget are left for
+ * `name` when its turn to draw comes: the budget, less the bodies of the
+ * skills drawn before it. Null when `names`, the controller's own list, does
+ * not hold it.
+ */
+export function controllerSkillRoom(names: readonly string[], name: string, dataRoot?: string): number | null {
+  if (!names.includes(name)) return null;
+  let room = CONTROLLER_SKILL_BUDGET;
+  for (const drawn of controllerSkillDrawOrder(names)) {
+    if (drawn === name) break;
+    room = Math.max(0, room - (skillBodyOverBudget(drawn, dataRoot)?.chars ?? 0));
+  }
+  return room;
+}
 
 /** A declared skill that reached the run with less (or none) of its content. */
 export interface UnresolvedSkillGrant {
@@ -227,7 +257,7 @@ export function readSkillBodyDetailed(
   };
 }
 
-/** A skill body's length, and how much of it is past its holder's budget. */
+/** A skill body's length, and how much of it is past what its holder is given. */
 export interface SkillBodySize {
   chars: number;
   over: number;
@@ -246,12 +276,7 @@ export interface SkillBodySize {
  * Architect's to 30,575; every save answered "updated", and the last 7,289 and
  * 6,575 characters of them reached no run, the newest rules among them.
  */
-export function skillBodyOverBudget(
-  name: string,
-  dataRoot?: string,
-  /** The budget of whoever holds it: an agent's, unless the controller's. */
-  budget: number = SKILL_INJECTION_BUDGET,
-): SkillBodySize | null {
+export function skillBodyOverBudget(name: string, dataRoot?: string): SkillBodySize | null {
   let resolved: ReturnType<typeof resolveContainedSkillFile>;
   try {
     resolved = resolveContainedSkillFile(name, dataRoot);
@@ -261,7 +286,7 @@ export function skillBodyOverBudget(
   if ("reason" in resolved) return null;
   try {
     const chars = splitFrontmatter(readFileSync(resolved.file, "utf8")).body.trim().length;
-    return { chars, over: Math.max(0, chars - budget) };
+    return { chars, over: Math.max(0, chars - SKILL_INJECTION_BUDGET) };
   } catch {
     return null;
   }

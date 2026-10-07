@@ -20,6 +20,42 @@ import { writeStoreFiles } from "./store-files.server";
 /** The longest file name a store folder keeps (`cleanSegment`). */
 const STORE_NAME_MAX_CHARS = 200;
 
+/** The most bytes of UTF-8 one name on the disk holds. */
+const DISK_NAME_MAX_BYTES = 255;
+
+/** A character that would end, or hide in, the one line a knowledge base's
+ *  index prints a name on: a control character, a line or paragraph
+ *  separator, or the backtick that closes the name's own code span. */
+function breaksAnIndexLine(ch: string): boolean {
+  const code = ch.codePointAt(0) ?? 0;
+  return code < 0x20 || (code >= 0x7f && code <= 0x9f) || code === 0x2028 || code === 0x2029 || ch === "`";
+}
+
+/**
+ * Ruling 678: what stops `name` from standing in a knowledge base's folder, as
+ * the sentence that refuses it, or null. The store keeps a name's first 200
+ * characters and a disk 255 bytes of one, so a longer name would land under a
+ * name the reply never said, or fail the write. And the name is printed in
+ * the knowledge base's index, in every prompt given it, so it holds nothing
+ * that could end the line it stands on.
+ */
+function unfitName(name: string): string | null {
+  const bytes = Buffer.byteLength(name, "utf8");
+  if (name.length > STORE_NAME_MAX_CHARS || bytes > DISK_NAME_MAX_BYTES) {
+    return (
+      `\`${name.slice(0, 40)}…\` is ${name.length} characters (${bytes} bytes) long, and a file in a knowledge base is ` +
+      `named in at most ${STORE_NAME_MAX_CHARS} characters and ${DISK_NAME_MAX_BYTES} bytes. Give it a shorter name with \`as\`.`
+    );
+  }
+  if ([...name].some(breaksAnIndexLine)) {
+    return (
+      "A knowledge base's index names this file to every run given it, so its name cannot hold a line break, " +
+      "a control character or a backtick. Give it a plain name with `as`."
+    );
+  }
+  return null;
+}
+
 export interface CopyTaskFileToKbInput {
   /** The knowledge base's id. */
   kbId: string;
@@ -110,52 +146,33 @@ export function copyTaskFileToKnowledgeBase(
     return refuse(isAppError(error) ? error.userMessage : `\`${wanted}\` cannot be copied.`);
   }
   if ("tooLarge" in read) return refuse(`\`${wanted}\` cannot be copied.`);
-  // The store keeps a name's first 200 characters; a longer one would land
-  // under a name this reply never said.
-  if (name.length > STORE_NAME_MAX_CHARS) {
-    return refuse(
-      `\`${name.slice(0, 40)}…\` is ${name.length} characters long, and a file in a knowledge base is named in at most ` +
-        `${STORE_NAME_MAX_CHARS}. Give it a shorter name with \`as\`.`,
-    );
-  }
-
-  // The name is printed in the knowledge base's index, in every prompt that is
-  // given it, so it holds nothing that could end the line it stands on.
-  if ([...name].some((ch) => ch < " " || ch === "\u007f" || ch === "`")) {
-    return refuse(
-      "A knowledge base's index names this file to every run given it, so its name cannot hold a line break, " +
-        "a control character or a backtick. Give it a plain name with `as`.",
-    );
-  }
-  // The store's own rule for a path, said here instead of found after a write
-  // that kept nothing.
-  if (name.includes("..")) {
-    return refuse(`A file in a knowledge base cannot be named with two dots in a row (\`${name}\`). Give it another name with \`as\`.`);
-  }
-  const document = isInjectableKbDoc(name);
+  // Ruling 675: a file the folder holds under the same name in the other
+  // Unicode form is the one this would replace, so that file's spelling is
+  // the name written, and the one the checks below are about.
+  const into = resolveStoredSegment(target.rootAbs, name);
+  const stored = path.basename(into);
+  const unfit = unfitName(stored);
+  if (unfit) return refuse(unfit);
+  const document = isInjectableKbDoc(stored);
   if (!document && isPrivateKbFolder(target.rootAbs)) {
     return refuse(
       `${target.name} is private: its folder is closed to every agent's shell, and a run given it reads documents only, ` +
-        `so no run could open \`${name}\` there. Copy it into an open knowledge base.`,
+        `so no run could open \`${stored}\` there. Copy it into an open knowledge base.`,
     );
   }
-  // Ruling 675: a file the folder holds under the same name in the other
-  // Unicode form is the one this would replace.
-  const into = resolveStoredSegment(target.rootAbs, name);
   const there = existsSync(into) ? statSync(into) : null;
   if (there?.isFile() && document) {
     return refuse(
-      `${target.name} already holds the document \`${name}\`. Change a document with edit_knowledge_base_doc or ` +
+      `${target.name} already holds the document \`${stored}\`. Change a document with edit_knowledge_base_doc or ` +
         "save_knowledge_base, which check what they replace, or copy this file under another name with `as`.",
     );
   }
   if (there?.isFile() && !input.replace) {
     return refuse(
-      `${target.name} already holds a file named \`${path.basename(into)}\` (${there.size.toLocaleString("en-US")} bytes). ` +
+      `${target.name} already holds a file named \`${stored}\` (${there.size.toLocaleString("en-US")} bytes). ` +
         "Pass `replace: true` to put this one in its place, or another name in `as`.",
     );
   }
-  const stored = path.basename(into);
   let added: number;
   try {
     added = writeStoreFiles(db, target, [], [{ relPath: stored, data: read.bytes }], input.actor, {
@@ -169,9 +186,12 @@ export function copyTaskFileToKnowledgeBase(
     if (isAppError(error)) return refuse(error.userMessage);
     throw error;
   }
-  // The store skips a path it will not keep and says so only in its count.
+  // The store skips a path it will not keep (a name with two dots in a row)
+  // and says so only in its count, so the count is what this answers by.
   if (added !== 1) {
-    return refuse(`The store keeps no file under the name \`${stored}\`. Give it another name with \`as\`.`);
+    return refuse(
+      `The store keeps no file named \`${stored}\`: it skips a name with two dots in a row. Give it another name with \`as\`.`,
+    );
   }
   publishResourceUpdated("kb", target.id);
   return {
