@@ -5,8 +5,8 @@
  * `architecture.md` assigns freshness to this layer, and forbids UI components
  * from carrying interpretation logic. Two rules were violating both: the
  * GitHub reconcile chip in `features/github/github-query.server.ts` and the MCP
- * health dot in `features/org-settings/resources-panel.tsx`, each with its own
- * private 1-hour constant.
+ * health dot, now in `features/org-settings/resource-rows.tsx`, each with its
+ * own private 1-hour constant.
  *
  * The thresholds and predicates themselves live in `~/shared/freshness` — NOT
  * because this module is decorative, but because the MCP rule is evaluated in a

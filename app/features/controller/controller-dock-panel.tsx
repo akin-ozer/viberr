@@ -110,9 +110,11 @@ export function DockPanelBody({
   // message (review finding 16). Ruling 476(c): the page's rule, so a reply
   // that lands shows its first line, not its last.
   const scrollRef = useRef<HTMLDivElement>(null);
-  // The thread list swaps the transcript's box out, and the box it swaps back
-  // in starts at its top: that is an open too. Ruling 572: the page's way back
-  // to the newest message, too.
+  // The thread list draws into the transcript's own box (DockBodyBox keeps
+  // one <section>, which React updates in place), so the transcript comes back
+  // at whatever offset the list left. `threadsOpen` in the follow key makes
+  // that return an open too, and the transcript is placed again. Ruling 572:
+  // the page's way back to the newest message, too.
   const jump = useTranscriptFollow(scrollRef, messages, fresh, working, `${conversationId ?? ""}:${threadsOpen}`);
   // Ruling 476(d): a reply to the thread on screen is announced here; the
   // announcer beside the button leaves this thread out while the panel is open.
