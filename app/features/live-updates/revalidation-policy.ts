@@ -391,7 +391,8 @@ export class LiveLedger {
       this.ownCall = false;
     }
     void settled.then(() => {
-      this.obligations = this.obligations.filter((o) => !due.includes(o));
+      const settledDue = new Set(due);
+      this.obligations = this.obligations.filter((o) => !settledDue.has(o));
     });
   }
 

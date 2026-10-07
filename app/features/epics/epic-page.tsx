@@ -588,6 +588,7 @@ function AddTasksDialog({
   const shown = candidates.filter(
     (c) => !q || c.key.toLowerCase().includes(q) || c.title.toLowerCase().includes(q),
   );
+  const pickedKeys = new Set(picked);
   const moving = picked.filter((key) => candidates.find((c) => c.key === key)?.epicId);
   useFetcherResult(fetcher, (d) => {
     if (!d.ok) {
@@ -649,7 +650,7 @@ function AddTasksDialog({
             {shown.map((c) => (
               <li key={c.key}>
                 <label className="epic-add-row">
-                  <input type="checkbox" checked={picked.includes(c.key)} onChange={() => toggle(c.key)} />
+                  <input type="checkbox" checked={pickedKeys.has(c.key)} onChange={() => toggle(c.key)} />
                   <span className="epic-task-key">{c.key}</span>
                   <span className="epic-task-title">{c.title}</span>
                   {c.epicId && (
