@@ -91,10 +91,10 @@ export function fileWriteDenyReason(
   const id = "execute-code-or-write-repo";
   const label = capabilityById(id)?.label ?? id;
   const [attachments, ...scratch] = roots;
-  // Ruling 692(d): the last sentence. The grant's label opens with "Execute
-  // code", and live a writer that read this refusal stopped running commands
-  // for the rest of its run ("after that I only counted words and checked
-  // links"), though the grant never took its shell away.
+  // Ruling 692(d): the last sentence. The grant's label used to open with
+  // "Execute code", and live a writer that read this refusal stopped running
+  // commands for the rest of its run ("after that I only counted words and
+  // checked links"), though the grant never took its shell away.
   return (
     `Withheld by capability policy: "${label}" (${id}) is not granted on this run, so ${tool} ` +
     `writes only into the task's attachments folder \`${attachments}\`, where the files you ` +

@@ -1019,7 +1019,7 @@ describe("removeProjectRepo — the door that takes a project's repository away 
     ).rejects.toMatchObject({
       status: 400,
       userMessage:
-        'Calculator Builder may write akin-ozer/viberr, so this board delivers through it. Withhold "Execute code or write to the repo" from that agent on the Agents page first, or change the repository instead. Nothing was changed.',
+        'Calculator Builder may write akin-ozer/viberr, so this board delivers through it. Withhold "Write to the repository" from that agent on the Agents page first, or change the repository instead. Nothing was changed.',
     });
 
     deploy(store, "off");

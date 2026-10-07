@@ -111,7 +111,7 @@ export const SEED_AGENT_PROFILES: SeedAgentProfile[] = [
       // for the retired assign/summon slot pair).
       direct: ["Select & run agents", "Generate decision & blocking packets", "Append typed important events", "Deliver the branch & open the review PR"],
       recommend: ["Stage transitions", "Accept completion into Done"],
-      forbidden: ["Execute code or write to the repo", "Transition a task to Done", "Change project policy"],
+      forbidden: ["Write to the repository", "Transition a task to Done", "Change project policy"],
     },
     "A dedicated operator is instantiated for every active task. It coordinates specialists, keeps the canonical task file authoritative, and turns agent work into concise decision packets for human review. It never writes code and never closes a task itself.",
   ),
@@ -145,7 +145,7 @@ export const SEED_AGENT_PROFILES: SeedAgentProfile[] = [
       },
     },
     {
-      // "Execute code or write to the repo" is the HEADLINE repo-write capability
+      // "Write to the repository" is the HEADLINE repo-write capability
       // and the master gate for ALL delivery (specialist-tool-policy.ts): with it
       // withheld, the fine-grained branch/commit/PR grants below are vetoed and the
       // developer silently delivers nothing (VIB-1 class). A deliverer MUST hold it.
@@ -161,7 +161,7 @@ export const SEED_AGENT_PROFILES: SeedAgentProfile[] = [
       // egress and the mount refuses without it (resolveBrowserMcp gate 2), so
       // the pair ships the way the profile editor's own coupling would save it —
       // never relying on the catalog default to keep the pair coherent.
-      direct: ["Execute code or write to the repo", "Create the task-key branch", "Commit & push to the branch", "Run unit & integration validation", "Open the review pull request", "Post mid-run comments", "Ask the human a question", "Move the task to Review", "Drive a live web browser", "Search & fetch from the web"],
+      direct: ["Write to the repository", "Create the task-key branch", "Commit & push to the branch", "Run unit & integration validation", "Open the review pull request", "Post mid-run comments", "Ask the human a question", "Move the task to Review", "Drive a live web browser", "Search & fetch from the web"],
       recommend: [],
       forbidden: ["Merge a pull request", "Transition a task to Done"],
     },
@@ -228,7 +228,7 @@ export const LIBRARY_AGENT_PROFILES: SeedAgentProfile[] = [
       // and web egress as an explicit pair, for the reason the Developer does:
       // a screenshot of the real thing is one of the three pictures a piece may
       // carry, and the mount refuses without egress.
-      direct: ["Execute code or write to the repo", "Create the task-key branch", "Commit & push to the branch", "Open the review pull request", "Post mid-run comments", "Ask the human a question", "Attach evidence references", "Move the task to Review", "Drive a live web browser", "Search & fetch from the web"],
+      direct: ["Write to the repository", "Create the task-key branch", "Commit & push to the branch", "Open the review pull request", "Post mid-run comments", "Ask the human a question", "Attach evidence references", "Move the task to Review", "Drive a live web browser", "Search & fetch from the web"],
       recommend: [],
       forbidden: ["Merge a pull request", "Transition a task to Done"],
     },

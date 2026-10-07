@@ -321,7 +321,7 @@ export function CapabilityMatrixModal({
               <li>
                 Delivery (push · open/merge PR) is <b>server-owned</b> and gated
                 server-side on the delivering profile's grant, enforced on both
-                backends. Withholding <b>Execute code or write to the repo</b> binds on
+                backends. Withholding <b>Write to the repository</b> binds on
                 Claude, which drops the write tools. Codex runs are not OS-confined
                 (ruling 185), so there it is advisory: the prompt omits every delivery
                 step, and the row is tagged "advisory on Codex" above. The scoped
@@ -402,7 +402,7 @@ export function CapabilityMatrixModal({
                 not restricted by any row here: granting a server IS the grant. The
                 exception is the tools an admin marks as <b>write tools</b> on the
                 server (Settings → MCP servers). Those are removed from every run whose
-                agent withholds <b>Execute code / write to the repo</b>, and from every
+                agent withholds <b>Write to the repository</b>, and from every
                 operator run, on Claude and Codex. A server's unmarked tools keep the
                 rule stated in the run's system prompt: an MCP tool may never merge,
                 close a task, or change policy. Grant MCP servers as deliberately as

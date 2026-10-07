@@ -2296,7 +2296,7 @@ describe("the file tools of a run that posts files (ruling 564)", () => {
       expect(answer.hookSpecificOutput?.permissionDecision, filePath).toBe("deny");
     }
     expect((await call(hook, "Edit", `${CHECKOUT}/mapping.md`)).hookSpecificOutput?.permissionDecisionReason).toBe(
-      'Withheld by capability policy: "Execute code or write to the repo" (execute-code-or-write-repo) ' +
+      'Withheld by capability policy: "Write to the repository" (execute-code-or-write-repo) ' +
         `is not granted on this run, so Edit writes only into the task's attachments folder \`${DROP}\`, ` +
         `where the files you post on the task go, and \`${tmpdir()}\` for scratch. ` +
         `\`${CHECKOUT}/mapping.md\` is outside both: write the file there by its absolute path, and ` +
@@ -2343,7 +2343,7 @@ describe("the file tools of a run that posts files (ruling 564)", () => {
       { signal: new AbortController().signal },
     );
     expect(answer.hookSpecificOutput?.permissionDecisionReason).toContain(
-      '"Execute code or write to the repo" (execute-code-or-write-repo)',
+      '"Write to the repository" (execute-code-or-write-repo)',
     );
   });
 });
