@@ -2958,14 +2958,23 @@ describe("UI-42/UI-44: the decision packet", () => {
    * that are all inert on a card with no Confirm, and a contributor-owner's
    * digit chose an archive their role cannot carry out. The keyboard now
    * passes an inert option by, as a disabled radio is in the APG radio group,
-   * and does nothing when every option is inert; the group's one tab stop
-   * follows the check. `accept_completion` carries no option-level gate, so a
-   * click and a key both still choose it and only Confirm refuses.
+   * and does nothing when every option is inert. With nothing chosen, the
+   * group's one tab stop is the first choice the viewer can make, and a
+   * refused Confirm focuses it (ruling 478(e)); an arrow that finds no other
+   * choice keeps a standing refusal (ruling 147). `accept_completion` carries
+   * no option-level gate, so a click and a key both still choose it and only
+   * Confirm refuses.
    *
    * CANARY: drop the `blockedOptions` check from `move` (arrows) or from the
    * digit handler in `PacketOptions` and a key checks an option a click
-   * cannot; skip on `gateFor` alone instead and the last row cannot reach
-   * accept_completion, which a click can.
+   * cannot; drop `move`'s trailing `if (blockedOptions[next]) return` and the
+   * viewer's arrows check an option on the agent's question; enter `move` at
+   * the end itself rather than past it and ArrowUp from nothing skips the
+   * directive; skip on `gateFor` alone and the third row cannot reach
+   * accept_completion, which a click can; put `tabStop` on option 0 whatever
+   * it is and the last two rows' tab stop and refusal focus land on an
+   * archive; let an arrow re-select the checked choice and the last row's
+   * refusal goes.
    */
   it.each<{
     name: string;
@@ -2974,28 +2983,77 @@ describe("UI-42/UI-44: the decision packet", () => {
       ComponentProps<typeof DecisionPacket>,
       "canResolve" | "canResolveCompletion" | "canArchive"
     >;
-    /** Each key and the radio checked after it. */
-    steps: [key: string, checked: number][];
+    /** The radio checked as the card opens (-1: none), and the tab stop while
+     *  none is. */
+    opens: [checked: number, openStop: number];
+    /** Each key, or a press of Confirm, then the radio checked and whether a
+     *  refusal stands. */
+    steps: [key: string, checked: number, refused?: boolean][];
   }>([
     {
       name: "a viewer who cannot resolve: every option is inert, so keys do nothing",
       packet: packet142,
       viewer: { canResolve: false, canResolveCompletion: false, canArchive: false },
+      opens: [0, 0],
       steps: [["ArrowDown", 0], ["2", 0], ["ArrowUp", 0], ["3", 0]],
     },
     {
       name: "a contributor-owner without canArchive: both archive options are passed by",
       packet: recoveryPacket,
       viewer: { canResolve: true, canResolveCompletion: true, canArchive: false },
+      opens: [0, 0],
       steps: [["2", 0], ["3", 0], ["ArrowDown", 3], ["ArrowUp", 0], ["4", 3]],
     },
     {
       name: "accept_completion without its grant stays choosable, as its click is",
       packet: packet142,
       viewer: { canResolve: true, canResolveCompletion: false, canArchive: true },
+      opens: [0, 0],
       steps: [["2", 1], ["1", 0], ["ArrowUp", 3], ["ArrowDown", 0]],
     },
-  ])("UI-42: an arrow or a digit passes an inert option by, as a click does ($name)", ({ packet, viewer, steps }) => {
+    {
+      name: "a viewer on an agent's question, where nothing is chosen: keys still check nothing",
+      packet: {
+        ...packet142,
+        kind: "Agent question",
+        from: "Developer",
+        answerTo: "Developer",
+        options: [
+          { kind: "custom", t: "Ship it as is", d: "", rec: true },
+          { kind: "custom", t: "Hold for the policy", d: "", rec: false },
+        ],
+      },
+      viewer: { canResolve: false, canResolveCompletion: false, canArchive: false },
+      opens: [-1, 0],
+      steps: [["ArrowDown", -1], ["ArrowUp", -1], ["2", -1]],
+    },
+    {
+      name: "nothing chosen and option 0 inert: the tab stop is the open option, and ArrowUp enters at the directive",
+      packet: {
+        ...recoveryPacket,
+        options: [
+          { kind: "archive_task", t: "Archive the task", d: "Keeps the branch.", rec: false },
+          { kind: "custom", t: "Rework and re-run the Developer", d: "", rec: false },
+        ],
+      },
+      viewer: { canResolve: true, canResolveCompletion: true, canArchive: false },
+      opens: [-1, 1],
+      steps: [["ArrowUp", 2], ["ArrowDown", 1], ["1", 1]],
+    },
+    {
+      name: "only the directive is open: a refused Confirm focuses it, and an arrow keeps its refusal",
+      packet: {
+        ...recoveryPacket,
+        options: [
+          { kind: "archive_task", t: "Archive the task", d: "Keeps the branch.", rec: false },
+          { kind: "archive_task", t: "Archive and delete the branch", d: "Discards the work.", rec: false, deleteBranch: true },
+        ],
+      },
+      viewer: { canResolve: true, canResolveCompletion: true, canArchive: false },
+      opens: [-1, 2],
+      steps: [["Confirm", -1, true], ["ArrowDown", 2], ["Confirm", 2, true], ["ArrowUp", 2, true], ["1", 2, true]],
+    },
+  ])("UI-42: an arrow or a digit passes an inert option by, as a click does ($name)", ({ packet, viewer, opens, steps }) => {
     const { container } = render(
       <DecisionPacket
         packet={packet}
@@ -3008,12 +3066,24 @@ describe("UI-42/UI-44: the decision packet", () => {
       />,
     );
     const group = container.querySelector('[role="radiogroup"]')!;
-    const radios = () => [...container.querySelectorAll<HTMLButtonElement>('[role="radio"]')];
-    for (const [key, checked] of steps) {
-      fireEvent.keyDown(group, { key });
-      const now = radios();
-      expect(now.findIndex((r) => r.getAttribute("aria-checked") === "true"), `checked after ${key}`).toBe(checked);
-      expect(now.findIndex((r) => r.tabIndex === 0), `tab stop after ${key}`).toBe(checked);
+    const [opened, openStop] = opens;
+    const expectState = (when: string, checked: number, refused = false) => {
+      const radios = [...container.querySelectorAll<HTMLButtonElement>('[role="radio"]')];
+      const stop = checked >= 0 ? checked : openStop;
+      expect(radios.findIndex((r) => r.getAttribute("aria-checked") === "true"), `checked ${when}`).toBe(checked);
+      expect(radios.findIndex((r) => r.tabIndex === 0), `tab stop ${when}`).toBe(stop);
+      expect(container.querySelector('[role="alert"]') !== null, `refusal ${when}`).toBe(refused);
+      // Ruling 478(e): refused with nothing chosen, focus is on the tab stop.
+      if (refused && checked < 0) expect(document.activeElement, `focus ${when}`).toBe(radios[stop]);
+    };
+    expectState("on open", opened);
+    for (const [key, checked, refused] of steps) {
+      if (key === "Confirm") {
+        fireEvent.click(container.querySelector<HTMLButtonElement>(".packet-actions .btn.primary")!);
+      } else {
+        fireEvent.keyDown(group, { key });
+      }
+      expectState(`after ${key}`, checked, refused);
     }
   });
 });

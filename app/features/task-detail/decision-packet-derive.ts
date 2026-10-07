@@ -375,8 +375,9 @@ export interface PacketChoiceView {
   showsAnswerBox: boolean;
   tabStop: number;
   /** Per authored option, whether it is inert for this viewer. A click, an
-   *  arrow and a digit all pass an inert option by; the composed directive
-   *  past them never is one (it is offered only to a resolver). */
+   *  arrow and a digit all pass an inert option by, and so does the tab stop
+   *  while nothing is chosen; the composed directive past them never is one
+   *  (it is offered only to a resolver). */
   blockedOptions: boolean[];
 }
 
@@ -430,9 +431,6 @@ export function packetChoiceView(
   // repository" for a person who cannot connect one, where it asked for a
   // required value nothing reads.
   const showsAnswerBox = canResolve && !customSelected && (!connectsRepository || !blockReason);
-  // Roving tabindex: with nothing chosen yet, the first choice is the group's
-  // one tab stop (APG radio group).
-  const tabStop = noChoice ? 0 : sel;
   // UI-42 / R14-3 / F20-6 / F31-6: an option the viewer cannot carry out is
   // inert and says why (`PacketOptions`), instead of recording a decision
   // that dead-ends at the server's own re-check (LV-08 — no control that
@@ -444,6 +442,14 @@ export function packetChoiceView(
   const blockedOptions = p.options.map(
     (o) => (gateFor(o.kind, grants)?.option ?? null) !== null || !canResolve,
   );
+  // Roving tabindex: with nothing chosen yet, the first choice the viewer can
+  // make is the group's one tab stop (APG radio group, ruling 478(e)), and a
+  // refused Confirm focuses it; the composed directive counts, as it is never
+  // inert. With every choice inert it is the first, so Tab still reaches the
+  // group and its options can be read.
+  const firstOpen = blockedOptions.indexOf(false);
+  const openStop = firstOpen >= 0 ? firstOpen : customOffered ? customIndex : 0;
+  const tabStop = noChoice ? openStop : sel;
   return {
     customIndex,
     customOffered,

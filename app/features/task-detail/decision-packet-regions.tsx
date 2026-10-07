@@ -379,7 +379,8 @@ export function PacketOptions({
 
 /**
  * Ruling 478(e) under ruling 147: a Confirm with nothing chosen is refused
- * here, a fresh alert per press, focus on the first choice.
+ * here, a fresh alert per press, focus on the first choice the viewer can
+ * make (the group's tab stop).
  */
 export function ChoiceRefusal({ choice }: { choice: PacketChoice }) {
   return (

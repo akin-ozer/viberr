@@ -158,7 +158,8 @@ export function usePacketChoice(
       sel >= 0 ? sel : optionRefs.current.findIndex((el) => el === document.activeElement);
     // UI-42: an arrow passes an inert option by, as its click does nothing
     // (a disabled radio in the APG radio group), and with every choice inert
-    // it does nothing at all.
+    // it does nothing at all. With none but the checked one reachable it
+    // changes no choice, so a standing refusal stays (ruling 147).
     const { blockedOptions } = view;
     let next = from < 0 ? (delta > 0 ? -1 : choiceCount) : from;
     for (let tried = 0; tried < choiceCount; tried++) {
@@ -166,7 +167,7 @@ export function usePacketChoice(
       if (!blockedOptions[next]) break;
     }
     if (blockedOptions[next]) return;
-    selectOption(next);
+    if (next !== sel) selectOption(next);
     requestAnimationFrame(() => optionRefs.current[next]?.focus());
   };
 

@@ -318,10 +318,10 @@ Intents behind `project.task.tsx` are explained in
   are availability and keep `disabled`), the project's **Add member** modal (a
   `MiniModal` opened from a head button, ruling 148(b)), the agent profile editor, and the
   task page's decision packet (ruling 478(e): a Confirm with nothing chosen is refused with
-  "Choose an answer above first.", the radiogroup marked and its first choice focused; a
-  choice the asking agent marked `reply` with the answer box empty is refused with "Write
-  your answer to <agent> first.", the box marked and focused; the empty directive keeps
-  "Write the directive first.").
+  "Choose an answer above first.", the radiogroup marked and the first choice the person
+  can make focused; a choice the asking agent marked `reply` with the answer box empty is
+  refused with "Write your answer to <agent> first.", the box marked and focused; the empty
+  directive keeps "Write the directive first.").
   A save with nothing changed and a typed-name destructive confirmation keep
   `disabled` on purpose (147(d)).
   While the request is in flight, the New project primary shows it: the `loader`
