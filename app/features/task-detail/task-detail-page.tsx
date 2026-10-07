@@ -38,6 +38,7 @@ import { AttachmentsPanel } from "./attachments-panel";
 import { ChangesPanel } from "./changes-slot";
 import { CompletionPacket, type CompletionDiff } from "./completion-packet";
 import type { CompletionView } from "~/server/tasks/completion-packet.server";
+import type { TookCard } from "~/server/tasks/what-it-took.server";
 import { MoveBackConfirm } from "./move-back-confirm";
 import type { TaskAttachmentEntry } from "~/server/files/task-attachments.server";
 import { Timeline, type TimelineFilterId } from "./timeline";
@@ -158,6 +159,7 @@ export function TaskDetailPage({
   changesUrl = null,
   dependencyCandidatesUrl = null,
   completion = null,
+  whatItTook = null,
   runtime: loadedRuntime,
   deployedSpecialists,
   operatorBackend,
@@ -225,6 +227,10 @@ export function TaskDetailPage({
    *  summary and screenshots, each reviewer's verdict, the change's size);
    *  null while nothing is delivered. */
   completion?: CompletionView | null;
+  /** Ruling 693: what the task took, as the completion card prints it; null
+   *  when the loader shipped none (nothing delivered, or a viewer who may not
+   *  see the runs). */
+  whatItTook?: TookCard | null;
   /** Per-task run projection (Phase 8). */
   runtime: RunView[];
   /** Deployed specialists the run-agent selector offers (loader). */
@@ -827,6 +833,7 @@ export function TaskDetailPage({
         verdictSatisfiedBy={acceptance.verdictSatisfiedBy ?? null}
         diff={completionDiff}
         standalone={!acceptanceDecision}
+        took={whatItTook}
         result={
           resultShown
             ? {

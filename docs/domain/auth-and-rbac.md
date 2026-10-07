@@ -513,6 +513,14 @@ record (tasks, packets, the audit trail) covers every backend, and the agent run
 one backend at a time, because Claude and Codex do not measure alike (only Claude reports
 a cost, their tokens are different models' tokens, Codex reports no cache write).
 
+Instance analytics stay with org admins: this page and the controller's
+`inspect_run_analytics`. One task's own figure does not (ruling 693). What a task took,
+the dollars its runs reported among it, is read by the task's project: a project member
+or an org admin sees it on the task's completion and Result card, the bar the run console
+already has, and any member may ask the controller for it (`get_task`'s `whatItTook`, and
+the run part for every task of a project on `list_tasks`). The operator reads the same
+figure in its snapshot.
+
 - **Oversight** (`oversightSummary`, every backend): owner clarity (active tasks with a
   definite next actor), branch and PR traceability, packet resolution times from audit
   rows, time to review, and long timelines, longest first. Each card that counts

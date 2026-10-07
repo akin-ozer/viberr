@@ -1,5 +1,6 @@
-import { useId } from "react";
+import { Fragment, useId } from "react";
 import type { CompletionVerdictRow, CompletionView } from "~/server/tasks/completion-packet.server";
+import type { TookCard } from "~/server/tasks/what-it-took.server";
 import { COMPLETION_NOTES, COMPLETION_SMALL_CHANGE_LINES } from "~/shared/completion-packet";
 import { Collapsible } from "~/ui/collapsible";
 import { Icon, type IconName } from "~/ui/icon";
@@ -31,6 +32,13 @@ import { ChangesPanel } from "./changes-slot";
  * the result. A task delivered as a revision shows no files: its pull request
  * holds them, so the result names the pull request, the change's size and the
  * paths it changed.
+ *
+ * Ruling 693: under the reviewers the card says what the task took: its runs
+ * and their agent time, their cost, the times a person was asked and the work
+ * was sent back, and the wall time to the first delivery and to acceptance.
+ * The server builds the phrases and the sentences saying what they miss
+ * (`what-it-took.server.ts`), so this draws them and formats nothing. It
+ * stays on the Result card.
  */
 export interface CompletionDiff {
   url: string;
@@ -113,6 +121,7 @@ export function CompletionPacket({
   diff = null,
   standalone = false,
   result = null,
+  took = null,
 }: {
   view: CompletionView;
   /** The attachments serving route's base, or null where there is none. */
@@ -127,6 +136,9 @@ export function CompletionPacket({
   standalone?: boolean;
   /** Ruling 668: the task is accepted, so this is its result. */
   result?: CompletionResult | null;
+  /** Ruling 693: what the task took and what that figure misses, or null for
+   *  a viewer the loader sent none. */
+  took?: TookCard | null;
 }) {
   const id = useId();
   const lightbox = useAttachmentLightbox();
@@ -258,6 +270,31 @@ export function CompletionPacket({
           ) : null}
         </ul>
       )}
+
+      {took && took.facts.length + took.notes.length > 0 ? (
+        <>
+          <Label className="cmp-k">What it took</Label>
+          {took.facts.length > 0 ? (
+            <p className="cmp-stat">
+              {took.facts.map((fact, i) => (
+                <Fragment key={fact}>
+                  {i > 0 ? (
+                    <span className="cmp-sep" aria-hidden="true">
+                      ·
+                    </span>
+                  ) : null}
+                  <span>{fact}</span>
+                </Fragment>
+              ))}
+            </p>
+          ) : null}
+          {took.notes.map((note) => (
+            <p key={note} className="cmp-none">
+              {note}
+            </p>
+          ))}
+        </>
+      ) : null}
 
       {shots.length > 0 ? (
         <>

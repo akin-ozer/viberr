@@ -60,6 +60,10 @@ import {
 } from "./specialist-roster.server";
 import { type RequiredReviewerView, resolveRequiredReviewers } from "./required-reviewers.server";
 import { type CompletionPacketFact, completionPacketFact } from "./completion-packet.server";
+import { type TaskTook, taskTook } from "./what-it-took.server";
+import { listRunsForTaskRows } from "~/server/runtimes/run-store.server";
+import { logger } from "~/server/logging/logger.server";
+import { toError } from "~/shared/errors";
 import { liveMergeable } from "~/features/github/github-pills";
 import {
   listKnowledgeBaseNames,
@@ -437,6 +441,15 @@ export interface OperatorTaskSnapshot {
    *  Optional only so hand-built fixtures need not restate it;
    *  `operatorSnapshot` always sets it. */
   completionPacket?: CompletionPacketFact;
+  /** Ruling 693: what the task has taken so far, derived from its run rows and
+   *  its own timeline at this read: the runs that started and their agent
+   *  minutes, the dollars they reported (`cost.usd: null` is unknown, never
+   *  zero), the rounds a person was asked, the times the work was sent back,
+   *  the wall time to the first delivery and to acceptance, and who spent it
+   *  (`byAgent`). `notes` says what the figure misses. Information only: it
+   *  changes no gate. Optional so hand-built fixtures need not restate it;
+   *  `operatorSnapshot` sets it unless the read itself failed. */
+  whatItTook?: TaskTook;
   /** The task's delivery branch (null before any delivery). Lets recovery
    *  packets name the branch a `deleteBranch` archive option would remove. */
   branch: string | null;
@@ -1344,6 +1357,29 @@ export function operatorSnapshot(
     // Ruling 521: whether an acceptance offer may go out yet, and what the
     // packet it needs must carry.
     completionPacket: completionPacketFact(fm, { projectSlug, taskKey, dataRoot: ctx.dataRoot }),
+    // Ruling 693: what the task took, from its run rows and the file read
+    // above. A read of what a task cost never fails the read of the task, so
+    // a throw here leaves the key out.
+    ...((): Pick<OperatorTaskSnapshot, "whatItTook"> => {
+      try {
+        return {
+          whatItTook: taskTook({
+            taskKey,
+            rows: listRunsForTaskRows(db, projectSlug, taskKey),
+            file: file.parsed,
+            stages,
+            terminalStageId: doneStageId,
+          }),
+        };
+      } catch (error) {
+        logger.warn("ruling 693 what-it-took read failed", {
+          projectSlug,
+          taskKey,
+          err: toError(error),
+        });
+        return {};
+      }
+    })(),
     // The task branch, so recovery copy can NAME what an `archive_task`
     // option with `deleteBranch: true` would delete instead of gesturing at
     // "the branch".

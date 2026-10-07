@@ -417,6 +417,17 @@ disagree with.
   from the whole timeline with their own words; ruling 415), `recentTimeline` (default 6
   entries, `events` up to 50), `timelineTotal` and `timelineOlder` (ruling 302),
   `unfinishedReport` (ruling 397), `unansweredRefusal` (ruling 408).
+- **What it took** (ruling 693): `whatItTook`, what the task has cost so far, derived at
+  this read from its run rows and its own timeline: `runs` (the runs that started, the
+  operator's among them, their agent minutes, and the ones not in that time), `cost`
+  (`usd`, null when no run reported one and never zero, with the unreported runs by
+  backend), `asked` (the rounds a person was asked), `sentBack` (by reviewers, by
+  people), `wall` (the spans to the first delivery and to acceptance, each with the part
+  agents ran and the part it waited on a person), `byAgent` (the first 8 agents by agent
+  time, with `moreAgents`), `facts` (the completion card's own line) and `notes` (what
+  the figure misses on this task). It is information for the operator's judgement and
+  changes no gate; each number's source and what it misses are in
+  [task-lifecycle.md §9](task-lifecycle.md). The key is left out only when its read fails.
 - **The board around it**: `epic` (ruling 503: the epic this task is in, its status, its
   description clipped at `EPIC_DESCRIPTION_CAP`, and its OTHER tasks, archived ones left
   out, each with its stage and `blockedBy`; absent for a task in no epic; it replaced
@@ -487,7 +498,7 @@ A withheld capability means the tool is **not built**; the model cannot reach it
 
 | Tool (`viberr`) | Action | Capability |
 |---|---|---|
-| `get_task` | `operatorSnapshot` (§4) | always |
+| `get_task` | `operatorSnapshot` (§4), with `whatItTook`, what the task has cost so far (ruling 693) | always |
 | `read_board` | `readBoardList` / `readBoardTask`: this project's tasks, or one task by key, archived included (ruling 282); one task carries its `outcome` once it has one, the current completion summary and each current verdict's report (read whole from its "Review verdict" comment, not the 2,000-character stored excerpt), each up to 8,000 characters (ruling 569); a goal past 2,000 characters comes back as its opening with every decision recorded on it kept whole (rulings 289, 579); one task also lists its `timeline`, every entry by stamp, type, author and title, newest first, the newest 200 (ruling 596), and its kept `deliveries` (ruling 597) | always |
 | `read_task_attachment` | one of this task's attachments: an `.xlsx` as its sheets in CSV, a PDF as its text (ruling 629), an image as the picture, any other file whose bytes are text as text whatever its name, a binary one named and refused (rulings 293, 533, 574), a page of up to 32,000 bytes at a time with `offset` (ruling 624) reading on from a truncated read's `nextOffset` (ruling 551); with `delivery`, a stamp from `read_board`'s `deliveries`, the file as that delivery held it, not as a rework left it (ruling 597) | always |
 | `read_timeline_entry` | one timeline entry in full, by its `occurredAt` stamp: this task's, or with `taskKey` another task's, by the stamp `read_board` lists in that task's `timeline` (rulings 285, 596); entries written in one millisecond come back together under `entries` (ruling 644), in the order they were written, and a `kb_correction` entry comes with `correction`, the correction whole from its record, when the operator itself is given that knowledge base (rulings 645, 648) | always |
@@ -512,7 +523,7 @@ A withheld capability means the tool is **not built**; the model cannot reach it
 | `lease_files` | `operatorLeaseFiles` (ruling 417: lease path globs to THIS task until it merges) | `deliver-review-pr` |
 | `update_branch_from_base` | `operatorUpdateBranchFromBase` (merge, never rebase; conflict → the delivering agent, or a packet when no agent can take it, ruling 475) | `update-task-branch` |
 | `transition_stage` | `operatorTransitionStage` | `stage-transitions` |
-| `write_completion_packet` | `operatorWriteCompletionPacket` → `writeCompletionPacket` (ruling 521: records `completionPacket` in task.md for the review subject, the operator's `summary`, its `changes` summary, required for a change of more than 200 lines, and up to 6 `screenshots` named from the task's image attachments with a caption each; ruling 668: also `considerations`, `assumptions` and `gaps`, each optional markdown of at most 2,000 characters, and `files`, up to 12 result files with a caption each, required on a task delivered as files and taken only from that delivery as it was kept (ruling 597) and still on the task, while a revision's `files` are left out with a line saying its pull request holds them; refuses (`noop`) while nothing is delivered, an empty or oversized summary or note, a large change without `changes`, a files delivery that names no result file or one outside the delivery, listing the delivered files, and a screenshot that is not an image or not among the attachments, listing the images it has; writes a `note` titled "Completion packet" and audit `task.completion_packet.written`; the Codex plan carries the summary in `text`, the changes in `reason`, the notes and the files in `result`) | `completion-for-acceptance` |
+| `write_completion_packet` | `operatorWriteCompletionPacket` → `writeCompletionPacket` (ruling 521: records `completionPacket` in task.md for the review subject, the operator's `summary`, its `changes` summary, required for a change of more than 200 lines, and up to 6 `screenshots` named from the task's image attachments with a caption each; ruling 668: also `considerations`, `assumptions` and `gaps`, each optional markdown of at most 2,000 characters, and `files`, up to 12 result files with a caption each, required on a task delivered as files and taken only from that delivery as it was kept (ruling 597) and still on the task, while a revision's `files` are left out with a line saying its pull request holds them; refuses (`noop`) while nothing is delivered, an empty or oversized summary or note, a large change without `changes`, a files delivery that names no result file or one outside the delivery, listing the delivered files, and a screenshot that is not an image or not among the attachments, listing the images it has; writes a `note` titled "Completion packet" and audit `task.completion_packet.written`; the Codex plan carries the summary in `text`, the changes in `reason`, the notes and the files in `result`; ruling 693: Viberr prints what the task took (runs, agent time, cost, questions, send-backs) on the same card from the record, so the tool's description tells the operator never to restate those figures in the packet) | `completion-for-acceptance` |
 | `accept_completion` | `operatorAcceptCompletion` | `completion-for-acceptance` |
 
 Every action returns `OperatorActionResult` with `outcome: done | recommended |
@@ -616,7 +627,9 @@ Details that matter:
   `current | stale | none | not_applicable`, `changedLines`, `changesSummaryRequired`,
   `screenshotCandidates`, the newest 20 image attachments, `resultFilesRequired` and
   `resultFileCandidates`, the delivered files a packet may name as the result (ruling
-  668), and a `note` saying what to do).
+  668), and a `note` saying what to do). The packet carries no figure of what the task
+  took: Viberr prints the runs, agent time, cost, questions and send-backs beside it
+  from the record (ruling 693), as it prints the verdicts and the change.
 - **Delivery.** Its description says it never serves a task whose deliverable is a
   result, which is delivered on the task (ruling 531, §4). `deliver_for_review` runs
   `performDelivery`, with NO cached-state short-circuit (ruling 134): rework on a task whose PR is already open is pushed to

@@ -5827,3 +5827,72 @@ describe("ruling 573: read_message_file", () => {
     expect((second.files ?? []).map((f) => f.name)).toEqual(["Müşteri Envanteri-2.csv"]);
   });
 });
+
+/**
+ * Ruling 693: the controller reads what a task took on `get_task`, with who
+ * spent it, and the run part for every task of a board on `list_tasks`, so a
+ * board is ranked in one call. What the figure counts is
+ * `what-it-took.server.test.ts`'s; this owns the two replies.
+ */
+describe("ruling 693: the controller's read of what a task took", () => {
+  it("ruling 693: get_task says what a task took and who spent it, and list_tasks carries the run part for every task", async () => {
+    // CANARY: (a) hand `runTotals` every run of the project instead of the
+    // task's own and each row reads the board's total; (b) default a task
+    // nobody ran to `costUsd: 0` and it reads as free, not unknown; (c) drop
+    // `...took` from the `get_task` reply and the controller is told nothing.
+    const { upsertRun } = await import("~/server/runtimes/run-store.server");
+    // VIB-153: the developer ran twice and a reviewer once. VIB-168: nobody ran.
+    for (const [id, kind, profile, name, minutes, totalCostUsd] of [
+      ["run_took_ctl_1", "primary", "developer", "Developer", 20, 1],
+      ["run_took_ctl_2", "primary", "developer", "Developer", 5, 0.25],
+      ["run_took_ctl_3", "reviewer", "reviewer", "Reviewer", 10, 0.5],
+    ] as const) {
+      upsertRun(app.db, {
+        id,
+        projectSlug: SLUG,
+        taskKey: "VIB-153",
+        threadId: `th-${id}`,
+        role: name,
+        kind,
+        backend: "claude",
+        model: "sonnet",
+        sdk: "test",
+        agentName: name,
+        agentProfileId: profile,
+        state: "finished",
+        startedAt: "2026-09-27T09:00:00.000Z",
+        finishedAt: `2026-09-27T09:${String(minutes).padStart(2, "0")}:00.000Z`,
+        totalCostUsd,
+      });
+    }
+
+    // SAFETY: `get_task` answers `json({ ..., whatItTook })`; the fields read
+    // here are the ones `TaskTook` declares, and a reply without the key fails
+    // the first assertion.
+    const read = JSON.parse(await call(ids.contributor, "get_task", { taskKey: "VIB-153" })) as {
+      whatItTook?: {
+        runs: { total: number; agentMinutes: number };
+        cost: { usd: number | null };
+        byAgent: { agent: string; profileId: string; role: string; runs: number; agentMinutes: number; costUsd: number | null }[];
+        moreAgents: number;
+      };
+    };
+    expect(read.whatItTook?.runs).toMatchObject({ total: 3, agentMinutes: 35 });
+    expect(read.whatItTook?.cost.usd).toBe(1.75);
+    expect(read.whatItTook?.byAgent).toEqual([
+      { agent: "Developer", profileId: "developer", role: "delivering", runs: 2, agentMinutes: 25, costUsd: 1.25 },
+      { agent: "Reviewer", profileId: "reviewer", role: "supporting", runs: 1, agentMinutes: 10, costUsd: 0.5 },
+    ]);
+    expect(read.whatItTook?.moreAgents).toBe(0);
+
+    // SAFETY: `list_tasks` answers `json(rows.map(...))`, each row with its
+    // key and the run part (the tool's own mapping).
+    const listed = JSON.parse(await call(ids.contributor, "list_tasks", {})) as {
+      key: string;
+      whatItTook: { runs: number; agentMinutes: number; costUsd: number | null };
+    }[];
+    const row = (key: string) => listed.find((t) => t.key === key)!.whatItTook;
+    expect(row("VIB-153")).toEqual({ runs: 3, agentMinutes: 35, costUsd: 1.75 });
+    expect(row("VIB-168")).toEqual({ runs: 0, agentMinutes: 0, costUsd: null });
+  });
+});
