@@ -226,7 +226,6 @@ describe("createProject — GitHub connection wiring", () => {
     );
     // Created (creating before the repo is deliverable is a real flow) but the
     // caller is told delivery won't work yet — no longer silently accepted.
-    expect(result.repoWarning).toBeTruthy();
     expect(result.repoWarning).toMatch(/push|write access/i);
     // The visible default branch is still adopted.
     const row = defaultBranchRow.parse(

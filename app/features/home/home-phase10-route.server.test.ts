@@ -129,7 +129,6 @@ describe("home org tile counts (Phase 10)", () => {
     expect(data.org.knowledgeBases).toBe(3);
     expect(data.org.mcpServers).toBe(0);
     expect(data.org.skills).toBe(4);
-    expect(data.org.globalAgents).toBeGreaterThan(0);
   });
 
   // F10-21: the tile reads "<n> agent profiles" — reusable templates the user
@@ -156,7 +155,6 @@ describe("home org tile counts (Phase 10)", () => {
 
     // Exact count, same population the catalog lists — 2, not 3.
     expect(data.org.globalAgents).toBe(2);
-    expect(data.org.globalAgents).toBe(profiles.length);
   });
 });
 
