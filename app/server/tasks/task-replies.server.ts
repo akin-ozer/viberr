@@ -492,8 +492,32 @@ export function stampNonCommitDelivery(
 }
 
 /**
+ * Ruling 699: who makes what a files delivery holds: its deliverer, and every
+ * supporting agent engaged on the task that holds no verdict.
+ *
+ * Ruling 587 counted the deliverer's files alone, and "a file of its own moves
+ * nothing" was written for a reviewer's notes: a reviewer that saves its
+ * evidence must not move the subject its verdict is about to bind to. A
+ * supporting agent with no verdict is not that. It makes a part of the result
+ * (ruling 610: a results board's deliverable is several agents' files), such
+ * as the picture a piece shows. Read before it shipped, the rework of such a
+ * picture replaced `cover.png` under its own name and moved nothing: the kept
+ * delivery still held the old picture, Viberr's pictures of the page still
+ * showed it, the reviewer's second objection read as one on unchanged work,
+ * and an approval given before a later change went on vouching for a picture
+ * its reviewer never saw. So a file such an agent saved before counts as
+ * held by the delivery, and saving it again moves the delivery as the
+ * deliverer's own file does. Its first save of a new name still moves
+ * nothing, and a verdict-capable agent's files never count.
+ */
+function deliveryMakers(fm: Pick<TaskFrontmatter, "engagements">): Set<string> {
+  return new Set(fm.engagements.filter((e) => e.delivers || !e.verdictCapable).map((e) => e.profileId));
+}
+
+/**
  * Ruling 587: the files the task's delivery holds: those the delivering
- * engagement's runs saved, as the timeline claims them, less the browser's
+ * engagement's runs saved, and (ruling 699) those a supporting agent that
+ * holds no verdict saved, as the timeline claims them, less the browser's
  * working files (ruling 570) and what a relay carried in (ruling 538).
  *
  * A delivery that is not a commit is reviewed as `files:<deliveredAt>` (ruling
@@ -510,8 +534,9 @@ export function deliveredFileNames(fm: TaskFrontmatter, timeline: readonly TaskF
   const names = new Set<string>();
   const deliverer = deliveringEngagement(fm);
   if (!fm.deliveredAt || !deliverer) return names;
+  const makers = deliveryMakers(fm);
   for (const e of timeline) {
-    if (e.actor.kind !== "agent" || e.actor.profileId !== deliverer.profileId) continue;
+    if (e.actor.kind !== "agent" || !makers.has(e.actor.profileId)) continue;
     if (isRelayComment(e)) continue;
     for (const name of e.attachments ?? []) {
       if (!isBrowserWorkingArtifact(name)) names.add(name);

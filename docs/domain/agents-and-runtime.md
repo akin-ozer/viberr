@@ -2266,6 +2266,7 @@ and the boot backfill writes them with `kb: []`, because it installs no knowledg
 The Writer and the Editor (`LIBRARY_AGENT_PROFILES`, ruling 692) are written by the same
 two writers and are in the library only: no project's default roster holds them, and a
 board gets them when the controller passes them as `agents` or a person adds them.
+The Diagrammer and the Cover Designer (ruling 699) ship the same way.
 
 | Profile | Kind | Backends | Model | Stages | Skills / KB | Grants |
 |---|---|---|---|---|---|---|
@@ -2274,6 +2275,8 @@ board gets them when the controller passes them as `agents` or a person adds the
 | `reviewer` | specialist | claude | `sonnet` | impl, review | `reviewer-expertise` / `api-contracts` (seed only) | direct: read diff, validation suites, tests, evidence, quality flags, comments, ask, verdict, approve, request changes; human: merge, done, commit/push |
 | `writer` (library) | specialist | claude, codex (Claude first) | `opus` | ready, impl | `writer-expertise` / none | direct: repo write, branch, commit/push, open PR (all four withheld on a board made to deliver results, ruling 667), comments, ask, evidence, browser, egress, advisory items; human: merge, done |
 | `editor` (library) | specialist | claude | `opus` | impl, review | `editor-expertise` / none | direct: read diff, evidence, quality flags, comments, ask, verdict, approve, request changes, egress; human: merge, done, commit/push |
+| `diagrammer` (library) | specialist | claude | `opus` | impl | `diagrammer-expertise` / none | direct: evidence, comments, egress; human: ask, merge, done, commit/push |
+| `cover-designer` (library) | specialist | claude | `opus` | impl | `cover-designer-expertise` / none | direct: evidence, comments, egress; human: ask, merge, done, commit/push |
 | `controller` | controller | claude | `sonnet` | n/a | `controller-guide` / `controller-handbook` | none (tools are gated by the asker's RBAC) |
 
 The Writer and the Editor are for a task whose result is prose a person puts their name
@@ -2288,6 +2291,28 @@ asked once and only what they alone know, their voice is taken from their own wr
 and nothing of a sample is carried over, and the page is looked at as its reader sees it
 (ruling 691). Each manual stays within half of the 24 000 characters a run with no
 checkout is given, so a board's own skill still fits beside it.
+
+The Diagrammer and the Cover Designer (ruling 699) make the pictures such a piece carries.
+Neither holds a delivery grant, so each runs as a supporting agent at the stage a board
+gives it: the piece stays its writer's delivery, the agent saves its picture on the task and
+saves the piece again with the picture placed, and that save moves the review to the
+assembled piece (ruling 587). A rework that only replaces a picture moves it too: a delivery
+holds the files of every supporting agent engaged on the task that holds no verdict
+(`deliveryMakers`, ruling 699), while a reviewer's own files still move nothing. Their manuals (`diagrammer-expertise`,
+`cover-designer-expertise`) hold the rest. A diagram is drawn only where the piece needs
+one, and none is a result; every box, arrow and label comes from the piece or from a kept
+source the run opened. A cover shows something from the piece (its command, its number, its
+real screen) in the look of the person's earlier covers, with no generated or stock imagery,
+no decoration and nothing invented. Each agent draws its picture as an SVG or an HTML page
+among the task's files, renders it at the size it names with `capture_page` (ruling 698),
+looks at the picture the tool returns (a cover also at a quarter of its size, as a feed
+shows it), fixes what it sees, makes the picture it keeps with one last call at scale 2,
+and copies that PNG onto the task. Neither asks the person
+anything: `ask-human` is withheld by name, because an absent grant resolves to granted, and
+what only the person can supply is a line of the report. The Editor's manual has it open
+every picture the piece carries and judge a diagram against the kept sources and a cover
+against the piece, naming the file with each finding so the fix goes to whoever made it;
+the Writer's leaves the diagrams and the cover to a board's drawing agent where it has one.
 
 The shipped operator doctrine (`operator.definition.md`, upgraded in place through
 `PRIOR_SHIPPED_HASHES`) tells the operator that a wait on other work is a fact with its

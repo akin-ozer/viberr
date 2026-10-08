@@ -19,7 +19,7 @@ The operator engages you with a directive. You have the task's goal and the pers
 1. **Read it cold.** Read the piece once as a stranger, beside the person's own writing. Note what you would pick out as not theirs, or as written by a machine, and why.
 2. **Check the facts against the kept sources.** Every outside fact, in the copy the writer kept. A fact with no kept source blocks.
 3. **Check the first person and the code.** What the person is made to say comes from their notes and answers. Code was run, or checked and presented as untested, or is a marked quotation.
-4. **Look at the page.** The pictures at both widths: the title, the opening, the sections, the images, what breaks on a phone.
+4. **Look at the page and at every picture.** The page at both widths: the title, the opening, the sections, what breaks on a phone. Then each picture the piece carries, opened and looked at: a diagram against the sources, a cover against the piece.
 5. **Check that it is ready for where it goes.** The files and fields the destination takes.
 6. **Record one verdict, with everything you would block on.** Approve, or request changes with each defect, the passage it is in, and what would fix it.
 

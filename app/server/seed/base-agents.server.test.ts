@@ -21,6 +21,8 @@ import { splitFrontmatter } from "~/server/files/frontmatter.server";
 import { joinedPrompt } from "~/server/runtimes/prompt-prefix.server";
 import { buildSpecialistPromptPrefix } from "~/server/tasks/specialist-prompt.server";
 import { isKnownModel } from "~/server/runtimes/model-catalog.server";
+import { effectiveCollabMode } from "~/server/tasks/agent-outcome.server";
+import { grantsWriteRepository } from "~/server/tasks/specialist-tool-policy";
 import type { AgentDeploymentDefinition } from "~/schemas/project-file.schema";
 
 const ctx = createTestDbContext();
@@ -154,7 +156,12 @@ describe("ruling 692: the library ships a Writer and an Editor", () => {
     const defaults = defaultAgentDeployments().map((d) => d.profileId).sort();
     expect(defaults).toEqual(["developer", "operator", "reviewer"]);
     expect(baseAgentDeployments().map((d) => d.profileId).sort()).toEqual(["developer", "operator", "reviewer"]);
-    expect(LIBRARY_AGENT_PROFILES.map((p) => p.frontmatter.id)).toEqual(["writer", "editor"]);
+    expect(LIBRARY_AGENT_PROFILES.map((p) => p.frontmatter.id)).toEqual([
+      "writer",
+      "editor",
+      "diagrammer",
+      "cover-designer",
+    ]);
   });
 
   it("the Writer delivers and reaches the web; the Editor holds the verdict and cannot write the piece", () => {
@@ -250,6 +257,164 @@ describe("ruling 692: the library ships a Writer and an Editor", () => {
     ).toBe(true);
     // Neither manual is about one kind of writing.
     expect(writer + editor).not.toMatch(/\bblog\b/i);
+  });
+});
+
+describe("ruling 699: the library ships a Diagrammer and a Cover Designer", () => {
+  const profileOf = (id: string) => LIBRARY_AGENT_PROFILES.find((p) => p.frontmatter.id === id);
+  const grantsOf = (id: string): Map<string, string> =>
+    new Map((profileOf(id)?.frontmatter.capabilities ?? []).map((c) => [c.capabilityId, c.mode]));
+  const said = (dataRoot: string, name: string) =>
+    readFileSync(path.join(dataRoot, "skills", name, "SKILL.md"), "utf8").replace(/\s+/g, " ");
+
+  it("writes both templates and their manuals into a fresh store, the persona as the template's body", () => {
+    // CANARY: take either profile out of LIBRARY_AGENT_PROFILES, or either
+    // skill out of STATIC_ASSETS, and its file is not there.
+    const dataRoot = ctx.makeTempDir();
+    seedDefaultAgentAssets(dataRoot);
+    const read = (...parts: string[]) => readFileSync(path.join(dataRoot, ...parts), "utf8");
+    const diagrammer = read("agents", "profiles", "diagrammer.md");
+    const cover = read("agents", "profiles", "cover-designer.md");
+    expect(diagrammer).toContain("You are the Diagrammer.");
+    expect(diagrammer).toContain("diagrammer-expertise");
+    expect(cover).toContain("You are the Cover Designer.");
+    expect(cover).toContain("cover-designer-expertise");
+    expect(read("skills", "diagrammer-expertise", "SKILL.md")).toContain("# Viberr diagrammer expertise");
+    expect(read("skills", "cover-designer-expertise", "SKILL.md")).toContain("# Viberr cover designer expertise");
+    expect(diagrammer).toContain("kb: []");
+    expect(cover).toContain("kb: []");
+  });
+
+  it("each saves files and reaches the web, delivers nothing, holds no verdict and asks the person nothing", () => {
+    // CANARY: move "Ask the human a question" out of either `forbidden` list
+    // and the grant is absent, which the catalog reads as granted.
+    for (const id of ["diagrammer", "cover-designer"]) {
+      const grants = grantsOf(id);
+      expect(grants.get("attach-evidence-references"), id).toBe("direct");
+      expect(grants.get("use-web-search-fetch"), id).toBe("direct");
+      expect(grants.get("ask-human"), id).toBe("human");
+      expect(grants.get("commit-push-branch"), id).toBe("human");
+      expect(grants.has("execute-code-or-write-repo"), id).toBe(false);
+      expect(grants.has("report-validation-verdict"), id).toBe(false);
+      // What the stored modes come to at run time, which is what the claim
+      // is about. CANARY: add "Create the task-key branch" to either `direct`
+      // list and the profile can write a repository.
+      const stored = profileOf(id)!.frontmatter.capabilities;
+      expect(grantsWriteRepository(stored), id).toBe(false);
+      expect(effectiveCollabMode(stored, "ask-human"), id).toBe("human");
+      expect(effectiveCollabMode(stored, "report-validation-verdict"), id).toBe("off");
+      expect(effectiveCollabMode(stored, "attach-evidence-references"), id).toBe("direct");
+      const profile = profileOf(id)!;
+      expect(profile.frontmatter.extras, `${id} has a label the catalog does not know`).toEqual([]);
+      expect(isKnownModel("claude", profile.frontmatter.model), id).toBe(true);
+      // They look at the picture a tool returns, which is proven on Claude only.
+      expect(profile.frontmatter.backends, id).toEqual(["claude"]);
+    }
+  });
+
+  it("each manual leaves a board's own skill half of what a run with no checkout is given", () => {
+    const dataRoot = ctx.makeTempDir();
+    seedDefaultAgentAssets(dataRoot);
+    for (const name of ["diagrammer-expertise", "cover-designer-expertise", "editor-expertise", "writer-expertise"]) {
+      const raw = readFileSync(path.join(dataRoot, "skills", name, "SKILL.md"), "utf8");
+      expect(splitFrontmatter(raw).body.trim().length, name).toBeLessThanOrEqual(SKILL_INJECTION_BUDGET / 2);
+    }
+  });
+
+  it("says a picture shows only what is true, is judged by looking at it, and is placed in the piece by its maker", () => {
+    // CANARY: drop a section of either manual.
+    const dataRoot = ctx.makeTempDir();
+    seedDefaultAgentAssets(dataRoot);
+    const diagrammer = said(dataRoot, "diagrammer-expertise");
+    expect(diagrammer).toContain("**None is a result.**");
+    expect(diagrammer).toContain("Every box, every arrow and every label comes from the piece or from a source kept on the task.");
+    expect(diagrammer).toContain("Do not draw from your memory of how such systems usually look.");
+    expect(diagrammer).toContain("Write the question the diagram answers in one line before you draw");
+    // The picture is made at a size the run names, and looked at.
+    expect(diagrammer).toContain("`capture_page` with the drawing's name and its `width` and `height` returns the picture");
+    // Read before it shipped: the reply's word on a layout that runs past
+    // the box cannot see inside a drawing's own canvas. CANARY: drop the
+    // sentence and a label cut at the canvas edge is "said to fit".
+    expect(diagrammer).toContain("It cannot see what a drawing's own canvas cuts off");
+    expect(diagrammer).toContain("Read the piece again just before you do, and add your line to the file as it stands then");
+    expect(diagrammer).toContain("A picture the piece already carries stays where it is");
+    expect(diagrammer).toContain("Check what you see, not what you meant");
+    expect(diagrammer).toContain("If you cannot read a main label in the phone picture, neither can the reader");
+    // Rehearsed: the run re-checked the piece's own facts in seven sources,
+    // looked at the piece eight times, and left the pictures' field for the
+    // writer, which would have cost a writer's run. CANARY: drop any of the
+    // three sentences.
+    expect(diagrammer).toContain("**What the piece states, draw as it states it.**");
+    expect(diagrammer).toContain("Look again only when the picture itself changed.");
+    expect(diagrammer).toContain("the field that lists its pictures is yours to bring up to date");
+    const cover = said(dataRoot, "cover-designer-expertise");
+    expect(cover).toContain("**It shows something from the piece.**");
+    expect(cover).toContain("would this cover fit another piece on the same topic? Then it is wallpaper.");
+    expect(cover).toContain("Generated or stock imagery, and anything drawn to look like either.");
+    expect(cover).toContain("An invented screen, output, quote or number.");
+    // Read before it shipped: the recipe hid the page's overflow, and the
+    // reply then said a cover with a line below its box fitted. CANARY: put
+    // `overflow: hidden` back in the recipe's place.
+    expect(cover).toContain("Do not hide overflow on the page or on that box");
+    expect(cover).not.toContain("overflow: hidden");
+    expect(cover).toContain("Take the look and nothing else.");
+    // Rehearsed: a board's later covers follow its first, and a person who
+    // publishes in two places has two looks.
+    expect(cover).toContain("those are the look");
+    expect(cover).toContain("Another publication's covers are that publication's look, not the person's");
+    expect(cover).toContain("the field that names its cover is yours to fill");
+    // The list of the piece's pictures holds other makers' entries too.
+    expect(cover).toContain("add the cover and leave every other entry as it is");
+    expect(cover).toContain("the same call with `scale` 0.25 is the cover as a feed shows it");
+    for (const manual of [diagrammer, cover]) {
+      // A supporting agent's save of the piece is what puts its picture under
+      // review (ruling 587), so both manuals say the save is theirs to make
+      // and that nothing else in the piece is.
+      expect(manual).toContain("That save makes the assembled piece the delivery a reviewer judges.");
+      expect(manual).toContain("Copy the picture `capture_page` saved for your run");
+      expect(manual).toContain("a face it lacks is replaced without a word");
+      expect(manual).toContain("Change nothing else in the piece");
+      // The picture that is kept is the scale 2 one, and a rework that only
+      // replaces it still reaches review (ruling 699's delivery rule).
+      expect(manual).toMatch(/the same call with `scale` 2 makes the (picture|cover) you keep/);
+      expect(manual).toContain("puts the piece back under review");
+      // Rehearsed against the renderer (2026-10-08): a run that measured its
+      // own picture with scripts took 15 minutes over a cover.
+      expect(manual).toContain("Judge by eye, as a reader does: run no script over the picture's pixels.");
+      // What only the person can supply is a line of the report, never a question.
+      expect(manual).not.toMatch(/ask_human|ask the person/i);
+      // Neither manual is about one kind of writing.
+      expect(manual).not.toMatch(/\bblog\b/i);
+    }
+  });
+
+  it("has the Editor open every picture, and the Writer leave the drawing to a board's drawing agent", () => {
+    // CANARY: drop the Editor's picture section, or the Writer's paragraph.
+    const dataRoot = ctx.makeTempDir();
+    seedDefaultAgentAssets(dataRoot);
+    const editor = said(dataRoot, "editor-expertise");
+    expect(editor).toContain("### 7. Every picture, by looking at it");
+    expect(editor).toContain("Never judge a picture from the file that drew it.");
+    expect(editor).toContain("every box, arrow and label is in the piece or in a kept source");
+    expect(editor).toContain("One that would fit any piece on the topic blocks");
+    expect(editor).toContain("Name the file with each finding and say what would fix it, so the fix goes to whoever made that picture.");
+    const writer = said(dataRoot, "writer-expertise");
+    expect(writer).toContain("the diagrams and the cover are that agent's. Draw none yourself");
+    const guide = said(dataRoot, "controller-guide");
+    expect(guide).toContain("add the shipped Diagrammer and Cover Designer** (ruling 699)");
+    expect(guide).toContain("each deployed at the stage where its step happens");
+    // Two at once would each save the piece, and the writer has to be told
+    // the drawing is not its to do. CANARY: drop either clause.
+    expect(guide).toContain("to run the two one after the other, the diagrams first");
+    expect(guide).toContain("so its writer draws none");
+    // A store whose copy nobody edited takes the new text at its next boot.
+    // CANARY: remove any of the three outgoing hashes.
+    const outgoing: [string, string][] = [
+      ["skills/writer-expertise/SKILL.md", "8c133fa610e494f0497b114cf71f64f08d91c9d08e6974634f1f4129fb64e870"],
+      ["skills/editor-expertise/SKILL.md", "62e62eed5108c4228e92c228d082d9815cb79c450d64b8d79f07beab7e30538a"],
+      ["skills/controller-guide/SKILL.md", "e51e4710c9719b8bae32484e443a0c8be92e5fe6298e03dd53bc78eb26abb208"],
+    ];
+    for (const [rel, hash] of outgoing) expect(shippedCopyIsUnedited(rel, hash, {}), rel).toBe(true);
   });
 });
 
