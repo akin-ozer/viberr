@@ -7,7 +7,7 @@ import { AgentCapability, Guardrails, HumanAccess, RequiredReviewers, WorkflowRu
 import type { GuardrailView } from "./policy-query.server";
 import type { RequiredReviewerView } from "~/server/tasks/required-reviewers.server";
 import { operatorAutonomyState } from "./policy-data";
-import { PROJECT_ROLES } from "~/shared/rbac";
+import { PROJECT_ROLES, RBAC_DEFINITIONS } from "~/shared/rbac";
 
 afterEach(cleanup);
 
@@ -104,8 +104,9 @@ describe("HumanAccess", () => {
     expect(heads.slice(0, 3)).toEqual(["Action", "Admin 2", "Maintainer 1"]);
     expect(container.querySelector(".rbac-table thead .rbac-n")!.textContent).toBe("2");
     // Grant rows (one per RBAC_DEFINITIONS entry) — the whole table, every enforced action.
-    // Ruling 582 added `remove-from-record`.
-    expect(container.querySelectorAll(".rbac-table tbody tr")).toHaveLength(23);
+    expect(container.querySelectorAll(".rbac-table tbody tr")).toHaveLength(
+      RBAC_DEFINITIONS.length,
+    );
     expect(getByText("Release any task owner")).toBeTruthy();
     expect(getByText("Edit task priority, labels & due date")).toBeTruthy();
     // Ruling 309(a): two grants gate more than their name says. The name stays
