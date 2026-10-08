@@ -154,6 +154,7 @@ function operatorTools() {
     projectSlug: store.slug,
     taskKey: "VIB-1",
     authority: authority(),
+    orgMcpServers: {},
   });
 }
 

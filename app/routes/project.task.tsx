@@ -264,25 +264,18 @@ export async function loader({ request, params }: Route.LoaderArgs) {
   const tlDefault: TimelineFilterId =
     rawDefault === "typed" || rawDefault === "comment" ? rawDefault : "all";
 
-  // Per-task provider run projection.
+  // Per-task provider run projection: the console `lines`, the stored wire
+  // envelopes (`raw`, what the `{ } raw` toggle prints) and the provider
+  // `sid`, the material `/resources/run-log` and `/resources/session-export`
+  // serve to project members and org admins. UI-30 held this projection to
+  // that bar while anyone could open the page; the page is members-only now
+  // (R15-4 / WI-13), and `requireVisibleProject` above is the same
+  // "any-member" gate those routes run, org admins passing as the audited D2
+  // override. So whoever can load this page gets the full projection, and the
+  // attachments, the kept sources and what the task took below need no bar of
+  // their own.
   //
-  // UI-30: the task page is READABLE app-wide by design (anyone may open a task
-  // and comment), but the run projection carries the three most sensitive run
-  // artifacts — the console `lines`, the exact stored wire envelopes (`raw`,
-  // what the `{ } raw` toggle prints) and the provider `sid`. Both routes that
-  // serve the SAME material require project membership
-  // (`/resources/run-log`, `/resources/session-export`), so this loader was
-  // simultaneously MORE permissive than its own data routes and broken: a
-  // non-member saw the full console while the live tail silently 403'd and
-  // Export downloaded a 403 body.
-  //
-  // One policy now: members (and org admins, via the audited D2 override) get
-  // the full projection; everyone else keeps the honest run SUMMARY strip —
-  // who ran, on what backend, when, and how it ended — with no log content.
-  const members = listProjectMembers(db, params.slug);
-  const runsVisible = members.some((m) => m.userId === user.id) || user.role === "admin";
-  //
-  // P13-D-11: the member projection carries a BOUNDED window of each agent
+  // P13-D-11: the projection carries a BOUNDED window of each agent
   // group's console (newest lines within `RUN_LOG_WINDOW_*`), not the whole
   // raw execution history — NFR5. `logWindow` carries the cursor the console
   // pages backwards with via `/resources/run-log?before=`.
@@ -294,23 +287,14 @@ export async function loader({ request, params }: Route.LoaderArgs) {
   // the thread it shows with one small request. This payload used to carry
   // every agent's window, lines and envelopes, on every revalidation.
   //
-  // A non-member's withheld projection bounds no window at all and reports an
-  // empty one, so nothing tries to page it.
-  //
   // Ruling 693: the task's run rows are read once here, for the projection
   // below and for what the task took, so the figure costs this loader no
   // statement of its own (ruling 457's SQL budget has no room for one).
   const runRows = listRunsForTaskRows(db, params.slug, params.key);
-  const runtime = runsVisible
-    ? listRunsForTask(db, params.slug, params.key, {
-        console: isDocumentNavigation(request) ? "shown" : "none",
-        rows: runRows,
-      })
-    : listRunsForTask(db, params.slug, params.key, { console: "withheld", rows: runRows }).map((r) => ({
-        ...r,
-        sid: null,
-        exportable: false,
-      }));
+  const runtime = listRunsForTask(db, params.slug, params.key, {
+    console: isDocumentNavigation(request) ? "shown" : "none",
+    rows: runRows,
+  });
 
   // Deployed specialists the "Assign specialist" menu offers. Model-availability
   // marks are threaded so the run control can flag an agent whose model a real
@@ -464,33 +448,29 @@ export async function loader({ request, params }: Route.LoaderArgs) {
 
   // R15-2 safety net (b): manual delivery is maintainer+ (run-agents tier) or
   // the task's own owner — mirror of manualDeliverForReview's server gate.
-  const myProjectRole = members.find((m) => m.userId === user.id)?.role ?? null;
+  const myProjectRole =
+    listProjectMembers(db, params.slug).find((m) => m.userId === user.id)?.role ?? null;
   const canDeliver =
     roleCan(myProjectRole, "run-agents") ||
     user.role === "admin" ||
     (taskFile?.parsed.frontmatter.ownerUserId === user.id &&
       roleCan(myProjectRole, "own-task"));
 
-  // R19-19: browser-produced files for this task. Same visibility bar as the
-  // run console (a screenshot shows whatever the agent saw) — non-members get
-  // an empty list, and the serving route re-checks membership itself.
-  const attachments = runsVisible
-    ? listTaskAttachments(params.slug, params.key)
-    : [];
+  // R19-19: browser-produced files for this task (a screenshot shows whatever
+  // the agent saw); the serving route re-checks membership itself.
+  const attachments = listTaskAttachments(params.slug, params.key);
   // C8 (pass 25): the list is capped (LIST_CAP=100); the panel needs the true
   // total to say "showing 100 of N" instead of hiding the older evidence silently.
-  const attachmentsTotal = runsVisible
-    ? countTaskAttachments(params.slug, params.key)
-    : 0;
+  const attachmentsTotal = countTaskAttachments(params.slug, params.key);
 
-  // Ruling 690: the sources the task keeps, apart from its files and behind
-  // the same bar: a kept page shows whatever the agent read. One read of
-  // their index whatever the count, and none on a task that keeps no sources;
-  // sent only for a task that keeps some, so every other task's payload
-  // stays as it was (ruling 457). The serving route re-checks membership.
-  const keptSources = runsVisible ? readTaskSources(params.slug, params.key) : null;
+  // Ruling 690: the sources the task keeps, apart from its files (a kept page
+  // shows whatever the agent read). One read of their index whatever the
+  // count, and none on a task that keeps no sources; sent only for a task
+  // that keeps some, so every other task's payload stays as it was (ruling
+  // 457). The serving route re-checks membership.
+  const keptSources = readTaskSources(params.slug, params.key);
   const sourcesShown =
-    keptSources && keptSources.sources.length > 0
+    keptSources.sources.length > 0
       ? {
           sources: taskSourceRows(
             keptSources.sources,
@@ -512,18 +492,15 @@ export async function loader({ request, params }: Route.LoaderArgs) {
   // Ruling 521: the completion packet, with each reviewer's verdict on the
   // work under review and the change's size, built from what this loader has
   // already read (the task file, the project's rules, the reviewers' and the
-  // deployed agents' names). A screenshot rides the attachments' own bar: a
-  // viewer who may not see the attachments sees none of it, and one that has
-  // left the store is counted, not drawn. Checked by name rather than against
-  // the list above, which stops at the newest 100. Ruling 668: an accepted
-  // task keeps it as its result, in the archive too.
+  // deployed agents' names). A screenshot that has left the store is
+  // counted, not drawn, checked by name rather than against the list above,
+  // which stops at the newest 100. Ruling 668: an accepted task keeps it as
+  // its result, in the archive too.
   const accepted = detail.stage === detail.stages[detail.stages.length - 1]?.id;
   const completion =
     taskFile && (!archived || accepted)
       ? completionView(taskFile.parsed.frontmatter, {
-          canSee: runsVisible
-            ? (name) => taskAttachmentExists(params.slug, params.key, name)
-            : null,
+          canSee: (name) => taskAttachmentExists(params.slug, params.key, name),
           nameOf: (profileId) => {
             const engaged = detail.reviewers.find((r) => r.profileId === profileId);
             return (
@@ -534,21 +511,19 @@ export async function loader({ request, params }: Route.LoaderArgs) {
             );
           },
           ruleReviewers: standing.requiredReviewers.map((r) => r.profileId),
-          // Ruling 690: what the work under review rests on, from the read
-          // above; null for a viewer who may not see the task's files.
-          sources: keptSources ? sourcesRestedOn(keptSources, taskFile.parsed.frontmatter) : null,
+          // Ruling 690: what the work under review rests on, from the read above.
+          sources: sourcesRestedOn(keptSources, taskFile.parsed.frontmatter),
         })
       : null;
 
   // Ruling 693: what the task took, as the card prints it: its facts and what
   // they miss, from the run rows and the task file this loader has already
-  // read. It rides the card (no completion view, no figure) and the run
-  // console's bar: dollars and run counts are for a viewer who may see the
-  // runs. Sent only then, so no other task's payload grows (ruling 457).
+  // read. It rides the card (no completion view, no figure), and is sent
+  // only then, so no other task's payload grows (ruling 457).
   // Guarded like the disclosures above: a read of what a task cost must not
   // 500 the task page.
   const tookShipped: TookShipped = {};
-  if (completion && runsVisible && taskFile) {
+  if (completion && taskFile) {
     try {
       const took = whatItTook({
         taskKey: params.key,
@@ -586,11 +561,8 @@ export async function loader({ request, params }: Route.LoaderArgs) {
     /** Ruling 521: the operator's completion packet as the page shows it. */
     completion,
     ...tookShipped,
-    // Who saved each attachment and when, from the events that claim names —
-    // same visibility bar as the list itself.
-    attachmentProducers: runsVisible
-      ? attachmentProducers(db, params.slug, params.key)
-      : {},
+    // Who saved each attachment and when, from the events that claim names.
+    attachmentProducers: attachmentProducers(db, params.slug, params.key),
     recommendations,
     schedules,
     queuedQuestions,
@@ -641,8 +613,6 @@ export async function loader({ request, params }: Route.LoaderArgs) {
       taskFile?.parsed.frontmatter.ownerUserId ?? null,
     ),
     liveAgentRuns,
-    /** UI-30: false → the console content above was withheld (non-member). */
-    runsVisible,
     mentionables,
     taskLinks,
     // UI-57: the task's GitHub card (branch / diff / commits / PR) is served
@@ -1014,15 +984,12 @@ export async function action({ request, params }: Route.ActionArgs) {
         // F20-18: a contributor-OWNER holds no option they can settle on this
         // packet — hand the decision UP. The server notifies the maintainers +
         // admins, records the ask on the timeline, and refuses (with a pointer)
-        // if the caller could actually resolve it themselves.
-        const note = String(formData.get("note") ?? "").slice(0, 2000);
-        const escalateInput: Parameters<
-          typeof requestPacketMaintainerDecision
-        >[1] = { projectSlug, taskKey };
-        if (note.trim()) escalateInput.note = note;
+        // if the caller could actually resolve it themselves. The button posts
+        // the intent alone: there is no note to read, so none can be cut
+        // (ruling 315).
         const { notified, to } = await requestPacketMaintainerDecision(
           db,
-          escalateInput,
+          { projectSlug, taskKey },
           actor,
         );
         return {
@@ -1724,7 +1691,6 @@ export default function TaskDetailRoute({
       // ever say "no" without saying whose "no" it is.
       runPrincipal={loaderData.runPrincipal}
       liveAgentRuns={loaderData.liveAgentRuns}
-      runsVisible={loaderData.runsVisible}
       timelineHasMore={loaderData.timelineHasMore}
       timelineRemaining={loaderData.timelineRemaining}
       timelineNextLimit={loaderData.timelineNextLimit}

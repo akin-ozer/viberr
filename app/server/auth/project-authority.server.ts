@@ -95,8 +95,9 @@ export interface AuthorityAudit {
  *
  * Identical denials collapse inside this window: the membership gate also
  * guards POLLED resource routes (run-log, session-export) and a client that
- * keeps retrying a 403 would otherwise write a row per poll, burying the single
- * deliberate probe this row exists to make visible. F19-30 reuses the same
+ * keeps retrying a refused read (which those routes answer with a 404, F19-28)
+ * would otherwise write a row per poll, burying the single deliberate probe
+ * this row exists to make visible. F19-30 reuses the same
  * window for the `"any-member"` ORG-ADMIN OVERRIDE row (see the override
  * branch), which is why the key is caller-supplied and prefixed by kind.
  * Keyed per database handle so parallel test DBs never share state.

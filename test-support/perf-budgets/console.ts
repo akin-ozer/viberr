@@ -35,9 +35,11 @@ export const CONSOLE_BUDGETS: PerfBudgetTable = {
   // cost reported, the first delivery, and two notes on what the figure
   // misses; its open acceptance decision is no asked round), only with a
   // completion view and to a viewer who may see the runs; the payload had
-  // come down 9 bytes since 526.
+  // come down 9 bytes since 526. Lowered 13685 to 13666 by ruling 705: the
+  // loader no longer ships `"runsVisible":true,` (19 bytes), a flag the
+  // members-only page could only ever set true.
   "console:task-data.json-bytes": {
-    ceiling: 13685,
+    ceiling: 13666,
     unit: "bytes",
     journey: "task-open",
     fixture: `${TASK_CONSOLE}, a .data request`,
@@ -60,9 +62,10 @@ export const CONSOLE_BUDGETS: PerfBudgetTable = {
   // (234 bytes, as above, less the same 12). Raised 136968 to 136994 by
   // ruling 526: the two rows' result and mark (26 bytes, as above). Raised
   // 136994 to 137258 by ruling 693: `whatItTook` (273 bytes, as above, less
-  // the same 9).
+  // the same 9). Lowered 137258 to 137239 by ruling 705: `runsVisible` (19
+  // bytes, as above).
   "console:task-document.json-bytes": {
-    ceiling: 137258,
+    ceiling: 137239,
     unit: "bytes",
     journey: "task-open",
     fixture: `${TASK_CONSOLE}, a document request`,

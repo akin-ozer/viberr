@@ -2290,6 +2290,8 @@ describe("the manual run is offered to run-agents holders only", () => {
     backend: "claude",
     model: "claude-sonnet",
     capabilities: { delivery: true, verdict: false, askHuman: true, browser: false },
+    stages: [],
+    spanAll: true,
   };
   const engagementsCell = (container: HTMLElement) =>
     Array.from(container.querySelectorAll<HTMLElement>(".profile-cell")).find((cell) =>

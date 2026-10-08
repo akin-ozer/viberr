@@ -6,7 +6,7 @@ import { deliveryToast } from "./delivery-toast";
  * `created` and `moved` branches and the first two cases fail.
  */
 describe("deliveryToast", () => {
-  const base = { status: "delivered" as const, prNumber: 13, url: "https://x/pull/13", pushStatus: "pushed", operatorRequeued: false };
+  const base = { status: "delivered" as const, prNumber: 13, url: "https://x/pull/13", pushStatus: "pushed", operatorRequeued: false, recompare: null };
   it("names a newly opened PR", () => {
     expect(deliveryToast({ ...base, created: true, moved: true, headSha: "a".repeat(40) })).toBe(
       "Delivered · opened review PR #13",

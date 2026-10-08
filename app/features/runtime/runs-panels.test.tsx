@@ -1033,11 +1033,11 @@ describe("P13-D-11: the console pages backwards", () => {
         sel="primary"
         onSel={() => {}}
         linesByThread={{ primary: rows(3, "b") }}
-        olderByThread={older({ error: "Older lines are project-member only." })}
+        olderByThread={older({ error: "Could not load older lines: the log endpoint returned 404." })}
         onLoadOlder={() => {}}
       />,
     );
-    expect(getByText("· Older lines are project-member only.")).toBeTruthy();
+    expect(getByText("· Could not load older lines: the log endpoint returned 404.")).toBeTruthy();
   });
 
   it("keeps the reader's place when older lines are prepended", () => {
@@ -2071,7 +2071,7 @@ describe("the console on a live store (ruling 457)", () => {
 
   it("appends a line without touching the rows already drawn, and counts it", async () => {
     const run = running();
-    const store = createLiveRunLogStore({ kind: "task", projectSlug: "p", taskKey: "K-1" }, [run]);
+    const store = createLiveRunLogStore([run]);
     const { container } = render(<AgentLogsPanel runtime={[run]} sel="primary" onSel={() => {}} store={store} />);
     const first = container.querySelector(".console > .log-line")!;
     vi.stubGlobal("fetch", vi.fn().mockResolvedValue(tail(3)));
@@ -2089,7 +2089,7 @@ describe("the console on a live store (ruling 457)", () => {
 
   it("follows the tail to its newest line, and leaves a reader who scrolled up where they are", async () => {
     const run = running();
-    const store = createLiveRunLogStore({ kind: "task", projectSlug: "p", taskKey: "K-1" }, [run]);
+    const store = createLiveRunLogStore([run]);
     const { container } = render(<AgentLogsPanel runtime={[run]} sel="primary" onSel={() => {}} store={store} />);
     const box = container.querySelector<HTMLElement>(".console")!;
     let height = 1000;
@@ -2142,7 +2142,7 @@ describe("the console on a live store (ruling 457)", () => {
     };
 
     const run = running();
-    const store = createLiveRunLogStore({ kind: "task", projectSlug: "p", taskKey: "K-1" }, [run]);
+    const store = createLiveRunLogStore([run]);
     const { container, getByRole } = render(
       <AgentLogsPanel runtime={[run]} sel="primary" onSel={() => {}} store={store} />,
     );
@@ -2202,7 +2202,7 @@ describe("the console on a live store (ruling 457)", () => {
       lineCount: 5,
       logWindow: { totalLines: 5, hasMore: true, runIds: ["run_1"], oldest: { runId: "run_1", seq: 3 }, headSeq: 4 },
     });
-    const store = createLiveRunLogStore({ kind: "task", projectSlug: "p", taskKey: "K-1" }, [run]);
+    const store = createLiveRunLogStore([run]);
     const { container, getByText } = render(
       <AgentLogsPanel runtime={[run]} sel="primary" onSel={() => {}} store={store} />,
     );
@@ -2235,7 +2235,7 @@ describe("the console on a live store (ruling 457)", () => {
       lineCount: 2,
       logWindow: { totalLines: 2, hasMore: false, runIds: ["run_1"], oldest: null, headSeq: 1, loaded: false },
     });
-    const store = createLiveRunLogStore({ kind: "task", projectSlug: "p", taskKey: "K-1" }, [run]);
+    const store = createLiveRunLogStore([run]);
     let answer: (value: RunLogAnswer) => void = () => {};
     const fetchMock = vi.fn().mockReturnValue(new Promise((resolve) => (answer = resolve)));
     vi.stubGlobal("fetch", fetchMock);
@@ -2266,7 +2266,7 @@ describe("the console on a live store (ruling 457)", () => {
 
   it("the raw view prints each stored envelope, loaded when it opens", async () => {
     const run = running();
-    const store = createLiveRunLogStore({ kind: "task", projectSlug: "p", taskKey: "K-1" }, [run]);
+    const store = createLiveRunLogStore([run]);
     let answer: (value: RunLogAnswer) => void = () => {};
     vi.stubGlobal("fetch", vi.fn().mockReturnValue(new Promise((resolve) => (answer = resolve))));
     const { container, getByText } = render(

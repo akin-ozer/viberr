@@ -4,11 +4,13 @@ import { setupTestStore } from "../../../test-support/test-store";
 import { rebuildAll } from "~/server/projections/rebuilder.server";
 import { reconfigureProject, setupProjectedStore } from "../../../test-support/projected-store";
 import { readProjectFile } from "~/server/files/project-writer.server";
+import { disableUser } from "~/server/auth/user-admin.server";
 import { insertUser } from "~/server/auth/user-store.server";
 import { deleteOrgUser } from "~/server/org/org-users.server";
 import { setMemberRole } from "~/features/policy/policy-actions.server";
+import { errorMessage } from "~/shared/errors";
 import { removeMember } from "./settings-actions.server";
-import { countLiveAdmins, listMembershipViews } from "./membership.server";
+import { listMembershipViews } from "./membership.server";
 
 const ctx = createTestDbContext();
 afterEach(ctx.cleanup);
@@ -79,16 +81,51 @@ describe("UI-29: the last-admin guard counts LIVE accounts only", () => {
     store.db.prepare(`DELETE FROM users WHERE id = ?`).run(store.users.arda.id);
   }
 
-  it("countLiveAdmins ignores a DISABLED admin", () => {
+  // Ruling 705: a DISABLED admin cannot sign in either, so it neither
+  // satisfies the guard nor is ever the last admin. The live admin beside it is
+  // still refused their own demotion, and its demotion goes, as its removal
+  // does (F18-6).
+  // CANARY: refuse an admin's demotion whenever one live admin remains,
+  // without asking whether the target is that one, and Murat's demotion is
+  // refused "needs at least one admin" while his seat stays admin.
+  it.each([
+    {
+      who: "the last live admin, beside a disabled one",
+      target: "arda" as const,
+      said: "Viberr Core needs at least one admin. Promote someone else first",
+      role: "admin",
+    },
+    {
+      who: "a disabled admin, beside the last live one",
+      target: "murat" as const,
+      said: "Murat Test is now Maintainer · enforced on the next action",
+      role: "maintainer",
+    },
+  ])("demoting $who", async ({ target, said, role }) => {
     const store = setupTestStore(ctx);
-    store.db
-      .prepare(`UPDATE users SET disabled = 1 WHERE id = ?`)
-      .run(store.users.arda.id);
-    expect(
-      countLiveAdmins(store.db, [
-        { userId: store.users.arda.id, role: "admin" },
-      ]),
-    ).toBe(0);
+    const arda = { userId: store.users.arda.id, label: "arda" };
+    const mutation = { dataRoot: store.dataRoot };
+    await setMemberRole(
+      store.db,
+      { projectSlug: store.slug, targetUserId: store.users.murat.id, role: "admin" },
+      arda,
+      mutation,
+    );
+    disableUser(store.db, store.users.murat.id, ACTOR);
+
+    const targetUserId = store.users[target].id;
+    const answer = await setMemberRole(
+      store.db,
+      { projectSlug: store.slug, targetUserId, role: "maintainer" },
+      arda,
+      mutation,
+    ).then((result) => result.toast, errorMessage);
+    const members = readProjectFile({ projectSlug: store.slug, dataRoot: store.dataRoot })!
+      .parsed.frontmatter.members;
+    expect({
+      said: answer,
+      role: members.find((m) => m.userId === targetUserId)?.role,
+    }).toEqual({ said, role });
   });
 
   it("a ghost admin can no longer satisfy the demotion guard", async () => {
@@ -174,12 +211,8 @@ describe("UI-29: the last-admin guard counts LIVE accounts only", () => {
       ],
     });
 
-    // countLiveAdmins sees ZERO live admins (the only admin is a ghost).
-    expect(
-      countLiveAdmins(store.db, [{ userId: "u_ghost_admin", role: "admin" }]),
-    ).toBe(0);
-
-    // arda (org admin → D2 override) removes the ghost — this must SUCCEED.
+    // arda (org admin → D2 override) removes the ghost — this must SUCCEED: with
+    // ZERO live admins (the only admin is a ghost), it is not the last of them.
     await removeMember(
       store.db,
       { projectSlug: store.slug, targetUserId: "u_ghost_admin" },

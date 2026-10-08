@@ -114,8 +114,20 @@ export interface TaskMutationContext {
      */
     planWhollyRefused?: boolean;
     /**
-     * Ruling 406 (F39-33): this drive CARRIED OUT at least one planned action
-     * (an `outcome: "done"`), whatever effect it had.
+     * Ruling 399: this drive IS ruling 228's plan-refused nudge, so the drive
+     * before it planned only steps Viberr refused. Stamped at drive start from
+     * `RunOperatorInput.planRefusedNudge`, because the settle judges this
+     * drive with nothing else about the one before it: its hold note says the
+     * first run was refused too only when this says so. A nudge for any other
+     * reason (an idle `auto` stage, the drive's own move, a refresh) follows a
+     * drive that may have carried out its whole plan.
+     */
+    planRefusedNudge?: boolean;
+    /**
+     * Ruling 406 (F39-33): this drive CARRIED OUT at least one action (an
+     * `outcome: "done"`, or a packet it opened, ruling 443), whatever effect it
+     * had: a Codex plan step or a Claude tool call alike, both stamped by
+     * `noteCarriedOutAction` (ruling 705).
      *
      * The settle-time "deliberate hold" verdict used to be reached by
      * enumerating effects, and the list kept turning out to be short: ruling
@@ -158,6 +170,22 @@ export interface TaskMutationContext {
      * whose attention is the thing being spent.
      */
     refusedPlanSteps?: { tool: string; message: string }[];
+    /**
+     * Ruling 399 on Claude (ruling 705): each governed call of a CLAUDE drive
+     * that Viberr refused (`planRefusalOf`), in order, recorded by
+     * `noteRefusedCall` from the toolkit's reply. Its one reader is the
+     * settle's hold note: a nudged drive that carried out nothing and was
+     * refused here was STOPPED, and the note quotes these, because no timeline
+     * note narrates a Claude drive's refusals.
+     *
+     * A field of its own, not `refusedPlanSteps` with `planWhollyRefused`.
+     * Those keep their Codex meaning: ruling 228's premise is a plan whose
+     * refusals arrive after its turn has ended, where nobody reads them, which
+     * is what pays for the plan-refused nudge and its quote (ruling 400). A
+     * Claude drive read each refusal in-run and chose to end its turn, so its
+     * refusals arm no nudge, and kept apart they cannot reach one.
+     */
+    refusedCalls?: { tool: string; message: string }[];
     /**
      * Ruling 357 (pass 38, F38-11): this drive's own delivery opened the review
      * PR or moved its head under full autonomy — the event that used to queue

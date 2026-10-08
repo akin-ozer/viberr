@@ -273,6 +273,7 @@ describe("buildOperatorSystemPrompt — safety scaffolding (A6)", () => {
       unhealthy: [],
       toolDenials: [],
       proxied: [],
+      oauthGrants: [],
     }).prompt;
     expect(prompt).toContain("MCP tools are governed too");
     expect(prompt).toContain("never use an MCP tool to merge a pull request");
@@ -291,6 +292,7 @@ describe("buildOperatorSystemPrompt — safety scaffolding (A6)", () => {
       unhealthy: [],
       toolDenials: [],
       proxied: ["cloudflare"],
+      oauthGrants: [],
     }).prompt;
     expect(prompt).toContain(
       "cloudflare is mounted through Viberr's MCP gateway: the credential is held by Viberr, " +
@@ -312,6 +314,7 @@ describe("buildOperatorSystemPrompt — safety scaffolding (A6)", () => {
       unhealthy: [],
       toolDenials: [{ server: "github", tools: ["create_pull_request", "merge_pull_request"] }],
       proxied: [],
+      oauthGrants: [],
     }).prompt;
     expect(prompt).toContain("You have tools from these attached MCP servers: ops-readonly.");
     expect(prompt).toContain("MCP write tools withheld");
@@ -325,6 +328,7 @@ describe("buildOperatorSystemPrompt — safety scaffolding (A6)", () => {
       unhealthy: [],
       toolDenials: [{ server: "github", tools: ["merge_pull_request"] }],
       proxied: [],
+      oauthGrants: [],
     }).prompt;
     expect(allGated).not.toContain("MCP tools are governed too");
     expect(allGated).toContain("Attached MCP servers: github.");
@@ -346,6 +350,7 @@ describe("buildOperatorSystemPrompt — RESOLVED MCP servers (B8)", () => {
       unhealthy: ["flaky-mcp"],
       toolDenials: [],
       proxied: [],
+      oauthGrants: [],
     }).prompt;
     expect(prompt).toContain("Attached MCP servers: flaky-mcp.");
     expect(prompt).toContain("MCP servers that may be unavailable");
@@ -446,6 +451,26 @@ describe("buildOperatorSystemPrompt — whose policy is this? (F21-16, F21-14)",
     expect(prompt).toContain("sanctioned");
     expect(prompt).toContain("`transition-to-done: human` is the RAW stage transition");
     expect(prompt).toContain("never narrate that you cannot accept while you hold that grant");
+  });
+
+  it("ruling 67: a clamped run is told what it asked for and the ceiling it runs at", () => {
+    // CANARY: drop the clause and a run held to its ceiling reads "Autonomy:
+    // **supervised**." with nothing saying it asked for full, which only the
+    // audit row a person reads records.
+    const clamped = buildOperatorSystemPrompt(
+      operatorAuthority({}, { autonomy: "supervised", configuredAutonomy: "supervised", autonomyClampedFrom: "full" }),
+      dataRoot(),
+    ).prompt;
+    expect(clamped).toContain(
+      "Autonomy: **supervised** (this run asked for full; supervised is this project's ceiling for every run, ruling 67).\n\n",
+    );
+    // A run that asked for LESS than its ceiling was not clamped, and reads
+    // the line every unclamped run always read.
+    const lowered = buildOperatorSystemPrompt(
+      operatorAuthority({}, { autonomy: "supervised", configuredAutonomy: "full" }),
+      dataRoot(),
+    ).prompt;
+    expect(lowered).toContain("Autonomy: **supervised**.\n\n");
   });
 });
 

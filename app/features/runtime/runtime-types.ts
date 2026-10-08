@@ -429,8 +429,9 @@ export interface RunLiveFacts {
    * Ruling 457 (CON-7): when the row these facts were read from last changed
    * (`agent_runs.updated_at`, epoch ms; every write of a fact bumps it). A
    * revalidation's projection and a tail read land in any order, so the store
-   * keeps the newer read, not the last one to arrive. Absent on a hand-built
-   * fixture, which then always wins.
+   * keeps the newer read, not the last one to arrive. Absent when the row's
+   * `updated_at` does not parse (`runLiveFacts` sets no NaN stamp), and a read
+   * without one always wins.
    */
   factsAt?: number;
 }

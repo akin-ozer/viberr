@@ -782,7 +782,11 @@ describe("ruling 457: console shipping", () => {
     expect(page.facts).toMatchObject({ phase: dev!.phase, step: dev!.step, turns: dev!.turns });
   });
 
-  it("UI-30: a withheld projection bounds no window and keeps the failure class", () => {
+  it("a .data request keeps the failure class, which no shipped line decides", () => {
+    // The run's end is read from its own newest lines (`classifyRunEndOf`),
+    // not from the window a payload carries (TASK-1).
+    // CANARY: classify only the lines a window read and a revalidation, which
+    // reads none, loses the failure class and the retry offer.
     insert({ id: "run_q", threadId: "primary", state: "error", credentialUserId: "u_owner" });
     insertRunLine(db, {
       runId: "run_q",
@@ -791,9 +795,8 @@ describe("ruling 457: console shipping", () => {
       raw: JSON.stringify({ type: "result" }),
       display: { t: "00:00:00", ev: "err", tag: "run·error·quota", text: "refused" },
     });
-    const [view] = projectRunsForTask(db, SLUG, TASK, { console: "withheld" });
+    const [view] = projectRunsForTask(db, SLUG, TASK, { console: "none" });
     expect(view!.lines).toEqual([]);
-    expect(view!.logWindow).toMatchObject({ totalLines: 0, runIds: [], headSeq: -1 });
     expect(view!.failureKind).toBe("quota");
     expect(view!.failedBackendUnavailable).toBe(true);
   });

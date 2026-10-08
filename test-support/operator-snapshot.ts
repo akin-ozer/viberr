@@ -6,7 +6,11 @@ import type { OperatorTaskSnapshot } from "~/server/tasks/operator-snapshot.serv
  * The task snapshot an operator prompt-byte test hands `buildOperatorTurnPrompt`
  * or `buildCodexOperatorPrompt`: VIB-1, ready at the work stage ("In Progress")
  * and waiting on nobody, with no owner, specialist, reviewer, packet, PR,
- * branch, live run or next stage.
+ * branch, live run, schedule, recommendation or next stage, on a board with a
+ * repository that requires no reviewer and declares no gates. Nothing is
+ * delivered, so there is no completion packet to write, no compare against the
+ * base and nothing the reconciler recorded about the branch; acceptance is
+ * refused by the stage gate, as on every task short of the boundary.
  *
  * Pass only the fields the case is about. Each prompt describe used to copy
  * this literal whole, so a field added to `OperatorTaskSnapshot` was one edit
@@ -34,6 +38,8 @@ export function operatorSnapshot(
     owner: null,
     specialist: null,
     reviewers: [],
+    requiredReviewers: [],
+    gates: null,
     nextStages: [],
     reworkStages: [],
     stageIds: ["triage", "impl", "review", "done"],
@@ -44,36 +50,70 @@ export function operatorSnapshot(
     openPacket: false,
     packet: null,
     recentTimeline: [],
+    recommendations: { pending: [], declined: [] },
     pr: null,
+    // Ruling 162: `acceptanceRefusalFor`'s first gate for a task at the work stage.
+    notAcceptableReason:
+      "VIB-1 is at In Progress, not Review. A completion can only be accepted from the boundary " +
+      "the workflow puts before Done. Move the task through the workflow first.",
+    completionPacket: {
+      state: "not_applicable",
+      writtenAt: null,
+      changedLines: null,
+      changesSummaryRequired: false,
+      screenshotCandidates: [],
+      resultFilesRequired: false,
+      resultFileCandidates: [],
+      sources: { kept: 0, restedOn: 0 },
+      pageCaptures: [],
+      note: "Nothing is delivered yet, so there is no completion packet to write.",
+    },
     branch: null,
+    unownedPr: null,
+    foreignHead: null,
+    baseBehindBy: null,
+    baseComparedHead: null,
+    baseBehindBySentence: "",
+    notRefreshableReason: null,
+    repo: "akin-ozer/viberr",
+    noChanges: false,
     liveRuns: [],
+    schedules: [],
     autonomy: "supervised",
     operatorPolicy: { scope: "operator", note: "", capabilities: {} },
+    orgResources: { kbs: [], skills: [], mcps: [] },
     ...over,
   };
 }
 
 /** A deployed Claude operator's resolved authority holding `policy`
- *  (capability → mode): supervised, on a board with no human gate before work,
- *  with no skills, knowledge bases or MCP servers. What a prompt or toolkit
+ *  (capability → mode): supervised, on a board with a repository and no human
+ *  gate before work, with no skills, knowledge bases (rulings or other) or MCP
+ *  servers. Ruling 67: its `configuredAutonomy` is its own `autonomy` and
+ *  nothing was clamped, unless the patch names them. What a prompt or toolkit
  *  test hands in place of `resolveOperatorAuthority`; pass what the case is about. */
 export function operatorAuthority(
   policy: Readonly<Record<string, CapabilityMode>> = {},
   patch: Partial<OperatorAuthority> = {},
 ): OperatorAuthority {
+  const autonomy = patch.autonomy ?? "supervised";
   return {
     policy: new Map(Object.entries(policy)),
-    autonomy: "supervised",
+    autonomy,
+    configuredAutonomy: autonomy,
+    autonomyClampedFrom: null,
     backend: "claude",
     model: "sonnet",
     effort: "",
     name: "Operator",
     skills: [],
     kb: [],
+    rulingsKb: null,
     mcps: [],
     persona: null,
     deployed: true,
     humanGatedBeforeWork: false,
+    repositoryAsk: null,
     ...patch,
   };
 }

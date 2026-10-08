@@ -176,23 +176,53 @@ describe("HumanAccess", () => {
     expect(onSetRole).toHaveBeenCalledWith(MEMBERS[3], "viewer");
   });
 
-  it("blocks demoting the last admin client-side (server re-checks)", () => {
+  it.each([
+    {
+      who: "the last admin",
+      members: MEMBERS.map((m) => (m.userId === "u_elif" ? { ...m, role: "maintainer" as const } : m)),
+      heads: ["Admin 1", "Maintainer 2"],
+      demote: "Arda Kaya",
+      outcome: "refused",
+    },
+    {
+      // A disabled account cannot sign in, so the server's guard
+      // (`isLastLiveAdmin`) does not count it, and neither do the headers.
+      // CANARY: count every non-missing member again and Elif's disabled
+      // account reads "Admin 2" and lets Arda's demotion through to the 409.
+      who: "the last admin who can sign in, beside a disabled one",
+      members: MEMBERS.map((m) => (m.userId === "u_elif" ? { ...m, disabled: true } : m)),
+      heads: ["Admin 1", "Maintainer 1"],
+      demote: "Arda Kaya",
+      outcome: "refused",
+    },
+    {
+      // Ruling 705: nor is a disabled admin ever the last one, so the server
+      // lets its demotion go, and the page sends it.
+      // CANARY: drop the target's own sign-in check from `setRole` and Elif's
+      // demotion is refused "Viberr Core needs at least one admin".
+      who: "a disabled admin, beside the last one who can sign in",
+      members: MEMBERS.map((m) => (m.userId === "u_elif" ? { ...m, disabled: true } : m)),
+      heads: ["Admin 1", "Maintainer 1"],
+      demote: "Elif Demir",
+      outcome: "let through",
+    },
+  ])("demoting $who is $outcome client-side (server re-checks)", ({ members, heads, demote, outcome }) => {
     const onSetRole = vi.fn();
-    const oneAdmin = MEMBERS.map((m) =>
-      m.userId === "u_elif" ? { ...m, role: "maintainer" as const } : m,
-    );
     const { container } = render(
       <HumanAccess
         projectName="Viberr Core"
-        members={oneAdmin}
+        members={members}
         canManage
         busy={false}
         onSetRole={onSetRole}
       />,
     );
-    const ardaSeg = container.querySelectorAll(".mini-seg")[1]!;
-    fireEvent.click(Array.from(ardaSeg.querySelectorAll("button")).find((b) => b.textContent === "Viewer")!);
-    expect(onSetRole).not.toHaveBeenCalled();
+    const shown = [...container.querySelectorAll(".rbac-table thead th")].map((th) => th.textContent);
+    expect(shown.slice(1, 3)).toEqual(heads);
+    const seg = container.querySelector(`.mini-seg[aria-label="Role for ${demote}"]`)!;
+    fireEvent.click(Array.from(seg.querySelectorAll("button")).find((b) => b.textContent === "Viewer")!);
+    const target = members.find((m) => m.name === demote);
+    expect(onSetRole.mock.calls).toEqual(outcome === "refused" ? [] : [[target, "viewer"]]);
   });
 
   /* U33-4 (owner, 2026-09-03): this used to assert the sixteen role buttons

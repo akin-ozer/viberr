@@ -1651,7 +1651,7 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
                 }
               : null,
             signInNote: mcpSignInNote(m.oauth),
-            requestedScopes: m.requestedScope ?? null,
+            requestedScopes: m.requestedScope,
           })),
         );
       }),

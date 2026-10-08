@@ -77,32 +77,37 @@ export function listMembershipViews(
   });
 }
 
-/** The one column {@link countLiveAdmins} reads per member. */
+/** The one column {@link isLastLiveAdmin} reads per member. */
 interface DisabledFlagRow {
   disabled: number;
 }
 
 /**
- * UI-29: admins who can ACTUALLY administer.
+ * UI-29: a project keeps at least one admin who can ACTUALLY administer. Is
+ * `targetUserId` the last of them, whose seat neither a demotion
+ * (`setMemberRole`) nor a removal (`removeMember`) may take?
  *
  * The last-admin guards used to count project.md admin entries, so one ghost
  * admin (an org-deleted account project.md still listed) satisfied the guard
  * and let the only real admin demote or remove themselves — leaving a project
  * nobody could govern. A member with no `users` row, or a disabled one, cannot
- * sign in, so neither counts.
+ * sign in, so neither counts, and neither is ever the last: taking its seat
+ * leaves the admins who can sign in as they were. Refusing that removal
+ * deadlocked the one way to clear a ghost admin (F18-6), and the demotion is
+ * let go exactly as the removal is (ruling 705).
  */
-export function countLiveAdmins(
+export function isLastLiveAdmin(
   db: DatabaseSync,
   members: readonly { userId: string; role: ProjectRole }[],
-): number {
+  targetUserId: string,
+): boolean {
   const stmt = db.prepare(`SELECT disabled FROM users WHERE id = ?`);
-  let live = 0;
-  for (const member of members) {
-    if (member.role !== "admin") continue;
+  const live = members.filter((member) => {
+    if (member.role !== "admin") return false;
     // SAFETY: the statement selects the single `disabled` column, an INTEGER
     // 0/1 in 0001_baseline; an org-deleted account yields no row at all.
     const row = stmt.get(member.userId) as DisabledFlagRow | undefined;
-    if (row && row.disabled !== 1) live += 1;
-  }
-  return live;
+    return row !== undefined && row.disabled !== 1;
+  });
+  return live.length === 1 && live[0]?.userId === targetUserId;
 }

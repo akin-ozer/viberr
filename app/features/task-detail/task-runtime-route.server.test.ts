@@ -24,7 +24,7 @@ import type { loader as taskLoader, action as taskAction } from "~/routes/projec
 let app: AppTestContext;
 /**
  * The seeded users this file drives the route with; deniz is registered, but a
- * member of NO project — the UI-30 gate subject.
+ * member of NO project — the R15-4 gate subject.
  */
 let ids: SeedUserIds;
 let finishedRunId: string;
@@ -171,16 +171,17 @@ describe("loader — runtime projection shape", () => {
     expect(run.raw).toEqual([]);
     // Real usage — codex turn.completed in+out tokens (no fabrication).
     expect(run.tokens).toBe(128034 + 6188);
+    // The provider session id, which Export (`/resources/session-export`)
+    // resumes from.
+    expect(run.sid).toBe("sess-142");
   });
 
   /**
    * UI-30: raw run logs, the `{ } raw` wire envelopes and the provider session
    * id were served to ANY signed-in user, while `/resources/run-log` and
-   * `/resources/session-export` — which serve the same material — require
-   * project membership. The surface was simultaneously more permissive than its
-   * own data routes AND broken (the live tail silently 403'd, Export downloaded
-   * a 403 body). One policy: members see the console, everyone else keeps the
-   * honest run summary.
+   * `/resources/session-export`, which serve the same material, require
+   * project membership. R15-4 made the page itself members-only, behind the
+   * same gate, so whoever loads it gets the whole projection (the case above).
    */
   it("R15-4: a NON-MEMBER does not reach the task page at all", async () => {
     // This used to assert the reduced projection a non-member received (UI-30's
@@ -193,14 +194,6 @@ describe("loader — runtime projection shape", () => {
       init: { status: 404 },
       data: "No project at projects/viberr-core.",
     });
-  });
-
-  it("UI-30: a project MEMBER still gets the full console", async () => {
-    const { runtime, runsVisible } = await runLoader("VIB-142", ids.selin);
-    expect(runsVisible).toBe(true);
-    const run = runtime.find((r) => r.serverRunId === finishedRunId)!;
-    expect(run.lines.length).toBeGreaterThan(0);
-    expect(run.sid).toBe("sess-142");
   });
 });
 

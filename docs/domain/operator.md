@@ -47,12 +47,21 @@ off`), the effective `autonomy` (`supervised | full`) with `configuredAutonomy` 
 `autonomyClampedFrom`, backend, model, effort, name, skills, knowledge bases (its own
 grants plus the project's rulings KB, ruling 239, with `rulingsKb` naming it), MCP
 grants, persona, whether the operator is deployed, and `humanGatedBeforeWork` (derived
-from the workflow graph, never a stored preset).
+from the workflow graph, never a stored preset). A project with no operator deployed gets
+an empty policy, the `supervised` ceiling and no grants, and still the rulings KB:
+`runOperator` refuses no undeployed operator (the Run operator control, a schedule, boot
+recovery and the controller each start one), and every run a project makes reads its
+rulings (ruling 239).
 
 - **Autonomy is a ceiling, not a pin** (ruling 67). A per-run level may sit at or
-  below the configured one; a clamp that bites writes the audit fact
-  `task.operator.autonomy_clamped`. The task page's run control shows the backend and
-  offers Run; it picks neither backend nor autonomy (ruling 92).
+  below the configured one. Only an agent-reply react carries one, the autonomy of the
+  drive that dispatched the agent (ruling 231), so a clamp bites when the ceiling was
+  lowered while the chain ran. A clamp that bites writes the audit fact
+  `task.operator.autonomy_clamped`, and the run's own prompt names it beside its autonomy:
+  "Autonomy: **supervised** (this run asked for full; supervised is this project's ceiling
+  for every run, ruling 67)." A run nothing reduced reads the bare line. The task page's
+  run control shows the backend and offers Run; it picks neither backend nor autonomy
+  (ruling 92).
 - **An operator run bills the TASK OWNER** (ruling 127), like every other run on a task:
   `runOperator` resolves `resolveTaskRunPrincipal` before it starts anything and spawns
   with that person's own Claude or Codex credential. Authority is still the operator's
@@ -244,8 +253,24 @@ A nudged drive that again ends stranded WITHOUT progress — no stage move away 
 it started, no delivery, and no action carried out at all (rulings 202, 406) — records a
 deliberate hold (`heldAtStage`) with a note, and later external triggers find the hold
 and stay quiet until a person re-litigates it (a transition, a packet resolution, a goal
-edit, a person's Run). When the nudged drive's plan was wholly refused again, the note
-says the operator was STOPPED, not holding, and names the three remedies (ruling 399).
+edit, a person's Run). An action carried out is any governed action that answered `done`,
+or one whose outcome is the packet it opened (ruling 443), on either backend: a Codex plan
+step through the executor's `record` and a Claude tool call through the toolkit's reply
+both stamp it with `noteCarriedOutAction` (ruling 705). When the nudged drive tried to act
+and Viberr refused all of it, the note says the operator was STOPPED, not holding, and
+names the three remedies (ruling 399). On Codex that is the nudge's plan refused in full,
+and the note points at the refusal notes left directly above it. It says the run before
+was refused too only when the nudge was ruling 228's plan-refused one, which the drive
+records at its start (`ctx.operatorRun.planRefusedNudge`); after a nudge for an idle
+`auto` stage, the drive's own move or a refresh it says nothing of that run, which may
+have carried out its whole plan. On Claude it is a
+drive whose governed calls were refused (`planRefusalOf`, the predicate the plan executor
+asks, kept on the drive by `noteRefusedCall` from the toolkit's reply): its tools answered
+each refusal to the model in the run and no timeline note narrates them, so the hold note
+quotes the refused calls itself, one "- `tool`: message" line each, and says nothing of
+the drive before the nudge (ruling 705). A Claude drive's refusals arm no nudge of their
+own: ruling 228's plan-refused nudge pays for refusals that arrive after a Codex turn has
+ended, where nobody reads them, and a Claude drive read its refusals and ended its turn.
 The nudge chain shares `OPERATOR_TRANSITION_CHAIN_CAP`; at the cap a note says the
 operator ended that many runs without advancing, opening a packet or engaging an agent.
 
@@ -265,7 +290,8 @@ guidance, the attached skills (verbatim) and knowledge-base INDEXES (ruling 283,
 document with its size class and sections, read on demand; the project's rulings KB with its
 note, ruling 286), sorted by name, the two-kinds-of-ruling note (ruling 312), the runtime
 ground truth (backend, model, effort, the attached MCP servers in name order), the measured
-shell inventory (ruling 191), the live capability policy (rows sorted by id), the triage
+shell inventory (ruling 191), the live authority (the autonomy the run holds, naming a
+clamp that bit, ruling 67, and the capability policy, rows sorted by id), the triage
 signals, the non-negotiable rules and the writing guide (ruling 502) close the static
 block; the workspace section (the checkout's repository, branch and directory, and what
 the run may write), the MCP governance and write-tool notes, the servers that failed their

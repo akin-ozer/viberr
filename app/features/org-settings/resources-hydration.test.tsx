@@ -62,6 +62,7 @@ const MCP_BASE: McpView = {
   hasCred: true, tools: 14, up: true, lastCheckedAt: "2026-07-03T21:00:00.000Z",
   lastError: null, warmingSince: null, writeTools: [], writeToolsReviewed: true,
   discoveredTools: null, storePaths: [],
+  credUnreadable: false, firstSuccessAt: null, heuristicWarmups: 0, oauth: null, requestedScope: null,
 };
 const MCPS: McpView[] = [
   MCP_BASE,

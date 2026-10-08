@@ -121,16 +121,14 @@ export interface AgentDispatch {
 
 /** U36-10 (pass 36): the refusal the dispatch gate would give the pick at
  *  the task's stage, in the server's own sentence (ruling 133), or null when
- *  the pick's stage scope is unknown or admits the stage. */
+ *  the pick's stage scope admits the stage. */
 function stageRefusal(
   selected: DeployedSpecialistView | null,
   stage: string,
   stages: { id: string; name: string }[],
   workflow: { from: string; to: string }[],
 ): string | null {
-  return selected &&
-    selected.stages !== undefined &&
-    !stageEligible({ stages: selected.stages, spanAll: selected.spanAll ?? false }, stage, stages, workflow)
+  return selected && !stageEligible(selected, stage, stages, workflow)
     ? stageIneligibilitySentence(
         selected.name,
         stageName(stages, stage),

@@ -156,6 +156,7 @@ async function relay(
     projectSlug: store.slug,
     taskKey: over.from ?? "VIB-1",
     authority: resolveOperatorAuthority(dctx(), store.slug),
+    orgMcpServers: {},
   });
   const def = toolkit.tools.find((t) => t.name === "relay_to_task");
   if (!def) throw new Error("relay_to_task is not built for this operator");
@@ -354,6 +355,7 @@ describe("ruling 557: a task takes the files it works from", () => {
       projectSlug: store.slug,
       taskKey: on,
       authority: resolveOperatorAuthority(dctx(), store.slug),
+      orgMcpServers: {},
     });
     const def = toolkit.tools.find((t) => t.name === "take_from_task");
     if (!def) throw new Error("take_from_task is not built for this operator");
@@ -481,6 +483,7 @@ describe("ruling 557: a task takes the files it works from", () => {
       projectSlug: store.slug,
       taskKey: "VIB-2",
       authority: resolveOperatorAuthority(dctx(), store.slug),
+      orgMcpServers: {},
     });
     // CANARY: build the tool outside the comment grant's block and an operator
     // that may not post on its own task writes a claim comment anyway.

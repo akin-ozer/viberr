@@ -29,6 +29,7 @@ import { configureRunServiceForTests } from "~/server/runtimes/run-service.serve
 import { resetOperatorLeasesForTests } from "~/server/runtimes/operator-run.server";
 import type { TaskFileEvent, TaskSchedule } from "~/schemas/task-file.schema";
 import { cloneTimeoutMs } from "./git-clone-auth.server";
+import { setTaskArchived } from "./task-archive.server";
 import {
   cancelScheduledAction,
   fireDueSchedules,
@@ -103,26 +104,46 @@ class ClosesTheTaskOnFirstStart implements RuntimeAdapter {
   readonly starts: RunSpec[] = [];
   closed: Promise<unknown> | null = null;
   readonly taskKey: string;
+  readonly close: (taskKey: string) => Promise<void>;
 
-  constructor(taskKey: string) {
+  constructor(taskKey: string, close: (taskKey: string) => Promise<void> = moveToTerminal) {
     this.taskKey = taskKey;
+    this.close = close;
   }
 
   start(spec: RunSpec): RunHandle {
     this.starts.push(spec);
-    if (this.starts.length === 1) {
-      const stage = terminalStage();
-      this.closed = updateTaskFile(
-        { projectSlug: store.slug, taskKey: this.taskKey, dataRoot: store.dataRoot },
-        (parsed) => {
-          parsed.frontmatter.stage = stage;
-        },
-      );
-    }
+    if (this.starts.length === 1) this.closed = this.close(this.taskKey);
     // The run is deliberately never completed: the drive stays in flight, just
     // as it would while the next occurrence in the same tick is being driven.
     return { runId: spec.runId, interrupt() {} };
   }
+}
+
+/** Ruling 177's closures, each the way it reaches a task file. Every one
+ *  enqueues its write before it first awaits, which is what keeps the adapter
+ *  above deterministic. */
+async function moveToTerminal(taskKey: string): Promise<void> {
+  const stage = terminalStage();
+  await updateTaskFile({ projectSlug: store.slug, taskKey, dataRoot: store.dataRoot }, (parsed) => {
+    parsed.frontmatter.stage = stage;
+  });
+}
+async function archiveByFileEdit(taskKey: string): Promise<void> {
+  await updateTaskFile({ projectSlug: store.slug, taskKey, dataRoot: store.dataRoot }, (parsed) => {
+    parsed.frontmatter.archived = true;
+  });
+}
+
+/** The board calls its terminal stage `name` (U36-9's "Shipped"). */
+function nameTerminalStage(name: string): void {
+  const pf = readProjectFile({ projectSlug: store.slug, dataRoot: store.dataRoot })!;
+  writeProject(store.dataRoot, {
+    ...pf.parsed.frontmatter,
+    stages: pf.parsed.frontmatter.stages.map((s) =>
+      s.id === terminalStage() ? { ...s, name } : s,
+    ),
+  });
 }
 
 /** A raw schedule object (bypasses the future-only guard) for fire tests. */
@@ -866,13 +887,7 @@ describe("fireDueSchedules", () => {
   it("U36-9 (pass 36): the skipped-done note names the terminal stage as the board calls it", async () => {
     // Live: "HLC-1 is already Done — the scheduled run is moot." on a board
     // whose last stage is Shipped. Canary: put the literal "Done" back.
-    const pf = readProjectFile({ projectSlug: store.slug, dataRoot: store.dataRoot })!;
-    writeProject(store.dataRoot, {
-      ...pf.parsed.frontmatter,
-      stages: pf.parsed.frontmatter.stages.map((s) =>
-        s.id === terminalStage() ? { ...s, name: "Shipped" } : s,
-      ),
-    });
+    nameTerminalStage("Shipped");
     writeTask(store.dataRoot, store.slug, {
       frontmatter: baseTaskFrontmatter("VIB-3", { ownerUserId: store.users.arda.id, stage: terminalStage(), schedules: [rawSchedule({ id: "sch_done" })] }),
     });
@@ -885,26 +900,43 @@ describe("fireDueSchedules", () => {
     expect(note.text).not.toContain("already Done");
   });
 
-  it("F19-20: a task Done'd AFTER its occurrence was CLAIMED is refused at fire time — and the task SAYS no run started", async () => {
+  it.each([
+    {
+      closure: "reached its terminal stage",
+      close: moveToTerminal,
+      said: "VIB-8 reached Shipped before its scheduled run started; no run was started.",
+      outcome: "skipped-done",
+    },
+    {
+      closure: "was archived by an edit to its file",
+      close: archiveByFileEdit,
+      said: "VIB-8 was archived before its scheduled run started; no run was started.",
+      outcome: "skipped-archived",
+    },
+  ])("F19-20: a task that $closure AFTER its occurrence was CLAIMED is refused at fire time — and the task SAYS which closure stopped the run", async ({ close, said, outcome }) => {
     // The claim-time re-check (the stale-projection tests below) closes the
     // window it can see. This is the one it cannot: both occurrences were
     // claimed while the task was live, and the FIRST drive's turn closes the
-    // task before the second is driven. FR39
-    // says never on a terminal stage, so `runOperator` refuses — and the
-    // occurrence's own record has to match, because the claim already wrote
-    // "Scheduled action starting" to the timeline and an audit row saying
-    // `claimed`. A `fired` occurrence whose only trace claims a run happened is
-    // the dishonest outcome.
+    // task before the second is driven. Ruling 177 refuses every trigger on a
+    // closed task, so `runOperator` refuses — and the occurrence's own record
+    // has to match, because the claim already wrote "Scheduled action
+    // starting" to the timeline and an audit row saying `claimed`. A `fired`
+    // occurrence whose only trace claims a run happened is the dishonest
+    // outcome, and so is one that names a closure the task did not meet: the
+    // note and the row say which, as the claim-time branch does.
     //
     // Canary (both verified): drop the `refusedTerminal` handling in the
     // finalize block of fireDueSchedules and the note + the final audit row
     // disappear. Drop runOperator's `scheduled` guard and the same assertions
     // fail for the worse reason — nothing refuses, so the second occurrence is
     // silently QUEUED behind the live drive to start on its release, and its
-    // record still says a run was started on a task that is Done.
-    const adapter = new ClosesTheTaskOnFirstStart("VIB-8");
+    // record still says a run was started on a task that is closed. Put the
+    // literal "reached Done" (or `skipped-done` for both) back and the note
+    // names neither the board's stage nor the archive.
+    const adapter = new ClosesTheTaskOnFirstStart("VIB-8", close);
     configureRunServiceForTests({ claude: adapter, codex: adapter });
 
+    nameTerminalStage("Shipped");
     writeTask(store.dataRoot, store.slug, {
       frontmatter: baseTaskFrontmatter("VIB-8", {
         ownerUserId: store.users.arda.id,
@@ -923,9 +955,8 @@ describe("fireDueSchedules", () => {
 
     // Two scheduled occurrences, one operator turn — the second never started.
     expect(adapter.starts).toHaveLength(1);
-    expect(
-      timeline("VIB-8").some((e) => e.text.includes("no run was started")),
-    ).toBe(true);
+    const skippedNote = timeline("VIB-8").find((e) => e.text.includes("Scheduled action skipped"));
+    expect(skippedNote?.text).toContain(said);
 
     // `listAuditEvents` is newest-first.
     const second = listAuditEvents(store.db).filter(
@@ -936,10 +967,58 @@ describe("fireDueSchedules", () => {
     // timeline agree about whether an agent turn happened.
     expect(second).toHaveLength(2);
     expect(second.at(-1)!.details).toMatchObject({ outcome: "claimed" });
-    expect(second[0]!.details).toMatchObject({
-      outcome: "skipped-done",
-      refusedAtStart: true,
+    expect(second[0]!.details).toMatchObject({ outcome, refusedAtStart: true });
+  });
+
+  it("F19-20: an archive that cancelled the claimed occurrence keeps the runner from recording it as fired", async () => {
+    // `setTaskArchived` cancels every pending or claimed occurrence
+    // (P14-RV-03), so by the time the second drive is refused the occurrence is
+    // no longer the runner's to retire: the archive wrote its last record. A
+    // final `task.schedule.fired` row would claim a retirement that never
+    // happened, beside a file that says `cancelled`.
+    // CANARY: drop `finalized.retired &&` from the refusal row's condition and
+    // a `skipped-*` row is written for the cancelled occurrence.
+    const adapter = new ClosesTheTaskOnFirstStart("VIB-8", async (taskKey) => {
+      await setTaskArchived(
+        store.db,
+        { projectSlug: store.slug, taskKey, archived: true },
+        { userId: store.users.arda.id, label: "Arda" },
+        dctx(),
+      );
     });
+    configureRunServiceForTests({ claude: adapter, codex: adapter });
+    writeTask(store.dataRoot, store.slug, {
+      frontmatter: baseTaskFrontmatter("VIB-8", {
+        ownerUserId: store.users.arda.id,
+        stage: "impl",
+        schedules: [rawSchedule({ id: "sch_first" }), rawSchedule({ id: "sch_second" })],
+      }),
+    });
+    // The drain drives occurrences one awaited drive at a time in claim order,
+    // so this later task's occurrence firing means VIB-8's second finalize ran.
+    writeTask(store.dataRoot, store.slug, {
+      frontmatter: baseTaskFrontmatter("VIB-9", {
+        ownerUserId: store.users.arda.id,
+        stage: "impl",
+        schedules: [rawSchedule({ id: "sch_after" })],
+      }),
+    });
+    rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
+
+    expect((await fireDueSchedules(store.db, dctx())).fired).toBe(3);
+    const claimOrder = listAuditEvents(store.db, { action: "task.schedule.fired" })
+      .map((e) => e.details?.scheduleId)
+      .reverse();
+    expect(claimOrder).toEqual(["sch_first", "sch_second", "sch_after"]);
+    await adapter.closed;
+    await waitForSchedule("VIB-9", "sch_after", "fired");
+
+    expect(schedules("VIB-8").map((s) => s.status)).toEqual(["cancelled", "cancelled"]);
+    const second = listAuditEvents(store.db).filter(
+      (e) => e.action === "task.schedule.fired" && e.details?.scheduleId === "sch_second",
+    );
+    expect(second.map((e) => e.details?.outcome)).toEqual(["claimed"]);
+    expect(timeline("VIB-8").some((e) => e.text.includes("Scheduled action skipped"))).toBe(false);
   });
 
   /**
@@ -1042,7 +1121,7 @@ describe("ruling 487: the operator's schedule_task_action and cancel_task_schedu
   // `operatorAuthority()` grants no `dispatch-agents`, which resolves to the
   // catalog default `direct` (ruling 98(b)).
   const toolkitFor = (taskKey: string, authority = operatorAuthority()) =>
-    buildOperatorToolkit({ db: store.db, ctx: dctx(), projectSlug: store.slug, taskKey, authority });
+    buildOperatorToolkit({ db: store.db, ctx: dctx(), projectSlug: store.slug, taskKey, authority, orgMcpServers: {} });
   const replyText = z
     .object({ content: z.array(z.object({ text: z.string() })).min(1) })
     .transform((r) => r.content[0]!.text);

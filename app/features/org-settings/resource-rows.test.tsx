@@ -21,6 +21,11 @@ const MCP: McpView = {
   writeToolsReviewed: true,
   discoveredTools: null,
   storePaths: [],
+  credUnreadable: false,
+  firstSuccessAt: null,
+  heuristicWarmups: 0,
+  oauth: null,
+  requestedScope: null,
 };
 
 const KB: KbView = {

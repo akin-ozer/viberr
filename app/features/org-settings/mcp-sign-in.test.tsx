@@ -39,7 +39,11 @@ const BASE: McpView = {
   writeToolsReviewed: true,
   discoveredTools: null,
   storePaths: [],
+  credUnreadable: false,
+  firstSuccessAt: null,
+  heuristicWarmups: 0,
   oauth: { status: "needs_sign_in", expiresAt: null, renews: false, issuer: null, reason: null, scope: null },
+  requestedScope: null,
 };
 
 /** What the stub server does beyond answering every intent `ok`. */

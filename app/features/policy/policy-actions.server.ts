@@ -11,7 +11,7 @@ import { assertProjectAction } from "~/server/auth/project-authority.server";
 import { updateProjectFile } from "~/server/files/project-writer.server";
 import { reprojectProject } from "~/server/projections/rebuilder.server";
 import {
-  countLiveAdmins,
+  isLastLiveAdmin,
   removedAccountLabel,
 } from "~/features/project-settings/membership.server";
 import { stageName } from "~/shared/workflow/stage-roles";
@@ -35,7 +35,7 @@ import { BOUNDARIES } from "./policy-data";
  * Server-side guards (mirrored client-side as UX sugar only):
  *   - actor must hold "Manage members & roles" / "Edit workflow & policy"
  *     → project admin (contracts §3.2)
- *   - last-admin guard: never demote the only admin
+ *   - last-admin guard: never demote the last admin who can sign in
  *   - review→done (any `locked` boundary, and any boundary INTO the final
  *     stage) is hard-locked `human` — V1 invariant.
  *
@@ -129,9 +129,10 @@ export async function setMemberRole(
       // UI-29: count admins with a LIVE, enabled account. Counting project.md
       // entries let one ghost admin (an org-deleted user project.md still
       // listed) satisfy the guard, so the only real admin could demote
-      // themselves into a project nobody could govern.
-      const admins = countLiveAdmins(db, parsed.frontmatter.members);
-      if (admins <= 1) {
+      // themselves into a project nobody could govern. Ruling 705: refuse only
+      // the demotion of the last of them, the seat `removeMember` guards; a
+      // ghost or disabled admin's demotion leaves that count as it was.
+      if (isLastLiveAdmin(db, parsed.frontmatter.members, input.targetUserId)) {
         // Last-admin guard — exact mock copy, project name parameterized.
         throw AppError.conflict(
           `${projectName} needs at least one admin. Promote someone else first`,

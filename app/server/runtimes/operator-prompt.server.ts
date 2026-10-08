@@ -143,9 +143,8 @@ export interface OperatorMcpResolution {
   toolDenials: McpToolDenial[];
   /** Ruling 461: the mounted servers reached through Viberr's MCP gateway. */
   proxied: string[];
-  /** Ruling 486: the proxied servers signed in with OAuth, with their grants.
-   *  Optional: a prompt-shape fixture mounts none. */
-  oauthGrants?: McpRunGrant[];
+  /** Ruling 486: the proxied servers signed in with OAuth, with their grants. */
+  oauthGrants: McpRunGrant[];
 }
 
 /** Resolve the operator's MCP grants once per run (see OperatorMcpResolution).
@@ -192,6 +191,7 @@ export const NO_OPERATOR_MCPS: OperatorMcpResolution = {
   unhealthy: [],
   toolDenials: [],
   proxied: [],
+  oauthGrants: [],
 };
 
 /**
@@ -456,7 +456,7 @@ export function buildOperatorSystemPrompt(
   // the alphabetically-first document inside the KB it protected. An index has
   // no budget to lose, so the operator now sees every document of every KB it
   // holds and reads the ones the work needs.
-  const rulingsKb = authority.rulingsKb ?? null;
+  const { rulingsKb } = authority;
   const kbSet = readKbIndexes(sortedNames(authority.kb), dataRoot, { rulingsKb });
   // R19-2: the SAME block, and so the same precedence rule, the specialist
   // runtime injects — one assembly, so the operator and the agents it
@@ -535,9 +535,17 @@ export function buildOperatorSystemPrompt(
   // F21-14 rides the same note: the acceptance exception, stated where the model
   // reads the rows it misread ("I can't accept completion myself…", 60 seconds
   // before it accepted).
+  // Ruling 67 (R19-A): a run that asked for more autonomy than the project's
+  // ceiling runs at the ceiling, and the audit row tells only people. The
+  // clause tells the run, beside the autonomy it produced; a run nothing
+  // reduced reads the line it always did.
+  const clamp = authority.autonomyClampedFrom
+    ? ` (this run asked for ${authority.autonomyClampedFrom}; ${authority.configuredAutonomy} is ` +
+      "this project's ceiling for every run, ruling 67)"
+    : "";
   parts.push(
     "\n\n---\n# Live authority: YOUR OWN capability policy\n\n" +
-      `Autonomy: **${authority.autonomy}**.\n\n` +
+      `Autonomy: **${authority.autonomy}**${clamp}.\n\n` +
       "Your capability policy (capabilityId: mode). These are the OPERATOR's capabilities, not any agent's:\n" +
       policyLines +
       "\n\n" +
@@ -591,7 +599,7 @@ export function buildOperatorSystemPrompt(
   const repositoryAsk =
     authority.repositoryAsk === "open" && !toolkit.includes("ask_for_repository")
       ? null
-      : (authority.repositoryAsk ?? null);
+      : authority.repositoryAsk;
   dynamic.push(workspaceSection(workspace, isolatedWritableRoot, repositoryAsk));
   // Ruling 176: a server whose write tools an admin marked has them removed
   // from every operator run, on both backends, so it leaves the paragraph
@@ -618,7 +626,7 @@ export function buildOperatorSystemPrompt(
   }
   // Ruling 461: the servers reached through Viberr's gateway, in the sentence
   // the specialist and controller prompts share.
-  const gateway = gatewayMcpSection(mcp.proxied, mcp.oauthGrants ?? []);
+  const gateway = gatewayMcpSection(mcp.proxied, mcp.oauthGrants);
   if (gateway) dynamic.push(gateway);
   if (toolDenials.length > 0) {
     dynamic.push(
@@ -1271,7 +1279,7 @@ function operatorTurnDoctrine(
  * was still owed. Empty when the project declares no rule.
  */
 function requiredReviewersRule(snapshot: OperatorTaskSnapshot): string {
-  const rules = snapshot.requiredReviewers ?? [];
+  const rules = snapshot.requiredReviewers;
   if (rules.length === 0) return "";
   const named = rules.map((r) => `${r.agentName} at ${r.stageName}`).join(", ");
   return (
@@ -1550,7 +1558,7 @@ function engageStagesInstruction(snapshot: OperatorTaskSnapshot): string {
  * Engineer run. Confirm the hold?", a packet that decided nothing.
  */
 function pendingSchedulesInstruction(snapshot: OperatorTaskSnapshot): string {
-  const pending = snapshot.schedules ?? [];
+  const pending = snapshot.schedules;
   if (pending.length === 0) return "";
   const nameOf = (profileId: string | null): string =>
     snapshot.deployedSpecialists.find((s) => s.id === profileId)?.name ?? profileId ?? "an agent";
@@ -1628,7 +1636,7 @@ function refreshBoundaryInstruction(snapshot: OperatorTaskSnapshot): string {
  * the sentence; this puts it in front of the plan, whatever the trigger.
  */
 function baseCompareInstruction(snapshot: OperatorTaskSnapshot): string {
-  const sentence = snapshot.baseBehindBySentence ?? "";
+  const sentence = snapshot.baseBehindBySentence;
   if (!sentence) return "";
   return (
     `${sentence} A decision packet never states a behind count for a head other than the one ` +

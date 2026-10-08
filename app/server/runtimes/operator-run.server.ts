@@ -55,6 +55,7 @@ import {
   type OperatorAuthority,
   type OperatorAuthorityOverrides,
   type OperatorAutonomy,
+  refusalList,
   resolveOperatorAuthority,
 } from "~/server/tasks/operator-authority.server";
 import type { RelayPayload } from "~/server/tasks/task-relay.server";
@@ -817,14 +818,13 @@ async function noteQueuedTriggerRefused(
     taskKey: queued.taskKey,
     dataRoot: queued.dataRoot,
   };
-  const outcome =
-    refused === "open-packet"
-      ? "skipped-packet"
-      : refused === "closed"
-        ? "skipped-done"
-        : "skipped-held";
+  // Read under the note's lock: the closure the note names is the one the
+  // outcome records, and an archived task is not Done (the schedule runner's
+  // split).
+  const found = { archived: false };
   try {
     await updateTaskFile(ref, (parsed) => {
+      found.archived = parsed.frontmatter.archived === true;
       const packetTitle = parsed.packet?.title ?? null;
       const cause =
         refused === "open-packet"
@@ -868,6 +868,14 @@ async function noteQueuedTriggerRefused(
     });
     reprojectTask(db, { dataRoot: ref.dataRoot }, ref.projectSlug, ref.taskKey);
     if (queued.scheduleId) {
+      const outcome =
+        refused === "open-packet"
+          ? "skipped-packet"
+          : refused === "closed"
+            ? found.archived
+              ? "skipped-archived"
+              : "skipped-done"
+            : "skipped-held";
       recordAudit(db, {
         action: "task.schedule.fired",
         actor: { userId: null, label: "system:schedule-runner" },
@@ -956,9 +964,8 @@ export function operatorLeftTaskStranded(
     recommendations: readonly unknown[];
     /** Ruling 131(d): a non-empty `blockedBy` is a RECORDED hold. */
     blockedBy: readonly unknown[];
-    /** Ruling 487: a pending schedule is a RECORDED wait with its time on it.
-     *  Optional so the stage-only call sites in tests stay readable. */
-    schedules?: readonly { status: string }[];
+    /** Ruling 487: a pending schedule is a RECORDED wait with its time on it. */
+    schedules: readonly { status: string }[];
   },
   workflow: readonly { from: string; to: string; boundary: string }[],
   /** The finished drive's OWN last transition landed the task on this stage. */
@@ -990,7 +997,7 @@ export function operatorLeftTaskStranded(
   // stranded sweep already honours (ruling 330). Nudging it anyway asked the
   // operator to "record the hold", and live on WEB-9 it did so with a packet
   // whose own body said it existed only so the stage was not left idle.
-  if ((task.schedules ?? []).some((s) => s.status === "pending")) return false;
+  if (task.schedules.some((s) => s.status === "pending")) return false;
   if (ownMoveLandedHere) return true;
   if (planWhollyRefused) return true;
   if (refreshedAndStopped) return true;
@@ -1159,8 +1166,6 @@ export async function maybeResumeStrandedOperator(
     ref.ownRun?.delivered === true ||
     ref.ownRun?.carriedOutAction === true;
   if (ref.strandedResume && !nudgeMadeProgress) {
-    // Ruling 399: the same fact the stranded predicate already consulted.
-    const planRefused = ref.ownRun?.planWhollyRefused === true;
     await updateTaskFile(
       { projectSlug: ref.projectSlug, taskKey: ref.taskKey, dataRoot: ref.dataRoot },
       (parsed) => {
@@ -1170,36 +1175,14 @@ export async function maybeResumeStrandedOperator(
           type: "note",
           actor: { kind: "system", systemId: "policy-engine" },
           title: null,
-          text: planRefused
-            ? // Ruling 399 (F39-26): the operator did not choose anything here.
-              // Every action it planned was REFUSED, twice — which Viberr knows
-              // in this exact scope (`planWhollyRefused`, read eleven lines
-              // above to decide the task was stranded at all) and which the
-              // refusal notes say in their own words, directly above this one.
-              // Calling that a deliberate hold is a sentence contradicting a
-              // fact the same function is holding, and the remedy it offered
-              // — run the operator again — is the one move that reproduces it:
-              // the operator was already re-invoked once and told what was
-              // wrong, and planned the refused step again anyway.
-              "**Note:** the operator did not hold this stage; it was stopped. " +
-              "Every action it planned was refused, on its first run and again on " +
-              "the one automatic retry, so nothing it decided was carried out. The " +
-              "refusal notes are directly above and each names what was wrong with " +
-              "the step. Coordination is paused because a fresh operator run plans " +
-              "against the same state and is refused the same way: do the thing a " +
-              "refusal names, change what made the step impossible, or take the " +
-              "action yourself."
-            : (autoStage
-                ? "**Note:** this stage auto-advances, but the operator held it twice in a row without advancing, dispatching, or opening a packet, so this is treated as a deliberate hold. "
-                : "**Note:** the operator moved the task to this stage and then held it twice in a row without dispatching or opening a packet, so this is treated as a deliberate hold. ") +
-              "Coordination is paused here: run the operator manually when the hold should end, adjust the goal, or loosen the boundary in Policy → Workflow rules.",
+          text: heldNudgeNote(ref.ownRun, autoStage),
           toAgent: false,
           evidence: null,
         });
       },
     );
     reprojectTask(db, { dataRoot: ref.dataRoot }, ref.projectSlug, ref.taskKey);
-    logger.info("stranded-operator resume withheld: the nudged drive held the stage again", {
+    logger.info("stranded-operator resume withheld: the nudged drive made no progress either", {
       taskKey: ref.taskKey,
       stage: file.parsed.frontmatter.stage,
     });
@@ -1273,6 +1256,65 @@ export async function maybeResumeStrandedOperator(
     });
   });
   return true;
+}
+
+/**
+ * The note a nudged drive's hold writes (F31-11): what the drive did, for the
+ * person who has to end the pause. Its caller reaches it only for a nudge that
+ * carried nothing out, so a drive Viberr refused was refused every time.
+ */
+function heldNudgeNote(ownRun: OwnOperatorRun | null | undefined, autoStage: boolean): string {
+  // Ruling 399: on either backend a refused drive was stopped, and these are
+  // the three remedies that can end it.
+  const stopped = "**Note:** the operator did not hold this stage; it was stopped. ";
+  const remedies =
+    "do the thing a refusal names, change what made the step impossible, or take the action yourself.";
+  if (ownRun?.planWhollyRefused === true) {
+    // Ruling 399 (F39-26): the operator did not choose anything here. Every
+    // action it planned was REFUSED — which Viberr knows in this exact scope
+    // (`planWhollyRefused`, which decided the task was stranded at all) and
+    // which the refusal notes say in their own words, directly above this
+    // one. Calling that a deliberate hold is a sentence contradicting a fact
+    // the same function is holding, and the remedy it offered — run the
+    // operator again — is the one move that reproduces it: the run Viberr
+    // refused WAS the automatic re-run. The drive before it was refused too
+    // only when this was ruling 228's plan-refused nudge; a nudge for an idle
+    // `auto` stage, the drive's own move or a refresh can follow a drive that
+    // carried out its whole plan, and then the note says nothing of it.
+    const when = ownRun.planRefusedNudge
+      ? "on its first run and again on the one automatic retry"
+      : "on the one automatic retry";
+    return (
+      stopped +
+      `Every action it planned was refused, ${when}, so nothing it decided ` +
+      "was carried out. The refusal notes are directly above and each names " +
+      "what was wrong with the step. Coordination is paused because a fresh " +
+      "operator run plans against the same state and is refused the same way: " +
+      remedies
+    );
+  }
+  if (ownRun?.refusedCalls?.length) {
+    // Ruling 399 on Claude (ruling 705): the same verdict, said truly where no
+    // refusal note exists. A Claude drive's tools answered each refusal to the
+    // model as it called them, so the note quotes them itself, and it says
+    // nothing of the drive before the nudge, whose refusals it cannot quote.
+    return (
+      stopped +
+      "On the one automatic re-run nothing it decided was carried out: Viberr " +
+      "refused each of these calls as the operator made them, and the operator " +
+      "then ended its turn.\n\n" +
+      refusalList(ownRun.refusedCalls) +
+      "\n\nCoordination is paused because a fresh operator run starts from the " +
+      "same state, where these calls are refused: " +
+      remedies
+    );
+  }
+  return (
+    (autoStage
+      ? "**Note:** this stage auto-advances, but the operator held it twice in a row without advancing, dispatching, or opening a packet, so this is treated as a deliberate hold. "
+      : "**Note:** the operator moved the task to this stage and then held it twice in a row without dispatching or opening a packet, so this is treated as a deliberate hold. ") +
+    "Coordination is paused here: run the operator manually when the hold should end, adjust the goal, or loosen the boundary in Policy → Workflow rules."
+  );
 }
 
 /** After the last operator drive ends with no queued follow-up: if no run is
@@ -1903,6 +1945,9 @@ export async function runOperator(
     // transitionStage's re-trigger (see OPERATOR_TRANSITION_CHAIN_CAP).
     transitionDepth: input.transitionDepth ?? 0,
   };
+  // Ruling 399: why this drive was nudged, for its own hold note, which says
+  // the drive before it was refused too only when it was.
+  if (input.planRefusedNudge) ctx.operatorRun.planRefusedNudge = true;
   // Ruling 152(a): the settle reads this drive's own moves off the same object.
   leaseToken.ownRun = ctx.operatorRun;
 

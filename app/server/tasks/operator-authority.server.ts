@@ -35,24 +35,23 @@ export interface OperatorAuthority {
   /** Ruling 286: which of `kb` is the project's RULINGS knowledge base (ruling
    *  239), so its index can say it BINDS. A label; ruling 283 removed the
    *  budget this used to feed. On the authority because that is where `kb`
-   *  already lives, and hand-built test literals may omit it. */
-  rulingsKb?: string | null;
+   *  already lives; null when `kb` holds none. */
+  rulingsKb: string | null;
   /** The autonomy this run ACTUALLY holds — already clamped to
    *  {@link OperatorAuthority.configuredAutonomy}. Never above it (R19-A). */
   autonomy: OperatorAutonomy;
   /**
    * R19-A — the project deployment's CONFIGURED autonomy: the ceiling for any
-   * run. Optional on the interface only so the handful of hand-built authority
-   * literals in tests keep compiling; `resolveOperatorAuthority` always sets it.
+   * run (`supervised` when no operator is deployed).
    */
-  configuredAutonomy?: OperatorAutonomy;
+  configuredAutonomy: OperatorAutonomy;
   /**
    * R19-A — non-null when THIS run asked for more autonomy than the project
    * allows and was reduced to the ceiling. Carries what was asked for, so the
-   * reduction can be named (audit row, run disclosure) instead of silently
-   * happening.
+   * reduction is named instead of silently happening: to people by the audit
+   * row, and to the run by its prompt's autonomy line (ruling 67).
    */
-  autonomyClampedFrom?: OperatorAutonomy | null;
+  autonomyClampedFrom: OperatorAutonomy | null;
   backend: RealBackend;
   model: string;
   effort: string;
@@ -87,11 +86,11 @@ export interface OperatorAuthority {
   /**
    * Ruling 672: whether this run may ask a person to connect a repository.
    * `open` on a project with none, `declined` once a person decided the board
-   * keeps none, null (or absent, on a hand-built literal) for a project that
-   * has one. It offers `ask_for_repository` on both backends and words the
-   * run's workspace section, so the tool and the sentence cannot disagree.
+   * keeps none, null for a project that has one. It offers
+   * `ask_for_repository` on both backends and words the run's workspace
+   * section, so the tool and the sentence cannot disagree.
    */
-  repositoryAsk?: RepositoryAskState | null;
+  repositoryAsk: RepositoryAskState | null;
 }
 
 /** How a gated capability resolves for the current authority. */
@@ -126,6 +125,90 @@ export interface OperatorActionResult {
    *  owes a fallback notice about the same event (T13) can dedupe per
    *  recipient instead of assuming the packet row reached everyone. */
   notifiedUserIds?: string[];
+}
+
+/**
+ * Ruling 406: an operator that ACTED did not hold. Stamps the drive's
+ * `carriedOutAction` when an action's result says it was carried out, `done`
+ * or (ruling 443) a step whose outcome is the decision packet it opened,
+ * whatever effect it had.
+ *
+ * Ruling 705: the ONE predicate both operator backends answer from. A Codex
+ * plan's steps pass through `executeCodexPlan`'s `record` and a Claude drive's
+ * governed tools reply through the toolkit's `resultText`, and each calls
+ * this, so the next action shape counts on both the day it is added. The
+ * stamp used to live in `record` alone, which covered one backend: a Claude
+ * nudge whose one action was a comment, or a refresh of a branch already
+ * current (AX-18's shape), was recorded as a deliberate hold where the same
+ * plan on Codex was resumed.
+ */
+export function noteCarriedOutAction(
+  ctx: TaskMutationContext,
+  result: OperatorActionResult,
+): void {
+  if (ctx.operatorRun && (result.outcome === "done" || result.openedPacket)) {
+    ctx.operatorRun.carriedOutAction = true;
+  }
+}
+
+/** A plan step or tool call that did not run, and WHY it did not (see
+ *  OperatorActionResult): `authority` = the capability policy (or ownership)
+ *  refused it; `state` = the task's current state, or the step itself, ruled
+ *  it out. */
+export interface RefusedPlanStep {
+  tool: string;
+  message: string;
+  kind: "authority" | "state";
+}
+
+/**
+ * Ruling 443: what one action's result refuses, if anything. `denied` is a
+ * refusal by authority and `noop` one by state (the LV-03 split), except a
+ * step whose outcome is the decision packet it opened. Live on ax-clone AX-21,
+ * AX-28 and AX-5 a refresh that met a conflict was narrated "This step did not
+ * apply to the task's current state" beside the packet it had just opened.
+ * The step ran, and its outcome was the packet.
+ *
+ * Both backends ask it: a Codex plan's `record` and a Claude drive's tool
+ * replies (`noteRefusedCall`), so a refusal is one fact on each.
+ */
+export function planRefusalOf(
+  toolName: string,
+  result: OperatorActionResult,
+): RefusedPlanStep | null {
+  if (result.outcome !== "denied" && result.outcome !== "noop") return null;
+  if (result.openedPacket) return null;
+  return {
+    tool: toolName,
+    message: result.message,
+    kind: result.outcome === "denied" ? "authority" : "state",
+  };
+}
+
+/**
+ * Ruling 399 on Claude (ruling 705): record a Claude drive's refused governed
+ * call on the drive, for the settle's hold note. A Codex plan's refusals are
+ * narrated onto the timeline once the plan has run (`narrateRefusedActions`);
+ * a Claude drive's reach the model in-run, as its tool's reply, and nothing
+ * else kept them. So a nudge whose every call was refused read at settle as a
+ * drive that tried nothing, and its hold note called it deliberate.
+ */
+export function noteRefusedCall(
+  ctx: TaskMutationContext,
+  toolName: string,
+  result: OperatorActionResult,
+): void {
+  const refusal = planRefusalOf(toolName, result);
+  if (ctx.operatorRun && refusal) {
+    (ctx.operatorRun.refusedCalls ??= []).push({ tool: refusal.tool, message: refusal.message });
+  }
+}
+
+/** Refused actions as a person reads them, one "- `tool`: message" line each:
+ *  a Codex plan's refusal note and a stopped Claude drive's hold note (ruling
+ *  399) print the same list. */
+export function refusalList(refusals: readonly { tool: string; message: string }[]): string {
+  return refusals.map((r) => `- \`${r.tool}\`: ${r.message}`).join("\n");
 }
 
 function readAutonomy(
@@ -377,7 +460,12 @@ export function resolveOperatorAuthority(
       effort: "",
       name: "Operator",
       skills: [],
-      kb: [],
+      // Ruling 239: every run a project makes reads its rulings, and this one
+      // still runs: `runOperator` refuses no undeployed operator (the Run
+      // operator control, a schedule, boot recovery and the controller each
+      // start one), so it plans from the rules the deployed branch reads.
+      kb: withProjectRulings([], projectSlug, ctx),
+      rulingsKb: projectRulingsKb(projectSlug, ctx),
       persona: null,
       mcps: [],
       deployed: false,
@@ -521,9 +609,13 @@ export function deliverGate(authority: OperatorAuthority): Gate {
   // resolved to `direct` on any non-strict board. An undeployed operator
   // therefore built a toolkit of exactly `get_task` + `deliver_for_review` —
   // it could push a branch and open a PR with no operator configured anywhere.
-  // Denied HERE rather than at the call sites, because four of the five
-  // `runOperator` entry points (the Run-operator button, a schedule, boot
-  // recovery, an `@operator` comment) never check `authority.deployed`; the
+  // Denied HERE rather than at the call sites, because `runOperator` refuses
+  // no undeployed operator and four of its doors never check
+  // `authority.deployed`: the Run-operator control, a schedule, boot
+  // recovery's abandoned-wait sweep and the controller's `run_agent_on_task`.
+  // (`autoInvokeOperator` and the agent-reply react check it, and an
+  // `@operator` comment reaches the operator only through
+  // `resolveMentionedAgent`, which resolves it only when one is deployed.) The
   // Claude toolkit, the Codex plan schema and `operatorDeliverForReview` all
   // resolve delivery through this one function.
   if (!authority.deployed) return "deny";

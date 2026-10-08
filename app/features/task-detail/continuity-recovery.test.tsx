@@ -355,19 +355,6 @@ describe("ContinuityRecoveryPanel", () => {
     expect(asked).toBe(1);
   });
 
-  it("withholds the console door from a non-member, and still reports the break", () => {
-    const { container } = renderPanel({
-      runsVisible: false,
-      onOpenConsole: () => {},
-      onAsk: () => {},
-    });
-    const panel = container.querySelector(".continuity-panel")!;
-    expect(panel).not.toBeNull();
-    const labels = Array.from(panel.querySelectorAll("button")).map((b) => b.textContent);
-    expect(labels.some((l) => l!.includes("console"))).toBe(false);
-    expect(labels.some((l) => l!.includes("Ask operator"))).toBe(true);
-  });
-
   it("names the continuation path in text, and only the one the viewer has", () => {
     const { container } = renderPanel({ canRunAgents: false });
     const hint = container.querySelector(".continuity-panel .hint")!;

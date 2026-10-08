@@ -3020,7 +3020,7 @@ async function fanOutByCause(
  */
 export async function requestPacketMaintainerDecision(
   db: DatabaseSync,
-  input: { projectSlug: string; taskKey: string; note?: string },
+  input: { projectSlug: string; taskKey: string },
   actor: TaskActor,
   ctx: TaskMutationContext = {},
 ): Promise<{ notified: number; to: "admin" | "maintainer" }> {
@@ -3060,15 +3060,12 @@ export async function requestPacketMaintainerDecision(
   }
 
   const ownerLabel = actor.label || "The task owner";
-  const trimmedNote = input.note?.trim();
-  const noteText =
-    (boardDecision
-      ? `${ownerLabel} cannot answer "${packet.title}" on ${input.taskKey}: both answers decide ` +
-        `the board, which is a project admin's, so they asked a project admin to make the call.`
-      : `${ownerLabel} owns ${input.taskKey} but every option on this decision ` +
-        `("${packet.title}") needs maintainer authority, so they asked a maintainer ` +
-        `or admin to make the call.`) +
-    (trimmedNote ? `\n\n> ${trimmedNote.replace(/\n/g, "\n> ")}` : "");
+  const noteText = boardDecision
+    ? `${ownerLabel} cannot answer "${packet.title}" on ${input.taskKey}: both answers decide ` +
+      `the board, which is a project admin's, so they asked a project admin to make the call.`
+    : `${ownerLabel} owns ${input.taskKey} but every option on this decision ` +
+      `("${packet.title}") needs maintainer authority, so they asked a maintainer ` +
+      `or admin to make the call.`;
   const occurredAt = new Date().toISOString();
 
   await updateTaskFile(

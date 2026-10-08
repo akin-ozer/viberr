@@ -130,20 +130,6 @@ export interface RunLogStore {
   setRawView(on: boolean): void;
 }
 
-/** What the store follows: a task's runs, or a controller conversation's. */
-export type RunLogSource =
-  | { kind: "task"; projectSlug: string; taskKey: string }
-  | { kind: "controller"; conversationId: string };
-
-/** One phrase for "this stream is not yours", per source: the task channel's
- *  logs are project-member material, a controller turn's are the conversation
- *  owner's (and org admins'). */
-function forbiddenNote(kind: RunLogSource["kind"]): string {
-  return kind === "task"
-    ? "project-member only"
-    : "for the conversation's owner and org admins only";
-}
-
 /** Page size for a backward fetch. The endpoint clamps to 1…500. */
 const OLDER_PAGE_LINES = 200;
 /** The most lines one `/resources/run-log` page returns. */
@@ -286,25 +272,18 @@ export interface LiveRunLogStore extends RunLogStore {
   /** Reads the tail of `runId` now (the controller's status poll) and
    *  answers the run's state, or null when the read failed. */
   poll(runId: string): Promise<string | null>;
-  /** UI-30: false for a viewer whose run-log requests would 403. */
-  setEnabled(enabled: boolean): void;
   /** Aborts every request in flight (unmount). React can go on using a
    *  disposed store, so a window load it cuts short is asked again the next
    *  time its thread is shown (ruling 524(e)). */
   dispose(): void;
 }
 
-export function createLiveRunLogStore(
-  source: RunLogSource,
-  threads: readonly ConsoleThreadInput[],
-  initiallyEnabled = true,
-): LiveRunLogStore {
+export function createLiveRunLogStore(threads: readonly ConsoleThreadInput[]): LiveRunLogStore {
   const listeners = new Set<() => void>();
   let threadMap = new Map<string, ThreadState>();
   const factsByRun = new Map<string, RunLiveFacts>();
   let streamError: string | null = null;
   let rawView = false;
-  let enabled = initiallyEnabled;
   let abort = new AbortController();
 
   const notify = () => {
@@ -460,7 +439,7 @@ export function createLiveRunLogStore(
    * long as a frame announced a line past what it brought.
    */
   const tail = async (t: ThreadState): Promise<void> => {
-    if (t.tailing || t.replacing || t.view.status !== "ready" || !enabled) return;
+    if (t.tailing || t.replacing || t.view.status !== "ready") return;
     t.tailing = true;
     try {
       while (current(t) && t.announced > t.cursor) {
@@ -470,14 +449,12 @@ export function createLiveRunLogStore(
         }
         const { status, data } = await getData<TailPage>(tailUrl(t.runId, t.cursor));
         if (data === null) {
-          // UI-30: a 403 here means the viewer is not a project member (or, on
-          // the controller channel, not the conversation's owner). It used to
-          // be swallowed, leaving a console that silently stopped following.
-          setStreamError(
-            status === 403
-              ? `Live tail stopped: raw run logs are ${forbiddenNote(source.kind)}.`
-              : `Live tail stopped: the log endpoint returned ${status}.`,
-          );
+          // UI-30: a refused read used to be swallowed, leaving a console that
+          // silently stopped following. Only the status is named: the route
+          // answers a viewer who may not read the run (a member removed while
+          // the page is open) with the 404 a missing run gets (F19-28), so
+          // the console cannot tell the two apart.
+          setStreamError(`Live tail stopped: the log endpoint returned ${status}.`);
           return;
         }
         if (!current(t)) return;
@@ -504,7 +481,6 @@ export function createLiveRunLogStore(
    * the frames that landed while it was.
    */
   const readFacts = async (t: ThreadState): Promise<void> => {
-    if (!enabled) return;
     if (t.readingFacts) {
       t.factsAgain = true;
       return;
@@ -529,7 +505,7 @@ export function createLiveRunLogStore(
    * A thread `replacing` its lines keeps drawing them until the window lands.
    */
   const loadWindow = async (t: ThreadState): Promise<void> => {
-    if (t.windowing || !enabled) return;
+    if (t.windowing) return;
     // A failed load is asked again the next time the thread is shown.
     if (!t.replacing && t.view.status !== "unloaded" && t.view.status !== "failed") return;
     t.windowing = true;
@@ -547,11 +523,7 @@ export function createLiveRunLogStore(
       );
       if (signal.aborted || !current(t)) return;
       if (data === null) {
-        fail(
-          status === 403
-            ? `This console is ${forbiddenNote(source.kind)}.`
-            : `Could not load this console: the log endpoint returned ${status}.`,
-        );
+        fail(`Could not load this console: the log endpoint returned ${status}.`);
         return;
       }
       const { lines, lineKeys, logWindow, facts, runId } = data;
@@ -604,7 +576,7 @@ export function createLiveRunLogStore(
       return;
     }
     t.fillAgain = false;
-    if (t.view.status !== "ready" || !enabled) return;
+    if (t.view.status !== "ready") return;
     const missing = new Map<number, number[]>();
     for (const line of t.view.lines) {
       if (line.raw !== null) continue;
@@ -663,7 +635,7 @@ export function createLiveRunLogStore(
    */
   const loadOlder = async (t: ThreadState): Promise<void> => {
     const cursor = t.page;
-    if (!cursor || cursor.runIdx < 0 || t.paging || !enabled) return;
+    if (!cursor || cursor.runIdx < 0 || t.paging) return;
     t.paging = true;
     const fail = (message: string) => {
       if (current(t)) update(t, { older: { ...t.view.older, loading: false, error: message } });
@@ -678,11 +650,9 @@ export function createLiveRunLogStore(
         const { status, data } = await getData<TailPage>(`/resources/run-log?${qs.toString()}`);
         if (data === null) {
           fail(
-            status === 403
-              ? `Older lines are ${forbiddenNote(source.kind)}.`
-              : status === 200
-                ? "Could not load older lines: malformed response."
-                : `Could not load older lines: the log endpoint returned ${status}.`,
+            status === 200
+              ? "Could not load older lines: malformed response."
+              : `Could not load older lines: the log endpoint returned ${status}.`,
           );
           return;
         }
@@ -834,7 +804,6 @@ export function createLiveRunLogStore(
       }
     },
     async poll(runId) {
-      if (!enabled) return null;
       const t = threadOfRun(runId);
       try {
         // A thread whose lines are not in hand reads the facts only.
@@ -847,9 +816,6 @@ export function createLiveRunLogStore(
       } catch {
         return null;
       }
-    },
-    setEnabled(next) {
-      enabled = next;
     },
     dispose() {
       abort.abort();

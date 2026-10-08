@@ -157,13 +157,15 @@ Beyond the table: a task's **owner** (contributor or above) may accept their own
 task and govern any open decision on it; membership invites join in the seat the
 inviter names and as `viewer` when they name none, in one write with one audit row
 (an unknown role is refused by name, against the same single enum `setMemberRole`
-parses; an invite is membership, with no accept step); the last live project admin
-cannot be demoted or removed; deleting an org account prunes its memberships from
-every `project.md` and releases its tasks. `edit-policy` also covers project
-settings, stages, required reviewers (ruling 178), file leases (ruling 396), the
-rulings knowledge base (ruling 239), the repository, branch cleanup and delete. Every
-boundary into the terminal stage must stay `human`; the Policy page refuses anything
-else.
+parses; an invite is membership, with no accept step); the last project admin who
+can sign in cannot be demoted or removed, while an admin whose account was deleted
+or disabled can be either, since that leaves the admins who can sign in as they were
+(`isLastLiveAdmin`, which both guards read: F18-6, ruling 705); deleting an org
+account prunes its memberships from every `project.md` and releases its tasks.
+`edit-policy` also covers project settings, stages, required reviewers (ruling 178),
+file leases (ruling 396), the rulings knowledge base (ruling 239), the repository,
+branch cleanup and delete. Every boundary into the terminal stage must stay `human`;
+the Policy page refuses anything else.
 
 ### Enforcement paths
 

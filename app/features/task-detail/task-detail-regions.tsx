@@ -82,7 +82,7 @@ export function TaskDecisionRegion({
       view={card}
       attachmentsBase={attachmentsBase}
       sourcesBase={sourcesBase}
-      verdictSatisfiedBy={acceptance.verdictSatisfiedBy ?? null}
+      verdictSatisfiedBy={acceptance.verdictSatisfiedBy}
       diff={diff}
       standalone={!acceptanceDecision}
       took={took}
@@ -308,7 +308,7 @@ export function TaskAcceptConfirm({
       atBoundary={acceptance.atBoundary}
       // R19-B: the human GitHub approval carrying the verdict gate, rendered
       // on the verdict row (null when an agent verdict cleared it).
-      verdictSatisfiedBy={acceptance.verdictSatisfiedBy ?? null}
+      verdictSatisfiedBy={acceptance.verdictSatisfiedBy}
       // Ruling 482: Viberr's own gate run on the revision this accepts.
       gates={acceptance.gates ?? null}
       ceremony={decision.ceremony}

@@ -21,8 +21,8 @@ import { useAttachmentLightbox } from "./attachment-lightbox";
  * when the task has a browser-capable agent (`browserExpected`); on the tasks
  * that never touch the feature it still stays silent, which is what kept an
  * empty "Attachments (0)" from being noise on every task.
- * Member-gated upstream: the loader ships `[]` to non-members (same bar as the
- * run console), and the serving route re-checks membership on every fetch.
+ * Member-gated upstream: the task page is members-only (R15-4), and the
+ * serving route re-checks membership on every fetch.
  *
  * F39-6 (pass 39): a PERSON can put a file here now. The panel therefore also
  * renders when the viewer may attach one — previously it stayed silent on every

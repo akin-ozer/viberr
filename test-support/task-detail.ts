@@ -83,7 +83,9 @@ export function connectedPrincipal(patch: Partial<TaskRunPrincipalView> = {}): T
   };
 }
 
-/** Acceptance at the review boundary for a viewer who may accept: nothing blocks it. */
+/** Acceptance at the review boundary for a viewer who may accept: nothing blocks
+ *  it, an agent's verdict (not a person's GitHub approval, R19-B) cleared the
+ *  verdict gate, and the project declares no gates. */
 export function acceptanceAffordance(patch: Partial<AcceptanceAffordance> = {}): AcceptanceAffordance {
   return {
     hasAuthority: true,
@@ -93,6 +95,7 @@ export function acceptanceAffordance(patch: Partial<AcceptanceAffordance> = {}):
     blockedReasonViaPacket: null,
     canAccept: true,
     terminallyBlocked: false,
+    verdictSatisfiedBy: null,
     ...patch,
   };
 }

@@ -5,7 +5,6 @@ import type { Mentionables } from "~/server/tasks/mention-suggestions.server";
 import type { TaskSchedule } from "~/schemas/task-file.schema";
 import { TASK_RECOMMENDATIONS_ANCHOR, TASK_TIMELINE_ANCHOR } from "~/shared/page-anchors";
 import type { TaskLinks } from "~/shared/task-key-links";
-import { Icon } from "~/ui/icon";
 import type { RunView } from "~/features/runtime/runtime-types";
 import { LiveRunPanel } from "~/features/runtime/runs-panels";
 import { AttachmentsPanel } from "./attachments-panel";
@@ -34,7 +33,6 @@ import { Timeline, type TimelineFilterId } from "./timeline";
 export function TaskMainColumn({
   task,
   runtime,
-  runsVisible,
   runConsole,
   can,
   recs,
@@ -73,7 +71,6 @@ export function TaskMainColumn({
   task: TaskDetail;
   /** The page's stable run projection (ruling 457, `useStableRows`). */
   runtime: RunView[];
-  runsVisible: boolean;
   runConsole: RunConsole;
   can: TaskPermissions;
   recs: RecommendationActions;
@@ -133,7 +130,7 @@ export function TaskMainColumn({
           interrupting={runConsole.runBusy}
           interruptingRunId={runConsole.interruptingRunId}
           consoleOpen={runConsole.consoleOpen}
-          console={runsVisible ? runConsole.agentLogs : null}
+          console={runConsole.agentLogs}
           store={runConsole.runLog}
         />
       ) : null}
@@ -152,11 +149,10 @@ export function TaskMainColumn({
         timeline={task.timeline}
         runtime={runtime}
         agents={deployedSpecialists}
-        runsVisible={runsVisible}
         canRunAgents={can.canRunAgents}
         // Ruling 380: the run card's `onViewLogs` is a Show/Hide toggle; from
         // this panel the console is elsewhere, so its door travels instead.
-        {...(runsVisible ? { onOpenConsole: runConsole.onAgentLog } : {})}
+        onOpenConsole={runConsole.onAgentLog}
         onAsk={onAsk}
       />
 
@@ -196,24 +192,7 @@ export function TaskMainColumn({
 
       {/* The archive. While a run streams, its console is disclosed on the
           run card above instead — one console either way, never two. */}
-      {runtime.length > 0 && runsVisible && !runConsole.liveRun ? runConsole.agentLogs : null}
-      {/* UI-30: raw console output, the `{ } raw` wire envelopes and the
-          provider session id are project-member material (the two routes that
-          serve the same data require membership). Say so rather than render an
-          empty console or, as before, hand them to any signed-in user. */}
-      {runtime.length > 0 && !runsVisible ? (
-        <section className="panel" data-comment-anchor="agent-logs">
-          <div className="panel-head">
-            <Icon name="cpu" />
-            <h2>Agent logs</h2>
-          </div>
-          <p className="empty sm">
-            Raw agent output, wire envelopes and provider session ids are
-            limited to project members. The run summary above is public to
-            signed-in users.
-          </p>
-        </section>
-      ) : null}
+      {runtime.length > 0 && !runConsole.liveRun ? runConsole.agentLogs : null}
 
       {/* Ruling 484 (F40-54): the Changes panel (`changesPanelReader`). */}
       {changesReader ? (

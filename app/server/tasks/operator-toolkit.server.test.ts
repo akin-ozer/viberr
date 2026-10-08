@@ -67,6 +67,7 @@ function bareToolkit(auth: OperatorAuthority, workspace?: { dir: string; default
     projectSlug: "p",
     taskKey: "P-1",
     authority: auth,
+    orgMcpServers: {},
   };
   if (workspace) deps.workspace = workspace;
   return buildOperatorToolkit(deps);
@@ -80,6 +81,7 @@ function storeToolkit(store: TestStore, auth: OperatorAuthority = authority([]))
     projectSlug: store.slug,
     taskKey: "VIB-1",
     authority: auth,
+    orgMcpServers: {},
   });
 }
 

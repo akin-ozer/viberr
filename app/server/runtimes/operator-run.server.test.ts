@@ -5,11 +5,12 @@ import { chmodSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "n
 import path from "node:path";
 import { promisify } from "node:util";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { z } from "zod";
 import { logger } from "~/server/logging/logger.server";
 import { rebuildAll } from "~/server/projections/rebuilder.server";
 import { readProjectFile } from "~/server/files/project-writer.server";
 import { recordNoRepositoryRuling } from "~/server/org/repository-ruling.server";
-import { resolveOperatorAuthority } from "~/server/tasks/operator-authority.server";
+import { planRefusalOf, resolveOperatorAuthority } from "~/server/tasks/operator-authority.server";
 import { writeTaskAttachment } from "~/server/files/task-attachments.server";
 import {
   updateTaskFile, readTaskFile } from "~/server/files/task-writer.server";
@@ -37,6 +38,7 @@ import {
   disconnectFakeBackend,
 } from "../../../test-support/backend-credentials";
 import { assertStrictSchema } from "../../../test-support/strict-schema";
+import type { ParsedTaskFile } from "~/schemas/task-file.schema";
 import { RUN_INPUTS_TAG } from "~/features/runtime/runtime-types";
 import {
   getRun,
@@ -61,7 +63,6 @@ import {
 } from "./operator-codex-plan.server";
 import * as operatorPrompts from "./operator-prompt.server";
 import * as operatorRunModule from "./operator-run.server";
-import * as operatorCodexPlan from "./operator-codex-plan.server";
 import {
   AGENT_REPORT_CAP_TOOLLESS,
   type OperatorTaskSnapshot,
@@ -84,6 +85,7 @@ import { createLocalOrigin, withLocalGithub } from "../../../test-support/git-or
 import { listAuditEvents } from "../../../test-support/audit-log";
 import { operatorAuthority, operatorSnapshot } from "../../../test-support/operator-snapshot";
 import { reconfigureProject } from "../../../test-support/projected-store";
+import { connectedClient, inProcess } from "../../../test-support/mcp-tool-meta";
 import { emptyRunFailureFacts, type RunFailureFacts } from "~/shared/run-failure";
 
 interface PendingRun {
@@ -1834,7 +1836,7 @@ describe("pr-diverged turn instruction (both backends)", () => {
       waiting: "human",
       nextStages: [{ id: "done", name: "Done", boundary: "human" }],
       stageIds: ["triage", "ready", "impl", "review", "done"],
-      pr: { number: 318, state: "closed", title: "PR", revisionDrift: null, revisionDriftSentence: "", headSha: null, unpushedRevision: null, unpushedRevisionSentence: "" },
+      pr: { number: 318, state: "closed", title: "PR", revisionDrift: null, revisionDriftSentence: "", headSha: null, unpushedRevision: null, unpushedRevisionSentence: "", mergeable: null },
       branch: "vib-9",
       ...over,
     });
@@ -1863,7 +1865,7 @@ describe("pr-diverged turn instruction (both backends)", () => {
 
   it("merged out-of-band → acceptance is the next state, no packet demanded", () => {
     const prompt = buildOperatorTurnPrompt(
-      snapshot({ pr: { number: 318, state: "merged", title: "PR", revisionDrift: null, revisionDriftSentence: "", headSha: null, unpushedRevision: null, unpushedRevisionSentence: "" } }),
+      snapshot({ pr: { number: 318, state: "merged", title: "PR", revisionDrift: null, revisionDriftSentence: "", headSha: null, unpushedRevision: null, unpushedRevisionSentence: "", mergeable: null } }),
       "pr-diverged",
     );
     expect(prompt).toContain("merged OUT-OF-BAND");
@@ -1873,7 +1875,7 @@ describe("pr-diverged turn instruction (both backends)", () => {
 
   it("PR live again → withdraw the moot packet and continue", () => {
     const prompt = buildOperatorTurnPrompt(
-      snapshot({ pr: { number: 318, state: "review", title: "PR", revisionDrift: null, revisionDriftSentence: "", headSha: null, unpushedRevision: null, unpushedRevisionSentence: "" } }),
+      snapshot({ pr: { number: 318, state: "review", title: "PR", revisionDrift: null, revisionDriftSentence: "", headSha: null, unpushedRevision: null, unpushedRevisionSentence: "", mergeable: null } }),
       "pr-diverged",
     );
     expect(prompt).toContain("live again");
@@ -2141,7 +2143,6 @@ describe("pr-diverged turn instruction (both backends)", () => {
   });
 
   it("ruling 443: a step whose outcome is the packet it opened is not a refusal", () => {
-    const { planRefusalOf } = operatorCodexPlan;
     const conflict = "`ax-5` CONFLICTS with `main`. Opened a blocking decision packet for a human to resolve.";
     // CANARY: drop the `openedPacket` check and AX-5's refresh is narrated
     // "This step did not apply" beside the packet it opened.
@@ -2326,7 +2327,7 @@ describe("pr-diverged turn instruction (both backends)", () => {
     expect(ordinary).toContain(line);
     expect(ordinary).toContain("`run_agent` (`delivers: false`)");
     const delivered = buildOperatorTurnPrompt(
-      snapshot({ requiredReviewers: rules, pr: { number: 318, state: "review", title: "PR", revisionDrift: null, revisionDriftSentence: "", headSha: null, unpushedRevision: null, unpushedRevisionSentence: "" } }),
+      snapshot({ requiredReviewers: rules, pr: { number: 318, state: "review", title: "PR", revisionDrift: null, revisionDriftSentence: "", headSha: null, unpushedRevision: null, unpushedRevisionSentence: "", mergeable: null } }),
       "delivered",
     );
     expect(delivered).toContain(line);
@@ -2356,6 +2357,7 @@ describe("pr-diverged turn instruction (both backends)", () => {
           headSha: null,
           unpushedRevision: null,
           unpushedRevisionSentence: "",
+          mergeable: null,
         },
       });
 
@@ -2368,7 +2370,7 @@ describe("pr-diverged turn instruction (both backends)", () => {
             number: 318, state: "closed", title: "PR",
             revisionDrift: record,
             revisionDriftSentence: describeRevisionDrift(record).sentence,
-            headSha: null, unpushedRevision: null, unpushedRevisionSentence: "",
+            headSha: null, unpushedRevision: null, unpushedRevisionSentence: "", mergeable: null,
           },
         }),
         "pr-diverged",
@@ -2412,6 +2414,7 @@ describe("pr-diverged turn instruction (both backends)", () => {
               headSha: null,
               unpushedRevision: null,
               unpushedRevisionSentence: "",
+              mergeable: null,
             },
           }),
           "pr-diverged",
@@ -2447,6 +2450,7 @@ describe("stranded auto-stage resume", () => {
       packet: null,
       recommendations: [],
       blockedBy: [],
+      schedules: [],
     };
     const { operatorLeftTaskStranded } = operatorRunModule;
     expect(operatorLeftTaskStranded(base, wf)).toBe(true);
@@ -2529,8 +2533,9 @@ describe("stranded auto-stage resume", () => {
       adapter2 = new ControlledAdapter();
       configureRunServiceForTests({ claude: adapter2, codex: adapter2 });
       // Ruling 127: an operator drive bills the TASK OWNER, so the owner has to
-      // have this backend connected or the drive is refused before it starts.
-      await connectFakeBackend(store2.db, store2.users.arda.id, "codex");
+      // have the backend connected or the drive is refused before it starts.
+      // Both: ruling 406's case drives the operator on each.
+      await connectFakeBackends(store2.db, store2.users.arda.id);
     });
 
     afterEach(() => {
@@ -2860,18 +2865,46 @@ describe("stranded auto-stage resume", () => {
      * operator again plans the same refused step, which is exactly what the one
      * automatic retry had already proved.
      *
-     * `planWhollyRefused` is read eleven lines above this note to decide the
-     * task is stranded at all — the fact was in the same function the whole
+     * `planWhollyRefused` was read eleven lines above that note to decide the
+     * task was stranded at all — the fact was in the same function the whole
      * time. This pass's signature shape, in the pause that is supposed to tell
      * a human what happened.
+     *
+     * Its first fix said "on its first run and again on the one automatic
+     * retry" after every nudge, and the settle knew nothing of the drive
+     * before it: a nudge for an idle `auto` stage follows a drive that may
+     * have carried out its whole plan. The second row is that shape.
      */
-    it("ruling 228: a plan refused IN FULL is nudged once, even at a human boundary", async () => {
-      // A stage whose outbound boundary is `human`, not `auto` — the shape the
-      // backstop could not see.
+    it.each([
+      {
+        case: "a plan refused IN FULL is nudged once, even at a human boundary",
+        // A stage whose outbound boundary is `human`, not `auto` — the shape the
+        // backstop could not see.
+        stage: "review",
+        // Drive 1 plans exactly one action and it does not run.
+        firstPlan: "refused",
+        // And it is told WHY it is back — not the idle-stage sentence, which
+        // would be false twice over here (the stage is not auto-advance, and the
+        // run did not end idle by choice).
+        nudgeSays: ["EVERY action your previous run planned was refused", "Do NOT plan the same refused action again"],
+        nudgeNever: "auto-advance stage idle",
+        refusedWhen: "on its first run and again on the one automatic retry",
+      },
+      {
+        case: "a nudge at an auto stage refused IN FULL does not say the run before it was",
+        // Ruling 399, said true: drive 1's one step was carried out, so the
+        // nudge is the idle-stage one, and nothing of the first run was refused.
+        stage: "triage",
+        firstPlan: "comment",
+        nudgeSays: ["auto-advance stage idle"],
+        nudgeNever: "EVERY action your previous run planned was refused",
+        refusedWhen: "on the one automatic retry",
+      },
+    ] as const)("ruling 228: $case", async ({ stage, firstPlan, nudgeSays, nudgeNever, refusedWhen }) => {
       writeTask(store2.dataRoot, store2.slug, {
         frontmatter: baseTaskFrontmatter("VIB-1", {
           title: "list files in the project",
-          stage: "review",
+          stage,
           readiness: "ready",
           waiting: "human",
           ownerUserId: store2.users.arda.id,
@@ -2888,12 +2921,11 @@ describe("stranded auto-stage resume", () => {
         trigger: "manual",
         dataRoot: store2.dataRoot,
       });
-      // Drive 1 plans exactly one action and it does not run.
       // Every field present-but-nullable, the shape OpenAI strict output
       // produces (B-6) — a missing key would fail the plan schema instead,
       // which is the escalation path, not this one.
-      // A REAL action the policy refuses: review → done is the locked human
-      // boundary, so the operator may not make this move. An empty or
+      // A REAL action the policy refuses: a move to Done is an acceptance, and
+      // this operator holds no `completion-for-acceptance` grant. An empty or
       // unparseable plan is a different case viberr already catches
       // ("produced no actionable plan") — the gap is a plan that named real
       // work and was not allowed to do it.
@@ -2901,22 +2933,33 @@ describe("stranded auto-stage resume", () => {
         reasoning: "Move it along.",
         actions: [transitionAction({ toStageId: "done" })],
       });
-      adapter2.finish(store2, refusedPlan, "finished");
+      const commentPlan = JSON.stringify({
+        reasoning: "",
+        actions: [
+          {
+            tool: "post_comment",
+            profileId: null,
+            delivers: null,
+            toStageId: null,
+            packetType: null,
+            text: "Read the goal; nothing to advance yet.",
+            reason: null,
+            packetOptions: null,
+          },
+        ],
+      });
+      adapter2.finish(store2, firstPlan === "refused" ? refusedPlan : commentPlan, "finished");
 
       await eventually(() => {
         expect(operatorRuns()).toHaveLength(2);
         expect(adapter2.pending).not.toBeNull();
       });
-      // And it is told WHY it is back — not the idle-stage sentence, which
-      // would be false twice over here (the stage is not auto-advance, and the
-      // run did not end idle by choice).
       const prompt = adapter2.pending!.spec.prompt;
-      expect(prompt).toContain("EVERY action your previous run planned was refused");
-      expect(prompt).toContain("Do NOT plan the same refused action again");
-      expect(prompt).not.toContain("auto-advance stage idle");
+      for (const said of nudgeSays) expect(prompt).toContain(said);
+      expect(prompt).not.toContain(nudgeNever);
 
-      // Drive 2 is refused in full as well: one nudge, then the hold, exactly
-      // as F31-11 requires — a refused plan must not loop either.
+      // Drive 2 is refused in full: one nudge, then the hold, exactly as
+      // F31-11 requires — a refused plan must not loop either.
       adapter2.finish(store2, refusedPlan, "finished");
       await eventually(() => {
         const parsed = readTaskFile({
@@ -2928,13 +2971,17 @@ describe("stranded auto-stage resume", () => {
         expect(parsed.frontmatter.waiting).toBe("human");
       });
       // Ruling 399: the pause itself is right and stays, but its note says the
-      // operator was stopped. CANARY: drop the `planRefused` branch and this
-      // note calls a refused plan a deliberate hold, which is what AX-4's
-      // timeline says verbatim.
+      // operator was stopped. CANARY: drop `heldNudgeNote`'s
+      // `planWhollyRefused` branch and this note calls a refused plan a
+      // deliberate hold, which is what AX-4's timeline says verbatim.
       const note = readTaskFile({ projectSlug: store2.slug, taskKey: "VIB-1", dataRoot: store2.dataRoot })!
         .parsed.timeline.find((e) => e.text.includes("did not hold this stage"))?.text;
       expect(note, "no hold note says the operator was stopped").toBeDefined();
-      expect(note).toContain("Every action it planned was refused");
+      // The run before the nudge was refused too only after ruling 228's
+      // nudge. CANARY: drop the drive-start `planRefusedNudge` stamp and the
+      // first row loses its first run; say it whatever the nudge and the second
+      // blames a first run whose one step was carried out.
+      expect(note).toContain(`Every action it planned was refused, ${refusedWhen}, so nothing it decided was carried out`);
       expect(note).not.toContain("deliberate hold");
       // …and the remedy no longer sends the reader at the one move that
       // reproduces it.
@@ -2942,6 +2989,83 @@ describe("stranded auto-stage resume", () => {
       expect(note).toContain("take the action yourself");
       await new Promise((resolve) => setTimeout(resolve, 80));
       expect(operatorRuns()).toHaveLength(2);
+    });
+
+    /**
+     * Ruling 399 on Claude (ruling 705). A Claude drive's governed tools answer
+     * each refusal to the model in-run, and no timeline note narrates it, so
+     * `planWhollyRefused` (ruling 228, a Codex plan's) is never set. A nudge
+     * whose every call was refused therefore read at settle as one that tried
+     * nothing, and got "the operator held it twice in a row … treated as a
+     * deliberate hold … run the operator manually": the two falsehoods and the
+     * remedy ruling 399 took out of the Codex note.
+     *
+     * The calls go through the drive's mounted `viberr` server with a real MCP
+     * client, the way the model makes them (ruling 406's Claude row).
+     */
+    it("ruling 399 on Claude: a nudge refused every time was stopped, and the note quotes the refusals", async () => {
+      reconfigureProject(store2, {
+        agents: [codexOperator(OPERATOR_POLICY, { backends: ["claude"], model: defaultModelFor("claude") })],
+      });
+      /** One governed call on the pending Claude drive; the reply it read. */
+      const callOnDrive = async (name: string, args: Record<string, string>): Promise<string> => {
+        const viberr = adapter2.pending!.spec.mcpServers?.viberr;
+        if (!inProcess(viberr)) throw new Error("a Claude drive must mount viberr in process");
+        const client = await connectedClient(viberr, "ruling-399");
+        const reply = await client.callTool({ name, arguments: args });
+        await client.close();
+        return z
+          .object({ content: z.array(z.object({ text: z.string() })) })
+          .parse(reply)
+          .content.map((c) => c.text)
+          .join("\n");
+      };
+      await runOperator(store2.db, {
+        projectSlug: store2.slug,
+        taskKey: "VIB-1",
+        backend: "claude",
+        autonomy: "supervised",
+        trigger: "create",
+        dataRoot: store2.dataRoot,
+      });
+      // A move to Done is an acceptance, and this operator holds no
+      // `completion-for-acceptance` grant: refused by its policy.
+      const refusal = await callOnDrive("transition_stage", { toStageId: "done" });
+      expect(refusal).toMatch(/^\[denied\] Accepting completion is not permitted/);
+      adapter2.finish(store2, "Accepting is not mine to do here.", "finished");
+      // Triage auto-advances, so the backstop nudges once. CANARY: record a
+      // Claude refusal as `planWhollyRefused` and this is ruling 228's
+      // plan-refused nudge, paid for refusals the drive had already read.
+      await eventually(() => {
+        expect(operatorRuns()).toHaveLength(2);
+        expect(adapter2.pending).not.toBeNull();
+      });
+      expect(adapter2.pending!.spec.prompt).toContain("your previous run ended with this auto-advance stage idle");
+      expect(adapter2.pending!.spec.prompt).not.toContain("EVERY action your previous run planned was refused");
+      // The nudge tries the same move and is refused the same way.
+      expect(await callOnDrive("transition_stage", { toStageId: "done" })).toBe(refusal);
+      adapter2.finish(store2, "Still not mine to do.", "finished");
+      await eventually(() => {
+        const parsed = readTaskFile({ projectSlug: store2.slug, taskKey: "VIB-1", dataRoot: store2.dataRoot })!.parsed;
+        // The pause stays, as ruling 399 keeps it, and settles to a person
+        // rather than to a third drive.
+        expect(parsed.frontmatter.heldAtStage).toBe(parsed.frontmatter.stage);
+        expect(parsed.frontmatter.waiting).toBe("human");
+      });
+      // CANARY: drop the Claude record (`noteRefusedCall` in the toolkit's
+      // `resultText`) and this note calls the refused nudge a deliberate hold
+      // and sends the reader to run the operator manually.
+      const note = readTaskFile({ projectSlug: store2.slug, taskKey: "VIB-1", dataRoot: store2.dataRoot })!
+        .parsed.timeline.find((e) => e.text.includes("Coordination is paused"))?.text;
+      expect(note, "no hold note").toBeDefined();
+      expect(note).not.toContain("deliberate hold");
+      expect(note).not.toContain("run the operator manually");
+      expect(note).toContain("the operator did not hold this stage; it was stopped");
+      // It quotes the refusal the call was answered with, which nothing else on
+      // the timeline does, and points at no refusal note.
+      expect(note).toContain(`- \`transition_stage\`: ${refusal.replace(/^\[denied\] /, "")}`);
+      expect(note).not.toContain("refusal notes are directly above");
+      expect(note).toContain("take the action yourself");
     });
 
     /**
@@ -3093,55 +3217,92 @@ describe("stranded auto-stage resume", () => {
      * The three clauses before this one were each added the same way (152(a),
      * 202, 228). This one is not a fourth effect: it is the fact that the
      * drive ACTED, which is what "held" was always meant to deny.
+     *
+     * A drive acts one way per backend: on Codex through the plan the server
+     * carries out when the run ends, on Claude through the `viberr` tools the
+     * run calls. Ruling 705: the stamp rode the plan executor alone, so the
+     * same comment from a Claude nudge was recorded as a deliberate hold.
      */
-    it("ruling 406: a nudged drive that CARRIED OUT its action is not a deliberate hold", async () => {
-      await runOperator(store2.db, {
-        projectSlug: store2.slug,
-        taskKey: "VIB-1",
+    it.each([
+      {
         backend: "codex",
-        autonomy: "supervised",
-        trigger: "create",
-        dataRoot: store2.dataRoot,
-      });
-      // Drive 1 strands (no actions) → the backstop fires the nudge (drive 2).
-      adapter2.finish(store2, JSON.stringify({ reasoning: "", actions: [] }), "finished");
-      await eventually(() => {
-        expect(operatorRuns()).toHaveLength(2);
-        expect(adapter2.pending).not.toBeNull();
-      });
-      // The nudge ends where it started and delivers nothing -- AX-18's shape.
-      // The only thing that distinguishes it is that it ACTED: a comment is the
-      // cheapest step that moves, dispatches, delivers and opens nothing.
-      adapter2.finish(
-        store2,
-        JSON.stringify({
-          reasoning: "",
-          actions: [
-            {
-              tool: "post_comment",
-              profileId: null,
-              delivers: null,
-              toStageId: null,
-              packetType: null,
-              text: "Checked the goal; nothing to advance yet.",
-              reason: null,
-              packetOptions: null,
-            },
-          ],
-        }),
-        "finished",
-      );
-      // CANARY: drop the `carriedOutAction` stamp from executeCodexPlan's
-      // `record` (or its clause in nudgeMadeProgress) and the nudge is recorded
-      // as a deliberate hold: `heldAtStage` is stamped and no third drive starts.
-      await eventually(() => {
-        expect(operatorRuns()).toHaveLength(3);
-        expect(adapter2.pending).not.toBeNull();
-      });
-      const parsed = readTaskFile({ projectSlug: store2.slug, taskKey: "VIB-1", dataRoot: store2.dataRoot })!.parsed;
-      expect(parsed.frontmatter.heldAtStage).toBeNull();
-      expect(parsed.timeline.some((ev) => ev.text.includes("deliberate hold"))).toBe(false);
-    });
+        // The comment is the plan's one step, carried out when the run ends.
+        comment: (text: string) =>
+          adapter2.finish(
+            store2,
+            JSON.stringify({
+              reasoning: "",
+              actions: [
+                {
+                  tool: "post_comment",
+                  profileId: null,
+                  delivers: null,
+                  toStageId: null,
+                  packetType: null,
+                  text,
+                  reason: null,
+                  packetOptions: null,
+                },
+              ],
+            }),
+            "finished",
+          ),
+      },
+      {
+        backend: "claude",
+        // The comment is a call on the tool the run mounts, made the way the
+        // model makes it; the run then ends with no plan to carry out.
+        comment: async (text: string) => {
+          const viberr = adapter2.pending!.spec.mcpServers?.viberr;
+          if (!inProcess(viberr)) throw new Error("a Claude drive must mount viberr in process");
+          const client = await connectedClient(viberr, "ruling-406");
+          const reply = JSON.stringify(
+            (await client.callTool({ name: "post_comment", arguments: { text } })).content,
+          );
+          await client.close();
+          expect(reply).toContain("[done]");
+          adapter2.finish(store2, text, "finished");
+        },
+      },
+    ] as const)(
+      "ruling 406: a nudged $backend drive that CARRIED OUT its action is not a deliberate hold",
+      async ({ backend, comment }) => {
+        // The nudge runs on the deployment's backend, so deploy this row's.
+        reconfigureProject(store2, {
+          agents: [codexOperator(OPERATOR_POLICY, { backends: [backend], model: defaultModelFor(backend) })],
+        });
+        await runOperator(store2.db, {
+          projectSlug: store2.slug,
+          taskKey: "VIB-1",
+          backend,
+          autonomy: "supervised",
+          trigger: "create",
+          dataRoot: store2.dataRoot,
+        });
+        // Drive 1 strands (no actions) → the backstop fires the nudge (drive 2).
+        adapter2.finish(store2, JSON.stringify({ reasoning: "", actions: [] }), "finished");
+        await eventually(() => {
+          expect(operatorRuns()).toHaveLength(2);
+          expect(adapter2.pending).not.toBeNull();
+        });
+        // The nudge ends where it started and delivers nothing -- AX-18's shape.
+        // The only thing that distinguishes it is that it ACTED: a comment is the
+        // cheapest step that moves, dispatches, delivers and opens nothing.
+        await comment("Checked the goal; nothing to advance yet.");
+        // CANARY: drop the `noteCarriedOutAction` call from either funnel
+        // (executeCodexPlan's `record`, the Claude toolkit's `resultText`), or
+        // the `carriedOutAction` clause in nudgeMadeProgress, and that backend's
+        // nudge is recorded as a deliberate hold: `heldAtStage` is stamped and
+        // no third drive starts.
+        await eventually(() => {
+          expect(operatorRuns()).toHaveLength(3);
+          expect(adapter2.pending).not.toBeNull();
+        });
+        const parsed = readTaskFile({ projectSlug: store2.slug, taskKey: "VIB-1", dataRoot: store2.dataRoot })!.parsed;
+        expect(parsed.frontmatter.heldAtStage).toBeNull();
+        expect(parsed.timeline.some((ev) => ev.text.includes("deliberate hold"))).toBe(false);
+      },
+    );
 
     /**
      * F39-69, live on ax-clone AX-5. A person's directive had three steps:
@@ -5587,41 +5748,56 @@ describe("runOperator — authority, ordering, orphans", () => {
     });
   });
 
-  it("ruling 141: a queued SCHEDULED occurrence refused at the front of the lease queue says so on the task and writes its final row", async () => {
+  it.each([
+    {
+      meanwhile: "opens a packet",
+      change: (parsed: ParsedTaskFile) => {
+        parsed.packet = {
+          type: "blocked",
+          kind: "Blocked decision",
+          from: "operator",
+          title: "Branch conflicts with main",
+          body: "",
+          observations: [],
+          options: [{ kind: "redirect", t: "Have the developer resolve it", d: "", rec: true }],
+        };
+        parsed.frontmatter.waiting = "human";
+      },
+      said: /Scheduled action skipped:.*reached the front of the queue, but a decision packet is open on VIB-1 \("Branch conflicts with main"\)/,
+      outcome: "skipped-packet",
+      waiting: "human", // the packet owns it; the refusal settles nothing
+    },
+    {
+      meanwhile: "archives the task",
+      change: (parsed: ParsedTaskFile) => {
+        parsed.frontmatter.archived = true;
+      },
+      said: /Scheduled action skipped:.*reached the front of the queue, but VIB-1 is closed \(archived\)/,
+      // The schedule runner's split: an archived task is not Done.
+      outcome: "skipped-archived",
+    },
+  ])("ruling 141: a queued SCHEDULED occurrence refused at the front of the lease queue because the live drive $meanwhile says so on the task and writes its final row", async ({ change, said, outcome, waiting }) => {
     // Canary: restore the bare `.catch(...)` at the drain site (drop the
     // `.then` that chains on the result) — the refusal exists only in the log.
+    // Write `skipped-done` for every closed refusal and the archived row
+    // records a task that was never Done.
     deployAgents([operatorAgent()]);
     seed("impl");
     await drive({ trigger: "manual" });
     expect(adapter5.pending).not.toBeNull();
     const queued = await drive({ trigger: "scheduled", scheduleId: "sch_1" });
     expect(queued.queued).toBe(true);
-    // The live drive opens a packet before the queued turn gets its chance.
-    await updateTaskFile({ projectSlug: store5.slug, taskKey: "VIB-1", dataRoot: store5.dataRoot }, (parsed) => {
-      parsed.packet = {
-        type: "blocked",
-        kind: "Blocked decision",
-        from: "operator",
-        title: "Branch conflicts with main",
-        body: "",
-        observations: [],
-        options: [{ kind: "redirect", t: "Have the developer resolve it", d: "", rec: true }],
-      };
-      parsed.frontmatter.waiting = "human";
-    });
+    // The live drive changes the task before the queued turn gets its chance.
+    await updateTaskFile({ projectSlug: store5.slug, taskKey: "VIB-1", dataRoot: store5.dataRoot }, change);
     rebuildAll(store5.db, { dataRoot: store5.dataRoot, force: true });
     adapter5.finish(store5, JSON.stringify({ reasoning: "done", actions: [] }), "finished");
     await eventually(() => {
-      expect(
-        task().timeline.some((e) =>
-          /Scheduled action skipped:.*reached the front of the queue, but a decision packet is open on VIB-1 \("Branch conflicts with main"\)/.test(e.text),
-        ),
-      ).toBe(true);
+      expect(task().timeline.some((e) => said.test(e.text))).toBe(true);
     });
     expect(operatorRuns()).toHaveLength(1); // the live drive only — no second run
-    expect(task().frontmatter.waiting).toBe("human"); // the packet owns it; the refusal settles nothing
+    if (waiting !== undefined) expect(task().frontmatter.waiting).toBe(waiting);
     const rows = listAuditEvents(store5.db).filter((e) => e.action === "task.schedule.fired");
-    expect(rows[0]!.details).toMatchObject({ scheduleId: "sch_1", outcome: "skipped-packet", refusedAtStart: true, atDrain: true });
+    expect(rows[0]!.details).toMatchObject({ scheduleId: "sch_1", outcome, refusedAtStart: true, atDrain: true });
   });
 
   it("ruling 141: a queued human @operator turn refused at the front of the queue gets the note, settling nothing", async () => {

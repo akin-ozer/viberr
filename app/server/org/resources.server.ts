@@ -682,11 +682,8 @@ export interface McpView {
    * connect anonymously with nothing but a log line to show for it, while this
    * row still read "auth configured". `true` here means the stored credential
    * cannot be opened and the server will NOT be mounted on a run.
-   *
-   * Optional so hand-built fixtures elsewhere stay valid; every real row from
-   * `mapMcp` sets it explicitly.
    */
-  credUnreadable?: boolean;
+  credUnreadable: boolean;
   tools: number | null;
   /** true up · false down · null never probed / not probeable (stdio). */
   up: boolean | null;
@@ -709,19 +706,16 @@ export interface McpView {
    * R20-4 (N20-2): when this server first answered a probe successfully (ISO),
    * or NULL if it never has here. A NULL turns a timeout on an npx/uvx-style
    * command into a plausible first-run INSTALL rather than a broken server.
-   *
-   * Optional so hand-built fixtures elsewhere stay valid; every real row from
-   * `mapMcp` sets it explicitly.
    */
-  firstSuccessAt?: string | null;
+  firstSuccessAt: string | null;
   /**
    * R20-4 (N20-2): how many times the HEURISTIC (the command looks like an
    * installer but printed nothing install-y, and the row has never succeeded)
    * armed a background warm-up. Capped at 1, so a command that times out on
    * EVERY probe still settles to `unreachable` instead of re-downloading
-   * forever. Optional for the same fixture reason as `firstSuccessAt`.
+   * forever.
    */
-  heuristicWarmups?: number;
+  heuristicWarmups: number;
   /**
    * Ruling 176: the tools an admin marked as WRITE tools. Each is denied on
    * every run whose `execute-code-or-write-repo` grant is withheld, and on
@@ -743,17 +737,15 @@ export interface McpView {
    * Ruling 469: where the connection stands on an OAuth sign-in — needs one,
    * signed in (until when, and whether it renews) or expired — or null when it
    * is not an OAuth connection. The public half only; the tokens never leave
-   * the server. Optional so hand-built fixtures elsewhere stay valid; every
-   * real row from `mapMcp` sets it explicitly.
+   * the server.
    */
-  oauth?: McpOAuthView | null;
+  oauth: McpOAuthView | null;
   /**
    * Ruling 486(c): the scope an admin asks the next OAuth sign-in for
    * ("Requested scopes"), space-joined; null asks for what the resource
-   * advertises. What was GRANTED is `oauth.scope`. Optional so hand-built
-   * fixtures elsewhere stay valid; every real row from `mapMcp` sets it.
+   * advertises. What was GRANTED is `oauth.scope`.
    */
-  requestedScope?: string | null;
+  requestedScope: string | null;
 }
 
 type McpRow = {
@@ -1988,7 +1980,7 @@ export async function saveMcpServer(
       effectiveWriteTools === undefined ? null : toolPolicyJson(effectiveWriteTools),
       // Ruling 486(c): an absent field keeps what is stored; a stdio row
       // signs nothing in, so it asks for nothing.
-      transport === "stdio" ? null : requestedScope === undefined ? (existing.requestedScope ?? null) : requestedScope,
+      transport === "stdio" ? null : requestedScope === undefined ? existing.requestedScope : requestedScope,
       now, id,
     );
     // Ruling 469: tokens never follow a row to another endpoint. And a
@@ -2027,7 +2019,7 @@ export async function saveMcpServer(
     if (existing.name !== name) details.renamedFrom = existing.name;
     if (oauthDropped) details.oauthDropped = true;
     // Ruling 486(c): what the next sign-in asks for, when this save changed it.
-    if (requestedScope !== undefined && requestedScope !== (existing.requestedScope ?? null)) {
+    if (requestedScope !== undefined && requestedScope !== existing.requestedScope) {
       details.requestedScope = requestedScope;
     }
     recordAudit(db, {
@@ -2221,7 +2213,7 @@ export async function testMcpServer(
     disc.installing !== true &&
     disc.firstRunInstaller === true &&
     firstEver &&
-    (existing.heuristicWarmups ?? 0) < 1;
+    existing.heuristicWarmups < 1;
   if (
     existing.transport === "stdio" &&
     disc.kind === "down" &&

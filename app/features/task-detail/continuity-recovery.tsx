@@ -121,7 +121,6 @@ export function ContinuityRecoveryPanel({
   timeline,
   runtime,
   agents = [],
-  runsVisible = true,
   canRunAgents = false,
   onOpenConsole,
   onAsk,
@@ -133,10 +132,6 @@ export function ContinuityRecoveryPanel({
   /** The deployed profiles, so a supporting agent is not called a reviewer
    *  unless its verdict gates acceptance (ruling 662). */
   agents?: readonly VerdictProfile[];
-  /** UI-30: false ⇒ the viewer is not a project member and the loader withheld
-   *  `lines`/`raw`/`sid`, so there is no console to open and no session id to
-   *  name. The panel still reports the break from the canonical timeline. */
-  runsVisible?: boolean;
   /** Whether the viewer may start runs — decides whether the continuation note
    *  names the Execution profile panel, which only shows Run to that tier. */
   canRunAgents?: boolean;
@@ -276,8 +271,7 @@ export function ContinuityRecoveryPanel({
       </p>
 
       <div className="packet-actions">
-        {runsVisible &&
-          onOpenConsole &&
+        {onOpenConsole &&
           loss.agents.map((agent) => (
             <button
               key={agent.threadId}

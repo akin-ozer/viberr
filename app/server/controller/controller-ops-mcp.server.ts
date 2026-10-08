@@ -645,20 +645,32 @@ export function buildControllerOpsMcp(deps: ControllerOpsDeps): ControllerOpsMcp
       runWith((args: { kind: "kb" | "skill"; id: string; path: string[]; offset?: number }) => {
         requireOrgAdmin("read store documents");
         const target = resolveStoreTarget(db, args.kind, args.id, { dataRoot });
-        if (!target) throw AppError.notFound("That resource no longer exists.");
+        if (!target) {
+          // Ruling 246's rule for the resource as for the file below: "no
+          // longer exists" claims the id once named something, and a mistyped
+          // or invented id never did. Name the id and the read that lists the
+          // real ones, as every other toolkit miss does.
+          throw AppError.notFound(
+            args.kind === "kb"
+              ? `No knowledge base has the id ${args.id}; list_knowledge_bases names them.`
+              : `No skill has the id ${args.id}; list_skills names them.`,
+          );
+        }
         const doc = readStoreDoc(target, args.path);
         if (!doc) {
           // Ruling 246 (F37-75): say what this reader IS, not that the file
           // "no longer exists" — which claims it once did, and sent the
           // controller looking for a deletion that never happened. The store
           // and the git repository are different places, and the caller most
-          // likely to hit this is one that confused them.
+          // likely to hit this is one that confused them, so it names the
+          // reads that do open the repository (ruling 299 gave the controller
+          // the default branch).
           throw AppError.notFound(
             `${target.kind === "kb" ? "Knowledge base" : "Skill"} "${target.name}" has no ` +
               `\`${args.path.join("/")}\`. This reads the org KNOWLEDGE-BASE and SKILL store, ` +
-              "not a git repository; Viberr has no tool that returns repository file contents, " +
-              "so a path from the project's repo will never be found here. Open it on GitHub, or " +
-              "ask an agent on a task with a checkout.",
+              "not a git repository, so a path from the project's repo will never be found here: " +
+              "read_default_branch_file reads a file as the project's default branch has it, and " +
+              "read_pull_request a pull request's changed files.",
           );
         }
         // Ruling 677: one page at a time, like every other document read. It

@@ -12,7 +12,7 @@ import type { TaskDetail } from "~/server/projections/task-query.server";
 import { TaskDetailPage } from "./task-detail-page";
 import { expectWithinBudget } from "../../../test-support/perf-ratchet";
 import { createRenderCounter, observeMutations } from "../../../test-support/render-counter";
-import { taskDetail } from "../../../test-support/task-detail";
+import { acceptanceAffordance, taskDetail } from "../../../test-support/task-detail";
 import { FakeEventSource } from "../../../test-support/fake-event-source";
 
 /**
@@ -186,7 +186,6 @@ function pageProps(rows: 40 | 400): PageProps {
     operatorAutonomy: "supervised",
     runPrincipal: null,
     liveAgentRuns: [{ profileId: "developer", lifecycle: "running" }],
-    runsVisible: true,
     timelineHasMore: false,
     timelineRemaining: 0,
     timelineNextLimit: 30,
@@ -197,15 +196,7 @@ function pageProps(rows: 40 | 400): PageProps {
     mentionables: { agents: [], users: [], reserved: [] },
     recommendations: [],
     schedules: [],
-    acceptance: {
-      hasAuthority: true,
-      atBoundary: false,
-      blockedReason: null,
-      blockedGates: [],
-      blockedReasonViaPacket: null,
-      canAccept: false,
-      terminallyBlocked: false,
-    },
+    acceptance: acceptanceAffordance({ atBoundary: false, canAccept: false }),
     githubHost: "https://github.com",
   };
 }

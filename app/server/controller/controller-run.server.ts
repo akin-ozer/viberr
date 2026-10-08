@@ -1474,15 +1474,14 @@ interface SystemPromptInput {
   config: ReturnType<typeof resolveControllerConfig>;
   mountedMcps: string[];
   unresolvedMcps: readonly UnresolvedMcpGrant[];
-  /** Ruling 461: the mounted org servers reached through Viberr's MCP gateway.
-   *  Optional: a prompt-shape test mounts no gateway. */
-  proxiedMcps?: readonly string[];
+  /** Ruling 461: the mounted org servers reached through Viberr's MCP gateway. */
+  proxiedMcps: readonly string[];
   /** Ruling 486: what each OAuth-signed-in proxied server was granted. */
-  oauthGrants?: readonly McpRunGrant[];
+  oauthGrants: readonly McpRunGrant[];
   /** Ruling 297: the list of every tool this turn mounts, from
    *  `buildControllerMounts`. Rebuilt per turn, so a conversation that was
    *  already running when a tool shipped is told about it. */
-  toolManifest?: string;
+  toolManifest: string;
   /** Ruling 344/339: the names this turn actually mounted, and the built-ins it
    *  denies — read off what the caller built, never restated from the gates. */
   toolkit: readonly string[];
@@ -1586,11 +1585,11 @@ export function buildControllerSystemPrompt(input: SystemPromptInput): Controlle
       // the operator, which reads both namespaces at once.
       RULING_NAMESPACE_NOTE +
       // Ruling 297: generated from the registries this very turn mounted.
-      (input.toolManifest ?? ""),
+      input.toolManifest,
   );
   // Ruling 461: the org servers this turn reaches through Viberr's gateway,
   // in the sentence the specialist and operator prompts share.
-  const gateway = gatewayMcpSection(input.proxiedMcps ?? [], input.oauthGrants ?? []);
+  const gateway = gatewayMcpSection(input.proxiedMcps, input.oauthGrants);
   if (gateway) parts.push(gateway);
 
   // Ruling 191: the controller has no shell, but it writes the profiles, the

@@ -51,8 +51,12 @@ import {
   deliverGate,
   dispatchGate,
   gate,
+  noteCarriedOutAction,
+  planRefusalOf,
+  refusalList,
   type OperatorActionResult,
   type OperatorAuthority,
+  type RefusedPlanStep,
 } from "~/server/tasks/operator-authority.server";
 import type { PacketOptionKind } from "~/schemas/task-file.schema";
 import { DONE_SIGNAL_RULE } from "~/server/tasks/done-signal.server";
@@ -910,11 +914,9 @@ export async function executeCodexPlan(
     }
     // Ruling 406: the drive acted. Stamped HERE, on the one funnel every plan
     // step already passes through, so a new action shape is covered the day it
-    // is added instead of the day it is mistaken for a deliberate hold.
-    // Ruling 443: a step whose outcome is the packet it opened acted too.
-    if ((result.outcome === "done" || result.openedPacket) && ctx.operatorRun) {
-      ctx.operatorRun.carriedOutAction = true;
-    }
+    // is added instead of the day it is mistaken for a deliberate hold. The
+    // Claude toolkit's replies ask the same predicate (ruling 705).
+    noteCarriedOutAction(ctx, result);
   };
   // B-6 (pass 24): OpenAI-strict structured output makes every plan field
   // present-but-nullable, so a step like `{tool:"transition_stage", toStageId:null}`
@@ -1375,36 +1377,6 @@ async function narratePausedPlan(
   });
 }
 
-/** A plan step that did not run, and WHY it did not (see OperatorActionResult):
- *  `authority` = the capability policy (or ownership) refused it;
- *  `state` = the task's current state, or the step itself, ruled it out. */
-export interface RefusedPlanStep {
-  tool: string;
-  message: string;
-  kind: "authority" | "state";
-}
-
-/**
- * Ruling 443: what one plan step's result adds to the plan's refusals, if
- * anything. `denied` is a refusal by authority and `noop` one by state (the
- * LV-03 split), except a step whose outcome is the decision packet it opened.
- * Live on ax-clone AX-21, AX-28 and AX-5 a refresh that met a conflict was
- * narrated "This step did not apply to the task's current state" beside the
- * packet it had just opened. The step ran, and its outcome was the packet.
- */
-export function planRefusalOf(
-  toolName: string,
-  result: OperatorActionResult,
-): RefusedPlanStep | null {
-  if (result.outcome !== "denied" && result.outcome !== "noop") return null;
-  if (result.openedPacket) return null;
-  return {
-    tool: toolName,
-    message: result.message,
-    kind: result.outcome === "denied" ? "authority" : "state",
-  };
-}
-
 /**
  * Ruling 446 (F39-70): a dispatch in a Codex plan carries the refusals the same plan has
  * already collected. A plan is written before any step runs, so a directive
@@ -1455,8 +1427,6 @@ async function narrateRefusedActions(
   if (refused.length === 0) return;
   const byAuthority = refused.filter((r) => r.kind === "authority");
   const byState = refused.filter((r) => r.kind === "state");
-  const list = (steps: RefusedPlanStep[]) =>
-    steps.map((r) => `- \`${r.tool}\`: ${r.message}`).join("\n");
   const were = (steps: RefusedPlanStep[]) =>
     steps.length === 1 ? "This step was" : "These steps were";
   const did = (steps: RefusedPlanStep[]) =>
@@ -1466,11 +1436,11 @@ async function narrateRefusedActions(
   // and a human acts on them differently.
   const body =
     byAuthority.length > 0 && byState.length > 0
-      ? `Refused by its capability policy:\n\n${list(byAuthority)}\n\n` +
-        `Did not apply to the task's current state:\n\n${list(byState)}`
+      ? `Refused by its capability policy:\n\n${refusalList(byAuthority)}\n\n` +
+        `Did not apply to the task's current state:\n\n${refusalList(byState)}`
       : byAuthority.length > 0
-        ? `${were(byAuthority)} refused by its capability policy:\n\n${list(byAuthority)}`
-        : `${did(byState)} not apply to the task's current state:\n\n${list(byState)}`;
+        ? `${were(byAuthority)} refused by its capability policy:\n\n${refusalList(byAuthority)}`
+        : `${did(byState)} not apply to the task's current state:\n\n${refusalList(byState)}`;
   const text =
     // Ruling 408: the lead is a shared constant, because the next turn's carry
     // finds this note by it.
