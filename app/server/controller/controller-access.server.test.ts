@@ -465,7 +465,7 @@ describe("GET /resources/run-log applies the same gate on the wire", () => {
     const owner = await fetchRunLog(ids.owner, CONTROLLER_RUN);
     expect(owner.status).toBe(200);
     // SAFETY: a 200 rules out the route's error branches, so the body is the
-    // success payload it builds from `getRunLog`.
+    // success payload it builds from `runLogPage`.
     const payload = JSON.parse(owner.body) as { data: { lines: unknown[] } };
     expect(payload.data.lines).toHaveLength(LOG_LINES);
 

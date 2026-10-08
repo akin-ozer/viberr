@@ -825,7 +825,7 @@ describe("interruptRun — RBAC + audit + idempotency", () => {
     expect(result.outcome).toBe("interrupted");
   });
 
-  it("reviewer / viewer / non-member cannot interrupt (403)", async () => {
+  it("contributor / viewer / non-member cannot interrupt (403)", async () => {
     const runId = await startRunning();
     for (const u of [store.users.selin, store.users.elif, store.users.deniz]) {
       await expect(
