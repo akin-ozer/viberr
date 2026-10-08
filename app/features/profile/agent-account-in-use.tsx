@@ -49,6 +49,11 @@ export function AccountInUse({
   // every run on the account was refused with a 403.
   const lastRefusal = data.lastRefusal;
   const { backend, label, request } = card;
+  // The account a Disconnect is asking about, as this load has it: its name
+  // and whether runs use it are read with the accounts that would take over,
+  // so a switch or a rename in another tab leaves no word of the dialog about
+  // anything but what confirming does.
+  const confirming = accounts.find((account) => account.id === card.confirmDisconnect);
   return (
     <>
       {/* Ruling 616: which account runs bill is the picker's to say and
@@ -97,9 +102,9 @@ export function AccountInUse({
       {/* Ruling 616: opened from the picker's menu, which says when the
           ceiling leaves no room for another. */}
       {card.adding ? <AddAccount kept={accounts.length} card={card} /> : null}
-      {card.confirmDisconnect && (
+      {confirming && (
         <DisconnectConfirm
-          account={card.confirmDisconnect}
+          account={confirming}
           kept={accounts.length}
           active={active}
           others={others}

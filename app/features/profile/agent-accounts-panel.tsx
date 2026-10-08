@@ -7,7 +7,7 @@ import { useFetcherResult } from "~/ui/use-fetcher-result";
 import { useToast } from "~/ui/toast";
 import { AGENT_ACCOUNTS_ANCHOR } from "~/shared/page-anchors";
 import { BACKEND_LABEL } from "~/shared/text/backend-label";
-import type { ProfileBackend, ProfileBackendAccount } from "./profile-query.server";
+import type { ProfileBackend } from "./profile-query.server";
 import type { ProfileActionData } from "./profile-page";
 import { AccountInUse } from "./agent-account-in-use";
 import { useSignInPoll } from "./agent-accounts-actions";
@@ -109,9 +109,9 @@ function AgentAccountCard({
   const revalidator = useRevalidator();
   const [paste, setPaste] = useState<"api_key" | "access_token" | null>(null);
   // Ruling 507: the account a Disconnect is asking about, the account whose
-  // name is being edited, and whether "Add another account" is open. Ruling
-  // 616: and whether the other accounts' management is.
-  const [confirmDisconnect, setConfirmDisconnect] = useState<ProfileBackendAccount | null>(null);
+  // name is being edited (each by its id), and whether "Add another account"
+  // is open. Ruling 616: and whether the other accounts' management is.
+  const [confirmDisconnect, setConfirmDisconnect] = useState<string | null>(null);
   const [renaming, setRenaming] = useState<string | null>(null);
   const [adding, setAdding] = useState(false);
   const [managing, setManaging] = useState(false);
@@ -151,12 +151,12 @@ function AgentAccountCard({
   // the dialog open over an account that no longer existed while others
   // remained; with none left, or a sign-in from another tab in their place,
   // the dialog went with the accounts but this state stayed, and the next load
-  // that showed an account opened it again with nobody asking. Matched by id,
+  // that showed an account opened it again with nobody asking. Held by id,
   // since every load brings fresh objects. Adjusted during render, React's
   // pattern for state a prop invalidates, not in an effect.
   if (
     confirmDisconnect &&
-    (running || !accounts.some((account) => account.id === confirmDisconnect.id))
+    (running || !accounts.some((account) => account.id === confirmDisconnect))
   ) {
     setConfirmDisconnect(null);
   }

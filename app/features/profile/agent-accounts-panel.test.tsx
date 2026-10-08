@@ -1350,6 +1350,7 @@ describe("rulings 507 and 616: several accounts on one backend", () => {
    *  each time as a decoded payload is; `reload` is a live event or another
    *  panel's post revalidating the page. */
   async function renderLoaded(server: ClaudeOnServer) {
+    lastSubmit = null;
     let revalidate: () => Promise<void> = async () => {};
     const Stub = createRoutesStub([
       {
@@ -1379,9 +1380,10 @@ describe("rulings 507 and 616: several accounts on one backend", () => {
   // left, or a sign-in from another tab in the card's place, the dialog went
   // with the accounts but the card's state kept it, and the next load that
   // showed an account opened it again with nobody asking.
-  // CANARY: drop the reset of `confirmDisconnect` in `AgentAccountCard`
-  // (agent-accounts-panel.tsx) and every row ends with the dialog open (drop
-  // only its `running` and the sign-in row does); match the account by
+  // CANARY: drop the `running` from the reset of `confirmDisconnect` in
+  // `AgentAccountCard` (agent-accounts-panel.tsx) and the sign-in row ends
+  // with the dialog open; go back to holding the account the Disconnect was
+  // pressed on, with no reset, and every row does; match that account by
   // identity instead of id and the load that changed nothing closes it under
   // the person reading it.
   it.each<[string, ClaudeOnServer[], string]>([
@@ -1423,6 +1425,58 @@ describe("rulings 507 and 616: several accounts on one backend", () => {
     }
     // The card shows an account in use again, where the dialog would be.
     expect(pickerFor(view, inUse)).toBeTruthy();
+  });
+
+  // Every word of an open confirm is about what confirming does now. The
+  // dialog read the account's name and whether runs use it off the account
+  // the Disconnect was pressed on, and who else is in use off the latest
+  // load: after a switch in another tab, "Disconnect API key ending in abcd?"
+  // said "Your runs keep using API key ending in abcd." over a Disconnect
+  // that hands runs to Work, and after a rename its title kept the old name.
+  // CANARY: give DisconnectConfirm the account the Disconnect was pressed on
+  // instead of the loaded account with its id (agent-account-in-use.tsx) and
+  // each row keeps the name or the sentence the dialog opened with.
+  it.each<[string, string, Account[], string, string]>([
+    [
+      "another tab switches runs to it",
+      "ubc_key",
+      [{ ...KEY, active: true }, { ...WORK, active: false }, PERSONAL],
+      "API key ending in abcd",
+      "Your runs switch to Work, the Claude account you used before it.",
+    ],
+    [
+      "another tab switches runs away from it",
+      "ubc_work",
+      [{ ...PERSONAL, active: true }, { ...WORK, active: false }, KEY],
+      "Work",
+      "Your runs keep using personal@example.com.",
+    ],
+    [
+      "another tab renames it",
+      "ubc_key",
+      [WORK, PERSONAL, { ...KEY, name: "Spare key", label: "Spare key" }],
+      "Spare key",
+      "Your runs keep using Work.",
+    ],
+  ])("an open Disconnect confirm says what confirming does when %s", async (_label, id, loaded, name, sentence) => {
+    const server: ClaudeOnServer = { accounts: [WORK, PERSONAL, KEY], login: null };
+    const { view, reload } = await renderLoaded(server);
+    // The account in use is disconnected under its health line; another one
+    // from the management.
+    if (id !== WORK.id) chooseAction(view, "Work", "Manage other accounts");
+    const scope =
+      id === WORK.id
+        ? view.container.querySelector<HTMLElement>(".cred-card .cred-manage")!
+        : rowOf(view.container, id);
+    fireEvent.click(buttonIn(scope, "Disconnect"));
+
+    server.accounts = loaded;
+    await reload();
+    const dialog = view.getByRole("alertdialog");
+    expect(dialog.getAttribute("aria-label")).toBe(`Disconnect ${name}?`);
+    expect(dialog.textContent).toContain(sentence);
+    fireEvent.click(buttonIn(dialog, `Disconnect ${name}`));
+    expect(lastSubmit).toEqual({ intent: "backend-disconnect", backend: "claude", account: id });
   });
 
   it("renames in place, and refuses a name too long in the store's own words (ruling 147)", () => {

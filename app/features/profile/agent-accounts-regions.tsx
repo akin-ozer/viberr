@@ -41,8 +41,9 @@ export interface CardControls {
   setPaste: Dispatch<SetStateAction<"api_key" | "access_token" | null>>;
   renaming: string | null;
   setRenaming: Dispatch<SetStateAction<string | null>>;
-  confirmDisconnect: ProfileBackendAccount | null;
-  setConfirmDisconnect: Dispatch<SetStateAction<ProfileBackendAccount | null>>;
+  /** The id of the account a Disconnect is asking about. */
+  confirmDisconnect: string | null;
+  setConfirmDisconnect: Dispatch<SetStateAction<string | null>>;
   adding: boolean;
   setAdding: Dispatch<SetStateAction<boolean>>;
   managing: boolean;
@@ -240,7 +241,7 @@ export function ManageButtons({
         // Ruling 481(b) (F40-49): it asks first, like every other one-way
         // control (ruling 458(f)). One tap used to sign the vendor session
         // out, with no undo short of a fresh sign-in.
-        onClick={() => card.setConfirmDisconnect(account)}
+        onClick={() => card.setConfirmDisconnect(account.id)}
       >
         {request.accountBusy("backend-disconnect", account.id) && <Icon name="loader" className="spin" />}
         {request.accountBusy("backend-disconnect", account.id) ? "Disconnecting…" : "Disconnect"}
