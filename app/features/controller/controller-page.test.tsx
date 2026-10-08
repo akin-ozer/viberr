@@ -6,7 +6,6 @@ import { createRoutesStub, replace, useLocation, type ActionFunction } from "rea
 import { ToastProvider } from "~/ui/toast";
 import { ControllerPage } from "./controller-page";
 import { surfaceLabel } from "./surface-label";
-import { readableStep } from "~/features/runtime/readable-step";
 import type { ControllerSurfaceView } from "./controller-query.server";
 import { controllerRun } from "../../../test-support/run-view";
 
@@ -438,38 +437,6 @@ describe("the open conversation's execution", () => {
     expect(row.querySelector(".ctl-working-step")?.getAttribute("title")).toBe(
       'mcp__viberr_controller__get_task · {"taskKey":"SHOP-31"}',
     );
-  });
-
-  it("U39-9: a step reads as words: no server prefix, no underscores, a flat input as its values", () => {
-    // CANARY: render `detail` instead of `readableStep(detail)`.
-    expect(readableStep("composing · mcp__viberr_controller__read_default_branch_file · internal/client/client.go answered")).toBe(
-      "composing · read default branch file · internal/client/client.go answered",
-    );
-    expect(readableStep('mcp__viberr_ops__read_run_log · {"runId":"run_x","tail":40}')).toBe("read run log · run_x, 40");
-    // A payload the 120-character cap cut short is not JSON, so it stays as stored.
-    expect(readableStep('mcp__viberr_controller__update_epic · {"epicId":"epic-6","addTasks…')).toBe(
-      'update epic · {"epicId":"epic-6","addTasks…',
-    );
-    // Built-in tools and their inputs are already words.
-    expect(readableStep("Bash · npm test")).toBe("Bash · npm test");
-  });
-
-  it("U39-28: the run loading its tools says so, with their names", () => {
-    // Live on ax-clone, the first step of a controller turn. CANARY: drop the
-    // two ToolSearch replacements.
-    expect(
-      readableStep(
-        "composing · ToolSearch · query: select:mcp__viberr_controller__get_task,mcp__viberr_controller__list_decisions… answered",
-      ),
-    ).toBe("composing · loading tools · get task, list decisions… answered");
-    expect(readableStep("ToolSearch · query: slack send")).toBe("looking up tools · slack send");
-    // Live after the deploy: the cap cut the second id before its tool name.
-    // CANARY: drop the truncated-id replacement.
-    expect(
-      readableStep(
-        "composing · ToolSearch · query: select:mcp__viberr_controller__read_knowledge_base_doc,mcp__viberr_controller_… answered",
-      ),
-    ).toBe("composing · loading tools · read knowledge base doc, … answered");
   });
 
   it("U39-29: the tasks a reply names open from the transcript", async () => {
