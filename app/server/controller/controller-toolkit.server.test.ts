@@ -5304,7 +5304,6 @@ describe("ruling 188: the controller reads what the human surfaces render", () =
 describe("ruling 469: the controller reads an MCP connection's OAuth sign-in", () => {
   it("save_mcp_server says the admin signs the server in; list_mcp_servers reports the sign-in without a token", async () => {
     const { startOAuthMcpServer, signInWithOAuth } = await import("../../../test-support/mcp-oauth-server");
-    const { resetMcpOAuthForTests } = await import("~/server/org/mcp-oauth.server");
     const oauth = await startOAuthMcpServer();
     try {
       const reply = await call(ids.orgAdminOutsider, "save_mcp_server", {
@@ -5338,7 +5337,6 @@ describe("ruling 469: the controller reads an MCP connection's OAuth sign-in", (
       const text = await call(ids.orgAdminOutsider, "list_mcp_servers");
       for (const secret of oauth.issuedSecrets()) expect(text).not.toContain(secret);
     } finally {
-      resetMcpOAuthForTests();
       await oauth.close();
     }
   });
@@ -5348,7 +5346,6 @@ describe("ruling 469: the controller reads an MCP connection's OAuth sign-in", (
     // "signed_in" over 194 read-only scopes, as it did live (F40-63).
     const { startOAuthMcpServer, signInWithOAuth } = await import("../../../test-support/mcp-oauth-server");
     const { CLOUDFLARE_READ_ONLY_GRANT } = await import("../../../test-support/cloudflare-read-only-grant");
-    const { resetMcpOAuthForTests } = await import("~/server/org/mcp-oauth.server");
     const oauth = await startOAuthMcpServer({ grantedScope: CLOUDFLARE_READ_ONLY_GRANT });
     try {
       await call(ids.orgAdminOutsider, "save_mcp_server", {
@@ -5396,7 +5393,6 @@ describe("ruling 469: the controller reads an MCP connection's OAuth sign-in", (
         /^\[error\] No MCP server has the id or name “no-such-server”\. Registered: .*\bgrant-probe\b/,
       );
     } finally {
-      resetMcpOAuthForTests();
       await oauth.close();
     }
   });

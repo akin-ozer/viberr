@@ -12,7 +12,7 @@ import {
   type OAuthMcpServerHandle,
 } from "../../../test-support/mcp-oauth-server";
 import { CLOUDFLARE_READ_ONLY_GRANT } from "../../../test-support/cloudflare-read-only-grant";
-import { resetMcpOAuthForTests, signOutMcpOAuth } from "~/server/org/mcp-oauth.server";
+import { signOutMcpOAuth } from "~/server/org/mcp-oauth.server";
 import { getMcpServer, saveMcpServer } from "~/server/org/resources.server";
 import { resolveSpecialistMcpServersDetailed } from "~/server/tasks/specialist-mcp.server";
 import { listAuditEvents } from "../../../test-support/audit-log";
@@ -63,7 +63,6 @@ beforeEach(async () => {
 afterEach(async () => {
   for (const client of clients.splice(0)) await client.close().catch(() => undefined);
   await stopMcpGateway();
-  resetMcpOAuthForTests();
   await server.close();
   ctx.cleanup();
 });

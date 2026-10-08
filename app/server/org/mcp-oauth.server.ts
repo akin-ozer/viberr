@@ -432,11 +432,6 @@ function stateKey(state: string): string {
   return createHash("sha256").update(state).digest("hex");
 }
 
-/** Test-only: forget every sign-in in flight. */
-export function resetMcpOAuthForTests(): void {
-  pending().clear();
-}
-
 export interface StartMcpOAuthInput {
   mcpId: string;
   /** `<the instance's own origin>/resources/mcp-oauth/callback`. */

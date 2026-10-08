@@ -24,7 +24,6 @@ import {
   backfillMcpGrantScopes,
   completeMcpOAuthSignIn,
   mcpOAuthTokenSource,
-  resetMcpOAuthForTests,
   signOutMcpOAuth,
   startMcpOAuthSignIn,
 } from "./mcp-oauth.server";
@@ -65,7 +64,6 @@ beforeEach(() => {
 });
 
 afterEach(async () => {
-  resetMcpOAuthForTests();
   await server?.close();
   ctx.cleanup();
 });
