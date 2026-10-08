@@ -131,10 +131,6 @@ function AgentAccountCard({
     else setManaging(true);
     setFocusAsked({ box });
   };
-  // The management closes with the last account it listed, so an account
-  // added later does not open it again on its own. Adjusted during render, as
-  // the Disconnect confirm below is, so no frame paints it open and empty.
-  if (managing && others.length === 0) setManaging(false);
 
   const { login, connected, running } = useSignInPoll(data, () => {
     push(`${label} connected`);
@@ -146,20 +142,14 @@ function AgentAccountCard({
 
   // The confirm asks about an account on screen, so it goes when that account
   // does, or when a sign-in under way takes the card's accounts off it. A
-  // confirmed Disconnect closes it itself (ruling 459). An account
-  // disconnected in another tab while its "Disconnect …?" was open here kept
-  // the dialog open over an account that no longer existed while others
-  // remained; with none left, or a sign-in from another tab in their place,
-  // the dialog went with the accounts but this state stayed, and the next load
-  // that showed an account opened it again with nobody asking. Held by id,
-  // since every load brings fresh objects. Adjusted during render, React's
-  // pattern for state a prop invalidates, not in an effect.
-  if (
-    confirmDisconnect &&
-    (running || !accounts.some((account) => account.id === confirmDisconnect))
-  ) {
-    setConfirmDisconnect(null);
-  }
+  // confirmed Disconnect closes it itself (ruling 459). It is held by id and
+  // found in each load (AccountInUse), so an account disconnected in another
+  // tab takes the dialog with it, and its id, never listed again, opens
+  // nothing later. A sign-in under way takes the accounts off the card while
+  // they are still listed, so that closes it here, or the load that showed
+  // them again would open it with nobody asking. Adjusted during render,
+  // React's pattern for state a prop invalidates, not in an effect.
+  if (confirmDisconnect && running) setConfirmDisconnect(null);
   // "Add another account" sits beside the confirm, under the account in use,
   // so it closes when that region goes: no account left, or a sign-in under
   // way in its place. A sign-in that ends here connected closes it too (the
@@ -172,6 +162,11 @@ function AgentAccountCard({
     setAdding(false);
     setPaste(null);
   }
+  // The management closes with the last account it listed, so an account
+  // added later does not open it again on its own, and with its region when a
+  // sign-in under way takes it, as the add section does. Adjusted during
+  // render, so no frame paints it open and empty.
+  if (managing && (running || others.length === 0)) setManaging(false);
 
   // A completed rename or saved key closes what the person had open for it.
   // Settled on the RESULT, so a refusal leaves the field as it was. Not the
