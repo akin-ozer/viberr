@@ -5,7 +5,8 @@ import { setupAppTest, type AppTestContext } from "../../test-support/test-app";
 /**
  * Ruling 457 (owner, 2026-09-24; FL-4 / SRV-6): the bell's list is its own
  * resource. It answers the viewer's own rows, newest first, capped where the
- * popover discloses the cap; a page revalidation never reloads it.
+ * popover discloses the cap. That a page revalidation never reloads it is
+ * counted where the bell mounts the route (`top-bell.test.tsx`).
  */
 
 let app: AppTestContext;
@@ -75,10 +76,5 @@ describe("/resources/notifications (ruling 457)", () => {
     } finally {
       app.db.prepare(`UPDATE users SET pwreset_required = 0 WHERE id = ?`).run(deniz);
     }
-  });
-
-  it("is never reloaded by a page's revalidation", async () => {
-    const { shouldRevalidate } = await import("~/routes/resources.notifications");
-    expect(shouldRevalidate()).toBe(false);
   });
 });
