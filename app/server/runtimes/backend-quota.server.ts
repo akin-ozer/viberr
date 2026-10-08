@@ -172,11 +172,9 @@ export interface BackendQuotaRow {
    * Ruling 481(d) (F40-50): the window `reading` describes has reset since it
    * was read (`readingWindowReset`). The reading is kept, as history, but no
    * surface presents its utilization as current: Profile and Insights word it
-   * in the past tense and draw no bar. Optional so row fixtures that predate
-   * it stay valid (absent reads as false); `latestBackendRateLimits` always
-   * sets it.
+   * in the past tense and draw no bar.
    */
-  readingWindowReset?: boolean;
+  readingWindowReset: boolean;
 }
 
 /**

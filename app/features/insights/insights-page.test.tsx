@@ -222,6 +222,7 @@ const CLAUDE: RunAnalytics = {
     },
     credentialRefused: null,
     exhausted: null,
+    readingWindowReset: false,
   },
   quotaWindows: [{ rateLimitType: "seven_day", utilization: 0.91, resetsAt: 1_787_832_000, reset: false }],
   windowDays: 30,
@@ -308,7 +309,7 @@ const CODEX: RunAnalytics = {
     },
     operatorBursts: null,
   },
-  quota: { backend: "codex", reading: null, credentialRefused: null, exhausted: null },
+  quota: { backend: "codex", reading: null, credentialRefused: null, exhausted: null, readingWindowReset: false },
   quotaWindows: [],
 };
 
@@ -521,7 +522,7 @@ describe("InsightsPage", () => {
     };
     const { container } = renderPage(
       withQuota(
-        { backend: "codex", reading, credentialRefused: null, exhausted: null },
+        { backend: "codex", reading, credentialRefused: null, exhausted: null, readingWindowReset: false },
         [
           { rateLimitType: "five_hour", utilization: 0.68, resetsAt: 1_790_980_628, reset: false },
           { rateLimitType: "seven_day", utilization: 0.42, resetsAt: 1_791_495_289, reset: false },
@@ -568,6 +569,7 @@ describe("InsightsPage", () => {
           },
           credentialRefused: null,
           exhausted: null,
+          readingWindowReset: false,
         },
         [{ rateLimitType: "five_hour", utilization: null, resetsAt: 1_787_848_800, reset: false }],
       ),
@@ -597,6 +599,7 @@ describe("InsightsPage", () => {
           credentialLabel: null,
         },
         exhausted: null,
+        readingWindowReset: false,
       }),
       "?backend=codex",
     );
@@ -625,7 +628,7 @@ describe("InsightsPage", () => {
     credentialLabel: null,
   };
   const refusedQuota = (exhausted: BackendQuotaRow["exhausted"]): InsightsSummary =>
-    withQuota({ backend: "codex", reading: null, credentialRefused: null, exhausted });
+    withQuota({ backend: "codex", reading: null, credentialRefused: null, exhausted, readingWindowReset: false });
 
   it("says the window is exhausted when a run was refused, and names that as its source", async () => {
     const { getByText, container } = renderPage(refusedQuota(REFUSED), "?backend=codex");
@@ -686,6 +689,7 @@ describe("InsightsPage", () => {
             credentialLabel: null,
           },
           exhausted: null,
+          readingWindowReset: false,
         },
         [{ rateLimitType: "five_hour", utilization: 0.2, resetsAt: null, reset: false }],
       ),
@@ -757,6 +761,7 @@ describe("InsightsPage", () => {
           },
           credentialRefused: null,
           exhausted: REFUSED,
+          readingWindowReset: false,
         },
         [{ rateLimitType: "five_hour", utilization: 0.12, resetsAt: null, reset: false }],
       ),
@@ -938,6 +943,7 @@ describe("ruling 130(d): whose account, and the hour", () => {
           resetsAt: 1_788_781_800, resetsAtPrecision: "exact", providerText: "session limit", runId: "run_1",
           observedAt: "2026-09-07T09:00:00.000Z", credentialUserId: "u_arda", credentialLabel: "Arda Kaya",
         },
+        readingWindowReset: false,
       }),
     );
     expect(exhausted.getByText(/from a refused run on Arda Kaya's account/)).toBeTruthy();
@@ -952,6 +958,7 @@ describe("ruling 130(d): whose account, and the hour", () => {
           },
           credentialRefused: null,
           exhausted: null,
+          readingWindowReset: false,
         },
         [{ rateLimitType: "five_hour", utilization: 0.2, resetsAt: 1_788_781_800, reset: false }],
       ),
@@ -1010,6 +1017,7 @@ describe("ruling 130(d): whose account, and the hour", () => {
         reading: null,
         credentialRefused: { providerText: "token revoked", runId: "run_2", observedAt: "2026-09-07T09:00:00.000Z", credentialUserId: "u_arda", credentialLabel: "Arda Kaya" },
         exhausted: null,
+        readingWindowReset: false,
       }),
     );
     expect(getByText(/Credential refused · Arda Kaya's account/)).toBeTruthy();
