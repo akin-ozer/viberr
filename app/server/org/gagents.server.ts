@@ -150,7 +150,7 @@ export interface ProfileDeploymentCounts {
  * undeletable ("detach it from its N projects first") because of a project
  * nobody can edit any more. Archived projects are excluded.
  */
-export function usedByProject(db: DatabaseSync): ProfileDeploymentCounts {
+function usedByProject(db: DatabaseSync): ProfileDeploymentCounts {
   // SAFETY: the SELECT names exactly these two columns, and `projects.slug` /
   // `projects.agent_policy_json` are both TEXT NOT NULL (0001_baseline), so
   // every returned row really does carry both as a string.
