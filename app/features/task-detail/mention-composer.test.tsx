@@ -260,9 +260,10 @@ describe("comment composer @-mention autocomplete", () => {
     expect(before).toHaveLength(1);
     fireEvent.keyDown(ce, { key: "ArrowDown" });
     fireEvent.keyDown(ce, { key: "Enter" });
-    // Something was inserted: an @mention (a display name, which may contain
-    // spaces like "@Arda Kaya") followed by a trailing space.
-    await waitFor(() => expect(/^@.+ $/.test(readText(editor))).toBe(true));
+    // The rows read agent, Arda Kaya, operator, claude: the arrow armed the
+    // second, and Enter inserts its display name. CANARY: let `pickActive`
+    // take the first row and "@agent " goes in.
+    await waitFor(() => expect(readText(editor)).toBe("@Arda Kaya "));
   });
 
   it("Arrow navigation survives caret-only refreshes (no snap back to top)", async () => {

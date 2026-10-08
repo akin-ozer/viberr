@@ -73,9 +73,17 @@ describe("filterMentions", () => {
   });
 
   it("start-of-string match ranks above substring match", () => {
-    // "de" prefixes agent "dev"; also occurs nowhere else → single hit
-    const out = filterMentions(all, "de");
-    expect(out[0]!.handle).toBe("dev");
+    // "a" starts `agent` and `arda` and only occurs inside `qa`, `operator`,
+    // `claude` and `murat`; group order breaks the ties. CANARY: sort by group
+    // order alone and `qa` leads.
+    expect(filterMentions(all, "a").map((s) => s.handle)).toEqual([
+      "agent",
+      "arda",
+      "qa",
+      "operator",
+      "claude",
+      "murat",
+    ]);
   });
 
   it("matches on handle or display name, case-insensitively", () => {
@@ -87,6 +95,8 @@ describe("filterMentions", () => {
 
   it("caps the result list", () => {
     expect(filterMentions(all, "", 3)).toHaveLength(3);
+    // The @-menu's path: a typed query with more matches than the cap.
+    expect(filterMentions(all, "a", 3).map((s) => s.handle)).toEqual(["agent", "arda", "qa"]);
   });
 
   it("returns nothing for a non-matching query", () => {
