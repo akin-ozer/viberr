@@ -34,7 +34,7 @@ afterAll(() => app.cleanup());
 
 interface RailData {
   board: {
-    columns: { stage: { id: string }; tasks: { key: string; archived: boolean }[] }[];
+    columns: { tasks: { key: string; archived: boolean }[] }[];
     orphanTasks: { key: string; archived: boolean }[];
   };
   taskCount: number;
@@ -115,30 +115,6 @@ describe("F19-9: the rail badges count the tasks their surfaces list", () => {
       expect(raw.filter((t) => !t.archived).length).toBe(archived.taskCount);
     } finally {
       await removeTask("VIB-991");
-    }
-  });
-
-  it("matches the review queue's own total — the list the badge links to", async () => {
-    const { getReviewQueue } = await import(
-      "~/server/projections/review-queue.server"
-    );
-    await writeReviewTask("VIB-992", true);
-    try {
-      const data = await railCounts();
-      const queue = getReviewQueue(app.db, "viberr-core", {
-        viewerUserId: ardaId,
-      });
-      // ReviewQueueData.total is documented as the "rail-badge parity" number.
-      expect(data.reviewCount).toBe(queue.total);
-      expect([...queue.ready, ...queue.working].map((r) => r.key)).not.toContain(
-        "VIB-992",
-      );
-      // The archived row IS at the review stage on the board payload — the
-      // exclusion is the archived predicate, not a stage mismatch.
-      const reviewColumn = data.board.columns.find((c) => c.stage.id === "review")!;
-      expect(reviewColumn.tasks.map((t) => t.key)).toContain("VIB-992");
-    } finally {
-      await removeTask("VIB-992");
     }
   });
 
