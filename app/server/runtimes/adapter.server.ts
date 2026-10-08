@@ -420,7 +420,13 @@ export type CompactOutcome =
 
 /** The callbacks a completion compaction drives: the same line sink and
  *  phase writer as the run it closes; no exit, it returns its outcome. */
-export type CompactCallbacks = Pick<RunCallbacks, "onLine" | "onPhase">;
+export type CompactCallbacks = Pick<RunCallbacks, "onLine" | "onPhase"> & {
+  /** Ruling 701: aborted when the run service stops waiting for the
+   *  compaction (`COMPLETION_COMPACT_DEADLINE_MS`). An adapter that can stop
+   *  its request stops it; the service sweeps the compaction's process by its
+   *  marker either way and drops what is said after. */
+  signal?: AbortSignal;
+};
 
 export interface RuntimeAdapter {
   readonly backend: RunBackend;

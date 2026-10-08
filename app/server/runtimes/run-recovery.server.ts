@@ -268,7 +268,16 @@ function finishCutCompactions(
         err: toError(error),
       });
     }
-    patchRun(db, run.id, { phase: null, step: null });
+    // Caught per row: this pass runs ahead of the orphans', and a mark it
+    // cannot clear must not stop a live run from being finalized.
+    try {
+      patchRun(db, run.id, { phase: null, step: null });
+    } catch (error) {
+      logger.warn("a cut compaction's mark could not be cleared", {
+        runId: run.id,
+        err: toError(error),
+      });
+    }
   }
   logger.info("finished the completion compactions a restart cut", {
     runIds: cut.map((run) => run.id),

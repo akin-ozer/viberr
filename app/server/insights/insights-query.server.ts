@@ -1116,7 +1116,8 @@ function resumeSummary(db: DatabaseSync, filter: RunFilter): ResumeSummary {
     db
       .prepare(
         `SELECT backend, prev_credential_kind, started_at, prev_finished_at, first_call_warm,
-                (SELECT MAX(l.occurred_at) FROM run_log_lines l WHERE l.run_id = prev_id) AS prev_last_line_at
+                (SELECT l.occurred_at FROM run_log_lines l WHERE l.run_id = prev_id
+                  ORDER BY l.seq DESC LIMIT 1) AS prev_last_line_at
          FROM (SELECT backend, started_at, first_call_warm,
                       LAG(id) OVER session AS prev_id,
                       LAG(finished_at) OVER session AS prev_finished_at,

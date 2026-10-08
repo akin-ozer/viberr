@@ -755,7 +755,8 @@ Note that `up -d` kills every run in flight, so check the board before deploying
 also cuts a completion compaction that is still running after a specialist's run has
 finished, which is on no board: nothing is lost but that summary, and boot finishes what
 the compaction left (ruling 701). Such a run reads `finished` with the phase "Compacting
-context" in the ops toolkit's `list_runs`.
+context" when the ops toolkit's `list_runs` is asked for its task (with no arguments that
+tool lists live runs only).
 
 Verify what is running from `/resources/health` → `build`: `version` comes from
 `VIBERR_BUILD_VERSION` or `package.json`; `revision` from `VIBERR_BUILD_SHA`, or from the

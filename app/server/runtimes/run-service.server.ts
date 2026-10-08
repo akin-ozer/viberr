@@ -288,7 +288,15 @@ function canAdmit(state: ServiceState, cap: number, lane: RunLane): boolean {
   if (lane === "coordination" && coordinationLiveCount(state) < laneSize) return true;
   if (liveCount(state) >= cap + laneSize) return false;
   if (lane === "delivery") return deliveryLiveCount(state) < cap;
-  return state.pending.delivery.length === 0;
+  // Ruling 701: a run parked for its session's summary is not a build waiting
+  // for a slot, so it is not what a coordination turn would be borrowing from.
+  return !state.pending.delivery.some((run) => !heldForSettlingSession(state, run));
+}
+
+/** Ruling 701: a parked run that could not start whatever the cap says,
+ *  because the session it resumes is still being compacted. */
+function heldForSettlingSession(state: ServiceState, run: PendingRun): boolean {
+  return run.sessionId !== undefined && state.settling.has(run.sessionId);
 }
 
 /** Invoked once when a registered run reaches a terminal state. */
@@ -2159,11 +2167,17 @@ function admitRun(
   // request that started it instead, so its records name that request and user.
   const parked: PendingRun = { runId, launch: carryCorrelation(launchThunk), dataRoot };
   if (resumeSessionId) parked.sessionId = resumeSessionId;
-  if (held) {
-    parked.heldForSession = true;
-    patchRun(db, runId, { step: SESSION_SETTLING_STEP });
-  }
+  if (held) parked.heldForSession = true;
   queue.push(parked);
+  // The step is what the row says while it waits; the queue entry above is
+  // what starts the run, so a write that fails here costs the sentence only.
+  if (held) {
+    try {
+      patchRun(db, runId, { step: SESSION_SETTLING_STEP });
+    } catch (error) {
+      logger.error("a held run's step could not be written", { runId, err: toError(error) });
+    }
+  }
   logger.info(
     held
       ? "run queued until its session's compaction is over"
@@ -2232,7 +2246,7 @@ function nextPromotable(state: ServiceState, cap: number): PendingRun | null {
     if (!canAdmit(state, cap, lane)) continue;
     // Ruling 701: a run whose session is still being compacted keeps its
     // place and is passed over; the oldest run that can go, goes.
-    const index = queue.findIndex((run) => !run.sessionId || !state.settling.has(run.sessionId));
+    const index = queue.findIndex((run) => !heldForSettlingSession(state, run));
     if (index === -1) continue;
     const [next] = queue.splice(index, 1);
     return next ?? null;
@@ -2251,7 +2265,8 @@ export interface RunConcurrencySnapshot {
    *  launched runs (still preparing their workspace). This is what the cap gates
    *  against, so it is what the admin card must show. */
   live: number;
-  /** Runs parked behind the cap right now, both lanes together. */
+  /** Runs parked right now, both lanes together: behind the cap, or (ruling
+   *  701) for the summary of their session's last run. */
   queued: number;
 }
 
@@ -2550,17 +2565,25 @@ function launch(
           spec.kind !== "operator" &&
           replaySize > COMPACT_AT_COMPLETION_TOKENS
         ) {
+          // Ruling 701: set at the deadline. What a compaction says after it
+          // was given up is dropped: the console has said it did not happen,
+          // and a run parked for the session may already be on it.
+          const givenUp = new AbortController();
           const compactSession = async (onPhase: CompactCallbacks["onPhase"]): Promise<void> => {
             const compactionsBefore = stats?.compactionEvents.length ?? 0;
             let outcome: CompactOutcome;
             try {
               outcome = await compact.call(adapter, spec, sessionId, {
-                onLine: (line) => sink.line(line),
+                onLine: (line) => {
+                  if (!givenUp.signal.aborted) sink.line(line);
+                },
                 onPhase,
+                signal: givenUp.signal,
               });
             } finally {
               revokeRunMcpGateway(spec.runId);
             }
+            if (givenUp.signal.aborted) return;
             logger.info("run compaction at completion", {
               runId: spec.runId,
               backend: exit.effectiveBackend,
@@ -2614,7 +2637,9 @@ function launch(
           // whose compaction threw was never finalized.)
           const compactWithin = async (onPhase: CompactCallbacks["onPhase"]): Promise<void> => {
             let timer: ReturnType<typeof setTimeout> | null = null;
+            let settleLate: (value: "late") => void = () => {};
             const late = new Promise<"late">((resolve) => {
+              settleLate = resolve;
               timer = setTimeout(() => resolve("late"), COMPLETION_COMPACT_DEADLINE_MS);
               timer.unref?.();
             });
@@ -2631,7 +2656,10 @@ function launch(
             );
             const ended = await Promise.race([work, late]);
             if (timer) clearTimeout(timer);
+            // Settled either way, so nothing of this run stays pending on it.
+            settleLate("late");
             if (ended !== "late") return;
+            givenUp.abort();
             const minutes = Math.round(COMPLETION_COMPACT_DEADLINE_MS / 60_000);
             logger.warn("run compaction at completion gave no answer by its deadline", {
               runId: spec.runId,
@@ -2646,12 +2674,22 @@ function launch(
               occurredAt,
             });
             revokeRunMcpGateway(spec.runId);
-            await reapRunProcesses({ runIds: [compactionRunId(spec.runId)] }).catch((error) => {
+            // The abort above asks the adapter to stop; the sweep by the
+            // compaction's own marker is what is waited for before anything
+            // parked on this session may start.
+            try {
+              const reaped = await reapRunProcesses({ runIds: [compactionRunId(spec.runId)] });
+              if (reaped.terminated + reaped.killed === 0) {
+                logger.warn("a compaction given up at its deadline left no process to stop", {
+                  runId: spec.runId,
+                });
+              }
+            } catch (error) {
               logger.warn("compaction epilogue reap failed", {
                 runId: spec.runId,
                 err: toError(error),
               });
-            });
+            }
           };
           if (spec.kind === "controller") {
             // U39-30: the answer is written; only the housekeeping is left.
@@ -2715,17 +2753,24 @@ function launch(
         state.settling.set(heldSession, spec.runId);
         release = () => {
           if (state.settling.get(heldSession) === spec.runId) state.settling.delete(heldSession);
-          // The runs parked for this session take their turn under the cap
-          // now, and a row among them that still waits says so no longer.
-          try {
-            // A shutdown drain (F21-24): boot finalizes what is still queued.
-            if (runPersistDrained(db)) return;
-            for (const lane of [state.pending.coordination, state.pending.delivery]) {
-              for (const parked of lane) {
-                if (parked.sessionId !== heldSession || !parked.heldForSession) continue;
+          // A shutdown drain (F21-24): boot finalizes what is still queued.
+          if (runPersistDrained(db)) return;
+          // A row parked for this session that still waits says so no longer.
+          for (const lane of [state.pending.coordination, state.pending.delivery]) {
+            for (const parked of lane) {
+              if (parked.sessionId !== heldSession || !parked.heldForSession) continue;
+              try {
                 if (getRun(db, parked.runId)?.state === "queued") patchRun(db, parked.runId, { step: null });
+              } catch (error) {
+                logger.error("a held run's step could not be cleared", {
+                  runId: parked.runId,
+                  err: toError(error),
+                });
               }
             }
+          }
+          // The runs parked for it take their turn under the cap now.
+          try {
             drainRunQueue(db);
           } catch (error) {
             logger.error("run queue drain failed", {
@@ -2874,6 +2919,15 @@ function stopRunProcess(
     // "working" until a restart replayed recovery. Same precondition as the
     // spawn-crash race: terminal state, no live handle, so fire it now.
     fireIfAlreadyTerminal(db, input.runId);
+    // Ruling 701: a parked run that is stopped leaves the queue now. A run
+    // parked behind the cap was dropped by the next drain anyway; one parked
+    // for its session's summary would have sat there, counted as queued,
+    // until that compaction ended.
+    for (const lane of ["coordination", "delivery"] as const) {
+      const queue = state.pending[lane];
+      const at = queue.findIndex((parked) => parked.runId === input.runId);
+      if (at !== -1) queue.splice(at, 1);
+    }
     // F28-R1: a run interrupted while still RESERVED (its workspace clone is in
     // flight, so no live handle exists yet) must release its committed
     // concurrency slot NOW. Otherwise the slot stays counted against the cap —

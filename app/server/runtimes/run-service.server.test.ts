@@ -23,6 +23,7 @@ import {
   repoWriteWithheldFromDenylist,
   reserveRun,
   resumeRun,
+  runConcurrencySnapshot,
   startRun,
 } from "./run-service.server";
 import * as runServiceModule from "./run-service.server";
@@ -2914,6 +2915,175 @@ describe("compaction at completion (ruling 376)", () => {
     await settle();
     await settle();
     expect(getRun(store.db, parked.runId)!.state).toBe("finished");
+  });
+
+  it("ruling 701: a run parked for a summary is not a build waiting for a slot: a coordination turn still borrows one", async () => {
+    // Ruling 152's borrow rule lets an operator or controller turn past the
+    // lane take a cap slot only when no build is parked for one. CANARY: count
+    // the run held for its session as such a build and the turn below waits
+    // for a compaction it has nothing to do with.
+    setMaxConcurrentRuns(store.db, 4);
+    queueFakeRun(finished("sess-borrow", 120_000));
+    const compaction = heldCompaction();
+    const { runId } = await startTestRun(store.db, specialist());
+    await settle();
+    await settle();
+    const held = await resumeRun(store.db, {
+      runId, prompt: "and the cover?", credentialUserId: store.users.arda.id, dataRoot: store.dataRoot,
+    });
+    expect(getRun(store.db, held.runId)!.state).toBe("queued");
+    // The lane's one turn is taken; the next one has to borrow.
+    queueFakeRun({ lines: [{ t: "1", ev: "text", tag: "assistant", text: "coordinating" }], keepRunning: true });
+    const first = await startTestRun(store.db, {
+      projectSlug: store.slug, taskKey: "VIB-1", threadId: "op", role: "Operator", kind: "operator",
+      backend: "claude", model: "claude-sonnet-4-5", prompt: "go", dataRoot: store.dataRoot,
+    });
+    const second = await startTestRun(store.db, controllerTurn("cnv_borrows"));
+    expect([first.outcome, second.outcome]).toEqual(["started", "started"]);
+    await interruptRun(
+      store.db,
+      { projectSlug: store.slug, taskKey: "VIB-1", dataRoot: store.dataRoot, runId: first.runId },
+      arda(),
+    );
+    compaction.answer();
+    await settle();
+    await settle();
+  });
+
+  it("ruling 701: a held run that is stopped leaves the queue at once", async () => {
+    // CANARY: leave its entry for the release and the instance counts a run
+    // as queued, for as long as the compaction takes, that will never start.
+    queueFakeRun(finished("sess-stopped-leaves", 120_000));
+    const compaction = heldCompaction();
+    const { runId } = await startTestRun(store.db, specialist());
+    await settle();
+    await settle();
+    const held = await resumeRun(store.db, {
+      runId, prompt: "and the cover?", credentialUserId: store.users.arda.id, dataRoot: store.dataRoot,
+    });
+    expect(runConcurrencySnapshot(store.db).queued).toBe(1);
+    await interruptRun(
+      store.db,
+      { projectSlug: store.slug, taskKey: "VIB-1", dataRoot: store.dataRoot, runId: held.runId },
+      arda(),
+    );
+    expect(runConcurrencySnapshot(store.db).queued).toBe(0);
+    compaction.answer();
+    await settle();
+  });
+
+  it("ruling 701: a held run whose step cannot be written is still parked, and still starts", async () => {
+    // The step is the sentence on the row; the queue entry is what starts the
+    // run. CANARY: write the step before the run is in the queue and a write
+    // that fails leaves a `queued` row that nothing will ever start.
+    const logged = vi.spyOn(logger, "error").mockImplementation(() => {});
+    try {
+      queueFakeRun(finished("sess-step-unwritten", 120_000));
+      const compaction = heldCompaction();
+      const { runId } = await startTestRun(store.db, specialist());
+      await settle();
+      await settle();
+      store.db.exec(
+        `CREATE TRIGGER fail_step_write BEFORE UPDATE OF step ON agent_runs
+           WHEN NEW.step = '${SESSION_SETTLING_STEP}' BEGIN SELECT RAISE(ABORT, 'the step cannot be written'); END`,
+      );
+      const held = await resumeRun(store.db, {
+        runId, prompt: "and the cover?", credentialUserId: store.users.arda.id, dataRoot: store.dataRoot,
+      });
+      expect(getRun(store.db, held.runId)).toMatchObject({ state: "queued", step: null });
+      compaction.answer();
+      await settle();
+      await settle();
+      expect(getRun(store.db, held.runId)!.state).toBe("finished");
+      expect(logged.mock.calls.map((call) => call[0])).toEqual(["a held run's step could not be written"]);
+    } finally {
+      logged.mockRestore();
+    }
+  });
+
+  it("ruling 701: a step that cannot be cleared does not keep the parked run from starting", async () => {
+    // CANARY: clear the steps and drain the queue under one `try`, and with
+    // no cap the run stays parked on a session that is free.
+    const logged = vi.spyOn(logger, "error").mockImplementation(() => {});
+    try {
+      queueFakeRun(finished("sess-step-uncleared", 120_000));
+      const compaction = heldCompaction();
+      const { runId } = await startTestRun(store.db, specialist());
+      await settle();
+      await settle();
+      const held = await resumeRun(store.db, {
+        runId, prompt: "and the cover?", credentialUserId: store.users.arda.id, dataRoot: store.dataRoot,
+      });
+      store.db.exec(
+        `CREATE TRIGGER fail_step_clear BEFORE UPDATE OF step ON agent_runs
+           WHEN NEW.step IS NULL AND OLD.state = 'queued' BEGIN SELECT RAISE(ABORT, 'the step cannot be cleared'); END`,
+      );
+      compaction.answer();
+      await settle();
+      await settle();
+      expect(getRun(store.db, held.runId)!.state).toBe("finished");
+      expect(logged.mock.calls.map((call) => call[0])).toEqual(["a held run's step could not be cleared"]);
+    } finally {
+      logged.mockRestore();
+    }
+  });
+
+  it("ruling 701: what a compaction says after its deadline is dropped, and its request is told to stop", async () => {
+    // By then the console has said it did not happen and a run parked for
+    // the session may be on it. CANARY: keep the late lines and the run
+    // reads as compacted, with a summary's size, under a line that says the
+    // compaction did not happen.
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"], shouldAdvanceTime: true });
+    const warned = vi.spyOn(logger, "warn").mockImplementation(() => {});
+    try {
+      const before = compactedRunSpecs().length;
+      queueFakeRun(finished("sess-late-answer", 120_000));
+      const compaction = heldCompaction();
+      const { runId } = await startTestRun(store.db, specialist());
+      await settle();
+      await settle();
+      expect(compactedRunSpecs().at(-1)?.signal?.aborted).toBe(false);
+      await vi.advanceTimersByTimeAsync(COMPLETION_COMPACT_DEADLINE_MS);
+      await vi.waitFor(() => expect(getRun(store.db, runId)!.phase).toBeNull(), { timeout: 5_000 });
+      expect(compactedRunSpecs().slice(before)).toHaveLength(1);
+      expect(compactedRunSpecs().at(-1)?.signal?.aborted).toBe(true);
+      compaction.answer();
+      await settle();
+      await settle();
+      const run = getRun(store.db, runId)!;
+      expect(run).toMatchObject({ state: "finished", compactions: 0, last_prompt_tokens: 120_000 });
+      expect(run.total_cost_usd).toBeCloseTo(4, 5);
+      const lines = JSON.stringify(listRunLines(store.db, runId));
+      expect(lines).toContain("no answer within 10 minutes");
+      expect(lines).not.toContain("run·compacted·completion");
+    } finally {
+      warned.mockRestore();
+      vi.useRealTimers();
+    }
+  });
+
+  it("ruling 701: a controller turn whose compaction never answers is finalized at the deadline", async () => {
+    // CANARY: bound a specialist's compaction alone and the turn stays
+    // `running`, and its conversation closed to the next message, for good.
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"], shouldAdvanceTime: true });
+    const warned = vi.spyOn(logger, "warn").mockImplementation(() => {});
+    try {
+      queueFakeRun(finished("sess-controller-hangs", 120_000));
+      queueFakeCompaction(
+        "claude",
+        { compacted: true, preTokens: 120_000, postTokens: 18_000 },
+        () => new Promise<void>(() => {}),
+      );
+      const { runId } = await startTestRun(store.db, controllerTurn("cnv_hangs"));
+      await settle();
+      await settle();
+      expect(getRun(store.db, runId)!.state).toBe("running");
+      await vi.advanceTimersByTimeAsync(COMPLETION_COMPACT_DEADLINE_MS);
+      await vi.waitFor(() => expect(getRun(store.db, runId)!.state).toBe("finished"), { timeout: 5_000 });
+    } finally {
+      warned.mockRestore();
+      vi.useRealTimers();
+    }
   });
 
   it("ruling 701: a compaction that never answers stops being waited for at its deadline", async () => {

@@ -443,6 +443,9 @@ describe("finalizeOrphanedRuns (F-RUN1)", () => {
     patchRun(store.db, "run_codex_done", { phase: RUN_PHASE.compacting, step: COMPACTING_AFTER_RUN_STEP });
     // A finished run with no mark was settled in its own process.
     seedRun("run_codex_settled", { ...finishedRun, threadId: "primary-settled" });
+    // An orphan on the same boot is finalized as ever. CANARY: sweep the cut
+    // compactions only when nothing is orphaned.
+    seedRun("run_orphan_beside", { state: "running", threadId: "op-beside" });
     const asked: string[][] = [];
     const result = finalizeOrphanedRuns(store.db, {
       dataRoot: store.dataRoot,
@@ -451,13 +454,19 @@ describe("finalizeOrphanedRuns (F-RUN1)", () => {
         return { terminated: 0, killed: 0 };
       },
     });
-    expect(result.finalized).toBe(0);
+    expect(result.finalized).toBe(1);
+    expect(getRun(store.db, "run_orphan_beside")!.state).toBe("interrupted");
     await result.reaped;
+    await result.notes;
+    await result.reinvokes;
     expect(existsSync(compaction.dir)).toBe(false);
     expect(readFileSync(path.join(accountHome, "auth.json"), "utf8")).toBe('{"token":"billed-refreshed"}');
     expect(readFileSync(path.join(sharedHome, "auth.json"), "utf8")).toBe('{"token":"other-account"}');
     expect(getRun(store.db, "run_codex_done")).toMatchObject({ state: "finished", phase: null, step: null });
-    expect(asked).toEqual([["run_codex_done:compaction"]]);
+    expect(asked).toEqual([
+      ["run_codex_done:compaction"],
+      ["run_orphan_beside", "run_orphan_beside:compaction"],
+    ]);
     // A second boot finds nothing.
     asked.length = 0;
     await finalizeOrphanedRuns(store.db, { dataRoot: store.dataRoot, reapProcesses: async (targets) => {
@@ -465,6 +474,28 @@ describe("finalizeOrphanedRuns (F-RUN1)", () => {
       return { terminated: 0, killed: 0 };
     } }).reaped;
     expect(asked).toEqual([]);
+  });
+
+  it("ruling 701: a mark boot cannot clear does not stop the orphans from being finalized", async () => {
+    // The sweep of cut compactions runs ahead of the orphans'. CANARY: let its
+    // write throw and a live row stays `running` with nothing behind it.
+    seedRun("run_marked", { state: "finished", finishedAt: new Date().toISOString(), kind: "primary", threadId: "primary-marked" });
+    patchRun(store.db, "run_marked", { phase: RUN_PHASE.compacting, step: COMPACTING_AFTER_RUN_STEP });
+    seedRun("run_live", { state: "running", threadId: "op-live" });
+    store.db.exec(
+      `CREATE TRIGGER fail_mark_clear BEFORE UPDATE OF phase ON agent_runs
+         WHEN OLD.id = 'run_marked' BEGIN SELECT RAISE(ABORT, 'the mark cannot be cleared'); END`,
+    );
+    const result = finalizeOrphanedRuns(store.db, {
+      dataRoot: store.dataRoot,
+      reapProcesses: async () => ({ terminated: 0, killed: 0 }),
+    });
+    expect(result.finalized).toBe(1);
+    await result.reaped;
+    await result.notes;
+    await result.reinvokes;
+    expect(getRun(store.db, "run_live")!.state).toBe("interrupted");
+    expect(getRun(store.db, "run_marked")!.phase).toBe(RUN_PHASE.compacting);
   });
 
   it("ruling 507: an orphaned run of an account removed since hands its token back to nobody", () => {
