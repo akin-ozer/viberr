@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { createTestDbContext, type TestDbContext } from "../../../test-support/test-db";
 import {
   baseTaskFrontmatter,
@@ -51,13 +51,9 @@ import { resolveOperatorAuthority } from "./operator-authority.server";
 // mocks: the probe and every accept-time gate run a REAL
 // `getProjectGithubContext` — a real credential on the project's repo — over
 // the canned transport `remote()` installs (`fetchImpl` on the call ctx), and
-// the acceptance merge is a typed double injected through the ctx `deps` bag.
-import type {
-  mergeTaskPr,
-} from "~/server/github/github-reconciler.server";
+// the acceptance merge is the real `mergeTaskPr`, which answers `no_pr` for these
+// PR-less tasks before any request.
 import { createPat, setProjectCredential } from "~/server/secrets/pat-store.server";
-
-const mergeMock = vi.fn<typeof mergeTaskPr>();
 
 let ctx: TestDbContext;
 let store: TestStore;
@@ -247,7 +243,6 @@ function dataCtx() {
   return {
     dataRoot: store.dataRoot,
     fetchImpl,
-    deps: { mergeTaskPr: mergeMock },
   };
 }
 
@@ -275,12 +270,6 @@ beforeEach(() => {
     patActor,
   );
   setProjectCredential(store.db, { projectSlug: store.slug, patId: pat.id }, patActor);
-  vi.clearAllMocks();
-  // SAFETY: every consumer of a merge result switches on `status` and reads
-  // only the fields of the arm it lands in (task-acceptance.server.ts) — the
-  // `no_pr` arm's `taskKey` is never read, so it is left off deliberately: the
-  // no-merge case below compares this whole recorded value.
-  mergeMock.mockResolvedValue({ status: "no_pr" } as Awaited<ReturnType<typeof mergeTaskPr>>);
   remote();
   installFakeRuntime();
 });
@@ -530,10 +519,6 @@ describe("acceptance closes it — with its OWN completion event, and no merge",
     expect(completion?.text).toContain("completed with no changes");
     expect(completion?.text).toContain(BASE_SHA.slice(0, 12));
     expect(completion?.text).not.toMatch(/merged/i);
-    // The shared acceptance path still pings mergeTaskPr (it is the one place
-    // that knows whether a PR exists); it answers `no_pr`, so nothing merges and
-    // the record says so. Assert the OUTCOME, not the call.
-    expect(await mergeMock.mock.results[0]?.value).toEqual({ status: "no_pr" });
   });
 
   it("ruling 550: a task delivered as files is accepted as delivered, never as \"completed with no changes\"", async () => {
