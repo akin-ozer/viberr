@@ -16,7 +16,6 @@ import {
   runInputRows,
   runLabel,
   runStatePill,
-  RUN_STATE,
   thoughtLabel,
   toolChip,
   waitCountTitle,
@@ -93,8 +92,8 @@ describe("runLabel / roleShort", () => {
 });
 
 describe("runStatePill (ruling 11 lifecycle mapping)", () => {
-  it("running/idle/done/error use RUN_STATE", () => {
-    expect(runStatePill({ ...base, state: "done", lifecycle: "finished" }).label).toBe(RUN_STATE.done.label);
+  it("a finished run reads 'finished', an unclassified error 'continuity error'", () => {
+    expect(runStatePill({ ...base, state: "done", lifecycle: "finished" }).label).toBe("finished");
     expect(runStatePill({ ...base, state: "error", lifecycle: "error" }).label).toBe("continuity error");
   });
   it("queued → neutral 'queued'", () => {
