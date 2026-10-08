@@ -53,6 +53,8 @@ describe("ensureDefaultBranch (ruling 128)", () => {
   it("an empty repository gets an initial commit and its default branch, recorded on the timeline and audited", async () => {
     // Canary: return `bootstrap_failed` from the empty-array arm instead of
     // issuing the PUT — the status, the PUT call and the timeline line all fail.
+    // The first ref read is GitHub's 409 for an empty repository, a missing ref:
+    // drop the 409 clause from `isMissingRefAnswer` and no PUT is sent either.
     const store = setup();
     let refCreated = false;
     const gh = fakeGithubFetch({
@@ -191,29 +193,6 @@ describe("ensureDefaultBranch (ruling 128)", () => {
     );
     expect(result).toEqual({ status: "exists", defaultBranch: "main" });
     expect(listAuditEvents(store.db).some((e) => e.action === "github.repo.bootstrapped")).toBe(false);
-  });
-
-  it("a 409 `Git Repository is empty.` on the ref read is a missing ref, not a network failure", async () => {
-    // Canary: drop the 409 clause from `isMissingRefAnswer` and this reads
-    // `bootstrap_failed` (the 409 falls into the generic failure arm).
-    const store = setup();
-    const gh = fakeGithubFetch({
-      [`GET ${REPO_PATH}/git/ref/heads/main`]: EMPTY_REF,
-      [`GET ${REPO_PATH}/branches`]: { body: [] },
-      [`PUT ${REPO_PATH}/contents/README.md`]: { status: 201, body: { commit: { sha: ROOT } } },
-    });
-    // The re-probe after the PUT still answers 409 here (the fake is static),
-    // which is a bootstrap that did not take — but the FIRST read must have
-    // been treated as "missing", which the PUT proves happened.
-    const result = await ensureDefaultBranch(
-      store.db,
-      contextFor(store, gh),
-      { projectSlug: store.slug, taskKey: "JC-1" },
-      ACTOR,
-      { dataRoot: store.dataRoot },
-    );
-    expect(gh.callsTo(`PUT ${REPO_PATH}/contents/README.md`)).toHaveLength(1);
-    expect(result.status).not.toBe("network_unavailable");
   });
 
   it("a repository whose only branch is a pushed task branch gets `main` at that branch's first commit and the default restored", async () => {
