@@ -38,7 +38,7 @@ import { toError } from "~/shared/errors";
  * operator re-invoke. A restart that lands after the window has elapsed sees a
  * clean count and re-invokes normally (the common single-boot case).
  */
-export const RECOVERY_REINVOKE_CAP = 3;
+const RECOVERY_REINVOKE_CAP = 3;
 const RECOVERY_WINDOW_MS = 30 * 60 * 1000;
 const RECOVERY_REINVOKE_ACTION = "run.recovery.reinvoked";
 /** Same crash-loop backstop for the reply-recovery re-invoke path (below). */
@@ -989,8 +989,8 @@ export async function completionReplayWillRun(
   // "recovering dropped agent-reply reactions" log line and then quietly
   // dropped. A note promising a replay here would be wrong in a way nothing
   // downstream ever corrects.
-  const { replyTextForRun } = await import("~/server/tasks/agent-reply.server");
-  if (!replyTextForRun(db, run.id)) return false;
+  const { fullReplyTextForRun } = await import("~/server/tasks/agent-reply.server");
+  if (!fullReplyTextForRun(db, run.id)) return false;
   // The crash-loop backstop: at the cap, further boots skip this run entirely.
   // SAFETY: `COUNT(*)` always returns exactly one row holding one integer.
   const priorReplays = (
@@ -1060,7 +1060,7 @@ export async function recoverUnreactedAgentRuns(
     count: rows.length,
   });
 
-  const [{ applyAgentCompletionEffects }, { agentMentionHandle, replyTextForRun }] =
+  const [{ applyAgentCompletionEffects }, { agentMentionHandle, fullReplyTextForRun }] =
     await Promise.all([
       import("~/server/tasks/agent-completion.server"),
       import("~/server/tasks/agent-reply.server"),
@@ -1071,7 +1071,7 @@ export async function recoverUnreactedAgentRuns(
   let capped = 0;
   for (const row of rows) {
     try {
-      const replyText = replyTextForRun(db, row.id);
+      const replyText = fullReplyTextForRun(db, row.id);
       if (!replyText) continue;
       // Crash-loop backstop (see docstring): count prior replays for THIS run in
       // the rolling window; once at the cap, skip re-firing costed operator

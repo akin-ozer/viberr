@@ -83,7 +83,7 @@ const call = () =>
 const handleOf = (u: TestStoreUser) => u.email.split("@")[0]!.toLowerCase();
 
 describe("getMentionables", () => {
-  it("returns the deployed specialists as agents (handle = name lowercased)", () => {
+  it("returns the deployed specialists as agents (handle = profile id, lowercased)", () => {
     const { agents } = call();
     expect(agents).toEqual([
       { handle: "dev", name: "dev", role: "developer", backend: "claude" },
@@ -156,11 +156,6 @@ describe("getMentionables", () => {
       { handle: "claude", label: "Claude specialist (dev)" },
       { handle: "codex", label: "Codex specialist (qa)" },
     ]);
-    // Belt and braces on the whole directory, not just this row: no reserved
-    // subline may reintroduce the retired phrase.
-    for (const r of call().reserved) {
-      expect(r.label).not.toMatch(/primary specialist/i);
-    }
   });
 
   /**

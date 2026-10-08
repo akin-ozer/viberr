@@ -183,7 +183,7 @@ const ghCheckRunsSchema = z
 
 /** One entry of `GET /pulls/{n}/reviews` — an EVENT log, not a per-reviewer
  *  state: the same person appears once per submitted review. */
-export interface GhReview {
+interface GhReview {
   state?: string;
   user?: { login?: string } | null;
   /** R19-B: the commit the review was submitted ON. This is what binds a human
@@ -305,10 +305,8 @@ type GhCheckRun = z.output<typeof ghCheckRunSchema> | null;
  * in the known vocabularies = passing/failing; an undecodable entry, an ABSENT
  * conclusion, an unrecognized one (GitHub's `stale`) and the shortfall against
  * `total_count` all land in `unknown`. `total` is never below what was counted.
- *
- * Exported for direct unit coverage of the accounting.
  */
-export function summarizeCheckRuns(input: {
+function summarizeCheckRuns(input: {
   totalCount: number | undefined;
   runs: readonly GhCheckRun[] | undefined;
 }): PrChecksSummary {
@@ -367,10 +365,8 @@ function latestVerdicts(reviews: readonly GhReview[]): Map<string, { state: stri
  * rule demands two. Resolving that needs the branch-protection API (another call
  * per pass); this is a status pill, not the merge gate — the real gate is
  * `mergeTaskPr`'s 405 → `not_mergeable`, which carries GitHub's own message.
- *
- * Exported for direct unit coverage of the ranking matrix.
  */
-export function deriveReviewState(
+function deriveReviewState(
   reviews: readonly GhReview[],
   requestedReviewers: number,
 ): PrReviewState | null {
@@ -394,7 +390,7 @@ export function deriveReviewState(
  * A reviewer with an outstanding CHANGES_REQUESTED is not listed, by
  * construction: their latest state is not APPROVED.
  */
-export function deriveApprovals(reviews: readonly GhReview[]): PrApproval[] {
+function deriveApprovals(reviews: readonly GhReview[]): PrApproval[] {
   return [...latestVerdicts(reviews)]
     .filter(([, verdict]) => verdict.state === "APPROVED")
     .map(([login, { review }]) => ({
@@ -586,7 +582,7 @@ export async function findPrForBranch(
       }
     } else if (checkRuns.kind === "network") {
       checksUnread = { status: null, message: checkRuns.message };
-    } else if (checkRuns.kind !== "not_modified") {
+    } else {
       // Ruling 360: the refusal is carried, not swallowed — it used to leave
       // `checks: null` indistinguishable from "never looked".
       checksUnread = { status: checkRuns.status, message: checkRuns.message };

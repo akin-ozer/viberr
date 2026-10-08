@@ -9,8 +9,7 @@ import {
   ExecutionProfile,
   type DeployedSpecialistView,
 } from "./execution-profile";
-import type { TaskRunPrincipalView } from "./run-principal-view";
-import { taskSummary } from "../../../test-support/task-detail";
+import { connectedPrincipal, taskSummary } from "../../../test-support/task-detail";
 
 afterEach(cleanup);
 
@@ -51,21 +50,6 @@ function ownedTask(): TaskSummary {
       initials: "AK",
       tone: "",
     },
-  };
-}
-
-/** Ruling 127: the task owner whose accounts a run bills, both connected. The
- *  owner here is the VIEWER (`meId`), which is the ordinary case on a task
- *  somebody is working; the refusal tests below vary both halves. */
-function connectedPrincipal(
-  patch: Partial<TaskRunPrincipalView> = {},
-): TaskRunPrincipalView {
-  return {
-    ownerUserId: "u-arda",
-    ownerName: "Arda Kaya",
-    claude: { available: true, detail: null },
-    codex: { available: true, detail: null },
-    ...patch,
   };
 }
 

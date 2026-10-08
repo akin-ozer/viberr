@@ -25,7 +25,7 @@ import {
  */
 
 /** The MCP servers a run mounts, keyed by declared name: the portable
- *  HTTP/stdio configs `resolveSpecialistMcpServers` builds (both backends)
+ *  HTTP/stdio configs `resolveSpecialistMcpServersDetailed` builds (both backends)
  *  plus Claude-only in-process SDK instances such as the operator's
  *  `{ viberr: createSdkMcpServer(...) }`. The one shape every producer emits
  *  and `StartRunInput`/`ResumeRunInput`/`ResumeConfinement` enforce. */

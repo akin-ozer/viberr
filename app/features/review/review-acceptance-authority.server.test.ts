@@ -60,40 +60,40 @@ function deployOperator(
 }
 
 describe("resolveAcceptanceAuthority", () => {
-  it("grants the exception only for full autonomy + an explicit direct grant", () => {
+  // Ruling 518: the operator is always called Operator. A project with no file
+  // to read takes the strict boundary, never a claimed exception (`null` row).
+  it.each<
+    [string, Parameters<typeof deployOperator>[1] | null, ReturnType<typeof resolveAcceptanceAuthority>]
+  >([
+    [
+      "grants the exception only for full autonomy + an explicit direct grant",
+      { autonomy: "full", completion: "direct" },
+      { operatorCanAccept: true, operatorName: "Operator" },
+    ],
+    [
+      "refuses to promote recommend → direct at full autonomy (ruling Q1)",
+      { autonomy: "full", completion: "recommend" },
+      { operatorCanAccept: false, operatorName: "Operator" },
+    ],
+    [
+      "refuses a direct grant held by a supervised operator",
+      { autonomy: "supervised", completion: "direct" },
+      { operatorCanAccept: false, operatorName: "Operator" },
+    ],
+    [
+      "refuses when no operator is deployed at all",
+      { deployed: false },
+      { operatorCanAccept: false, operatorName: "Operator" },
+    ],
+    [
+      "falls back to the strict boundary for a project with no file",
+      null,
+      { operatorCanAccept: false, operatorName: "the operator" },
+    ],
+  ])("%s", (_title, operator, expected) => {
     const store = setupTestStore(ctx);
-    deployOperator(store, { autonomy: "full", completion: "direct" });
-    // Ruling 518: the operator is always called Operator.
-    expect(resolveAcceptanceAuthority(store.slug, { dataRoot: store.dataRoot })).toEqual({
-      operatorCanAccept: true,
-      operatorName: "Operator",
-    });
+    if (operator) deployOperator(store, operator);
+    const slug = operator ? store.slug : "no-such-project";
+    expect(resolveAcceptanceAuthority(slug, { dataRoot: store.dataRoot })).toEqual(expected);
   });
-
-  it("refuses to promote recommend → direct at full autonomy (ruling Q1)", () => {
-    const store = setupTestStore(ctx);
-    deployOperator(store, { autonomy: "full", completion: "recommend" });
-    expect(
-      resolveAcceptanceAuthority(store.slug, { dataRoot: store.dataRoot }).operatorCanAccept,
-    ).toBe(false);
-  });
-
-  it("refuses a direct grant held by a supervised operator", () => {
-    const store = setupTestStore(ctx);
-    deployOperator(store, { autonomy: "supervised", completion: "direct" });
-    expect(
-      resolveAcceptanceAuthority(store.slug, { dataRoot: store.dataRoot }).operatorCanAccept,
-    ).toBe(false);
-  });
-
-  it("refuses when no operator is deployed at all", () => {
-    const store = setupTestStore(ctx);
-    deployOperator(store, { deployed: false });
-    expect(
-      resolveAcceptanceAuthority(store.slug, { dataRoot: store.dataRoot }).operatorCanAccept,
-    ).toBe(false);
-  });
-
-  // The "unreadable project falls back to the strict boundary" case runs
-  // against the REAL resolver in review-route.server.test.ts too.
 });

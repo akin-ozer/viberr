@@ -366,7 +366,6 @@ export interface RunPatch {
   /** Pass 35 U35-7: the reason an `interrupted` run stopped with no person
    *  behind it. The orphan sweeps write `"restart"`; nothing else writes it. */
   interruptedReason?: RunInterruptedReason | null;
-  backend?: RunBackend;
   /** C1 (pass 31): the `staged_outcomes` key for this run's Claude
    *  `report_outcome` envelope. It used to be written by a raw
    *  `UPDATE agent_runs SET outcome_key = ?` in `registerAgentCompletion`,
@@ -377,13 +376,6 @@ export interface RunPatch {
   /** See `AgentRunRow.dispatched_by_name` (pass 32, C02-R11). */
   dispatchedByName?: string | null;
   dispatchedByUserId?: string | null;
-  /** Ruling 316: patchable so a test can put a run in the state the deadlock
-   *  dispatch creates without driving the whole dispatch. */
-  verdictWithheld?: boolean;
-  /** Ruling 127: the credential principal, patchable like `backend` is — the
-   *  start path stamps it onto the row a reservation already inserted, without
-   *  re-writing every other column of a run that is already live. */
-  credentialUserId?: string | null;
   /** Ruling 248: this run executed with no working tree (see
    *  `AgentRunRow.no_checkout`). Patched at completion registration, like
    *  `outcomeKey`, so boot recovery re-reads it from the row after a restart. */
@@ -402,8 +394,6 @@ export interface RunPatch {
   compactions?: number;
   /** Ruling 369: patchable so the start path can stamp it on a reserved row. */
   credentialKind?: CredentialKind | null;
-  /** Ruling 507: patchable for the same reason, beside the kind. */
-  credentialAccountId?: string | null;
 }
 
 /** Patch selected fields on a run row; always bumps updated_at. */
@@ -426,14 +416,9 @@ export function patchRun(db: DatabaseSync, runId: string, patch: RunPatch): void
     totalCostUsd: ["total_cost_usd", patch.totalCostUsd],
     interruptedBy: ["interrupted_by", patch.interruptedBy],
     interruptedReason: ["interrupted_reason", patch.interruptedReason],
-    backend: ["backend", patch.backend],
     outcomeKey: ["outcome_key", patch.outcomeKey],
     dispatchedByName: ["dispatched_by_name", patch.dispatchedByName],
     dispatchedByUserId: ["dispatched_by_user_id", patch.dispatchedByUserId],
-    credentialUserId: ["credential_user_id", patch.credentialUserId],
-    // Ruling 316: patchable so a test can put a run in the state the deadlock
-    // dispatch creates without driving the whole dispatch.
-    verdictWithheld: ["verdict_withheld", patch.verdictWithheld === undefined ? undefined : patch.verdictWithheld ? 1 : 0],
     noCheckout: ["no_checkout", patch.noCheckout],
     cacheWriteTokens: ["cache_write_tokens", patch.cacheWriteTokens],
     firstCallPromptTokens: ["first_call_prompt_tokens", patch.firstCallPromptTokens],
@@ -446,7 +431,6 @@ export function patchRun(db: DatabaseSync, runId: string, patch: RunPatch): void
     lastPromptTokens: ["last_prompt_tokens", patch.lastPromptTokens],
     compactions: ["compactions", patch.compactions],
     credentialKind: ["credential_kind", patch.credentialKind],
-    credentialAccountId: ["credential_account_id", patch.credentialAccountId],
   } satisfies Record<keyof RunPatch, readonly [string, SQLInputValue | undefined]>;
 
   const cols: string[] = [];

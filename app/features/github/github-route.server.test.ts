@@ -1,9 +1,8 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { readFileSync } from "node:fs";
 import path from "node:path";
-import { RouterContextProvider } from "react-router";
-import type { Route } from "../../routes/+types/project.github";
 import {
+  routeArgs,
   setupAppTest,
   type AppTestContext,
 } from "../../../test-support/test-app";
@@ -36,20 +35,8 @@ afterAll(() => app.cleanup());
 /** The route pattern the framework matches these calls under. */
 const ROUTE_PATTERN = "/projects/:slug/github";
 
-/** The loader/action argument the framework builds, assembled by hand: the
- *  route module is called directly here, so nothing else fills these in. */
-function routeArgs(request: Request, params: { slug: string }): Route.LoaderArgs {
-  return {
-    request,
-    url: new URL(request.url),
-    params,
-    pattern: ROUTE_PATTERN,
-    context: new RouterContextProvider(),
-  };
-}
-
 function loaderArgs(url: string, params: { slug: string }, cookie?: string) {
-  return routeArgs(app.request(url, cookie ? { cookie } : {}), params);
+  return routeArgs(app.request(url, cookie ? { cookie } : {}), params, ROUTE_PATTERN);
 }
 
 /**
@@ -80,7 +67,7 @@ async function postAction(
     body,
     headers: { "Content-Type": "application/x-www-form-urlencoded" },
   });
-  return action(routeArgs(request, { slug: "viberr-core" }));
+  return action(routeArgs(request, { slug: "viberr-core" }, ROUTE_PATTERN));
 }
 
 describe("loader", () => {
@@ -219,7 +206,7 @@ describe("loader", () => {
 });
 
 describe("action RBAC + degraded no-PAT results", () => {
-  it("rejects a reviewer from grant-scope (admin|maintainer only)", async () => {
+  it("rejects a contributor from grant-scope (admin|maintainer only)", async () => {
     const result = await postAction(ids.selin, "grant-scope");
     expect(result.init?.status).toBe(403);
   });

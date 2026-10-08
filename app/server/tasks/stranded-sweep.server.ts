@@ -43,7 +43,7 @@ import { toError } from "~/shared/errors";
  */
 
 /** How long a task must be untouched before "quiet" means "stopped". */
-export const STRANDED_AFTER_MS = 15 * 60_000;
+const STRANDED_AFTER_MS = 15 * 60_000;
 
 /** The sweep's own note. Also its idempotence key: while this is the newest
  *  event on a task, the sweep has already spoken and does not speak again. */
@@ -72,13 +72,12 @@ export interface StrandedTask {
  * a hold, a queued question and a pending schedule live there and each of them
  * is a legitimate reason for silence.
  */
-export function findStrandedTasks(
+function findStrandedTasks(
   db: DatabaseSync,
   ctx: TaskActionContext,
   nowMs: number,
-  staleAfterMs: number = STRANDED_AFTER_MS,
 ): StrandedTask[] {
-  const cutoff = new Date(nowMs - staleAfterMs).toISOString();
+  const cutoff = new Date(nowMs - STRANDED_AFTER_MS).toISOString();
   const rows = db
     .prepare(
       `SELECT t.project_slug, t.task_key, t.waiting, t.updated_at
@@ -131,7 +130,7 @@ export function findStrandedTasks(
       projectSlug,
       taskKey,
       waiting: parsed.data.waiting,
-      quietForMs: Number.isFinite(updatedMs) ? nowMs - updatedMs : staleAfterMs,
+      quietForMs: Number.isFinite(updatedMs) ? nowMs - updatedMs : STRANDED_AFTER_MS,
     });
   }
   return out;

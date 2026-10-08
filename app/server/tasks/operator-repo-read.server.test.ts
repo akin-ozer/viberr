@@ -9,14 +9,14 @@ import {
   withLocalGithub,
 } from "../../../test-support/git-origin";
 import { createTestDbContext, type TestDbContext } from "../../../test-support/test-db";
+import { READ_PAGE_BYTES } from "~/server/runtimes/read-page-budget.server";
 import {
-  DEFAULT_BRANCH_READ_PAGE_BYTES,
   defaultBranchPageNote,
   pageOfText,
   readDefaultBranchFile,
   readProjectDefaultBranchFile,
 } from "./operator-repo-read.server";
-import { cloneWorkspaceRepo, projectRepoMirrorDir } from "./repo-mirror.server";
+import { cloneWorkspaceRepo } from "./repo-mirror.server";
 
 /** A Go-shaped file of `lines` lines, each about 30 characters. */
 function goLines(lines: number): string {
@@ -35,8 +35,8 @@ describe("ruling 436: a default-branch read comes in pages the CLI will carry", 
     expect(pageOfText("the guide\n")).toEqual({
       ok: true, text: "the guide\n", fromLine: 1, toLine: 1, totalLines: 1, more: false, lineCut: false,
     });
-    const long = pageOfText(`${"x".repeat(DEFAULT_BRANCH_READ_PAGE_BYTES + 5)}\nnext\n`);
-    expect(long.ok && long.lineCut && long.more && long.text.length).toBe(DEFAULT_BRANCH_READ_PAGE_BYTES);
+    const long = pageOfText(`${"x".repeat(READ_PAGE_BYTES + 5)}\nnext\n`);
+    expect(long.ok && long.lineCut && long.more && long.text.length).toBe(READ_PAGE_BYTES);
     expect(pageOfText("a\nb\n", 3)).toEqual({ ok: false, totalLines: 2 });
     expect(pageOfText("", 1)).toMatchObject({ ok: true, totalLines: 0, more: false });
   });
@@ -191,7 +191,7 @@ describe("readDefaultBranchFile", () => {
     // No mirror ⇒ no network, no fetch, and an honest `refreshed: false` for the
     // tool's prose to report. Canary: pass `create: true` from the read and this
     // recreates the mirror instead of degrading.
-    rmSync(projectRepoMirrorDir(SLUG, REPO, dataRoot)!, {
+    rmSync(path.join(dataRoot, "projects", SLUG, ".repo-mirror", "acme__widgets.git"), {
       recursive: true,
       force: true,
     });
@@ -264,8 +264,7 @@ describe("readProjectDefaultBranchFile (ruling 299)", () => {
     });
   });
   afterEach(() => {
-    const dir = projectRepoMirrorDir(SLUG, REPO, dataRoot);
-    if (dir) rmSync(dir, { recursive: true, force: true });
+    rmSync(path.join(dataRoot, "projects", SLUG, ".repo-mirror", "acme__widgets.git"), { recursive: true, force: true });
     ctx.cleanup();
   });
 
@@ -294,7 +293,7 @@ describe("readProjectDefaultBranchFile (ruling 299)", () => {
       const read = await withLocalGithub(origins, () => readProjectDefaultBranchFile(db, request));
       if (read.kind !== "found") throw new Error(`read ${read.kind}`);
       // CANARY: take every line from fromLine on, uncapped.
-      expect(read.text.length).toBeLessThanOrEqual(DEFAULT_BRANCH_READ_PAGE_BYTES);
+      expect(read.text.length).toBeLessThanOrEqual(READ_PAGE_BYTES);
       expect(read.totalLines).toBe(10_000);
       seen.push(read.text.replace(/\n$/, ""));
       if (!read.more) break;

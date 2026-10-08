@@ -33,7 +33,7 @@ import {
 /** The longest path we will accept — a defensive cap, not a real GitHub limit. */
 const MAX_PATH_LENGTH = 512;
 
-export type ScopedGithubReadPath =
+type ScopedGithubReadPath =
   | { ok: true; path: string }
   | { ok: false; reason: string };
 
@@ -59,7 +59,7 @@ export type ScopedGithubReadPath =
  * authoritative check — returning that normalized path so the request AND the
  * audit row record exactly what is fetched.
  */
-export function scopeAgentGithubReadPath(
+function scopeAgentGithubReadPath(
   rawPath: string,
   owner: string,
   name: string,

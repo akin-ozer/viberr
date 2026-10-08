@@ -254,7 +254,7 @@ function cloneCatalog(cat: ModelCatalog): ModelCatalog {
 }
 
 /** The always-available curated fallback for a backend (fresh copy). */
-export function curatedCatalog(backend: RealBackend): ModelCatalog {
+function curatedCatalog(backend: RealBackend): ModelCatalog {
   return cloneCatalog(backend === "codex" ? CODEX_CURATED : CLAUDE_CURATED);
 }
 

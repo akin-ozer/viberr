@@ -58,7 +58,7 @@ const DOCK_HIDDEN_ROUTE_IDS: readonly string[] = [
  * above. `controller-dock-context.test.ts` pins this list against the modules
  * that actually call the hook.
  */
-export const DOCK_SELF_STREAM_ROUTE_IDS: readonly string[] = ["routes/insights"];
+const DOCK_SELF_STREAM_ROUTE_IDS: readonly string[] = ["routes/insights"];
 
 const WORKSPACE_ROUTE_ID = "routes/project";
 const TASK_ROUTE_ID = "routes/project.task";

@@ -51,16 +51,12 @@ function unwind<K extends string>(target: Record<K, Wrappable>, key: K): void {
 export interface SqlTally {
   /** Statement executions: `run`/`get`/`all`/`iterate` plus every `exec`. */
   statements: number;
-  /** Executions of INSERT / UPDATE / DELETE / REPLACE. */
-  writes: number;
   /** WAL commits: writes outside a transaction plus each `COMMIT`. */
   commits: number;
   /** The SQL text of each execution, in order (for filters and messages). */
   sql: string[];
   /** Rows each execution returned, index-aligned with `sql` (0 for run/exec). */
   rows: number[];
-  /** `db.prepare` calls (statement compiles). */
-  prepares: number;
 }
 
 const WRITE_RE = /^\s*(insert|update|delete|replace)\b/i;
@@ -77,16 +73,14 @@ export interface SqlProbe {
  * without it `commits` counts only explicit COMMITs.
  */
 export function countSql(db?: DatabaseSync): SqlProbe {
-  const tally: SqlTally = { statements: 0, writes: 0, commits: 0, sql: [], rows: [], prepares: 0 };
+  const tally: SqlTally = { statements: 0, commits: 0, sql: [], rows: [] };
   const record = (sql: string): number => {
     tally.statements += 1;
     tally.sql.push(sql);
     tally.rows.push(0);
     if (/^\s*commit\b/i.test(sql)) tally.commits += 1;
-    if (WRITE_RE.test(sql)) {
-      tally.writes += 1;
-      if (db && !db.isTransaction) tally.commits += 1;
-    }
+    // A write outside a transaction is its own commit.
+    if (WRITE_RE.test(sql) && db && !db.isTransaction) tally.commits += 1;
     return tally.rows.length - 1;
   };
   const proto = StatementSync.prototype;
@@ -96,7 +90,6 @@ export function countSql(db?: DatabaseSync): SqlProbe {
     all: proto.all,
     iterate: proto.iterate,
     exec: DatabaseSync.prototype.exec,
-    prepare: DatabaseSync.prototype.prepare,
   };
   let stopped = false;
   const isStopped = () => stopped;
@@ -104,7 +97,6 @@ export function countSql(db?: DatabaseSync): SqlProbe {
     stopped = true;
     for (const key of ["run", "get", "all", "iterate"] as const) unwind(proto, key);
     unwind(DatabaseSync.prototype, "exec");
-    unwind(DatabaseSync.prototype, "prepare");
     return tally;
   };
   // Registered before anything is wrapped: outside a test this throws with
@@ -162,15 +154,6 @@ export function countSql(db?: DatabaseSync): SqlProbe {
     function exec(this: DatabaseSync, sql: string) {
       if (!stopped) record(sql);
       return originals.exec.call(this, sql);
-    },
-    isStopped,
-  );
-  install(
-    DatabaseSync.prototype,
-    "prepare",
-    function prepare(this: DatabaseSync, ...args: Parameters<DatabaseSync["prepare"]>) {
-      if (!stopped) tally.prepares += 1;
-      return originals.prepare.apply(this, args);
     },
     isStopped,
   );
@@ -281,8 +264,6 @@ export interface StatementRecord {
 }
 
 export interface ServerReadTally {
-  /** `db.prepare` calls (statement compiles). */
-  prepares: number;
   /** Every execution, with the rows it returned. */
   statements: StatementRecord[];
   /** `readFileSync` calls on files under the data root, as relative paths. */
@@ -300,7 +281,7 @@ export function rowsMatching(tally: ServerReadTally, pattern: RegExp): number {
 }
 
 /**
- * The read work one call does: SQL compiles, executions with their rows, and
+ * The read work one call does: SQL executions with their rows, and
  * store-file reads under `dataRoot`. Measure a WARM call (run the journey once
  * first): the figures are then the steady state every revalidation pays, not
  * the one-off cost of a cold cache.
@@ -322,7 +303,6 @@ export async function tallyServerReads<T>(
 
 function toServerReadTally(sql: SqlTally, storeReads: string[]): ServerReadTally {
   return {
-    prepares: sql.prepares,
     statements: sql.sql.map((text, i) => ({ sql: text, rows: sql.rows[i] ?? 0 })),
     storeReads: [...storeReads],
   };

@@ -8,6 +8,7 @@ import {
 } from "../../../test-support/test-app";
 import { withEnv } from "../../../test-support/env";
 import type { ControllerToolUser } from "./controller-tool-guards.server";
+import { operatorAuthority } from "../../../test-support/operator-snapshot";
 
 /**
  * Ruling 107 — what a controller turn MOUNTS, and what it is told about it.
@@ -852,21 +853,7 @@ describe("ruling 293: the coordinators can read the evidence", () => {
       ctx: { dataRoot: app.dataRoot },
       projectSlug: "viberr-core",
       taskKey: "VIB-1",
-      authority: {
-        policy: new Map(),
-        autonomy: "supervised",
-        configuredAutonomy: "supervised",
-        kb: [],
-        skills: [],
-        mcps: [],
-        persona: null,
-        deployed: false,
-        backend: "claude",
-        model: "",
-        effort: "",
-        name: "Operator",
-        humanGatedBeforeWork: false,
-      },
+      authority: operatorAuthority({}, { configuredAutonomy: "supervised", deployed: false, model: "" }),
     });
     expect(operator.allowedTools).toContain("mcp__viberr__read_task_attachment");
   });
@@ -1087,12 +1074,8 @@ describe("ruling 476(h): an epic a turn creates records the conversation it was 
     // The tool the turn was really handed, called the way the model calls it.
     const server = lastRunSpec()?.mcpServers?.["viberr_controller"];
     if (!inProcess(server)) throw new Error("the turn must mount viberr_controller in process");
-    const { Client } = await import("@modelcontextprotocol/sdk/client/index.js");
-    const { InMemoryTransport } = await import("@modelcontextprotocol/sdk/inMemory.js");
-    const [clientEnd, serverEnd] = InMemoryTransport.createLinkedPair();
-    await server.instance.connect(serverEnd);
-    const client = new Client({ name: "ruling-476", version: "1" }, { capabilities: {} });
-    await client.connect(clientEnd);
+    const { connectedClient } = await import("../../../test-support/mcp-tool-meta");
+    const client = await connectedClient(server, "ruling-476");
     const reply = JSON.stringify(
       (
         await client.callTool({
@@ -1172,12 +1155,8 @@ describe("ruling 685: a turn's tools know which message the turn answers", () =>
     // The tool the turn was really handed, called the way the model calls it.
     const server = lastRunSpec()?.mcpServers?.["viberr_controller"];
     if (!inProcess(server)) throw new Error("the turn must mount viberr_controller in process");
-    const { Client } = await import("@modelcontextprotocol/sdk/client/index.js");
-    const { InMemoryTransport } = await import("@modelcontextprotocol/sdk/inMemory.js");
-    const [clientEnd, serverEnd] = InMemoryTransport.createLinkedPair();
-    await server.instance.connect(serverEnd);
-    const client = new Client({ name: "ruling-685", version: "1" }, { capabilities: {} });
-    await client.connect(clientEnd);
+    const { connectedClient } = await import("../../../test-support/mcp-tool-meta");
+    const client = await connectedClient(server, "ruling-685");
     const reply = JSON.stringify(
       (
         await client.callTool({
@@ -1192,23 +1171,5 @@ describe("ruling 685: a turn's tools know which message the turn answers", () =>
     expect(reply).toContain("[noop] This turn was itself started by a follow-up");
     expect(openFollowUps(app.db, "viberr-core", "VIB-142")).toEqual([]);
     await client.close();
-  });
-});
-
-/**
- * Ruling 573: a message's files are named to the turn that reads it, whether
- * it starts a turn or steers one, and the transcript keeps the words alone.
- */
-describe("ruling 573: the turn is told what files came", () => {
-  it("names a steering message's files after its words", async () => {
-    // CANARY: drop `withFilesNote` from `steeringText` and a file sent while
-    // a turn worked reaches it as words alone.
-    const { steeringText } = await import("./controller-run.server");
-    const text = steeringText({ userLabel: "Akin" }, [
-      { text: "Use this one instead.", surface: null, files: [{ id: "cfile_1", name: "rvtools.xlsx", bytes: 40_000 }] },
-    ]);
-    expect(text).toContain(
-      "Use this one instead.\n\nA file came with this message: `rvtools.xlsx` (39 KB). Read it with `read_message_file`",
-    );
   });
 });

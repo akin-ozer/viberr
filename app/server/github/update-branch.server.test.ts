@@ -9,11 +9,10 @@ import {
 import {
   baseTaskFrontmatter,
   setupTestStore,
-  writeProject,
   writeTask,
   type TestStore,
 } from "../../../test-support/test-store";
-import { readProjectFile } from "~/server/files/project-writer.server";
+import { reconfigureProject } from "../../../test-support/projected-store";
 import {
   createPat,
   setProjectCredential,
@@ -499,13 +498,6 @@ describe("ruling 159: the base refresh will not publish the store layout either"
     const lsTree = git.calls.find((c) => c.includes("ls-tree"));
     expect(lsTree).toEqual(["-C", expect.any(String), "ls-tree", "-r", "-z", "--name-only", "HEAD", "--", `projects/${store.slug}/tasks/`]);
   });
-
-  it("a clean tree still updates the branch", async () => {
-    bindPat();
-    const git = fakeGit({ behind: 2, storeLayoutFiles: [] });
-    expect(await run(git.exec)).toMatchObject({ status: "updated" });
-    expect(git.calls.some((c) => c.includes("push"))).toBe(true);
-  });
 });
 
 /**
@@ -519,12 +511,9 @@ describe("ruling 428: the base refresh honours file leases", () => {
     writeTask(store.dataRoot, store.slug, {
       frontmatter: baseTaskFrontmatter(holder, { stage: "review", branch: holder.toLowerCase() }),
     });
-    const file = readProjectFile({ projectSlug: store.slug, dataRoot: store.dataRoot })!;
-    writeProject(store.dataRoot, {
-      ...file.parsed.frontmatter,
+    reconfigureProject(store, {
       fileLeases: [{ paths, taskKey: holder, reason: "lands first" }],
     });
-    rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
   }
 
   it("refuses a branch that changes a path another task holds, merging and pushing nothing", async () => {

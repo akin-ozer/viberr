@@ -5,14 +5,18 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { z } from "zod";
 import { logger } from "~/server/logging/logger.server";
 import { createTestDbContext } from "../../../test-support/test-db";
-import {
-  applyRetention,
-  AUDIT_RETENTION_DAYS,
-  NOTIFICATION_MAX_PER_USER,
-  RUN_LOG_RETENTION_DAYS,
-} from "./retention.server";
+import { applyRetention } from "./retention.server";
 
 const ctx = createTestDbContext();
+
+/**
+ * The windows as README.md ("Retention windows are mostly fixed") and
+ * data-model.md §5 promise them, spelled here: fixtures built from the module's
+ * own constants would move with a changed window and never notice it.
+ */
+const RUN_LOG_DAYS = 30;
+const AUDIT_DAYS = 90;
+const NOTIFICATIONS_PER_USER = 500;
 
 afterEach(() => {
   vi.restoreAllMocks();
@@ -96,10 +100,10 @@ describe("applyRetention (F10-29)", () => {
            VALUES ('run_1', ?, ?, '{}', '{}', ?)`,
         )
         .run(seq, at, at);
-    line(1, iso(RUN_LOG_RETENTION_DAYS + 5)); // old → pruned
+    line(1, iso(RUN_LOG_DAYS + 5)); // old → pruned
     line(2, iso(1)); // recent → kept
 
-    insertAudit(db, { id: "aud_old", at: iso(AUDIT_RETENTION_DAYS + 5) }); // pruned
+    insertAudit(db, { id: "aud_old", at: iso(AUDIT_DAYS + 5) }); // pruned
     insertAudit(db, { id: "aud_new", at: iso(5) }); // kept
 
     const res = applyRetention(db, new Date(), { dataRoot: root });
@@ -123,7 +127,7 @@ describe("applyRetention (F10-29)", () => {
 
   it("keeps only the newest N notifications per user", () => {
     const db = ctx.makeDb();
-    const total = NOTIFICATION_MAX_PER_USER + 20;
+    const total = NOTIFICATIONS_PER_USER + 20;
     const insert = db.prepare(
       `INSERT INTO notifications (id, user_id, kind, title, text, project_slug,
          task_key, occurred_at, read_at, created_at)
@@ -146,7 +150,7 @@ describe("applyRetention (F10-29)", () => {
       countRowSchema.parse(
         db.prepare(`SELECT COUNT(*) c FROM notifications WHERE user_id='u1'`).get(),
       ).c,
-    ).toBe(NOTIFICATION_MAX_PER_USER);
+    ).toBe(NOTIFICATIONS_PER_USER);
     expect(
       countRowSchema.parse(
         db.prepare(`SELECT COUNT(*) c FROM notifications WHERE user_id!='u1'`).get(),
@@ -172,7 +176,7 @@ describe("applyRetention (F10-29)", () => {
     // The tied pair has to STRADDLE the cap: fill it with NEWER rows, then
     // write the two tied (older) ones, so exactly one of them is pruned and
     // the tie-break is what picks it.
-    for (let i = 0; i < NOTIFICATION_MAX_PER_USER - 1; i++) {
+    for (let i = 0; i < NOTIFICATIONS_PER_USER - 1; i++) {
       const newer = iso(1);
       insert.run(`n_new_${String(i).padStart(4, "0")}`, newer, newer);
     }
@@ -196,7 +200,7 @@ describe("idempotency-keyed audit rows survive retention (B-FD10)", () => {
     const db = ctx.makeDb();
     const root = ctx.makeTempDir();
     const now = new Date();
-    const ancient = iso(AUDIT_RETENTION_DAYS + 30);
+    const ancient = iso(AUDIT_DAYS + 30);
     // Boot recovery asks "does this row exist?" to decide whether the effect
     // already happened — pruning it makes the next boot repost the reply.
     insertAudit(db, { id: "keep_reply", at: ancient, action: "task.agent.replied" });
@@ -235,7 +239,7 @@ describe("audit purge exports expiring rows before deleting them", () => {
     const db = ctx.makeDb();
     const root = ctx.makeTempDir();
     const now = new Date();
-    const ancient = iso(AUDIT_RETENTION_DAYS + 5);
+    const ancient = iso(AUDIT_DAYS + 5);
     insertAudit(db, { id: "aud_a", at: ancient, details: '{"who":"a"}' });
     insertAudit(db, { id: "aud_b", at: ancient, action: "user.disabled" });
     insertAudit(db, { id: "aud_c", at: ancient });
@@ -258,7 +262,7 @@ describe("audit purge exports expiring rows before deleting them", () => {
     const db = ctx.makeDb();
     const root = ctx.makeTempDir();
     const now = new Date();
-    insertAudit(db, { id: "aud_a", at: iso(AUDIT_RETENTION_DAYS + 5) });
+    insertAudit(db, { id: "aud_a", at: iso(AUDIT_DAYS + 5) });
 
     applyRetention(db, now, { dataRoot: root });
 
@@ -276,7 +280,7 @@ describe("audit purge exports expiring rows before deleting them", () => {
     const root = ctx.makeTempDir();
     const now = new Date();
     insertAudit(db, { id: "aud_fresh", at: iso(1) });
-    insertAudit(db, { id: "aud_edge", at: iso(AUDIT_RETENTION_DAYS - 1) });
+    insertAudit(db, { id: "aud_edge", at: iso(AUDIT_DAYS - 1) });
 
     expect(applyRetention(db, now, { dataRoot: root }).auditEvents).toBe(0);
 
@@ -293,15 +297,15 @@ describe("audit purge exports expiring rows before deleting them", () => {
     const warn = vi.spyOn(logger, "warn").mockImplementation(() => {});
     // A FILE where the export directory belongs: mkdir cannot create it.
     writeFileSync(path.join(root, "audit-exports"), "not a dir\n");
-    insertAudit(db, { id: "aud_a", at: iso(AUDIT_RETENTION_DAYS + 5) });
-    insertAudit(db, { id: "aud_b", at: iso(AUDIT_RETENTION_DAYS + 5) });
+    insertAudit(db, { id: "aud_a", at: iso(AUDIT_DAYS + 5) });
+    insertAudit(db, { id: "aud_b", at: iso(AUDIT_DAYS + 5) });
     // Notifications past the per-user cap, to prove the sibling sweeps still run.
     const insert = db.prepare(
       `INSERT INTO notifications (id, user_id, kind, title, text, project_slug,
          task_key, occurred_at, read_at, created_at)
        VALUES (?, 'u1', 'mention', 't', 'b', 'p', 'VIB-1', ?, null, ?)`,
     );
-    for (let i = 0; i < NOTIFICATION_MAX_PER_USER + 3; i++) {
+    for (let i = 0; i < NOTIFICATIONS_PER_USER + 3; i++) {
       const at = iso(i + 1);
       insert.run(`n_${String(i).padStart(4, "0")}`, at, at);
     }
@@ -322,12 +326,12 @@ describe("audit purge exports expiring rows before deleting them", () => {
     const db = ctx.makeDb();
     const root = ctx.makeTempDir();
     const now = new Date();
-    insertAudit(db, { id: "aud_first", at: iso(AUDIT_RETENTION_DAYS + 5) });
+    insertAudit(db, { id: "aud_first", at: iso(AUDIT_DAYS + 5) });
     expect(applyRetention(db, now, { dataRoot: root }).auditEvents).toBe(1);
 
     // A later pass the same day (boot, the interval tick, a disk-pressure sweep)
     // finds rows the first one could not have seen.
-    insertAudit(db, { id: "aud_second", at: iso(AUDIT_RETENTION_DAYS + 6) });
+    insertAudit(db, { id: "aud_second", at: iso(AUDIT_DAYS + 6) });
     expect(applyRetention(db, now, { dataRoot: root }).auditEvents).toBe(1);
 
     expect(readdirSync(path.join(root, "audit-exports"))).toEqual([

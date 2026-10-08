@@ -9,6 +9,7 @@ import {
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
+import { withEnv } from "../../../test-support/env";
 import {
   cloneTimeoutMs,
   cloneFailureLogDetails,
@@ -50,7 +51,6 @@ function runAskpass(
       repo: "acme/private-repo",
       destination: "/tmp/private-repo",
       token,
-      baseEnv: { PATH: process.env.PATH },
     });
     const askpassPath = plan.env.GIT_ASKPASS!;
 
@@ -69,8 +69,12 @@ function runAskpass(
       expect(askpass).not.toContain(token);
       expect(statSync(askpassPath).mode & 0o777).toBe(0o700);
       expect(plan.env.VIBERR_GIT_ASKPASS_PASSWORD).toBe(token);
-      expect(plan.env.GIT_CONFIG_KEY_0).toBe("credential.helper");
-      expect(plan.env.GIT_CONFIG_VALUE_0).toBe("");
+      // The helper reset rides after any GIT_CONFIG_* entries the host carries.
+      const n = Number(plan.env.GIT_CONFIG_COUNT);
+      expect([plan.env[`GIT_CONFIG_KEY_${n - 3}`], plan.env[`GIT_CONFIG_VALUE_${n - 3}`]]).toEqual([
+        "credential.helper",
+        "",
+      ]);
       expect(runAskpass(askpassPath, "Username for 'https://github.com':", plan.env)).toBe(
         "x-access-token",
       );
@@ -86,23 +90,20 @@ function runAskpass(
     expect(plan.env.GIT_ASKPASS).toBeUndefined();
   });
 
-  it("does not reuse ambient askpass credentials when no project PAT exists", () => {
-    const plan = createGitHubClonePlan({
-      repo: "acme/public-repo",
-      destination: "/tmp/public-repo",
-      baseEnv: {
-        PATH: process.env.PATH,
-        GIT_ASKPASS: "/unsafe/inherited-helper",
-        SSH_ASKPASS: "/unsafe/inherited-helper",
-      },
+  it("does not reuse ambient askpass credentials when no project PAT exists", async () => {
+    await withEnv({ GIT_ASKPASS: "/unsafe/inherited-helper", SSH_ASKPASS: "/unsafe/inherited-helper" }, () => {
+      const plan = createGitHubClonePlan({
+        repo: "acme/public-repo",
+        destination: "/tmp/public-repo",
+      });
+      try {
+        expect(plan.env.GIT_ASKPASS).toBeUndefined();
+        expect(plan.env.SSH_ASKPASS).toBeUndefined();
+        expect(plan.env.GIT_TERMINAL_PROMPT).toBe("0");
+      } finally {
+        plan.dispose();
+      }
     });
-    try {
-      expect(plan.env.GIT_ASKPASS).toBeUndefined();
-      expect(plan.env.SSH_ASKPASS).toBeUndefined();
-      expect(plan.env.GIT_TERMINAL_PROMPT).toBe("0");
-    } finally {
-      plan.dispose();
-    }
   });
 
   it("removes a legacy embedded PAT before reusing an existing clone", () => {

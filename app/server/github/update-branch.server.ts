@@ -194,12 +194,8 @@ export interface UpdateBranchInput {
   projectSlug: string;
   taskKey: string;
   dataRoot?: string;
-  workdir?: string | null;
-  /** Injected runner (tests): the workspace's git and, unless `serverExec` is
-   *  given too, the server's. */
+  /** Injected runner (tests): the workspace's git and the server's. */
   exec?: Exec;
-  /** Injected runner for the server's own git in its stage (tests). */
-  serverExec?: Exec;
 }
 
 /** git's answer to fetching a ref the remote does not have. */
@@ -332,13 +328,7 @@ export async function updateWorkspaceBranchFromBase(
     const base = projectFile?.parsed.frontmatter.defaultBranch || "main";
     const repoName = repo.split("/").pop() ?? repo;
 
-    const repoDir = findWorkspaceRepoDir(
-      projectSlug,
-      taskKey,
-      repoName,
-      dataRoot,
-      input.workdir,
-    );
+    const repoDir = findWorkspaceRepoDir(projectSlug, taskKey, repoName, dataRoot);
     if (!repoDir) {
       return {
         status: "no_workspace",

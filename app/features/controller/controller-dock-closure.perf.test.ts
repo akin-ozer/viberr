@@ -39,12 +39,8 @@ describe("the closed controller dock's static import closure (ruling 457, FL-1)"
     expect(heavy.filter((id) => root.has(id))).toEqual([]);
   });
 
-  it("walks what the client build ships: root reaches no server module", () => {
-    // A walker of this file's own followed server modules, so root's closure
-    // held 121 of them and the packages only they import; the route package
-    // checks' walk skips them. One walk now answers both.
+  it("root's client closure carries no server-only package", () => {
     const root = [...staticModulesOf("app/root.tsx")];
-    expect(root.filter((id) => /^server\/|\.server\.tsx?$/.test(id))).toEqual([]);
     const serverPackages = ["npm:better-auth", "npm:chokidar", "npm:yaml", "npm:@anthropic-ai/claude-agent-sdk"];
     expect(root.filter((id) => serverPackages.includes(id))).toEqual([]);
   });

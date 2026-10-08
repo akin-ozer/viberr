@@ -7,7 +7,6 @@ import {
 } from "~/shared/rbac";
 import {
   askerAuthorityLine,
-  authorityTiers,
   projectAuthorityPrompt,
   tiersFrom,
 } from "./authority-prompt.server";
@@ -20,7 +19,7 @@ import {
 
 describe("authorityTiers", () => {
   it("places every action under exactly one tier, and under its lowest holder", () => {
-    const tiers = authorityTiers();
+    const tiers = tiersFrom(RBAC_DEFINITIONS);
     const placed = tiers.flatMap((t) => t.gains);
     expect(placed).toHaveLength(RBAC_DEFINITIONS.length);
     expect(new Set(placed).size).toBe(RBAC_DEFINITIONS.length);

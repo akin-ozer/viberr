@@ -141,7 +141,7 @@ import { claudeReportedTotals } from "./wire-format.server";
 /**
  * The only module routes call
  * for runtime work:
- *   startRun / resumeRun / interruptRun / listRunsForTask / getRunLog
+ *   startRun / resumeRun / interruptRun / listRunsForTask / runLogPage
  *
  * - Elapsed derives from started_at (client clock); tokens/cost come from
  *   real usage envelopes only (the sink folds them in — no fabrication).
@@ -913,11 +913,11 @@ export interface RunStartResult {
 
 /** F21-13: the `meta` tag on the run's model-substitution disclosure line.
  *  A durable classified tag (no column, no migration), like `run·line_lost`. */
-export const MODEL_SUBSTITUTED_TAG = "run·model_substituted";
+const MODEL_SUBSTITUTED_TAG = "run·model_substituted";
 
 /** Ruling 636: the console line of a run that starts without a temporary
  *  directory of its own. */
-export const RUN_TMP_UNAVAILABLE_TAG = "run·tmp_unavailable";
+const RUN_TMP_UNAVAILABLE_TAG = "run·tmp_unavailable";
 
 /**
  * Starts a run: selects the requested provider adapter, inserts the queued
@@ -3243,27 +3243,15 @@ export interface RunLogQuery {
 }
 
 /**
- * A page of a run's log lines.
+ * A page of a run's log lines, for a caller that already read the run row: the
+ * run-log route reads it for its membership gate, and the live tail calls that
+ * route once per streamed line per viewer (ruling 457, LIVE-9).
  *
  * Two modes, because D-11 made the console a paginated view of a bounded
  * loader window rather than the whole history:
  *   - forward  (`since`)  — the live tail after a `run.log-appended` event;
  *   - backward (`before`) — the newest `limit` lines older than a cursor, which
  *     is how the console walks back through history the loader did not ship.
- */
-export function getRunLog(
-  db: DatabaseSync,
-  runId: string,
-  query: RunLogQuery = {},
-): RunLog | null {
-  const run = getRun(db, runId);
-  return run ? runLogPage(db, run, query) : null;
-}
-
-/**
- * `getRunLog` for a caller that already read the run row — the run-log route
- * reads it for its membership gate, and the live tail calls that route once
- * per streamed line per viewer (ruling 457, LIVE-9).
  */
 export function runLogPage(db: DatabaseSync, run: AgentRunRow, query: RunLogQuery): RunLog {
   const runId = run.id;

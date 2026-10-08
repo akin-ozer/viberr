@@ -646,13 +646,9 @@ describe("loadProjectContext", () => {
       active.workflow.find((w) => w.from === "review" && w.to === "done")
         ?.boundary,
     ).toBe("human");
-    expect(active.stages.map((s) => s.id)).toEqual([
-      "triage",
-      "ready",
-      "impl",
-      "review",
-      "done",
-    ]);
+    expect(active.stages).toEqual(
+      project.parsed.frontmatter.stages.map(({ id, name }) => ({ id, name })),
+    );
 
     writeProject(store.dataRoot, {
       ...project.parsed.frontmatter,

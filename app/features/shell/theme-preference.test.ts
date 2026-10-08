@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { applyThemePreference, setDocumentTheme, THEME_FLIP_MS } from "./theme-preference";
+import { applyThemePreference, setDocumentTheme } from "./theme-preference";
 
 /**
  * Interface review 2026-09-06: the sheet animates colour on ~50 rules at .14s
@@ -28,6 +28,10 @@ describe("setDocumentTheme", () => {
   });
 
   const overrides = () => [...document.head.querySelectorAll("style")];
+  /** The flip's length, read off the override it injects: the clock its
+   *  first property runs on. */
+  const flipMs = () =>
+    Number(/^\*,\*::before,\*::after\{transition:color (\d+)ms ease/.exec(overrides()[0]?.textContent ?? "")?.[1]);
 
   it("changes the theme under one colour clock for everything, then lifts it", () => {
     document.documentElement.dataset.theme = "light";
@@ -37,14 +41,16 @@ describe("setDocumentTheme", () => {
     const [style, ...extra] = overrides();
     expect(extra).toEqual([]);
     const css = style!.textContent ?? "";
-    expect(css.startsWith("*,*::before,*::after{transition:")).toBe(true);
     expect(css.endsWith("!important}")).toBe(true);
+    const ms = flipMs();
+    expect(ms).toBeGreaterThan(0);
+    // One clock: every property the tokens paint runs for the same time.
     for (const property of ["color", "background-color", "border-color", "fill", "stroke", "box-shadow"]) {
-      expect(css).toContain(`${property} ${THEME_FLIP_MS}ms ease`);
+      expect(css).toContain(`${property} ${ms}ms ease`);
     }
     // Colour only: nothing moves while the page changes colour.
     expect(css).not.toMatch(/transform|opacity|\ball\b/);
-    vi.advanceTimersByTime(THEME_FLIP_MS);
+    vi.advanceTimersByTime(ms);
     expect(overrides()).toHaveLength(1);
     vi.advanceTimersByTime(50);
     expect(overrides()).toHaveLength(0);
@@ -59,14 +65,15 @@ describe("setDocumentTheme", () => {
   it("turns a flip made mid-flip around under the same override, and lifts it once", () => {
     document.documentElement.dataset.theme = "light";
     setDocumentTheme(true);
-    vi.advanceTimersByTime(THEME_FLIP_MS - 50);
+    const ms = flipMs();
+    vi.advanceTimersByTime(ms - 50);
     setDocumentTheme(false);
-    vi.advanceTimersByTime(THEME_FLIP_MS - 50);
+    vi.advanceTimersByTime(ms - 50);
     setDocumentTheme(true);
     // Still one override: the clock restarted with each flip.
     expect(overrides()).toHaveLength(1);
     expect(document.documentElement.dataset.theme).toBe("dark");
-    vi.advanceTimersByTime(THEME_FLIP_MS + 50);
+    vi.advanceTimersByTime(ms + 50);
     expect(overrides()).toHaveLength(0);
   });
 

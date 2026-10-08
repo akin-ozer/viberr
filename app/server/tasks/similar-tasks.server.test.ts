@@ -22,13 +22,13 @@ const SHOP_29 = "Gateway routes for inventory, cart and checkout";
 const PROPOSED = "Gateway routes for orders, cart and inventory";
 
 describe("similarOpenTasks", () => {
-  function board(titles: Record<string, string>, archived: string[] = []) {
+  function board(titles: Record<string, string>, archived: string[] = [], done: string[] = []) {
     const store = setupTestStore(ctx);
     for (const [key, title] of Object.entries(titles)) {
       writeTask(store.dataRoot, store.slug, {
         frontmatter: baseTaskFrontmatter(key, {
           title,
-          stage: "triage",
+          stage: done.includes(key) ? "done" : "triage",
           archived: archived.includes(key),
         }),
       });
@@ -49,7 +49,7 @@ describe("similarOpenTasks", () => {
     expect(found[0]!.stageId).toBe("triage");
   });
 
-  it("says nothing about the 3,403 pairs of a real board that are not duplicates", () => {
+  it("says nothing for distinct live titles at the measured 0.6 threshold", () => {
     // The whole value of this disclosure is that it is quiet. Measured across
     // the shopify-clone board's 83 titles, this threshold flags none of them.
     // CANARY: drop SIMILAR_TITLE_THRESHOLD to 0.5 and "Admin order management"
@@ -78,12 +78,20 @@ describe("similarOpenTasks", () => {
         "VIB-1": PROPOSED,
         "VIB-2": SHOP_29,
         "VIB-3": SHOP_29,
+        "VIB-4": SHOP_29,
       },
       ["VIB-3"],
+      ["VIB-4"],
     );
     // A task cannot be a duplicate of itself, and the caller passes its own key.
     const found = similarOpenTasks(store.db, store.slug, PROPOSED, ["VIB-1"]);
-    expect(found.map((t) => t.key)).toEqual(["VIB-2"]);
+    // A Done task stays, with its stage: "this was already built, and here it
+    // is" is what the person confirming needs. CANARY: leave Done tasks out of
+    // the query and VIB-4 is gone.
+    expect(found.map((t) => [t.key, t.stageId])).toEqual([
+      ["VIB-2", "triage"],
+      ["VIB-4", "done"],
+    ]);
     // CANARY: drop the `archived = 0` filter and VIB-3 comes back — an archived
     // task is off every board and owns nothing, so naming it is noise.
     expect(found.map((t) => t.key)).not.toContain("VIB-3");

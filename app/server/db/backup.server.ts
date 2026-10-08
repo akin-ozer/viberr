@@ -176,7 +176,7 @@ function walkFiles(dir: string): StoreFileTotals {
   return { files, bytes };
 }
 
-export function projectionPathIn(dataRoot: string): string {
+function projectionPathIn(dataRoot: string): string {
   return path.join(dataRoot, "state", PROJECTION_NAME);
 }
 
@@ -475,7 +475,7 @@ const backupManifestSchema = z
   })
   .loose();
 
-export function readManifest(artefact: string): BackupManifest {
+function readManifest(artefact: string): BackupManifest {
   const file = path.join(artefact, MANIFEST_NAME);
   if (!existsSync(file)) {
     throw new Error(

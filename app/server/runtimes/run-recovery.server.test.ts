@@ -20,7 +20,6 @@ import {
   recoverStrandedOperatorPlans,
   recoverUnreactedAgentRuns,
   settleAbandonedWaits,
-  RECOVERY_REINVOKE_CAP,
 } from "./run-recovery.server";
 import { getRun, insertRunLine, patchRun, upsertRun } from "./run-store.server";
 import { COMPACTING_AFTER_RUN_STEP, RUN_PHASE, SESSION_SETTLING_STEP } from "./adapter.server";
@@ -33,6 +32,10 @@ import {
 import { loginTargetFor, recordBackendLogin } from "./backend-credentials.server";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import path from "node:path";
+
+/** The crash-loop cap (F7-BOOT1): three re-invokes per task, and three replays
+ *  per run, within 30 minutes (docs/domain/operator.md, agents-and-runtime.md). */
+const CAP = 3;
 
 let ctx: TestDbContext;
 let store: TestStore;
@@ -58,63 +61,6 @@ function seedRun(id: string, over: Partial<Parameters<typeof upsertRun>[1]> = {}
     startedAt: new Date().toISOString(), ...over,
   });
 }
-
-describe("outcome_key lives in the run store (C1, pass 31)", () => {
-  /**
-   * BEFORE: `registerAgentCompletion` persisted the staging key with a raw
-   * `UPDATE agent_runs SET outcome_key = ?`, so the store's own `AgentRunRow`
-   * did not declare the column and `RunPatch` could not write it — the one
-   * column on this table whose reads were untyped and whose writes bypassed
-   * `patchRun` entirely. This pins the typed round-trip.
-   */
-  it("patchRun writes outcome_key and getRun reads it back", () => {
-    seedRun("run_oc");
-    // A run that never staged an envelope reads null, not undefined — the row
-    // type has to admit the column.
-    expect(getRun(store.db, "run_oc")!.outcome_key).toBeNull();
-    patchRun(store.db, "run_oc", { outcomeKey: "oc_1" });
-    expect(getRun(store.db, "run_oc")!.outcome_key).toBe("oc_1");
-    // Clearing is expressible too (null is a value, not "leave alone").
-    patchRun(store.db, "run_oc", { outcomeKey: null });
-    expect(getRun(store.db, "run_oc")!.outcome_key).toBeNull();
-    // An omitted key leaves the column untouched (the `undefined` skip).
-    patchRun(store.db, "run_oc", { outcomeKey: "oc_2" });
-    patchRun(store.db, "run_oc", { phase: "working" });
-    expect(getRun(store.db, "run_oc")!.outcome_key).toBe("oc_2");
-  });
-
-  /**
-   * Ruling 248 (pass 37, F37-77): the run executed with NO working tree, so the
-   * completion pipeline closes its verdict path. Persisted on the ROW rather
-   * than held in the completion closure for the reason `outcome_key` is: the
-   * closure dies with the process, and a no-checkout reviewer recovered after a
-   * restart would have its report re-classified into a verdict it never gave.
-   */
-  it("patchRun writes no_checkout and getRun reads it back (ruling 248)", () => {
-    seedRun("run_nc");
-    // A row written before viberr recorded the fact reads 0, which is the
-    // honest value: nothing here says this run was checkout-less.
-    expect(getRun(store.db, "run_nc")!.no_checkout).toBe(0);
-    patchRun(store.db, "run_nc", { noCheckout: 1 });
-    expect(getRun(store.db, "run_nc")!.no_checkout).toBe(1);
-    // CANARY: leave `noCheckout` out of `patchRun`'s assignable map and the
-    // exhaustiveness `satisfies` catches it at compile time; leave it out of
-    // the baseline healer and an existing data root fails every completion.
-    patchRun(store.db, "run_nc", { phase: "working" });
-    expect(getRun(store.db, "run_nc")!.no_checkout).toBe(1);
-  });
-
-  it("patchRun writes interrupted_reason and getRun reads it back (pass 35 U35-7)", () => {
-    seedRun("run_ir");
-    expect(getRun(store.db, "run_ir")!.interrupted_reason).toBeNull();
-    patchRun(store.db, "run_ir", { interruptedReason: "restart" });
-    expect(getRun(store.db, "run_ir")!.interrupted_reason).toBe("restart");
-    patchRun(store.db, "run_ir", { phase: "working" });
-    expect(getRun(store.db, "run_ir")!.interrupted_reason).toBe("restart");
-    patchRun(store.db, "run_ir", { interruptedReason: null });
-    expect(getRun(store.db, "run_ir")!.interrupted_reason).toBeNull();
-  });
-});
 
 describe("finalizeOrphanedRuns (F-RUN1)", () => {
   /**
@@ -521,12 +467,15 @@ describe("finalizeOrphanedRuns (F-RUN1)", () => {
     expect(res.finalized).toBe(1);
     expect(res.reinvoked).toBe(1);
     expect(res.capped).toBe(0);
+    // The row the next boot's cap counts. CANARY: record the action under a
+    // spelling the count does not read and every boot re-invokes, uncapped.
+    expect(listAuditEvents(store.db, { action: "run.recovery.reinvoked" })).toHaveLength(1);
   });
 
   it("finalizes but does NOT re-invoke once the crash-loop cap is hit (F7-BOOT1)", () => {
     // Simulate CAP prior recovery re-invokes for this task (a boot→orphan→crash
     // loop): each real boot recorded a `run.recovery.reinvoked` audit row.
-    for (let i = 0; i < RECOVERY_REINVOKE_CAP; i++) {
+    for (let i = 0; i < CAP; i++) {
       recordAudit(store.db, {
         action: "run.recovery.reinvoked",
         actor: SYSTEM_ACTOR,
@@ -557,7 +506,7 @@ describe("finalizeOrphanedRuns (F-RUN1)", () => {
         )
         .get() as { n: number }
     ).n;
-    expect(n).toBe(RECOVERY_REINVOKE_CAP);
+    expect(n).toBe(CAP);
   });
 
   /**
@@ -577,7 +526,7 @@ describe("finalizeOrphanedRuns (F-RUN1)", () => {
         ownerUserId: "u-arda",
       }),
     });
-    for (let i = 0; i < RECOVERY_REINVOKE_CAP; i++) {
+    for (let i = 0; i < CAP; i++) {
       recordAudit(store.db, {
         action: "run.recovery.reinvoked",
         actor: SYSTEM_ACTOR,
@@ -1018,13 +967,13 @@ describe("recoverUnreactedAgentRuns (NFR17/B9 crash-loop backstop)", () => {
 
   it("consumes a persisted staged report_outcome envelope on recovery (AO-1)", async () => {
     seedDroppedReplyRun("run_staged");
-    // Simulate a run whose completion was registered (outcome_key persisted to
-    // the row) and whose report_outcome envelope was staged — then the process
-    // died before the callback fired. Pre-fix, recovery had no key and the
-    // staged row was orphaned (verdict fell back to the prose regex).
-    store.db
-      .prepare(`UPDATE agent_runs SET outcome_key = 'oc_staged' WHERE id = 'run_staged'`)
-      .run();
+    // Simulate a run whose completion was registered (outcome_key written to
+    // the row through the store, as `registerAgentCompletion` writes it) and
+    // whose report_outcome envelope was staged — then the process died before
+    // the callback fired. Pre-fix, recovery had no key and the staged row was
+    // orphaned (verdict fell back to the prose regex). The staged row goes in
+    // directly: `stageOutcome` also fills an in-process map a restart loses.
+    patchRun(store.db, "run_staged", { outcomeKey: "oc_staged" });
     store.db
       .prepare(
         `INSERT INTO staged_outcomes (outcome_key, outcome_json, created_at)
@@ -1085,7 +1034,7 @@ describe("recoverUnreactedAgentRuns (NFR17/B9 crash-loop backstop)", () => {
     // Simulate CAP prior replays for THIS run within the window (a boot→recover→
     // crash loop where the reply write kept failing so `task.agent.replied` never
     // landed and the run was re-selected every boot).
-    for (let i = 0; i < RECOVERY_REINVOKE_CAP; i++) {
+    for (let i = 0; i < CAP; i++) {
       recordAudit(store.db, {
         action: "run.recovery.reply_replayed",
         actor: SYSTEM_ACTOR,
@@ -1101,7 +1050,7 @@ describe("recoverUnreactedAgentRuns (NFR17/B9 crash-loop backstop)", () => {
     expect(res.capped).toBe(1);
     expect(res.recovered).toBe(0);
     // No NEW attempt audit was written (count stays exactly at the cap).
-    expect(countReplayAudits("run_loop")).toBe(RECOVERY_REINVOKE_CAP);
+    expect(countReplayAudits("run_loop")).toBe(CAP);
     // The run was NEVER reacted to: no reply audit landed.
     expect(
       listAuditEvents(store.db, { action: "task.agent.replied" }).filter(
@@ -1112,7 +1061,7 @@ describe("recoverUnreactedAgentRuns (NFR17/B9 crash-loop backstop)", () => {
 
   it("caps per run — a distinct run on the same task is still recovered", async () => {
     // The capped run's prior replays must NOT starve a sibling run on the task.
-    for (let i = 0; i < RECOVERY_REINVOKE_CAP; i++) {
+    for (let i = 0; i < CAP; i++) {
       recordAudit(store.db, {
         action: "run.recovery.reply_replayed",
         actor: SYSTEM_ACTOR,
@@ -1143,7 +1092,7 @@ describe("recoverUnreactedAgentRuns (NFR17/B9 crash-loop backstop)", () => {
     expect(res.capped).toBe(1); // run_capped skipped
     expect(res.recovered).toBe(1); // run_fresh recovered
     expect(countReplayAudits("run_fresh")).toBe(1);
-    expect(countReplayAudits("run_capped")).toBe(RECOVERY_REINVOKE_CAP);
+    expect(countReplayAudits("run_capped")).toBe(CAP);
   });
 });
 

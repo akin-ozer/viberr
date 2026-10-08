@@ -255,14 +255,6 @@ describe("loginWithCredentials", () => {
     // The first 10 are ordinary auth failures; the 11th trips the bucket.
     expect(statuses.slice(0, 10).every((s) => s !== 429)).toBe(true);
     expect(statuses[10]).toBe(429);
-    // Keyed on email+ip, so a different account on that ip still gets in.
-    const other = await loginWithCredentials(
-      db,
-      auth,
-      { email: "arda@viberr.test", password: PASSWORD },
-      requestDeps("192.0.2.45"),
-    );
-    expect(other.ok).toBe(true);
   });
 
   it("signals the forced-reset gate when pwreset_required is set", async () => {

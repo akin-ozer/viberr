@@ -190,7 +190,7 @@ export interface BackendQuotaRow {
  * applies. A reading that named no reset, or a clock we could not read,
  * answers "no": nothing is aged on a guess.
  */
-export function readingWindowReset(
+function readingWindowReset(
   reading: Pick<BackendRateLimitReading, "resetsAt"> | null,
   nowMs: number,
 ): boolean {

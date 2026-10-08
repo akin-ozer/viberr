@@ -207,7 +207,7 @@ export interface RefreshChain {
  *
  * Null when no recorded refresh was made onto `headSha`.
  */
-export function refreshChainFrom(
+function refreshChainFrom(
   headSha: string,
   refreshes: readonly RefreshLink[],
 ): RefreshChain | null {

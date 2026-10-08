@@ -226,7 +226,6 @@ describe("createProject — GitHub connection wiring", () => {
     );
     // Created (creating before the repo is deliverable is a real flow) but the
     // caller is told delivery won't work yet — no longer silently accepted.
-    expect(result.repoWarning).toBeTruthy();
     expect(result.repoWarning).toMatch(/push|write access/i);
     // The visible default branch is still adopted.
     const row = defaultBranchRow.parse(
@@ -330,7 +329,7 @@ describe("createProject — policy preset shapes REAL governance", () => {
     to: string,
   ) => wf.find((b) => b.from === from && b.to === to)?.boundary;
 
-  it("balanced = template defaults (pre-work auto, supervised operator)", async () => {
+  it("balanced = template defaults (pre-work and the move into Review auto, a supervised operator with deliver-review-pr: direct)", async () => {
     const store = setupTestStore(ctx);
     seedConnection(store.db, store.users.arda.id);
     answeringGithub();
@@ -343,7 +342,14 @@ describe("createProject — policy preset shapes REAL governance", () => {
     const f = fm(store, r.slug);
     expect(boundary(f.workflow, "triage", "ready")).toBe("auto");
     expect(boundary(f.workflow, "ready", "impl")).toBe("auto");
+    // Ruling 519: nobody confirms the move into Review on a new board; the
+    // operator makes it. CANARY: put the template's edge back to `approval`.
+    expect(boundary(f.workflow, "impl", "review")).toBe("auto");
     expect(opAutonomy(f.agents)).toBeUndefined(); // supervised (default)
+    const op = f.agents.find((a) => a.profileId === "operator")!;
+    expect(
+      op.capabilities.find((c) => c.capabilityId === "deliver-review-pr")?.mode,
+    ).toBe("direct");
   });
 
   /**
@@ -417,26 +423,6 @@ describe("createProject — policy preset shapes REAL governance", () => {
     ).toBe("recommend");
   });
 
-  it("balanced keeps the shipped template's deliver-review-pr: direct and its automatic move into Review", async () => {
-    const store = setupTestStore(ctx);
-    seedConnection(store.db, store.users.arda.id);
-    answeringGithub();
-    const r = await createProject(
-      store.db,
-      { name: "Bal", key: "BAL", owner: "akin-ozer", repoName: "b", policy: "balanced" },
-      ACTOR,
-      { dataRoot: store.dataRoot },
-    );
-    const f = fm(store, r.slug);
-    // Ruling 519: nobody confirms the move into Review on a new board; the
-    // operator makes it. CANARY: put the template's edge back to `approval`.
-    expect(boundary(f.workflow, "impl", "review")).toBe("auto");
-    const op = f.agents.find((a) => a.profileId === "operator")!;
-    expect(
-      op.capabilities.find((c) => c.capabilityId === "deliver-review-pr")?.mode,
-    ).toBe("direct");
-  });
-
   it("auto = the operator runs at full autonomy + explicit completion-for-acceptance:direct (Q1)", async () => {
     const store = setupTestStore(ctx);
     seedConnection(store.db, store.users.arda.id);
@@ -463,12 +449,18 @@ describe("createProject — policy preset shapes REAL governance", () => {
   // DELETED because it created a todo/doing/done board while the preinstalled
   // roster's eligible stages are the governed ids — no specialist was ever
   // stage-eligible and the operator could not hand work off. The rule this
-  // pins: WHATEVER board creation produces, every preinstalled specialist must
-  // be eligible for at least one stage on it. (The old test passed
-  // `template: "light"`; there is no such input any more.)
-  it("AP-04: every preinstalled specialist is stage-eligible on the board creation produced", async () => {
+  // pins: every stage a preinstalled specialist declares is a stage of the
+  // board creation produced. Eligibility drops a declared id the board does
+  // not have, and reads a declaration left with none as unrestricted
+  // (stage-eligibility.ts, rule 3), so a misspelt id would change where an
+  // agent may work without a word. CANARY: misspell a declared stage in
+  // agent-catalog.server.ts.
+  it("AP-04: every stage a preinstalled specialist declares is a stage of the board creation produced", async () => {
     const store = setupTestStore(ctx);
     seedConnection(store.db, store.users.arda.id);
+    // The profiles an instance seeds at boot: a deployment reads what it
+    // declares from them, and without them every view declares nothing.
+    seedDefaultAgentAssets(store.dataRoot);
     answeringGithub();
     const r = await createProject(
       store.db,
@@ -483,16 +475,14 @@ describe("createProject — policy preset shapes REAL governance", () => {
     const { effectiveProfileView } = await import(
       "~/features/agents/agents-query.server"
     );
-    const { specialistEligibleForStage } = await import("~/server/tasks/specialist-roster.server");
     const specialists = f.agents
       .map((a) => effectiveProfileView(a, store.dataRoot, "direct"))
       .filter((v) => v.kind === "specialist");
-    expect(specialists.length).toBeGreaterThan(0);
+    expect(specialists.flatMap((spec) => spec.stages)).not.toHaveLength(0);
     for (const spec of specialists) {
-      const eligible = boardStages.filter((stageId) =>
-        specialistEligibleForStage(spec, stageId),
-      );
-      expect(eligible, `${spec.name} has no eligible stage`).not.toHaveLength(0);
+      for (const stageId of spec.stages) {
+        expect(boardStages, `${spec.name} declares ${stageId}`).toContain(stageId);
+      }
     }
   });
 

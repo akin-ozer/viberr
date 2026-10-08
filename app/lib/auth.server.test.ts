@@ -1,14 +1,14 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import type { DatabaseSync } from "node:sqlite";
 import { createTestDbContext } from "../../test-support/test-db";
-import { buildAuthOptions } from "./auth.server";
+import { createAuth } from "./auth.server";
 
 /**
- * F28-A1: buildAuthOptions is the one place the exact Better Auth options are
- * assembled, so the account-linking policy is pinned here — a config-only
- * regression guard, no live handler needed.
+ * F28-A1: the account-linking policy, read off the options the app's Better
+ * Auth instance is built with — a config-only regression guard, no request
+ * needed.
  */
-describe("buildAuthOptions account linking (F28-A1)", () => {
+describe("createAuth account linking (F28-A1)", () => {
   const ctx = createTestDbContext();
   afterEach(ctx.cleanup);
   let db: DatabaseSync;
@@ -16,17 +16,23 @@ describe("buildAuthOptions account linking (F28-A1)", () => {
     db = ctx.makeDb();
   });
 
-  const opts = () =>
-    buildAuthOptions({
+  async function opts() {
+    const auth = createAuth({
       db,
       secret: "test-secret-at-least-32-characters-long-000",
+      baseURL: "http://localhost:5173",
       trustedOrigins: ["http://localhost:5173"],
       github: { clientId: "gh-id", clientSecret: "gh-secret" },
       google: { clientId: "go-id", clientSecret: "go-secret" },
     });
+    // Start-up checks the db's schema without waiting for the verdict; join
+    // that shared check so it finishes before the db closes.
+    await (await auth.$context).checkSchema?.();
+    return auth.options;
+  }
 
-  it("does NOT trust github/google for implicit account linking", () => {
-    const linking = opts().account?.accountLinking;
+  it("does NOT trust github/google for implicit account linking", async () => {
+    const linking = (await opts()).account?.accountLinking;
     const trusted = linking?.trustedProviders ?? [];
     // Trusting a provider links a social sign-in to an existing account by email
     // WITHOUT the provider's emailVerified check. Combined with every viberr

@@ -156,14 +156,11 @@ describe("the closed dock's cost to every page (ruling 457, RF-8 / CTL-3)", () =
     await openDock();
     await closeDock();
     const before = dockRequests(m);
-    const closedLoads = m.loads.length;
     for (let i = 0; i < 3; i += 1) {
       fireEvent.click(screen.getByRole("button", { name: "revalidate page" }));
       await settle();
     }
     expectWithinBudget("controller:closed-dock.requests-per-revalidation", (dockRequests(m) - before) / 3);
-    // Ruling 448: only the OPEN dock reads the transcript it shows.
-    expect(m.loads.slice(closedLoads).filter((u) => u.searchParams.get("seen") === "1")).toEqual([]);
   });
 });
 

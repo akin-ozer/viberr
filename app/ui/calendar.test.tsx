@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { cleanup, fireEvent, render } from "@testing-library/react";
 import { Calendar } from "./calendar";
 import { fromISODate, toISODate } from "./iso-date";
@@ -23,9 +23,19 @@ describe("calendar date helpers", () => {
 });
 
 describe("Calendar", () => {
+  // The viewer's today, 2026-08-23 at local noon: what the calendar marks and
+  // opens on when nothing is selected.
+  beforeEach(() => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(new Date(2026, 7, 23, 12));
+  });
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
   it("renders a 6×7 grid with weekday headers and the month caption", () => {
     const { container, getByText } = render(
-      <Calendar selected="2026-08-23" onSelect={() => {}} today="2026-08-23" />,
+      <Calendar selected="2026-08-23" onSelect={() => {}} />,
     );
     expect(getByText("August 2026")).toBeTruthy();
     expect(container.querySelectorAll("th")).toHaveLength(7);
@@ -34,7 +44,7 @@ describe("Calendar", () => {
 
   it("marks today and the selected day", () => {
     const { container } = render(
-      <Calendar selected="2026-08-10" onSelect={() => {}} today="2026-08-23" />,
+      <Calendar selected="2026-08-10" onSelect={() => {}} />,
     );
     const sel = container.querySelector('.cal-day.sel[data-iso="2026-08-10"]');
     const today = container.querySelector('.cal-day.today[data-iso="2026-08-23"]');
@@ -48,7 +58,7 @@ describe("Calendar", () => {
   it("emits the clicked day as YYYY-MM-DD", () => {
     const onSelect = vi.fn();
     const { container } = render(
-      <Calendar selected={null} onSelect={onSelect} today="2026-08-23" />,
+      <Calendar selected={null} onSelect={onSelect} />,
     );
     fireEvent.click(container.querySelector('.cal-day[data-iso="2026-08-15"]')!);
     expect(onSelect).toHaveBeenCalledWith("2026-08-15");
@@ -56,7 +66,7 @@ describe("Calendar", () => {
 
   it("navigates months with the prev/next controls", () => {
     const { container, getByText, getByLabelText } = render(
-      <Calendar selected={null} onSelect={() => {}} today="2026-08-23" />,
+      <Calendar selected={null} onSelect={() => {}} />,
     );
     fireEvent.click(getByLabelText("Go to next month"));
     expect(getByText("September 2026")).toBeTruthy();
@@ -70,7 +80,7 @@ describe("Calendar", () => {
   it("ArrowRight then Enter selects the next day", () => {
     const onSelect = vi.fn();
     const { container } = render(
-      <Calendar selected="2026-08-23" onSelect={onSelect} today="2026-08-23" />,
+      <Calendar selected="2026-08-23" onSelect={onSelect} />,
     );
     const grid = container.querySelector('[role="grid"]')!;
     fireEvent.keyDown(grid, { key: "ArrowRight" });

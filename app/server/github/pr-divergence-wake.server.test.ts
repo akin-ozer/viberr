@@ -22,8 +22,11 @@ import { createPat, setProjectCredential } from "~/server/secrets/pat-store.serv
 import {
   deleteTaskRemoteBranch,
   reconcileTask,
-  type OperatorWake,
+  type GithubActionContext,
 } from "./github-reconciler.server";
+
+/** The operator wake the reconciler fires, as its context takes it. */
+type OperatorWake = NonNullable<GithubActionContext["wakeOperator"]>;
 
 /**
  * The pr-diverged coordination seam: an out-of-band PR transition detected by

@@ -8,7 +8,6 @@ import { createTestDbContext, type TestDbContext } from "../../../test-support/t
 import {
   baseTaskFrontmatter,
   setupTestStore,
-  writeProject,
   writeTask,
   type TestStore,
 } from "../../../test-support/test-store";
@@ -25,8 +24,8 @@ import { settle, waitFor } from "../../../test-support/polling";
 import { withEnv } from "../../../test-support/env";
 import { writeFakeBrowser } from "../../../test-support/fake-browser";
 import { startHttpUpstream, type UpstreamHandle } from "../../../test-support/mcp-upstream";
+import { reconfigureProject } from "../../../test-support/projected-store";
 import { appendTimelineEvent, readTaskFile } from "~/server/files/task-writer.server";
-import { readProjectFile } from "~/server/files/project-writer.server";
 import { taskAttachmentsDir } from "~/server/files/file-store-root.server";
 import { keepDelivery } from "~/server/files/kept-deliveries.server";
 import { readTaskSources } from "~/server/files/task-sources.server";
@@ -41,7 +40,7 @@ import { defaultModelFor } from "~/server/runtimes/model-catalog.server";
 import type { RealBackend } from "~/server/runtimes/runtime-registry.server";
 import { errorMessage } from "~/shared/errors";
 import { runFailureReason } from "~/server/tasks/agent-reply.server";
-import { LOOP_REPEATS, mcpGatewayStatus, startMcpGateway, stopMcpGateway } from "./gateway.server";
+import { mcpGatewayStatus, startMcpGateway, stopMcpGateway } from "./gateway.server";
 
 /**
  * Ruling 461 through the run service: `startRun` is the one funnel that puts a
@@ -58,6 +57,8 @@ const READS_ONLY = {
   webEgress: true,
   agent: { profileId: "workflow-researcher", roleHint: "Workflow Researcher" },
 };
+/** Ruling 598(a): one call with one answer, 100 times within 60 seconds. */
+const LOOP_REPEATS = 100;
 let ctx: TestDbContext;
 let store: TestStore;
 let upstream: UpstreamHandle;
@@ -191,19 +192,14 @@ describe("startRun puts the run's token on its gateway mounts (ruling 461)", () 
 });
 
 describe("every path that ends a run revokes its token (ruling 461)", () => {
-  it("success: the settle revokes it", async () => {
-    await startWithMounts("claude");
+  it.each([
+    { backend: "claude", outcome: "finished" },
+    { backend: "codex", outcome: "error" },
+  ] as const)("a $backend run that ends $outcome: the settle revokes its token", async ({ backend, outcome }) => {
+    await startWithMounts(backend, { outcome });
     const cloudflare = mountSchema.parse(lastRunSpec()?.mcpServers?.cloudflare);
-    expect(getRun(store.db, lastRunSpec()!.runId)?.state).toBe("finished");
+    expect(getRun(store.db, lastRunSpec()!.runId)?.state).toBe(outcome);
     // CANARY: drop the settle's revoke (before the finalize) and a token outlives its run.
-    expect(mcpGatewayStatus().liveTokens).toBe(0);
-    expect(await gatewayAnswers(cloudflare.url, cloudflare.headers.Authorization)).toBe(401);
-  });
-
-  it("failure: a run that errors revokes it too", async () => {
-    await startWithMounts("codex", { outcome: "error" });
-    const cloudflare = mountSchema.parse(lastRunSpec()?.mcpServers?.cloudflare);
-    expect(getRun(store.db, lastRunSpec()!.runId)?.state).toBe("error");
     expect(mcpGatewayStatus().liveTokens).toBe(0);
     expect(await gatewayAnswers(cloudflare.url, cloudflare.headers.Authorization)).toBe(401);
   });
@@ -311,11 +307,9 @@ describe("ruling 585: the gateway answers a Codex run's knowledge server itself"
   it("reads and corrects the knowledge bases the run holds, a private one included, and nothing else, while the run lives", async () => {
     // An agent on the project is not given `answer-keys`, as AWSC-97's
     // Inventory Analyst is not given the calculator research.
-    const project = readProjectFile({ projectSlug: store.slug, dataRoot: store.dataRoot })!;
-    writeProject(store.dataRoot, {
-      ...project.parsed.frontmatter,
+    reconfigureProject(store, (fm) => ({
       agents: [
-        ...project.parsed.frontmatter.agents,
+        ...fm.agents,
         {
           profileId: "inventory-analyst",
           capabilities: [],
@@ -323,8 +317,7 @@ describe("ruling 585: the gateway answers a Codex run's knowledge server itself"
           definition: { kind: "specialist", name: "Inventory Analyst", role: "Intake", backends: ["codex"], model: defaultModelFor("codex") },
         },
       ],
-    });
-    rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
+    }));
     const dir = path.join(store.dataRoot, "kb", "answer-keys");
     mkdirSync(dir, { recursive: true });
     writeFileSync(path.join(dir, "sample-01.md"), "# Sample 01\n\nThe expected total is 1234.56.\n");
@@ -782,10 +775,6 @@ describe("ruling 598: a run that keeps sending one call and getting one answer i
     // tries, until a person stopped the run. CANARIES: skip the guard and the
     // hundredth answer is the tool's own; key the count on the call without
     // its answer and the changing reads below are stopped.
-    writeTask(store.dataRoot, store.slug, {
-      frontmatter: baseTaskFrontmatter("VIB-1", { stage: "impl", ownerUserId: store.users.arda.id }),
-    });
-    rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
     const mount = resolveBoardMcp({ backend: "codex", collaborates: true, ...READS_ONLY, dataRoot: store.dataRoot });
     queueFakeRun({ lines: [{ t: "1", ev: "text", tag: "assistant", text: "correcting" }], sessionId: "s", backend: "codex", keepRunning: true }, "codex");
     const { runId } = await startRun(store.db, {

@@ -10,9 +10,9 @@ import {
   type TestStore,
 } from "../../../test-support/test-store";
 import type { FileActorRef, TaskFrontmatter } from "~/schemas/task-file.schema";
-import { taskAttachmentsDir } from "~/server/files/file-store-root.server";
+import { taskAttachmentsDir, taskDir } from "~/server/files/file-store-root.server";
 import { listTaskAttachmentNames } from "~/server/files/task-attachments.server";
-import { readTaskSources, taskSourcesDir, writeTaskSource } from "~/server/files/task-sources.server";
+import { readTaskSources, writeTaskSource } from "~/server/files/task-sources.server";
 import { keepTaskSource, type KeepSourceInput } from "./task-sources.server";
 
 /**
@@ -71,8 +71,9 @@ const inFolder = (store: TestStore) => (existsSync(attachmentsDir(store)) ? read
 /** The folder as every reader of the task's files lists it. */
 const files = (store: TestStore) => listTaskAttachmentNames(store.slug, "VIB-1", store.dataRoot).sort();
 const kept = (store: TestStore) => readTaskSources(store.slug, "VIB-1", store.dataRoot).sources;
+/** A kept source's bytes, where file-formats.md puts them: the task's `sources/`. */
 const sourceFile = (store: TestStore, name: string) =>
-  path.join(taskSourcesDir(store.slug, "VIB-1", store.dataRoot), name);
+  path.join(taskDir(store.slug, "VIB-1", store.dataRoot), "sources", name);
 
 /** Keep `count` sources of `bytes` each on VIB-1, by the store's own writer. */
 function keepEarlier(store: TestStore, count: number, bytes = 0): void {

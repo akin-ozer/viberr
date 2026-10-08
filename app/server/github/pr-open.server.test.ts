@@ -1,5 +1,7 @@
+import { createHash } from "node:crypto";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { z } from "zod";
+import { withEnv } from "../../../test-support/env";
 import { createTestDbContext } from "../../../test-support/test-db";
 import {
   baseTaskFrontmatter,
@@ -23,7 +25,7 @@ import { findOpenScopeViolation } from "~/server/projections/policy-violations.s
 import { rebuildAll } from "~/server/projections/rebuilder.server";
 import { createPat, setProjectCredential } from "~/server/secrets/pat-store.server";
 import { resetEnvCacheForTests } from "~/server/config/env.server";
-import { composePrBody, openTaskPr, prBodySha256 } from "./pr-open.server";
+import { openTaskPr } from "./pr-open.server";
 
 const ctx = createTestDbContext();
 afterEach(ctx.cleanup);
@@ -56,6 +58,12 @@ const createPrRequest = z.object({
   base: z.string(),
   body: z.string(),
 });
+
+/** Ruling 474's `pr.bodyWritten.sha256` as the file records it: the SHA-256 of
+ *  the body Viberr sent, in hex. */
+function sha256Hex(text: string): string {
+  return createHash("sha256").update(text, "utf8").digest("hex");
+}
 
 /** The delivered revision an adoptable PR's head has to be (R16-1). */
 const DELIVERED_SHA = "d3l1ver3dsha0000000000000000000000000000";
@@ -105,47 +113,6 @@ function openPr(store: TestStore, gh: FakeGithub) {
   );
 }
 
-describe("composePrBody", () => {
-  it("carries the absolute Viberr task back-link, goal, and change summary", () => {
-    const body = composePrBody({
-      taskKey: "VIB-201",
-      projectSlug: "core",
-      title: "Attach workspace",
-      goal: "Wire the workspace.",
-      appOrigin: "https://viberr.example",
-      changeSummary: "3 files changed.",
-      evidence: ["unit tests pass"],
-    });
-    expect(body).toContain(
-      "[VIB-201 · Attach workspace](https://viberr.example/projects/core/tasks/VIB-201)",
-    );
-    expect(body).toContain("## Goal");
-    expect(body).toContain("Wire the workspace.");
-    expect(body).toContain("## Change summary");
-    expect(body).toContain("## Evidence");
-    expect(body).toContain("unit tests pass");
-  });
-
-  // N20-4 (§5a): with no configured public origin the back-link used to be a
-  // RELATIVE `/projects/…` path that 404s on github.com — worse than none. The
-  // composer now omits the link and names the task by its store key instead.
-  // Canary: put the relative fallback back and the "no link" assertions go red.
-  it("omits the link and writes the plain store key when no origin is configured", () => {
-    const body = composePrBody({
-      taskKey: "VIB-1",
-      projectSlug: "core",
-      title: "Wire it",
-      goal: "Wire.",
-      appOrigin: null,
-    });
-    expect(body).toContain("**Viberr task:** VIB-1 · Wire it");
-    // No markdown link at all, and no relative path a github.com reader could
-    // click into a 404.
-    expect(body).not.toContain("](");
-    expect(body).not.toContain("/projects/core/tasks/VIB-1");
-  });
-});
-
 describe("openTaskPr", () => {
   useAppOrigin("https://viberr.example");
 
@@ -176,8 +143,10 @@ describe("openTaskPr", () => {
     const sent = createPrRequest.parse(post.body);
     expect(sent.title).toBe("[VIB-201] Attach execution workspace to task runtime");
     expect(sent.head).toBe(BRANCH);
-    expect(sent.body).toContain("https://viberr.example/projects/");
-    expect(sent.body).toContain("VIB-201");
+    expect(sent.body).toContain(
+      "**Viberr task:** [VIB-201 · Attach execution workspace to task runtime](https://viberr.example/projects/viberr-core/tasks/VIB-201)\n\n" +
+        "## Goal\nWire the runtime workspace to the canonical task so runs anchor on it.",
+    );
     // No evidence on the task and no compare to derive rows from: no section.
     expect(sent.body).not.toContain("## Evidence");
 
@@ -186,6 +155,28 @@ describe("openTaskPr", () => {
     const fm = readTaskFile({ projectSlug: store.slug, taskKey: "VIB-201", dataRoot: store.dataRoot })!.parsed.frontmatter;
     expect(fm.pr).toMatchObject({ number: 42, state: "review" });
     expect(listAuditEvents(store.db, {}).map((a) => a.action)).toContain("github.pr.opened");
+  });
+
+  // N20-4 (§5a): with no configured public origin the back-link used to be a
+  // RELATIVE `/projects/…` path that 404s on github.com — worse than none. The
+  // body omits the link and names the task by its store key instead.
+  // Canary: put the relative fallback back and the "no link" assertions go red.
+  it("N20-4: with no configured origin the body names the task by its key and links nowhere", async () => {
+    const store = setupWithBranch();
+    const gh = fakeGithubFetch({
+      [`GET ${REPO_PATH}/pulls`]: { body: [] },
+      [`POST ${REPO_PATH}/pulls`]: {
+        status: 201,
+        body: { number: 42, html_url: "https://github.com/akin-ozer/viberr/pull/42", title: "[VIB-201] x", state: "open" },
+      },
+    });
+    await withEnv({ BETTER_AUTH_URL: "" }, () => openPr(store, gh));
+    const sent = createPrRequest.parse(gh.callsTo(`POST ${REPO_PATH}/pulls`)[0]!.body);
+    expect(sent.body).toContain("**Viberr task:** VIB-201 · Attach execution workspace to task runtime");
+    // No markdown link at all, and no relative path a github.com reader could
+    // click into a 404.
+    expect(sent.body).not.toContain("](");
+    expect(sent.body).not.toContain("/projects/");
   });
 
   it("F22-10: the PR body's change-summary + evidence come from the LIVE compare, not stale fm.github", async () => {
@@ -221,7 +212,7 @@ describe("openTaskPr", () => {
     expect(res.status).toBe("ok");
     const sent = createPrRequest.parse(gh.callsTo(`POST ${REPO_PATH}/pulls`)[0]!.body);
     // The live compare wins: 1 file / +5, 1 commit.
-    expect(sent.body).toContain("1 file(s) changed (+5/-0).");
+    expect(sent.body).toContain("## Change summary\n1 file(s) changed (+5/-0).");
     expect(sent.body).toContain("1 file(s) changed on `" + BRANCH + "` · +5 · −0");
     expect(sent.body).toContain("1 commit(s) delivered");
     // The stale reconciled numbers must NOT appear.
@@ -501,14 +492,18 @@ describe("openTaskPr", () => {
     // the discovery is the link `openTaskPr` itself minted — refreshing it is
     // not adoption and must not need a head match (a re-delivery can advance
     // the revision between the push and this read).
+    // CANARY: put the cached number through `decidePrAdoption` as well and the
+    // task's own PR #7 is refused as a `branch_collision`.
     const store = setupWithBranch("VIB-201", {
       pr: { number: 7, state: "review", title: "[VIB-201] x" },
       workRevision: deliveredRevision(),
     });
     const gh = fakeGithubFetch({
-      // Step 0 confirms the cached PR is still open on GitHub and reuses it.
-      [`GET ${REPO_PATH}/pulls/7`]: {
-        body: { number: 7, html_url: "https://github.com/akin-ozer/viberr/pull/7", title: "[VIB-201] x", state: "open", head: { sha: "moved-on-since" } },
+      // Step 0 cannot confirm the cached PR (`GET /pulls/7` answers 404), so the
+      // head listing decides, and it names #7 at a head that is NOT the
+      // delivered revision.
+      [`GET ${REPO_PATH}/pulls`]: {
+        body: [{ number: 7, html_url: "https://github.com/akin-ozer/viberr/pull/7", title: "[VIB-201] x", state: "open", head: { sha: "moved-on-since" } }],
       },
       [`POST ${REPO_PATH}/pulls`]: { status: 500, body: { message: "should not be called" } },
     });
@@ -533,18 +528,65 @@ describe("openTaskPr", () => {
     expect(findOpenScopeViolation(store.db, store.slug, "pull_request:write", "VIB-201")).not.toBeNull();
   });
 
-  it("a 422 'No commits between' is an honest nothing_to_review, NOT network_unavailable", async () => {
+  /**
+   * A 422 on `POST /pulls` is classified by GitHub's own words, which ride in
+   * the envelope or in `errors[].message`. GitHub answered, so no row is ever
+   * `network_unavailable`, and none fabricates a PR on the task.
+   */
+  it.each([
+    {
+      // The reason is honest (it was mislabeled network before).
+      name: "a 422 'No commits between' is an honest nothing_to_review, NOT network_unavailable",
+      body: { message: "Validation Failed: No commits between main and vib-201" },
+      status: "nothing_to_review",
+      quote: "No commits between",
+    },
+    {
+      // The envelope message is the constant "Validation Failed" — the sentence
+      // that says WHICH validation failed rides in `errors[].message`. Sniffing
+      // only the envelope makes every 422 look identical.
+      name: "reads the 422 reason out of GitHub's errors[] rows, not just the envelope",
+      body: {
+        message: "Validation Failed",
+        errors: [
+          { resource: "PullRequest", field: "base", code: "custom",
+            message: "No commits between main and vib-201" },
+        ],
+      },
+      status: "nothing_to_review",
+      quote: "No commits between",
+    },
+    {
+      // Canary: return `network_unavailable` from the residual again.
+      name: "an unmapped 422 is `refused` and carries GitHub's own words",
+      body: {
+        message: "Validation Failed",
+        errors: [{ resource: "PullRequest", code: "custom", message: "A pull request title is required" }],
+      },
+      status: "refused",
+      quote: "A pull request title is required",
+    },
+    {
+      // A validation refusal this module has no reading for keeps the residual
+      // failure — with GitHub's own words — instead of borrowing the empty-branch
+      // meaning and marking the task as having produced no change. A prose
+      // "base is invalid" is not the structured base row either.
+      name: "an UNRELATED 422 is neither an empty branch nor a collision",
+      body: {
+        message: "Validation Failed",
+        errors: [{ message: "base is invalid" }],
+      },
+      status: "refused",
+      quote: "base is invalid",
+    },
+  ])("ruling 128: $name", async ({ body, status, quote }) => {
     const store = setupWithBranch();
     const gh = fakeGithubFetch({
       [`GET ${REPO_PATH}/pulls`]: { body: [] },
-      [`POST ${REPO_PATH}/pulls`]: {
-        status: 422,
-        body: { message: "Validation Failed: No commits between main and vib-201" },
-      },
+      [`POST ${REPO_PATH}/pulls`]: { status: 422, body },
     });
     const res = await openPr(store, gh);
-    expect(res.status).toBe("nothing_to_review");
-    // No fabricated PR, and the reason is honest (was mislabeled network before).
+    expect(res).toMatchObject({ status, message: expect.stringContaining(quote) });
     const fm = readTaskFile({ projectSlug: store.slug, taskKey: "VIB-201", dataRoot: store.dataRoot })!.parsed.frontmatter;
     expect(fm.pr).toBeNull();
   });
@@ -571,24 +613,6 @@ describe("openTaskPr", () => {
     expect(fm.pr).toBeNull();
   });
 
-  it("ruling 128: an unmapped 422 is `refused` and carries GitHub's own words", async () => {
-    // Canary: return `network_unavailable` from the residual again.
-    const store = setupWithBranch();
-    const gh = fakeGithubFetch({
-      [`GET ${REPO_PATH}/pulls`]: { body: [] },
-      [`POST ${REPO_PATH}/pulls`]: {
-        status: 422,
-        body: {
-          message: "Validation Failed",
-          errors: [{ resource: "PullRequest", code: "custom", message: "A pull request title is required" }],
-        },
-      },
-    });
-    const res = await openPr(store, gh);
-    expect(res.status).toBe("refused");
-    expect(res.status === "refused" ? res.message : "").toContain("A pull request title is required");
-  });
-
   it("F21-9: an UNREADABLE head probe never falls through to create", async () => {
     // The probe answered 200 with a payload the reader refused, so whether a PR
     // already occupies `head` is UNKNOWN. Before this, an unreadable answer was
@@ -608,30 +632,6 @@ describe("openTaskPr", () => {
     expect(gh.callsTo(`POST ${REPO_PATH}/pulls`)).toHaveLength(0);
     const fm = readTaskFile({ projectSlug: store.slug, taskKey: "VIB-201", dataRoot: store.dataRoot })!.parsed.frontmatter;
     expect(fm.pr).toBeNull();
-  });
-
-  it("reads the 422 reason out of GitHub's errors[] rows, not just the envelope", async () => {
-    // The envelope message is the constant "Validation Failed" — the sentence
-    // that says WHICH validation failed rides in `errors[].message`. Sniffing
-    // only the envelope makes every 422 look identical.
-    const store = setupWithBranch();
-    const gh = fakeGithubFetch({
-      [`GET ${REPO_PATH}/pulls`]: { body: [] },
-      [`POST ${REPO_PATH}/pulls`]: {
-        status: 422,
-        body: {
-          message: "Validation Failed",
-          errors: [
-            { resource: "PullRequest", field: "base", code: "custom",
-              message: "No commits between main and vib-201" },
-          ],
-        },
-      },
-    });
-    const res = await openPr(store, gh);
-    expect(res.status).toBe("nothing_to_review");
-    if (res.status !== "nothing_to_review") throw new Error("expected nothing_to_review");
-    expect(res.message).toContain("No commits between");
   });
 
   it("a 422 'a pull request already exists' is a COLLISION, never nothing_to_review", async () => {
@@ -707,51 +707,13 @@ describe("openTaskPr", () => {
     expect(listAuditEvents(store.db, { action: "github.pr.opened" })).toHaveLength(0);
   });
 
-  it("an UNRELATED 422 is neither an empty branch nor a collision", async () => {
-    // A validation refusal this module has no reading for keeps the residual
-    // failure — with GitHub's own words — instead of borrowing the empty-branch
-    // meaning and marking the task as having produced no change.
-    const store = setupWithBranch();
-    const gh = fakeGithubFetch({
-      [`GET ${REPO_PATH}/pulls`]: { body: [] },
-      [`POST ${REPO_PATH}/pulls`]: {
-        status: 422,
-        body: {
-          message: "Validation Failed",
-          errors: [{ message: "base is invalid" }],
-        },
-      },
-    });
-    const res = await openPr(store, gh);
-    // Ruling 128: GitHub ANSWERED, so an unmapped 422 is `refused` (quoting
-    // GitHub), never `network_unavailable`.
-    expect(res.status).toBe("refused");
-    if (res.status !== "refused") throw new Error("expected refused");
-    expect(res.message).toContain("base is invalid");
-    const fm = readTaskFile({ projectSlug: store.slug, taskKey: "VIB-201", dataRoot: store.dataRoot })!.parsed.frontmatter;
-    expect(fm.pr).toBeNull();
-  });
-
   it("skips creation when the task already carries a live PR (agent-side capture) — reconciles instead (B5)", async () => {
-    const store = setupTestStore(ctx);
     // The agent delivered on ITS OWN branch and the PR was captured into
     // fm.pr — the deterministic-branch head= dedup would never match it.
-    writeTask(store.dataRoot, store.slug, {
-      frontmatter: baseTaskFrontmatter("VIB-201", {
-        title: "Attach execution workspace to task runtime",
-        stage: "review",
-        branch: "agent-made-this-branch",
-        pr: { number: 7, state: "review", title: "[VIB-201] agent PR" },
-      }),
-      goal: "Deliver.",
+    const store = setupWithBranch("VIB-201", {
+      branch: "agent-made-this-branch",
+      pr: { number: 7, state: "review", title: "[VIB-201] agent PR" },
     });
-    rebuildAll(store.db, { dataRoot: store.dataRoot });
-    const pat = createPat(
-      store.db,
-      { userId: store.users.arda.id, label: "bot", token: "ghp_propen00000002" },
-      ACTOR,
-    );
-    setProjectCredential(store.db, { projectSlug: store.slug, patId: pat.id }, ACTOR);
 
     const gh = fakeGithubFetch({
       [`GET ${REPO_PATH}/pulls/7`]: {
@@ -768,23 +730,10 @@ describe("openTaskPr", () => {
   });
 
   it("never downgrades a human-set \"accepted\" (merge pending) on the reuse path (B3)", async () => {
-    const store = setupTestStore(ctx);
-    writeTask(store.dataRoot, store.slug, {
-      frontmatter: baseTaskFrontmatter("VIB-201", {
-        title: "Attach execution workspace to task runtime",
-        stage: "done",
-        branch: BRANCH,
-        pr: { number: 7, state: "accepted", title: "[VIB-201] x" },
-      }),
-      goal: "Deliver.",
+    const store = setupWithBranch("VIB-201", {
+      stage: "done",
+      pr: { number: 7, state: "accepted", title: "[VIB-201] x" },
     });
-    rebuildAll(store.db, { dataRoot: store.dataRoot });
-    const pat = createPat(
-      store.db,
-      { userId: store.users.arda.id, label: "bot", token: "ghp_propen00000003" },
-      ACTOR,
-    );
-    setProjectCredential(store.db, { projectSlug: store.slug, patId: pat.id }, ACTOR);
 
     const gh = fakeGithubFetch({
       // Still open on GitHub — "review" must NOT clobber "accepted".
@@ -800,33 +749,16 @@ describe("openTaskPr", () => {
     expect(gh.callsTo(`POST ${REPO_PATH}/pulls`)).toHaveLength(0);
   });
 
-  /** Ruling 160 (pass 35, F35-11): a closed-unmerged cache, with or without a
-   *  person's answer on it. The three tests below share this seed. */
+  /** Ruling 160 (pass 35, F35-11): a closed-unmerged cache, with an unanswered
+   *  closure record or none. The two tests below share this seed. */
   function seedClosedCache(closure: NonNullable<PrRef["closure"]> | null) {
-    const store = setupTestStore(ctx);
     const pr: NonNullable<TaskFrontmatter["pr"]> = {
       number: 7,
       state: "closed",
       title: "[VIB-201] abandoned",
     };
     if (closure) pr.closure = closure;
-    writeTask(store.dataRoot, store.slug, {
-      frontmatter: baseTaskFrontmatter("VIB-201", {
-        title: "Attach execution workspace to task runtime",
-        stage: "review",
-        branch: BRANCH,
-        pr,
-      }),
-      goal: "Deliver.",
-    });
-    rebuildAll(store.db, { dataRoot: store.dataRoot });
-    const pat = createPat(
-      store.db,
-      { userId: store.users.arda.id, label: "bot", token: "ghp_propen00000004" },
-      ACTOR,
-    );
-    setProjectCredential(store.db, { projectSlug: store.slug, patId: pat.id }, ACTOR);
-    return store;
+    return setupWithBranch("VIB-201", { pr });
   }
 
   it("ruling 160: a cached closed-unmerged PR with no answered closure refuses a fresh PR (closed_by_human)", async () => {
@@ -901,27 +833,6 @@ describe("openTaskPr", () => {
     expect(again).toEqual({ status: "closed_by_human", prNumber: 7, closedBy: "akin-ozer" });
     expect(gh.calls).toHaveLength(before);
     expect(divergence()).toHaveLength(1);
-  });
-
-  it("ruling 160: a closed cache whose closure a person ANSWERED clears the way for a fresh PR", async () => {
-    const store = seedClosedCache({
-      at: "2026-09-06T19:33:19.000Z",
-      by: "akin-ozer",
-      answered: { at: "2026-09-06T19:40:00.000Z", byUserId: "u_arda" },
-    });
-    const gh = fakeGithubFetch({
-      [`GET ${REPO_PATH}/pulls`]: { body: [] },
-      [`POST ${REPO_PATH}/pulls`]: {
-        status: 201,
-        body: { number: 43, html_url: "https://github.com/akin-ozer/viberr/pull/43", title: "[VIB-201] Attach execution workspace to task runtime", state: "open" },
-      },
-    });
-    const res = await openPr(store, gh);
-    expect(res).toMatchObject({ status: "ok", prNumber: 43, created: true });
-    const fm = readTaskFile({ projectSlug: store.slug, taskKey: "VIB-201", dataRoot: store.dataRoot })!.parsed.frontmatter;
-    // A different PR never inherits the old one's closure.
-    expect(fm.pr).toMatchObject({ number: 43, state: "review" });
-    expect(fm.pr?.closure).toBeUndefined();
   });
 
   it("ruling 160: a cached 'review' PR that GitHub reports CLOSED unmerged is a person's decision: recorded through the reconciler, surfaced once, no fresh PR", async () => {
@@ -1002,26 +913,12 @@ describe("openTaskPr", () => {
   });
 
   it("a MERGED cached PR clears the way — a reworked branch opens a fresh PR (DG-1)", async () => {
-    const store = setupTestStore(ctx);
-    writeTask(store.dataRoot, store.slug, {
-      frontmatter: baseTaskFrontmatter("VIB-201", {
-        title: "Attach execution workspace to task runtime",
-        stage: "review",
-        branch: BRANCH,
-        // The prior PR on this branch already merged; the branch was then
-        // reworked (new commits). Resurrecting the merged PR would dead-end
-        // acceptance at "merge pending" forever.
-        pr: { number: 7, state: "merged", title: "[VIB-201] already merged" },
-      }),
-      goal: "Deliver.",
+    const store = setupWithBranch("VIB-201", {
+      // The prior PR on this branch already merged; the branch was then
+      // reworked (new commits). Resurrecting the merged PR would dead-end
+      // acceptance at "merge pending" forever.
+      pr: { number: 7, state: "merged", title: "[VIB-201] already merged" },
     });
-    rebuildAll(store.db, { dataRoot: store.dataRoot });
-    const pat = createPat(
-      store.db,
-      { userId: store.users.arda.id, label: "bot", token: "ghp_propen00000005" },
-      ACTOR,
-    );
-    setProjectCredential(store.db, { projectSlug: store.slug, patId: pat.id }, ACTOR);
 
     const gh = fakeGithubFetch({
       // No open PR for the branch → a fresh one is created (the merged #7 is
@@ -1041,25 +938,11 @@ describe("openTaskPr", () => {
   });
 
   it("a cached 'review' PR that GitHub reports MERGED out-of-band opens a fresh PR, not the dead one (DG-1)", async () => {
-    const store = setupTestStore(ctx);
-    writeTask(store.dataRoot, store.slug, {
-      frontmatter: baseTaskFrontmatter("VIB-201", {
-        title: "Attach execution workspace to task runtime",
-        stage: "review",
-        branch: BRANCH,
-        // Cache still says "review" (reconcile hasn't run), but the PR was
-        // merged out-of-band on GitHub and the branch reworked since.
-        pr: { number: 7, state: "review", title: "[VIB-201] merged out-of-band" },
-      }),
-      goal: "Deliver.",
+    const store = setupWithBranch("VIB-201", {
+      // Cache still says "review" (reconcile hasn't run), but the PR was
+      // merged out-of-band on GitHub and the branch reworked since.
+      pr: { number: 7, state: "review", title: "[VIB-201] merged out-of-band" },
     });
-    rebuildAll(store.db, { dataRoot: store.dataRoot });
-    const pat = createPat(
-      store.db,
-      { userId: store.users.arda.id, label: "bot", token: "ghp_propen00000006" },
-      ACTOR,
-    );
-    setProjectCredential(store.db, { projectSlug: store.slug, patId: pat.id }, ACTOR);
 
     const gh = fakeGithubFetch({
       // The live PR is CLOSED+merged on GitHub → must not be reused.
@@ -1081,22 +964,15 @@ describe("openTaskPr", () => {
   it("P13-D-28: reusing the SAME PR keeps the reconciler-owned checks + review", async () => {
     // openTaskPr never reads CI or reviews. Rebuilding the ref from scratch on a
     // reuse would blank both pills until the next 5-minute poller tick.
-    const store = setupWithBranch();
-    writeTask(store.dataRoot, store.slug, {
-      frontmatter: baseTaskFrontmatter("VIB-201", {
-        title: "Attach execution workspace to task runtime",
-        stage: "review",
-        branch: BRANCH,
-        pr: {
-          number: 42,
-          state: "review",
-          title: "old title",
-          checks: { total: 3, passing: 2, failing: 0, pending: 1 },
-          review: "approved",
-        },
-      }),
+    const store = setupWithBranch("VIB-201", {
+      pr: {
+        number: 42,
+        state: "review",
+        title: "old title",
+        checks: { total: 3, passing: 2, failing: 0, pending: 1 },
+        review: "approved",
+      },
     });
-    rebuildAll(store.db, { dataRoot: store.dataRoot });
     const gh = fakeGithubFetch({
       [`GET ${REPO_PATH}/pulls/42`]: {
         body: {
@@ -1124,48 +1000,7 @@ describe("openTaskPr", () => {
     });
   });
 
-  it("P13-D-28: a DIFFERENT (freshly opened) PR starts with no checks and no review", async () => {
-    const store = setupWithBranch();
-    writeTask(store.dataRoot, store.slug, {
-      frontmatter: baseTaskFrontmatter("VIB-201", {
-        title: "Attach execution workspace to task runtime",
-        stage: "review",
-        branch: BRANCH,
-        pr: {
-          number: 42,
-          state: "merged",
-          title: "old merged PR",
-          checks: { total: 3, passing: 3, failing: 0, pending: 0 },
-          review: "approved",
-        },
-      }),
-    });
-    rebuildAll(store.db, { dataRoot: store.dataRoot });
-    const gh = fakeGithubFetch({
-      [`GET ${REPO_PATH}/pulls`]: { body: [] },
-      [`POST ${REPO_PATH}/pulls`]: {
-        status: 201,
-        body: {
-          number: 51,
-          html_url: "https://github.com/akin-ozer/viberr/pull/51",
-          title: "[VIB-201] Attach execution workspace to task runtime",
-          state: "open",
-        },
-      },
-    });
-    await openPr(store, gh);
-    const fm = readTaskFile({
-      projectSlug: store.slug,
-      taskKey: "VIB-201",
-      dataRoot: store.dataRoot,
-    })!.parsed.frontmatter;
-    // Ruling 474: the one thing a fresh PR does start with is the record of
-    // the body it was opened with.
-    expect(Object.keys(fm.pr!)).toEqual(["number", "state", "title", "bodyWritten"]);
-    expect(fm.pr).toMatchObject({ number: 51, state: "review" });
-  });
-
-  it("degrades cleanly when no repo/PAT is configured (no throw, typed result)", async () => {
+  it("passes the project's context failure through when no PAT is bound (no throw, typed result)", async () => {
     const store = setupTestStore(ctx);
     writeTask(store.dataRoot, store.slug, {
       frontmatter: baseTaskFrontmatter("VIB-9", { stage: "review", branch: "vib-9-x" }),
@@ -1178,7 +1013,7 @@ describe("openTaskPr", () => {
       { ...ACTOR, userId: store.users.arda.id },
       { dataRoot: store.dataRoot },
     );
-    expect(["no_pat_configured", "no_repo_configured"]).toContain(res.status);
+    expect(res).toEqual({ status: "no_pat_configured", repo: "akin-ozer/viberr" });
   });
 });
 
@@ -1190,20 +1025,13 @@ describe("openTaskPr", () => {
  */
 describe("ruling 135: writePrToTask and the PR head", () => {
   it("reusing the SAME PR writes the live head and clears a satisfied unpushed record", async () => {
-    const store = setupWithBranch();
-    writeTask(store.dataRoot, store.slug, {
-      frontmatter: baseTaskFrontmatter("VIB-201", {
-        title: "Attach execution workspace to task runtime",
-        stage: "review",
-        branch: BRANCH,
-        workRevision: { id: "rev_1", headSha: "9".repeat(40), treeSha: null, branch: BRANCH, createdAt: "2026-09-04T00:00:00.000Z", sourceProfileId: "developer" },
-        pr: {
-          number: 42, state: "review", title: "old title", headSha: "1".repeat(40),
-          unpushedRevision: { revisionSha: "9".repeat(40), prHeadSha: "1".repeat(40), relation: "behind" },
-        },
-      }),
+    const store = setupWithBranch("VIB-201", {
+      workRevision: { id: "rev_1", headSha: "9".repeat(40), treeSha: null, branch: BRANCH, createdAt: "2026-09-04T00:00:00.000Z", sourceProfileId: "developer" },
+      pr: {
+        number: 42, state: "review", title: "old title", headSha: "1".repeat(40),
+        unpushedRevision: { revisionSha: "9".repeat(40), prHeadSha: "1".repeat(40), relation: "behind" },
+      },
     });
-    rebuildAll(store.db, { dataRoot: store.dataRoot });
     const gh = fakeGithubFetch({
       [`GET ${REPO_PATH}/pulls/42`]: {
         body: { number: 42, html_url: "https://github.com/akin-ozer/viberr/pull/42", title: "new title", state: "open", merged: false, head: { sha: "9".repeat(40) } },
@@ -1215,25 +1043,21 @@ describe("ruling 135: writePrToTask and the PR head", () => {
     expect(fm.pr).toEqual({ number: 42, state: "review", title: "new title", headSha: "9".repeat(40) });
   });
 
-  it("a DIFFERENT PR does not inherit the old head", async () => {
-    const store = setupWithBranch();
-    writeTask(store.dataRoot, store.slug, {
-      frontmatter: baseTaskFrontmatter("VIB-201", {
-        title: "Attach execution workspace to task runtime",
-        stage: "review",
-        branch: BRANCH,
-        // Ruling 160: a closed cache clears the way only once a person has
-        // answered the closure; the fresh PR inherits neither the head nor it.
-        pr: {
-          number: 7,
-          state: "closed",
-          title: "[VIB-201] abandoned",
-          headSha: "1".repeat(40),
-          closure: { at: "2026-09-06T19:33:19.000Z", by: "akin-ozer", answered: { at: "2026-09-06T19:40:00.000Z", byUserId: "u_arda" } },
-        },
-      }),
+  it("a DIFFERENT PR inherits nothing from the old record: head, closure, checks or review (rulings 135, 160; P13-D-28)", async () => {
+    const store = setupWithBranch("VIB-201", {
+      // Ruling 160: a closed cache clears the way only once a person has
+      // answered the closure. The fresh PR inherits none of the old record:
+      // not the head, the closure, or the reconciler-owned checks and review.
+      pr: {
+        number: 7,
+        state: "closed",
+        title: "[VIB-201] abandoned",
+        headSha: "1".repeat(40),
+        checks: { total: 3, passing: 3, failing: 0, pending: 0 },
+        review: "approved",
+        closure: { at: "2026-09-06T19:33:19.000Z", by: "akin-ozer", answered: { at: "2026-09-06T19:40:00.000Z", byUserId: "u_arda" } },
+      },
     });
-    rebuildAll(store.db, { dataRoot: store.dataRoot });
     const gh = fakeGithubFetch({
       [`GET ${REPO_PATH}/pulls`]: { body: [] },
       [`POST ${REPO_PATH}/pulls`]: {
@@ -1251,7 +1075,7 @@ describe("ruling 135: writePrToTask and the PR head", () => {
       number: 43,
       state: "review",
       title: "[VIB-201] t",
-      bodyWritten: { sha256: prBodySha256(sent.body), revision: null },
+      bodyWritten: { sha256: sha256Hex(sent.body), revision: null },
     });
   });
 });
@@ -1265,21 +1089,23 @@ describe("ruling 474: a reused PR's body follows the delivery it describes", () 
   const REWORK_SHA = "cc9aa30" + "2".repeat(33);
   const PR_PATH = `${REPO_PATH}/pulls/2`;
   const PR_TITLE = "[VIB-201] Attach execution workspace to task runtime";
-  const FIRST_BODY = composePrBody({
-    taskKey: "VIB-201",
-    projectSlug: "core",
-    title: "Attach execution workspace to task runtime",
-    goal: "Wire the runtime workspace to the canonical task so runs anchor on it.",
-    appOrigin: "https://viberr.example",
-    changeSummary: "10 file(s) changed (+814/-15).",
-    evidence: [
-      `10 file(s) changed on \`${BRANCH}\` · +814 · −15`,
-      "3 commit(s) delivered, revision 7cf1edc",
-    ],
-  });
+  /** The description PR #2 was opened with, for revision 7cf1edc. */
+  const FIRST_BODY = [
+    "**Viberr task:** [VIB-201 · Attach execution workspace to task runtime](https://viberr.example/projects/viberr-core/tasks/VIB-201)",
+    "",
+    "## Goal",
+    "Wire the runtime workspace to the canonical task so runs anchor on it.",
+    "",
+    "## Change summary",
+    "10 file(s) changed (+814/-15).",
+    "",
+    "## Evidence",
+    `- 10 file(s) changed on \`${BRANCH}\` · +814 · −15`,
+    "- 3 commit(s) delivered, revision 7cf1edc",
+  ].join("\n");
   /** What the service PATCHes: the fake records the request body as `unknown`. */
   const patchRequest = z.object({ body: z.string() });
-  const recordedFirst: PrBodyWritten = { sha256: prBodySha256(FIRST_BODY), revision: FIRST_SHA };
+  const recordedFirst: PrBodyWritten = { sha256: sha256Hex(FIRST_BODY), revision: FIRST_SHA };
 
   function reworkRevision(): TaskFrontmatter["workRevision"] {
     return {
@@ -1387,7 +1213,7 @@ describe("ruling 474: a reused PR's body follows the delivery it describes", () 
     expect(sent[0]).toContain("_Opened by Viberr for task VIB-201.");
 
     expect(readParsed(store).frontmatter.pr?.bodyWritten).toEqual({
-      sha256: prBodySha256(sent[0]!),
+      sha256: sha256Hex(sent[0]!),
       revision: REWORK_SHA,
     });
     const audit = listAuditEvents(store.db, { action: "github.pr.body_updated" });
@@ -1501,7 +1327,7 @@ describe("ruling 474: a reused PR's body follows the delivery it describes", () 
     expect(sent).toHaveLength(1);
     expect(sent[0]).toContain("5 commit(s) delivered, revision cc9aa30");
     expect(readParsed(store).frontmatter.pr?.bodyWritten).toEqual({
-      sha256: prBodySha256(sent[0]!),
+      sha256: sha256Hex(sent[0]!),
       revision: REWORK_SHA,
     });
     expect(listAuditEvents(store.db, { action: "github.pr.body_updated" })[0]!.details).toEqual({

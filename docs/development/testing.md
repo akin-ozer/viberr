@@ -5,7 +5,7 @@
 > `package.json` scripts, `vitest.config.ts`, `test-support/*`, `app/shared/docs/*`,
 > `.oxlintrc.json`, `tools/oxlint/anti-slop/`, `playwright.config.ts`, `scripts/e2e.ts`,
 > `compose.e2e.yml`, `e2e/*`, `.github/workflows/ci.yml`. Requires Node 26+ and `npm ci`.
-> Verified against `claude/test-audit` @ `8748a583` (2026-09-27, ruling 512).
+> Verified against `claude/fervent-goodall-u18pnu` @ `9e5db35a` (2026-10-08, ruling 704).
 
 ## 0. Before you add or change a test
 
@@ -112,10 +112,11 @@ chromium` → `npm run e2e`, uploading `playwright-report/` for 7 days on failur
 are needed: the unit setup file seeds synthetic ones and `compose.e2e.yml` carries its own.
 
 The test step runs on the image's userland, not the runner's (ruling 622): `npm test`
-inside `node:26-slim`, the Dockerfile's base, with the git and ca-certificates its
-runtime stage adds, as the runner's own uid. The server shells out to `rm`, `chmod` and
-`git`, and the runner's Ubuntu carries other versions of them (its coreutils 9.4 has no
-`chmod -P`; the image's 9.7 does). The agent-tree suites prove refusals that root never
+inside `node:26-slim`, the Dockerfile's base, with the git, ca-certificates and
+poppler-utils its runtime stage adds, as the runner's own uid. The server shells out to
+`rm`, `chmod`, `git` and `pdftotext` (ruling 629), and the runner's Ubuntu carries other
+versions of them (its coreutils 9.4 has no `chmod -P`; the image's 9.7 does) or none: the
+PDF reader's test skips on a host without poppler. The agent-tree suites prove refusals that root never
 meets, so they need an unprivileged user, and `--init` reaps orphans as the app's
 `init: true` does (the process suites wait for a killed group's members to go). Run the
 same step locally as a non-root user
@@ -125,7 +126,7 @@ whose uid is outside the agent range (20001 to 59999), from the checkout:
 docker run --rm --init -v "$PWD:/w" -w /w -e DEBIAN_FRONTEND=noninteractive \
   -e HOST_UID="$(id -u)" -e HOST_GID="$(id -g)" node:26-slim sh -euc '
     apt-get update -qq
-    apt-get install -y -qq --no-install-recommends git ca-certificates > /dev/null
+    apt-get install -y -qq --no-install-recommends git ca-certificates poppler-utils > /dev/null
     exec setpriv --reuid="$HOST_UID" --regid="$HOST_GID" --clear-groups env HOME=/tmp npm test'
 ```
 
@@ -142,11 +143,11 @@ the only gates. Jobs run again since 2026-10-01.
   tests and hooks alike, `testTimeout: 20_000` and `hookTimeout: 20_000` (a suite that
   seeds the demo store in `beforeAll` needs the same room as its tests; raise them there,
   and let a test raise its own only while it waits on a real process). A component test
-  opts into jsdom per file with a `// @vitest-environment jsdom` comment (100 files).
+  opts into jsdom per file with a `// @vitest-environment jsdom` comment (107 files).
   `db/`, `scripts/`, `e2e/`, `test-support/` and `tools/` are not collected; cover script
   behaviour by extracting it into `app/` (the CLIs are thin wrappers over `app/server`
-  modules) or through e2e. The tree holds 510 test files under `app/`, 290 of them
-  `*.server.test.ts` (counted 2026-09-27).
+  modules) or through e2e. The tree holds 547 test files under `app/`, 313 of them
+  `*.server.test.ts` (counted 2026-10-08).
 - `test-support/setup-env.ts` runs before any app module loads and makes the suite
   hermetic:
   - seeds `VIBERR_SESSION_SECRET` and `VIBERR_SECRET_ENCRYPTION_KEY` (`??=`, so an
@@ -220,39 +221,40 @@ the only gates. Jobs run again since 2026-10-01.
 |---|---|
 | `test-db.ts` | `createTestDbContext()` → `makeDb()` (a migrated temp SQLite), `makeTempDir(prefix = "viberr-test-")`, `cleanup()` (closes the databases, then removes the dirs) |
 | `temp-dirs.ts` | `createTempDirs()` → `make(prefix)` (an `mkdtemp` dir under the OS temp dir) and `cleanup()`, which removes every dir made since the last one; for a test with no database (`createTestDbContext` and `setupAppTest` keep their dirs through it). Register `afterAll(temp.cleanup)` when a `describe` makes a dir at collection time and shares it across its cases, `afterEach` otherwise. Whatever no cleanup removed goes when the test file finishes (an `afterAll` the module registers as the file loads), so a file that forgets one still leaves nothing in the OS temp folder |
-| `test-store.ts` | `setupTestStore(ctx)` → temp data root + project `viberr-core` (governed template, prefix `VIB`, next number 100, repo `akin-ozer/viberr`, no agents) with users arda (org admin, project admin), murat (maintainer), selin (contributor), elif (viewer), deniz (non-member), each with a unique `@viberr.test` email; `writeProject`, `writeTask`, `baseTaskFrontmatter`; `actorOf(user)` → the `{ userId, label }` actor a user writes as (label = email); `insertTestUser(db, id)` → a lone org-member users row (name = id, email `<id>@viberr.test`) for a test that needs a real user without the store; `MERGE_STAGE_BOARD` (the k9s board: a Merge stage past Review, pass 35) and `REVIEW_STAGE_REVIEWER` (a verdict-capable reviewer eligible at Review only) |
-| `projected-store.ts` | `setupProjectedStore(ctx)` → `setupTestStore(ctx)` with the SQLite projection already rebuilt; kept apart so a test that never projects does not load the rebuilder |
+| `test-store.ts` | `setupTestStore(ctx)` → temp data root + project `viberr-core` (governed template, prefix `VIB`, next number 100, repo `akin-ozer/viberr`, no agents) with users arda (org admin, project admin), murat (maintainer), selin (contributor), elif (viewer), deniz (non-member), each with a unique `@viberr.test` email; `writeProject`, `writeTask`, `baseTaskFrontmatter`; `actorOf(user)` → the `{ userId, label }` actor a user writes as (label = email); `insertTestUser(db, id)` → a lone org-member users row (name = id, email `<id>@viberr.test`) for a test that needs a real user without the store; `REVIEW_APPROVAL_WORKFLOW` (the Standard board with a person's approval into Review) and `approveReviewEntry(store)`, which writes it onto the store's project.md; `MERGE_STAGE_BOARD` (the k9s board: a Merge stage past Review, pass 35), `REVIEW_STAGE_REVIEWER` (a verdict-capable reviewer eligible at Review only), `REVIEWER_ENGAGEMENT` (the seeded Reviewer engaged on a task: verdict-capable, delivering nothing, its verdict binding) and `OPEN_DECISION` (the operator's open input packet with one `request_edit` option, a decision `decisions.server` counts) |
+| `projected-store.ts` | `setupProjectedStore(ctx)` → `setupTestStore(ctx)` with the SQLite projection already rebuilt; `reconfigureProject(store, patch \| fn)` writes `patch` (or what `fn(current)` returns) over the frontmatter of the store's project.md and re-projects, the way a board saved in its settings reaches every reader; kept apart so a test that never projects does not load the rebuilder |
 | `stale-mount.ts` | `staleViewOf(absPath)` → `{ serve() }`: take it before a write and call `serve()` after, and the path names the file that write replaced again, same inode, bytes and mtime: the view a stale VirtioFS mount hands a reader (VIB-1, ruling 513). The writers' stale-read tests make one this way; rewriting the file in place would be another writer, which the repair lets win |
-| `test-app.ts` | `setupAppTest()` route-level harness: `NODE_ENV=test`, fresh secrets, its own temp `VIBERR_DATA_ROOT`, `VIBERR_SEED_ADMIN_*` cleared, env cache reset, fake runtime installed; `cookieFor(userId)` signs in through better-auth with `APP_TEST_PASSWORD` (hashed on the file's first sign-in and shared by every later one, since scrypt is deliberately slow; clearing that user's login rate-limit bucket first), `csrfFor(sessionId)`, `sessionFor(userId)` (one signed-in session and its CSRF token per person, made on first use; `forgetSession` drops one a test signed out), `request(url, { cookie, … })` adds `Origin: http://localhost:5173`, `cleanup()` |
-| `fake-runtime.ts` | `installFakeRuntime()`, `queueFakeRun({ lines, extraFacts, backend, occurredAt, sessionId, keepRunning, outcome, gate })`, `startedRunSpecs()`, `lastRunSpec()`; completion compaction (ruling 376): `queueFakeCompaction(backend, outcome, onCompact?)`, `compactedRunSpecs()`; `drainRunCompletions(timeoutMs = 5_000)` waits for the work a run's exit and its completion callbacks set off (a callback `void`s its effects, so nothing a test awaits covers them) — await it in `afterEach` before cleanup, or the chain meets a closed database; past the ceiling it stops waiting instead of failing. `installRunAdapters(adapters)` installs a test's own adapters with the same tracking |
+| `test-app.ts` | `setupAppTest()` route-level harness: `NODE_ENV=test`, fresh secrets, its own temp `VIBERR_DATA_ROOT`, `VIBERR_SEED_ADMIN_*` cleared, env cache reset, fake runtime installed; `cookieFor(userId)` signs in through better-auth with `APP_TEST_PASSWORD` (hashed on the file's first sign-in and shared by every later one, since scrypt is deliberately slow; clearing that user's login rate-limit bucket first), `csrfFor(sessionId)`, `sessionFor(userId)` (one signed-in session and its CSRF token per person, made on first use; `forgetSession` drops one a test signed out), `request(url, { cookie, … })` adds `Origin: http://localhost:5173`, `cleanup()`; `routeArgs(request, params, pattern?)` → the whole argument a route's loader or action is handed (`url`, `params`, `pattern`, a fresh `RouterContextProvider`; the pattern defaults to the request's path) |
+| `fake-runtime.ts` | `installFakeRuntime()`, `queueFakeRun({ lines, extraFacts, backend, occurredAt, sessionId, keepRunning, outcome, gate })`, `startedRunSpecs()`, `lastRunSpec()`; completion compaction (ruling 376): `queueFakeCompaction(backend, outcome, onCompact?)`, `compactedRunSpecs()`; `drainRunCompletions(timeoutMs = 5_000)` waits for the work a run's exit and its completion callbacks set off (a callback `void`s its effects, so nothing a test awaits covers them) — await it in `afterEach` before cleanup, or the chain meets a closed database; past the ceiling it stops waiting instead of failing; `untilRunSettled(db, runId)` waits for that run's row to leave running and queued (2 s at most), then drains. `installRunAdapters(adapters)` installs a test's own adapters with the same tracking |
 | `fake-github.ts` | `fakeGithubFetch({ "GET /user": spec \| fn })` → `{ fetchImpl, calls, callsTo }`; unmatched → 404; `unreachableFetch()`; `unreadableResponse()` → a 200 whose headers throw on read (a throw from inside a GitHub pass) |
 | `git-origin.ts` | a local GitHub stand-in for the real git paths: `createLocalOrigin(origins, { repo, files?, empty? })` → a bare repo with `advance()` (one more commit on `main`); `withLocalGithub(root, work)` rewrites `https://github.com/` to it through a temp `GIT_CONFIG_GLOBAL`; `gitOut(cwd, args)` and its sync twin `gitOutSync(cwd, args)` (runs git in `cwd`, stderr piped) → trimmed stdout |
 | `demo-seed.ts`, `demo-data.ts`, `custom-board.ts` | the demo fixture: `runDemoSeed(db, { dataRoot, reset?, adminPassword? })` (arda, elif, murat, selin, deniz, each signing in with `SEED_DEFAULT_PASSWORD` from `app/server/seed/seed-credentials.ts` unless `adminPassword` sets arda's, each distinct password hashed once per seed; `viberr-core` plus the stub projects `deploy-pipeline` and `billing-service`; twelve tasks, VIB-139…168 with full timelines plus DEP-31 and BIL-9; Arda's inbox, the VIB-142 scope violation, Arda's Home pins; the demo Developer stays Codex-backed) → the counts plus `userIds`, each seeded user's id by handle, so a test signs in as one without looking it up by email; `CUSTOM_3_STAGE_BOARD` (`todo` / `doing` / `done`) |
 | `backend-credentials.ts` | `connectFakeBackend(db, userId, backend)`, `connectFakeBackends(db, userId)`, `disconnectFakeBackend(db, userId, backend)`, `fakeBackendSecret(backend)` |
 | `fake-vendor-binary.ts` | `writeFakeVendorBinaries()` → executable `claude` / `codex` stand-ins (mode 0o755) for `deps.binaries`, with `cleanup()`; `setFakeVendorMode("success" \| "fail" \| "hang")`, `setFakeVendorLoggedOut()`, `setFakeVendorLogoutExit()`, `setFakeVendorEvidenceDir()`, `resetFakeVendorEnv()`; the evidence readers `fakeVendorEnv/Argv/Stdin/Terminated/Logout(home)` and, outside every home, `fakeVendorLogouts/Terminations(dir)`; `FAKE_DEVICE_CODE`, `FAKE_CLAUDE_URL`, `FAKE_CODEX_URL`, `ANSI_ESCAPE` |
 | `fake-browser.ts` | `writeFakeBrowser(dir)` → an executable stand-in for Chromium (mode 0o755) for the page capture (ruling 691): it speaks the renderer child's part of the DevTools protocol on fd 3 and 4, fetches the page it is told to open and every `src` in it from the child's own page server, and answers a screenshot with a real PNG of the clip. A page says how large it is in its own text (`fake-height:3000`, `fake-width:612`, `fake-scale:0.5`), and `fake-crash-at:390` ends the browser at that viewport width, so one width is pictured and the other is not. `env(mode)` gives the two variables a suite sets (`hang`, `crash`, `big`, `dialog`, which opens an alert and finishes the load only once it is answered, `unload`, a page that asks before the browser leaves it (a `beforeunload` dialog at every load after its first, which starts only once the dialog is accepted), and `hold`, which finishes a load only after `release()`, so a test acts while a render is in flight; each optionally `mode:needle` for one page); `launches()`, `pages()`, `shots()` and `dialogs()` read back its argv and environment, the HTML and sub-resource statuses it was served, the clips it was asked for and each dialog's type and how it was answered |
-| `mcp-tool-meta.ts` | reads a mounted in-process MCP server the way a model sees it: `toolLoading(server)` (tools loaded up front vs deferred to ToolSearch), `publishedSchemas(server)` (the JSON Schema through a real MCP client, ruling 296), `publishedInstructions(server)` (ruling 297); `callToolText(tools, toolName, args)` calls one controller tool (`viberr_controller` or `viberr_ops`) by name on a toolkit the test built as its asker and returns the text reply |
+| `mcp-tool-meta.ts` | reads a mounted in-process MCP server the way a model sees it: `toolLoading(server)` (tools loaded up front vs deferred to ToolSearch), `publishedSchemas(server)` (the JSON Schema through a real MCP client, ruling 296), `publishedInstructions(server)` (ruling 297); `callToolText(tools, toolName, args)` calls one tool of a controller or operator toolkit the test built and returns the text reply; `connectedClient(server, name?)` → a real MCP client connected over an in-memory pair to a mount's live server, for a test that calls its tools as a model does |
 | `strict-schema.ts` | `assertStrictSchema(node)` — the OpenAI strict structured-output rule (every object `additionalProperties: false`, every key `required`) walked recursively over the Codex agent envelope and operator plan |
 | `toolchain.ts` | `HERMETIC_TOOLCHAIN`, `primeToolchain(reading \| null)`, `primeHermeticToolchain()` |
-| `audit-log.ts` | `listAuditEvents(db, { limit, action })` — raw `audit_events` rows, newest first; rows of one millisecond in the order written (`rowid`), as the app's own audit readers order them, so `[0]` is the row the last write made |
+| `audit-log.ts` | `listAuditEvents(db, { limit, action })` — raw `audit_events` rows, all of them unless `limit` caps them, newest first; rows of one millisecond in the order written (`rowid`), as the app's own audit readers order them, so `[0]` is the row the last write made |
 | `fake-claude-query.ts` | `fakeClaudeQuery(...messages)` → a Claude SDK query (the `ClaudeQuery` the real adapter reads, one layer below `fake-runtime.ts`) that yields `messages`, then completes; `interrupt()` resolves. Type-only import, so it loads nothing at module scope |
 | `process-liveness.ts` | for tests on real processes: `alive(pid)` (signal-0 probe; any throw = not alive, unlike the product's `isProcessAlive`, where `EPERM` counts as alive) and `gone(pid, withinMs = 3000)` (polls every 25 ms) |
 | `polling.ts` | the delivery tests' fire-and-forget settling: `flush()` (5 microtask turns, then a 5 ms timer) and `waitFor(cond, what, timeoutMs = 2_000)` (polls every 5 ms, throws `timed out waiting for <what>`); the runtime suites' `settle()` (thirty zero-delay timer turns) and the agent suites' `pollUntil(cond, timeoutMs = 6_000)` (every 25 ms, resolves to whether `cond` held, so a miss is the caller's to assert). A suite at another cadence keeps its own loop |
 | `delivery-operator.ts` | `deployDeliveryOperator(store, "full" \| "supervised")` → the store's project deploys ONLY an operator with a direct `deliver-review-pr` grant and that autonomy (repo `akin-ozer/viberr`), then re-projects |
 | `data-root-lock.ts` | `lockPath(dataRoot)` → `<dataRoot>/state/writer.lock`, the single-writer lock file (B-FD1) |
-| `operator-snapshot.ts` | `operatorSnapshot(over?)` → the `OperatorTaskSnapshot` an operator prompt-byte test hands `buildOperatorTurnPrompt` / `buildCodexOperatorPrompt` (VIB-1, ready at the work stage, waiting on nobody); pass only the fields the case is about |
+| `operator-snapshot.ts` | `operatorSnapshot(over?)` → the `OperatorTaskSnapshot` an operator prompt-byte test hands `buildOperatorTurnPrompt` / `buildCodexOperatorPrompt` (VIB-1, ready at the work stage, waiting on nobody); pass only the fields the case is about. `operatorAuthority(policy?, patch?)` → the `OperatorAuthority` of a deployed, supervised Claude operator holding `policy` (capability → mode), with no skills, knowledge bases or MCP servers, for a prompt or toolkit test that does not resolve one from a project.md |
 | `profile-data.ts` | `PROFILE_DATA`, a maintainer's profile with neither GitHub nor an agent account connected, shared by the Profile page's tests and the route's |
-| `task-detail.ts` | `taskSummary(patch?)` and `taskDetail(patch?)` → VIB-151 as the task projection hands it over (open, undelivered, unowned, waiting on its agent, three stages); pass only the fields the case is about |
+| `task-detail.ts` | `taskSummary(patch?)` and `taskDetail(patch?)` → VIB-151 as the task projection hands it over (open, undelivered, unowned, waiting on its agent, three stages); pass only the fields the case is about. `connectedPrincipal(patch?)` → a run's principal, Arda Kaya with both backends connected (ruling 127); `acceptanceAffordance(patch?)` → acceptance at the review boundary for a viewer who may accept, with nothing blocking it |
 | `run-view.ts` | `NO_RUN_CACHE` (the cache record of a run that has reported nothing yet) and `controllerRun(patch?)` (a controller turn in flight, one line in its console) |
 | `static-run-log-store.ts` | `staticRunLogStore({ linesByThread, olderByThread?, streamError?, onLoadOlder? })` → a `RunLogStore` over lines in hand, for a console a test feeds by props |
 | `fake-event-source.ts` | `FakeEventSource`, the `EventSource` a test stubs as the global: it records every source a page opens (`instances`, `last()`, `open()`), `emit(name, lastEventId?, data?)` reaches that name's listeners, `fail()` fails the connection as a non-200 answer does; a file that frames a payload keeps that framing local |
+| `sse-client.ts` | `recordSse(userId, scopes = [{ kind: "user" }])` → a watcher on the real SSE broker, as an open tab's stream holds it: `writes`, then `wire()` (all of it), `names()` (the event names) and `data()` (the `data:` payloads) in order, and `close()`; the broker's own suite keeps its hand-made connections |
 | `data-router.tsx` | `DataRouter`, a render `wrapper` with a real data router whose one route counts its loader runs, for a hook that calls `useRevalidator`; `resetDataRouter()` before each test, `loaderRunCount()` |
 | `env.ts` | `withEnv(vars, run)` → `run` with `vars` in `process.env` and the env cache dropped on the way in and out: a switch a deployment sets in its env, reached the way production reaches it (ruling 512(c)) |
 | `controller-dock-stub.tsx` | `mountDock(opts)`: the controller dock under a routed stub shaped like the app (root, the workspace layout, a board, a task, the project controller page, the dock's two resource routes, run through their real `clientLoader` and `clientAction`), shared by the dock's behaviour and perf tests (ruling 121); `reachable: () => false` takes the server away |
 | `client-data.ts` | `clientLoaderOver(module, server)` and `clientActionOver(module, server)` → a stub route's loader or action that runs a fetcher's request as framework mode does: through the route module's `clientLoader` or `clientAction` over `server` (the server's handler, answering what single fetch decodes), or `server` alone when the module has none; `unreachable()` throws what `fetch` rejects with when no answer comes (ruling 457) |
 | `memory-storage.ts` | `MemoryStorage`, an in-memory `Storage` for a component test that reads `localStorage` (Node 26 defines none without `--localstorage-file`); install it with `vi.stubGlobal` |
 | `mcp-upstream.ts` | real MCP servers for the gateway's tests (ruling 461): Streamable HTTP (`startHttpUpstream`, `startSessionfulHttpUpstream`), legacy SSE (`startSseUpstream`) and stdio (`writeStdioUpstream`, `writeSilentStdioUpstream`) upstreams that require their bearer and record the calls that arrived |
-| `mcp-oauth-server.ts` | `startOAuthMcpServer(options)`: an in-test MCP server that signs in with OAuth the way Cloudflare's does (401 with `resource_metadata`, dynamic client registration, PKCE S256, refresh and revocation), and `signInWithOAuth` / `consentAt`, which go through the real `startMcpOAuthSignIn` / `completeMcpOAuthSignIn` (ruling 469) |
+| `mcp-oauth-server.ts` | `startOAuthMcpServer(options)`: an in-test MCP server that signs in with OAuth the way Cloudflare's does (401 with `resource_metadata`, dynamic client registration, PKCE S256, refresh and revocation; `options.holdTokenAnswer` holds the next token answer for a grant until a test's write lands), and `signInWithOAuth` / `consentAt`, which go through the real `startMcpOAuthSignIn` / `completeMcpOAuthSignIn` (ruling 469) |
 | `cloudflare-read-only-grant.ts` | `CLOUDFLARE_READ_ONLY_SCOPES` / `CLOUDFLARE_READ_ONLY_GRANT`: the 194 read scopes Cloudflare's read-only consent template granted the live sign-in (ruling 486) |
 | `kb-legacy-proposals.ts` | `withLegacyProposals(text, inputs)`: a knowledge-base document with a "Proposed corrections (not binding)" section, byte for byte the way rulings 378 and 483 filed them, for the readers that still meet one after ruling 498 |
 | `resource-boards.ts` | `writeBoardHolding(dataRoot, slug, resources, more?)`: one board's `project.md` whose Scout holds the given skills, knowledge bases and MCP servers beside an Operator, for the suites that ask which boards are given a resource (ruling 681) |
@@ -265,7 +267,7 @@ A `test-support/` helper has no test of its own: the tests that use it are its c
 
 Import route modules **after** `setupAppTest()` so they see the test env. A route action
 takes the React Router 8 argument shape, including `url`, `pattern` and a
-`RouterContextProvider`:
+`RouterContextProvider`, which `routeArgs` builds:
 
 ```ts
 const ctx = await setupAppTest();
@@ -284,13 +286,7 @@ const request = ctx.request("/projects/viberr-core/board", {
     stage: "triage",
   }),
 });
-const res = await action({
-  request,
-  url: new URL(request.url),
-  params: { slug: "viberr-core" },
-  pattern: "/projects/:slug/board",
-  context: new RouterContextProvider(),
-});
+const res = await action(routeArgs(request, { slug: "viberr-core" }, "/projects/:slug/board"));
 ctx.cleanup();
 ```
 
@@ -316,10 +312,9 @@ Every test under `app/shared/docs/`, and the ones elsewhere that read a doc or a
   entry; the `## Packet` section enumerates `PACKET_OPTION_KINDS` in schema order under a
   "The N kinds:" marker, and every count it states (outside quotation marks) equals the
   schema's length.
-- `app/shared/docs/rulings-supersession.test.ts` (ruling 341):
-  `docs/architecture/decisions.md` still states its own supersession convention, and
-  every ruling that a later one says it supersedes, replaces, retires, reverses or
-  narrows carries a marker in its own text.
+- `app/shared/docs/rulings-supersession.test.ts` (ruling 341): every ruling in
+  `docs/architecture/decisions.md` that a later one says it supersedes, replaces,
+  retires, reverses or narrows carries a marker in its own text.
 - `app/shared/docs/runbook-db-read.test.ts` (ruling 158): `docs/operations/runbook.md`
   and `docs/operations/deployment.md` never run `sqlite3` against
   `state/projection.sqlite` or open it with `DatabaseSync(` in a bash block; the runbook
@@ -602,20 +597,20 @@ comment quotes the same title).
 
 | Spec | Tests | Covers |
 |---|---|---|
-| `01-home-board.spec.ts` | 6 | board columns and a real click through to VIB-142, drag-and-drop reorder and cross-stage moves (the solid lifted card, the hole it leaves and the one preview, told apart by dnd-kit's `data-dnd-*` attributes; the column read after a drop counts real `a.card`s, never the landing preview; a same-lane reorder held in flight with `page.route` draws its landing preview in the requested slot, and every commit until the answer draws the card exactly once), Escape cancels, a Done-stage drop asks first (dismissing writes nothing) and confirming still meets the verdict gate |
+| `01-home-board.spec.ts` | 7 | board columns and a real click through to VIB-142, a lane that scrolls only while its cards overflow it and then reserves the dock's reach (ruling 661), drag-and-drop reorder and cross-stage moves (the solid lifted card, the hole it leaves and the one preview, told apart by dnd-kit's `data-dnd-*` attributes; the column read after a drop counts real `a.card`s, never the landing preview; a same-lane reorder held in flight with `page.route` draws its landing preview in the requested slot, and every commit until the answer draws the card exactly once), Escape cancels, a Done-stage drop asks first (dismissing writes nothing) and confirming still meets the verdict gate |
 | `02-feeds-profile.spec.ts` | 3 | mark-all-read (which leaves 07 a fully read inbox to audit), the theme cookie surviving a reload, Agent accounts with both backends unconnected |
 | `03-org-settings-store.spec.ts` | 3 | each instance settings tab renders its own panel, heading scope (R15-13), the instance pages under the app header (ruling 145) |
 | `04-palette-mobile.spec.ts` | 3 | at 375 px: the rail collapses behind a toggle with no sideways scroll, Home keeps a way into the palette, and the workspace palette trigger is a real touch target |
-| `05-task-comment-composer.spec.ts` | 5 | the Lexical composer in a real browser: a plain post, Enter versus Ctrl/Meta+Enter, @-mention by keyboard and by click (the posted bytes carry the mention), undo cannot resurrect a sent comment, zero page errors |
+| `05-task-comment-composer.spec.ts` | 6 | the Lexical composer in a real browser: a plain post, Enter versus Ctrl/Meta+Enter, the one line break typed just before the editor arrives, @-mention by keyboard and by click (the posted bytes carry the mention), undo cannot resurrect a sent comment, zero page errors |
 | `06-activity-hydration.spec.ts` | 2 | clean hydration in `Pacific/Auckland`: the activity page and the task page (VIB-142 with its open accept card); both assert zero `pageerror` and a timestamp-only SSR first pass |
-| `07-accessibility.spec.ts` | 37 generated | axe WCAG 2.2 AA on 13 surfaces and 4 dialogs × 2 themes, plus the mobile rail overlay and login in both themes |
+| `07-accessibility.spec.ts` | 39 generated | axe WCAG 2.2 AA on 14 surfaces and 4 dialogs × 2 themes, plus the mobile rail overlay and login in both themes |
 | `08-controller-dock.spec.ts` | 4 | the dock follows the surface you stand on and stays off the controller pages; at 375 px it is a bottom sheet with no sideways scroll; a dock the tab remembers open comes back after a reload without its entrance; a click on the trigger while the dock closes turns it back open |
-| `09-epics.spec.ts` | 5 | a new epic opens on its own page (the chain's first test creates `epic-1`), tasks join and leave it from its page and from their own, the epic page reads in one column at 375 px (ruling 560), and the epic page and its dialogs pass axe (ruling 503) |
+| `09-epics.spec.ts` | 6 | a new epic opens on its own page (the chain's first test creates `epic-1`), tasks join and leave it from its page and from their own, the epic page reads in one column at 375 px (ruling 560), a task under a long-named epic does not scroll sideways at 375 px (ruling 666), and the epic page and its dialogs pass axe (ruling 503) |
 | `10-notification-anchors.spec.ts` | 1 | with Chrome's scroll anchoring off, a notification about an event on another task lands on it in view after the page's long comments fold (rulings 497, 547) |
 | `11-label-editor-press.spec.ts` | 2 | one press on the Labels editor's Save, made where Save stood with the label list open, saves: after a pick and with a label half typed (ruling 561) |
 
-The tree holds 71 tests plus the setup project (counted from the spec files on
-2026-09-28; Playwright counts the setup itself, so its own total reads 72). `npm run e2e`
+The tree holds 76 tests plus the setup project (counted from the spec files on
+2026-10-08; Playwright counts the setup itself, so its own total reads 77). `npm run e2e`
 on 2026-09-27 read `68 passed (43.8s)`, 64 s end to end with the image build.
 Two gates run a real CLI entrypoint: e2e runs `npm run seed:demo`, and
 `app/server/seed/default-assets.server.test.ts` runs `npm run seed` inside `npm test`.

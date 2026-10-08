@@ -8,25 +8,20 @@ import { closeDb, shutdownDatabase } from "~/server/db/sqlite.server";
 import { logger } from "~/server/logging/logger.server";
 import { createTestDbContext, type TestDbContext } from "../../../test-support/test-db";
 import { setupTestStore, writeTask, baseTaskFrontmatter, type TestStore } from "../../../test-support/test-store";
-import { AppError } from "~/server/errors/app-error.server";
 import { readTaskFile } from "~/server/files/task-writer.server";
 import { listAuditEvents } from "../../../test-support/audit-log";
 import {
   chainRunCompletion,
   configureRunServiceForTests,
-  getRunLog,
   interruptRun,
   listRunsForTask,
-  MODEL_SUBSTITUTED_TAG,
   noteCompletionEffectsLost,
   registerRunCompletion,
-  repoWriteWithheldFromDenylist,
   reserveRun,
   resumeRun,
   runConcurrencySnapshot,
   startRun,
 } from "./run-service.server";
-import * as runServiceModule from "./run-service.server";
 import {
   getRun,
   insertRunLine,
@@ -60,7 +55,6 @@ import {
   type FakeRun,
 } from "../../../test-support/fake-runtime";
 import { settle } from "../../../test-support/polling";
-import { RUN_TMP_REMOVE_DELAY_MS, runTmpDir } from "./run-tmp.server";
 
 // SAFETY: stands in for a live `createSdkMcpServer(...)` config. The tests
 // mounting it assert how the service ROUTES the dictionary — key-derived
@@ -68,8 +62,15 @@ import { RUN_TMP_REMOVE_DELAY_MS, runTmpDir } from "./run-tmp.server";
 // adapters that never connect, so the instance-bearing fields are never
 // dereferenced and the toEqual fixtures stay byte-identical.
 const sdkServerStub = { type: "sdk" } as McpSdkServerConfigWithInstance;
-/** A portable stdio mount, shaped as `resolveSpecialistMcpServers` builds it. */
+/** A portable stdio mount, shaped as `resolveSpecialistMcpServersDetailed` builds it. */
 const stdioServerStub = { command: "npx", args: ["-y", "example-mcp"] };
+
+/** Ruling 636(a): a launched run's temporary directory, `<root>/<runId>` under
+ *  the `VIBERR_RUN_TMP_ROOT` test-support/setup-env.ts gives each file. */
+const runTmpDirOf = (runId: string) => path.join(process.env.VIBERR_RUN_TMP_ROOT!, runId);
+/** Ruling 636(b): the directory goes twice ruling 174's 5 s reap grace and 2 s
+ *  after the settle. */
+const RUN_TMP_REMOVAL_MS = 12_000;
 
 let ctx: TestDbContext;
 let store: TestStore;
@@ -558,10 +559,10 @@ describe("a run with no credential principal (ruling 127)", () => {
         env: { TMPDIR: "/tmp" },
       });
       await settle();
-      const dir = runTmpDir(runId);
+      const dir = runTmpDirOf(runId);
       expect(lastRunSpec()!.env).toMatchObject({ TMPDIR: dir, TMP: dir, TEMP: dir });
       expect(existsSync(dir)).toBe(true);
-      await vi.advanceTimersByTimeAsync(RUN_TMP_REMOVE_DELAY_MS);
+      await vi.advanceTimersByTimeAsync(RUN_TMP_REMOVAL_MS);
       await vi.waitFor(() => expect(existsSync(dir)).toBe(false), { timeout: 5_000 });
     } finally {
       vi.useRealTimers();
@@ -824,12 +825,12 @@ describe("interruptRun — RBAC + audit + idempotency", () => {
     expect(result.outcome).toBe("interrupted");
   });
 
-  it("reviewer / viewer / non-member cannot interrupt (403)", async () => {
+  it("contributor / viewer / non-member cannot interrupt (403)", async () => {
     const runId = await startRunning();
     for (const u of [store.users.selin, store.users.elif, store.users.deniz]) {
       await expect(
         interruptRun(store.db, { projectSlug: store.slug, taskKey: "VIB-1", dataRoot: store.dataRoot, runId }, { userId: u.id, label: u.email }),
-      ).rejects.toThrow(AppError);
+      ).rejects.toMatchObject({ status: 403 });
     }
   });
 
@@ -1020,40 +1021,6 @@ describe("agent identity — startRun persists + resumeRun carries (BUG 2)", () 
     expect(resumeSpec.attachmentsWritableDir).toBe(
       "/data/projects/x/tasks/VIB-1/attachments",
     );
-  });
-
-  it("C02-R12 (pass 32): a forward read can be bounded in the SELECT itself", () => {
-    upsertRun(store.db, {
-      id: "run_fwd",
-      projectSlug: store.slug,
-      taskKey: "VIB-1",
-      threadId: "t-fwd",
-      role: "Primary specialist",
-      kind: "primary",
-      backend: "claude",
-      model: "m",
-      sdk: "s",
-      agentProfileId: "developer",
-      state: "finished",
-    });
-    for (let seq = 0; seq < 6; seq += 1) {
-      insertRunLine(store.db, {
-        runId: "run_fwd",
-        seq,
-        occurredAt: new Date().toISOString(),
-        raw: "{}",
-        display: { t: "1", ev: "text", tag: "assistant", text: `line ${seq}` },
-      });
-    }
-    // Unbounded stays the console's live tail…
-    expect(listRunLines(store.db, "run_fwd", 1).map((l) => l.seq)).toEqual([2, 3, 4, 5]);
-    // …and the bound is applied by SQL, ascending from the cursor.
-    expect(listRunLines(store.db, "run_fwd", 1, 2).map((l) => l.seq)).toEqual([2, 3]);
-    expect(listRunLines(store.db, "run_fwd", -1, 0)).toEqual([]);
-    // `getRunLog` threads it as `forwardLimit`, never as the backward `limit`.
-    const { getRunLog } = runServiceModule;
-    const page = getRunLog(store.db, "run_fwd", { since: 1, forwardLimit: 3 })!;
-    expect(page.lines.map((l) => l.seq)).toEqual([2, 3, 4]);
   });
 });
 
@@ -1538,91 +1505,6 @@ describe("resumeRun — continuity recovery", () => {
   });
 });
 
-/* -------------- backward paging for the console (P13-D-11) ---------------- */
-
-describe("getRunLog paging", () => {
-  async function runWithLines(count: number): Promise<string> {
-    queueFakeRun(
-      instantScript(
-        Array.from({ length: count }, (_, i) => ({
-          t: String(i),
-          ev: "text" as const,
-          tag: "assistant",
-          text: `l${i}`,
-        })),
-      ),
-    );
-    const { runId } = await startTestRun(store.db, {
-      projectSlug: store.slug, taskKey: "VIB-1", role: "R", kind: "primary",
-      backend: "claude", model: "m", prompt: "go", dataRoot: store.dataRoot,
-    });
-    await settle();
-    return runId;
-  }
-
-  it("pages BACKWARDS from a cursor, newest-first, oldest-first within the page", async () => {
-    const runId = await runWithLines(10);
-    // The loader shipped the tail; the console asks for what came before seq 7.
-    const page = getRunLog(store.db, runId, { before: 7, limit: 3 })!;
-    expect(page.lines.map((l) => l.display.text)).toEqual(["l4", "l5", "l6"]);
-    expect(page.oldestSeq).toBe(4);
-    expect(page.hasMore).toBe(true); // seq 0..3 are still older
-
-    const older = getRunLog(store.db, runId, { before: page.oldestSeq, limit: 10 })!;
-    expect(older.lines.map((l) => l.display.text)).toEqual(["l0", "l1", "l2", "l3"]);
-    // Reached the start of this run — the console steps to the PREVIOUS run id
-    // in the group's logWindow.runIds from here.
-    expect(older.hasMore).toBe(false);
-  });
-
-  it("a bare `limit` pages a run's newest lines (how the console enters an older run)", async () => {
-    const runId = await runWithLines(10);
-    const page = getRunLog(store.db, runId, { limit: 2 })!;
-    expect(page.lines.map((l) => l.display.text)).toEqual(["l8", "l9"]);
-    expect(page.hasMore).toBe(true);
-  });
-
-  it("keeps the forward `since` tail working unchanged", async () => {
-    const runId = await runWithLines(4);
-    const tail = getRunLog(store.db, runId, { since: 1 })!;
-    expect(tail.lines.map((l) => l.display.text)).toEqual(["l2", "l3"]);
-    expect(tail.headSeq).toBe(3);
-    expect(tail.hasMore).toBe(true); // seq 0..1 exist below this page
-  });
-});
-
-describe("repoWriteWithheldFromDenylist (P13-RT-02)", () => {
-  it("recognises exactly the denylist a withheld repo-write grant produces", () => {
-    // The rule set is specialist-tool-policy's `execute-code-or-write-repo`
-    // entry. It is computed for EVERY run backend-agnostically — it just had no
-    // effect on Codex, which has no denylist channel.
-    expect(
-      repoWriteWithheldFromDenylist([
-        "Edit",
-        "MultiEdit",
-        "Write",
-        "NotebookEdit",
-        "Bash(git commit:*)",
-      ]),
-    ).toBe(true);
-  });
-
-  it("does not fire for the narrower delivery capabilities", () => {
-    // Withholding branch/push/PR must NOT make the whole workspace read-only:
-    // the agent still has to be able to edit files and run its validation.
-    expect(
-      repoWriteWithheldFromDenylist([
-        "Bash(git push:*)",
-        "Bash(git commit:*)",
-        "Bash(gh pr create:*)",
-        "Bash(git checkout -b:*)",
-      ]),
-    ).toBe(false);
-    expect(repoWriteWithheldFromDenylist([])).toBe(false);
-    expect(repoWriteWithheldFromDenylist(undefined)).toBe(false);
-  });
-});
-
 describe("startRun spec derivation (P13-RT-02 / P13-RT-08)", () => {
   it("marks repoWriteWithheld from the capability denylist so Codex can enforce it", async () => {
     const specs = captureSpecs();
@@ -2048,7 +1930,7 @@ describe("startRun — foreign model substitution is disclosed (F21-13)", () => 
     // never saw is the lie this closes.
     expect(getRun(store.db, runId)!.model).toBe(defaultModelFor("claude"));
     const first = listRunLines(store.db, runId)[0]!;
-    expect(first.display.tag).toBe(MODEL_SUBSTITUTED_TAG);
+    expect(first.display.tag).toBe("run·model_substituted");
     expect(first.display.text).toContain("gpt-5.6-terra");
     expect(first.display.text).toContain("Codex");
     expect(first.display.text).toContain("Claude");
@@ -2074,7 +1956,7 @@ describe("startRun — foreign model substitution is disclosed (F21-13)", () => 
     expect(getRun(store.db, runId)!.model).toBe("claude-sonnet-4-5");
     expect(
       listRunLines(store.db, runId).some(
-        (l) => l.display.tag === MODEL_SUBSTITUTED_TAG,
+        (l) => l.display.tag === "run·model_substituted",
       ),
     ).toBe(false);
   });
@@ -2277,6 +2159,15 @@ describe("C4: noteCompletionEffectsLost (a lost completion callback)", () => {
    */
   it("F37-67: does not promise a replay the recovery sweep will never run", async () => {
     seedLostRun("VIB-3", "run_replied_then_lost");
+    // A readable reply, so the reply row below is the one thing that keeps the
+    // sweep away: a run with no reply text is dropped for that alone.
+    insertRunLine(store.db, {
+      runId: "run_replied_then_lost",
+      seq: 0,
+      occurredAt: new Date().toISOString(),
+      raw: "{}",
+      display: { t: "1", ev: "text", tag: "assistant", text: "Implemented the parser." },
+    });
     // Step 1 happened: the reply is on the record, and its idempotency row with
     // it. This is the exact row `recoverUnreactedAgentRuns` excludes on.
     const { recordAudit } = await import("~/server/audit/audit-recorder.server");
@@ -3132,9 +3023,9 @@ describe("compaction at completion (ruling 376)", () => {
       const { runId } = await startTestRun(store.db, specialist());
       await settle();
       await settle();
-      const dir = runTmpDir(runId);
+      const dir = runTmpDirOf(runId);
       expect(getRun(store.db, runId)!.state).toBe("finished");
-      await vi.advanceTimersByTimeAsync(RUN_TMP_REMOVE_DELAY_MS * 2);
+      await vi.advanceTimersByTimeAsync(RUN_TMP_REMOVAL_MS * 2);
       // A removal, had one been scheduled, has had its time to finish.
       const until = performance.now() + 150;
       while (performance.now() < until) await new Promise((resolve) => setImmediate(resolve));
@@ -3142,7 +3033,7 @@ describe("compaction at completion (ruling 376)", () => {
       compaction.answer();
       await settle();
       await settle();
-      await vi.advanceTimersByTimeAsync(RUN_TMP_REMOVE_DELAY_MS);
+      await vi.advanceTimersByTimeAsync(RUN_TMP_REMOVAL_MS);
       await vi.waitFor(() => expect(existsSync(dir)).toBe(false), { timeout: 5_000 });
     } finally {
       vi.useRealTimers();

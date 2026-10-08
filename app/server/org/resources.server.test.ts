@@ -12,20 +12,23 @@ import { afterEach, describe, expect, it } from "vitest";
 import { z } from "zod";
 import { unreachableFetch } from "../../../test-support/fake-github";
 import { startHttpUpstream, startSseUpstream } from "../../../test-support/mcp-upstream";
+import { waitFor } from "../../../test-support/polling";
 import { createTestDbContext } from "../../../test-support/test-db";
 import { listAuditEvents } from "../../../test-support/audit-log";
+import { withEnv } from "../../../test-support/env";
 import { writeBoardHolding } from "../../../test-support/resource-boards";
 import { ENV_KEYS } from "~/server/config/env.server";
+import { CONTROLLER_OPS_MCP_NAME } from "~/server/controller/controller-ops-mcp.server";
 import { kbDirPath, skillDirPath } from "~/server/files/file-store-root.server";
+import { BOARD_MCP_NAME } from "~/server/mcp-proxy/board-tool.server";
+import { KNOWLEDGE_MCP_NAME } from "~/server/mcp-proxy/knowledge-tool.server";
+import { BROWSER_MCP_NAME } from "~/server/tasks/browser-deadline.server";
+import { RESERVED_MCP_NAMES } from "~/shared/mcp-reserved";
 import {
   deleteKnowledgeBase,
   deleteMcpServer,
   deleteSkill,
   discoverStdioMcpTools,
-  getMcpServer,
-  getKnowledgeBase,
-  getSkill,
-  isFirstRunInstallerCommand,
   listKnowledgeBases,
   listSkills,
   markMcpServerUnreachableFromRun,
@@ -38,7 +41,6 @@ import {
   storePathsInMcpTarget,
   mcpStoreAccessNote,
   saveSkill,
-  splitMcpCommand,
   testMcpServer,
 } from "./resources.server";
 import { resetWarmupsForTest } from "./mcp-warmup.server";
@@ -132,21 +134,6 @@ function crashingSpawn(stderrText: string): McpSpawn {
       on: (event, cb) => {
         if (event === "exit") exit.on("exit", cb);
       },
-      kill() {},
-    };
-  };
-}
-
-/** Chatters on stderr (a package manager fetching) but never answers. */
-function chattySpawn(stderrText: string): McpSpawn {
-  return () => {
-    const err = new EventEmitter();
-    queueMicrotask(() => err.emit("data", Buffer.from(stderrText)));
-    return {
-      stdin: { write() {}, end() {} },
-      stdout: { on() {} },
-      stderr: { on: (event, cb) => err.on(event, cb) },
-      on() {},
       kill() {},
     };
   };
@@ -316,7 +303,7 @@ describe("knowledge bases", () => {
     // External edit → visible on the next read (the def-note promise).
     mkdirSync(path.join(dir, "decisions"), { recursive: true });
     writeFileSync(path.join(dir, "decisions", "adr-001.md"), "# ADR");
-    const fresh = getKnowledgeBase(db, kb.id, ctx)!;
+    const fresh = listKnowledgeBases(db, ctx).find((k) => k.id === kb.id)!;
     expect(fresh.fileCount).toBe(1);
     expect(fresh.tree[0]).toMatchObject({ type: "dir", name: "decisions" });
 
@@ -360,10 +347,10 @@ describe("knowledge bases", () => {
     const { db, dataRoot, ctx } = setup();
     const { kb } = await saveKnowledgeBase(db, { name: "Wiped", refresh: "manual" }, ACTOR, ctx);
     // A healthy KB with no docs still exists on disk.
-    expect(getKnowledgeBase(db, kb.id, ctx)!.folderExists).toBe(true);
+    expect(listKnowledgeBases(db, ctx).find((k) => k.id === kb.id)!.folderExists).toBe(true);
     // Remove the folder out from under the row (a store reset / external delete).
     rmSync(kbDirPath("wiped", dataRoot), { recursive: true, force: true });
-    const orphan = getKnowledgeBase(db, kb.id, ctx)!;
+    const orphan = listKnowledgeBases(db, ctx).find((k) => k.id === kb.id)!;
     expect(orphan.folderExists).toBe(false);
     expect(orphan.injectableCount).toBe(0); // indistinguishable from empty WITHOUT the flag
   });
@@ -424,7 +411,7 @@ describe("skills", () => {
       ctx,
     );
     expect(updated.toast).toBe("Skill terraform-review updated. SKILL.md rewritten");
-    expect(getSkill(db, skill.id, ctx)!.body).toBe("## New body");
+    expect(listSkills(db, ctx).find((s) => s.id === skill.id)!.body).toBe("## New body");
   });
 
   it("U36-4: a disk:<name> id whose folder already has a row updates THAT row instead of clashing", async () => {
@@ -512,9 +499,12 @@ describe("skills", () => {
     it("refuses an empty body on a write: a create with nothing in it lands no folder", async () => {
       // Canary: let `writeFileSync(SKILL.md, "")` through.
       const { db, dataRoot, ctx } = setup();
-      await expect(
-        saveSkill(db, { name: "hollow", summary: "Nothing inside.", body: "   \n" }, ACTOR, ctx),
-      ).rejects.toThrowError(/empty/);
+      // "" is what the controller's save_skill sends for an omitted body.
+      for (const body of ["", "   \n"]) {
+        await expect(
+          saveSkill(db, { name: "hollow", summary: "Nothing inside.", body }, ACTOR, ctx),
+        ).rejects.toThrowError(/empty/);
+      }
       expect(existsSync(skillDirPath("hollow", dataRoot))).toBe(false);
     });
   });
@@ -645,7 +635,7 @@ describe("skills", () => {
     symlinkSync(outside, path.join(dir, "SKILL.md"));
 
     // READ: the editor shows nothing rather than the target's content.
-    expect(getSkill(db, skill.id, ctx)!.body).toBe("");
+    expect(listSkills(db, ctx).find((s) => s.id === skill.id)!.body).toBe("");
 
     // WRITE: refused, and the link target is untouched.
     await expect(
@@ -747,18 +737,10 @@ describe("mcp servers", () => {
     // P13-KM-12 / ruling 107: a row under one of these names is unusable (every
     // resolver skips it) AND shadows the mount key of a server the product
     // attaches itself, so it is refused at save rather than accepted dead. The
-    // hyphen spellings are what a Codex run would see.
-    for (const name of [
-      "viberr",
-      "viberr_agent",
-      "viberr-agent",
-      "viberr_browser",
-      "viberr-browser",
-      "viberr_controller",
-      "viberr-controller",
-      "viberr_ops",
-      "viberr-ops",
-    ]) {
+    // hyphen spellings are what a Codex run would see. CANARY: refuse from a
+    // private copy of the list and the names reserved since (rulings 585 and
+    // 589) save as dead rows.
+    for (const name of RESERVED_MCP_NAMES) {
       await expect(
         saveMcpServer(
           db,
@@ -771,6 +753,14 @@ describe("mcp servers", () => {
     }
     // The refusal is the whole story: nothing was written on the way out.
     expect(listMcpServers(db)).toEqual([]);
+    // The list holds the mount keys the product attaches, in both spellings.
+    // CANARY: drop a spelling from RESERVED_MCP_NAMES and a registry row can
+    // take that server's key.
+    for (const key of [BROWSER_MCP_NAME, BOARD_MCP_NAME, KNOWLEDGE_MCP_NAME, CONTROLLER_OPS_MCP_NAME]) {
+      for (const name of [key, key.replaceAll("_", "-")]) {
+        expect(RESERVED_MCP_NAMES.has(name), name).toBe(true);
+      }
+    }
   });
 
   it("save runs a REAL MCP handshake on HTTP targets and never fabricates counts", async () => {
@@ -829,6 +819,10 @@ describe("mcp servers", () => {
     );
     expect(dead.mcp).toMatchObject({ up: false, tools: null });
     expect(dead.toast).toContain("did not answer");
+    // A command that says NOTHING is a plain timeout: the install hint is
+    // earned by evidence, never assumed.
+    expect(dead.toast).toContain("timed out after");
+    expect(dead.toast).not.toContain("still installing");
 
     /* R19-17: a stdio server that CRASHES explains itself on stderr, and the
        probe used to answer with three fixed words. This is the live case: a
@@ -849,58 +843,6 @@ describe("mcp servers", () => {
     );
     expect(crashed.mcp).toMatchObject({ up: false, tools: null });
     expect(crashed.toast).toContain("ImportError: cannot import name 'McpError'");
-
-    /* …and the credential the child was spawned WITH never rides along, even
-       when the dying server prints its own environment. */
-    const leaky = await saveMcpServer(
-      db,
-      {
-        name: "leaky-stdio",
-        transport: "stdio",
-        target: "uvx mcp-server-leak",
-        cred: "sk-live-abcdefghijklmnop",
-      },
-      ACTOR,
-      {
-        spawnImpl: crashingSpawn(
-          "env dump: MCP_CREDENTIAL=sk-live-abcdefghijklmnop\nfatal: giving up\n",
-        ),
-        timeoutMs: 200,
-      },
-    );
-    expect(leaky.toast).toContain("fatal: giving up");
-    expect(leaky.toast).not.toContain("sk-live-abcdefghijklmnop");
-
-    /* R19-17c: a command that is still FETCHING on first use is not a broken
-       one, and the two need different next steps. `npx`/`uvx` install on first
-       run — live, a server pulling a CUDA-sized dependency tree could never
-       finish inside any probe window, and each killed probe discarded the
-       partial download, so retesting never converged. */
-    const installing = await saveMcpServer(
-      db,
-      { name: "cold-stdio", transport: "stdio", target: "uvx big-server", cred: "" },
-      ACTOR,
-      {
-        spawnImpl: chattySpawn("Downloading nvidia-curand (59.1MiB)\n"),
-        timeoutMs: 60,
-      },
-    );
-    // R19-18: Viberr now finishes the install itself rather than telling the
-    // admin to go warm it from a shell, so the row goes to "installing" and the
-    // save says so instead of reporting a failure.
-    expect(installing.toast).toContain("installing in the background");
-    expect(installing.mcp.warmingSince).not.toBeNull();
-
-    /* …and a command that says NOTHING is still a plain timeout — the hint is
-       earned by evidence, never assumed. */
-    const silent = await saveMcpServer(
-      db,
-      { name: "silent-stdio", transport: "stdio", target: "node /tmp/hang.mjs", cred: "" },
-      ACTOR,
-      { spawnImpl: silentSpawn, timeoutMs: 60 },
-    );
-    expect(silent.toast).toContain("timed out after");
-    expect(silent.toast).not.toContain("still installing");
 
     /* R19-17: the reason PERSISTS on the row, so it is still there after the
        toast is gone — and a passing retest clears it, because a stale
@@ -942,7 +884,7 @@ describe("mcp servers", () => {
     // as 15 because the old probe advertised no client capabilities.
     const healthy = await testMcpServer(db, mcp.id, { fetchImpl: mcpHttpFetch(15) });
     expect(healthy.toast).toMatch(/^github-mcp healthy: 15 tools · \d+ms$/);
-    expect(getMcpServer(db, mcp.id)!.tools).toBe(15);
+    expect(listMcpServers(db).find((m) => m.id === mcp.id)!.tools).toBe(15);
 
     const dead = await testMcpServer(db, mcp.id, { fetchImpl: unreachableFetch() });
     expect(dead.mcp.up).toBe(false);
@@ -997,9 +939,9 @@ describe("MCP probe crash-safety, honesty, and teardown (pass 20)", () => {
     ).rejects.toMatchObject({ message: expect.stringMatching(/at least 8 characters/), field: "cred" });
     expect(listMcpServers(db).find((m) => m.name === "shorty")).toBeUndefined();
 
-    // A longer credential IS allowed; if the dying command echoes it, the
-    // persisted `last_error` carries [redacted], never the value.
-    await saveMcpServer(
+    // A longer credential IS allowed; if the dying command echoes it, the toast
+    // and the persisted `last_error` carry [redacted], never the value.
+    const leaky = await saveMcpServer(
       db,
       { name: "leaky", transport: "stdio", target: "uvx svc", cred: "sk-live-abcdefghijk" },
       ACTOR,
@@ -1008,6 +950,8 @@ describe("MCP probe crash-safety, honesty, and teardown (pass 20)", () => {
         timeoutMs: 60,
       },
     );
+    expect(leaky.toast).toContain("fatal: boom");
+    expect(leaky.toast).not.toContain("sk-live-abcdefghijk");
     const row = listMcpServers(db).find((m) => m.name === "leaky")!;
     expect(row.lastError).toContain("fatal: boom");
     expect(row.lastError).not.toContain("sk-live-abcdefghijk");
@@ -1044,7 +988,7 @@ describe("MCP probe crash-safety, honesty, and teardown (pass 20)", () => {
     // tab kept rendering the server as up until a manual reload.
     // Canary: drop the publishResourceUpdated call and no event arrives.
     const { db } = setup();
-    const { connectSseClient } = await import("~/server/events/sse-broker.server");
+    const { recordSse } = await import("../../../test-support/sse-client");
     const { mcp } = await saveMcpServer(
       db,
       { name: "everything", transport: "stdio", target: "npx -y @mcp/everything", cred: "" },
@@ -1052,24 +996,14 @@ describe("MCP probe crash-safety, honesty, and teardown (pass 20)", () => {
       { spawnImpl: fakeMcpSpawn(16) },
     );
 
-    const writes: string[] = [];
-    const handle = connectSseClient({
-      userId: "u_watcher",
-      scopes: [{ kind: "user" }],
-      lastEventId: null,
-      write: (chunk) => writes.push(chunk),
-    });
+    const sse = recordSse("u_watcher");
     try {
       markMcpServerUnreachableFromRun(db, "everything", "it failed to start");
-      const events = writes
-        .flatMap((chunk) => chunk.split("\n"))
-        .filter((line) => line.startsWith("event: "))
-        .map((line) => line.slice("event: ".length));
-      expect(events).toContain("resource.updated");
+      expect(sse.names()).toContain("resource.updated");
       // …naming the row that actually changed.
-      expect(writes.join("")).toContain(mcp.id);
+      expect(sse.wire()).toContain(mcp.id);
     } finally {
-      handle.close();
+      sse.close();
     }
   });
 
@@ -1142,29 +1076,26 @@ describe("MCP probe crash-safety, honesty, and teardown (pass 20)", () => {
     }
   });
 
-  it("R20-4: isFirstRunInstallerCommand matches package-runner argv only", () => {
-    for (const cmd of [
-      "npx -y @mcp/x",
-      "bunx thing",
-      "uvx svc",
-      "pipx run svc",
-      "pnpm dlx svc",
-      "yarn dlx svc",
-      "bun x svc",
-      "uv tool run svc",
-      "/usr/local/bin/npx svc",
-    ]) {
-      expect(isFirstRunInstallerCommand(splitMcpCommand(cmd))).toBe(true);
-    }
-    for (const cmd of [
-      "node server.js",
-      "my-npx-tool --go",
-      "/usr/local/bin/mcp-server",
-      "pnpm start",
-      "python -m svc",
-    ]) {
-      expect(isFirstRunInstallerCommand(splitMcpCommand(cmd))).toBe(false);
-    }
+  // R20-4: only a package runner's argv (never a substring of it) marks a
+  // silent timeout as a probable first-run fetch.
+  it.each([
+    ["npx -y @mcp/x", true],
+    ["bunx thing", true],
+    ["uvx svc", true],
+    ["pipx run svc", true],
+    ["pnpm dlx svc", true],
+    ["yarn dlx svc", true],
+    ["bun x svc", true],
+    ["uv tool run svc", true],
+    ["/usr/local/bin/npx svc", true],
+    ["node server.js", false],
+    ["my-npx-tool --go", false],
+    ["/usr/local/bin/mcp-server", false],
+    ["pnpm start", false],
+    ["python -m svc", false],
+  ] as const)("R20-4: a silent probe of %s reports firstRunInstaller %s", async (cmd, installer) => {
+    const disc = await discoverStdioMcpTools(cmd, { spawnImpl: silentSpawn, timeoutMs: 1 });
+    expect(disc.kind === "down" && disc.firstRunInstaller === true).toBe(installer);
   });
 
   it("R20-4: a silent npx probe reports firstRunInstaller; a silent node probe is a plain timeout", async () => {
@@ -1197,9 +1128,11 @@ describe("MCP probe crash-safety, honesty, and teardown (pass 20)", () => {
     expect(saved.toast).toContain("installing in the background");
 
     // Let the (also silent) warm-up time out and settle the row down.
-    await new Promise((r) => setTimeout(r, 120));
+    await waitFor(
+      () => listMcpServers(db).find((m) => m.name === "cold-npx")?.warmingSince === null,
+      "cold-npx's warm-up",
+    );
     const afterWarmup = listMcpServers(db).find((m) => m.name === "cold-npx")!;
-    expect(afterWarmup.warmingSince).toBeNull();
     expect(afterWarmup.up).toBe(false);
     expect(afterWarmup.firstSuccessAt ?? null).toBeNull();
     expect(afterWarmup.heuristicWarmups).toBe(1);
@@ -1238,8 +1171,7 @@ describe("disk is truth (finding #7)", () => {
     expect(disk.id).toBe("disk:developer-expertise");
     expect(disk.summary).toBe("Implement a task's stage work.");
     expect(disk.updatedAt).toBeNull();
-    // getSkill resolves the synthetic id (StoreBrowser / edit rely on this).
-    expect(getSkill(db, disk.id, ctx)!.body).toContain("# body");
+    expect(disk.body).toContain("# body");
   });
 
   it("derives the summary from a BLOCK-SCALAR description (imported skills) — not a literal '|'", () => {
@@ -1260,7 +1192,7 @@ describe("disk is truth (finding #7)", () => {
     mkdirSync(dir, { recursive: true });
     writeFileSync(path.join(dir, "SKILL.md"), "# original");
 
-    const before = getSkill(db, "disk:reviewer-expertise", ctx)!;
+    const before = listSkills(db, ctx).find((s) => s.name === "reviewer-expertise")!;
     const { skill, toast } = await saveSkill(
       db,
       { id: before.id, name: "reviewer-expertise", summary: "Review verdicts.", body: "# edited" },
@@ -1317,7 +1249,7 @@ describe("disk is truth (finding #7)", () => {
       ),
     ).rejects.toThrowError(/already exists/);
     // Original content untouched.
-    expect(getSkill(db, "disk:api-design", ctx)!.body).toContain("# keep me");
+    expect(listSkills(db, ctx).find((s) => s.name === "api-design")!.body).toContain("# keep me");
   });
 
   it("rejects a path-traversal disk id instead of escaping the store root", async () => {
@@ -1867,7 +1799,7 @@ describe("knowledge-base doc counts", () => {
     writeFileSync(path.join(dir, "contract.pdf"), "%PDF-1.7");
     writeFileSync(path.join(dir, "diagram.png"), "png");
 
-    const fresh = getKnowledgeBase(db, kb.id, ctx)!;
+    const fresh = listKnowledgeBases(db, ctx).find((k) => k.id === kb.id)!;
     expect(fresh.fileCount).toBe(4);
     expect(fresh.injectableCount).toBe(2);
 
@@ -1898,28 +1830,14 @@ describe("mcpSpawnEnv (third-party command isolation)", () => {
 
   it("withholds credential-shaped variables and passes ordinary ones through", async () => {
     const { mcpSpawnEnv } = await import("./resources.server");
-    const saved: Record<string, string | undefined> = {};
-    for (const [k, v] of Object.entries(SECRETS)) {
-      saved[k] = process.env[k];
-      process.env[k] = v;
-    }
-    const savedPath = process.env.PATH;
-    process.env.PATH ??= "/usr/bin";
-    try {
+    await withEnv({ ...SECRETS, PATH: process.env.PATH || "/usr/bin" }, () => {
       const env = mcpSpawnEnv(null);
       for (const key of Object.keys(SECRETS)) {
         expect(env[key], `${key} must not reach a third-party command`).toBeUndefined();
       }
       // Not a lockout: an MCP command still needs an ordinary environment.
       expect(env.PATH).toBeTruthy();
-    } finally {
-      for (const [k, v] of Object.entries(saved)) {
-        if (v === undefined) delete process.env[k];
-        else process.env[k] = v;
-      }
-      if (savedPath === undefined) delete process.env.PATH;
-      else process.env.PATH = savedPath;
-    }
+    });
   });
 
   it("ruling 142: withholds Viberr's own configuration, which a third-party command has no business reading", async () => {
@@ -1938,14 +1856,7 @@ describe("mcpSpawnEnv (third-party command isolation)", () => {
       GITHUB_OAUTH_CLIENT_ID: "iv1.example-client-id",
       VIBERR_UNLOCK_CONTROLLER_MCPS: "enabled",
     };
-    const saved: Record<string, string | undefined> = {};
-    for (const [k, v] of Object.entries(APP_CONFIG)) {
-      saved[k] = process.env[k];
-      process.env[k] = v;
-    }
-    const savedPath = process.env.PATH;
-    process.env.PATH ??= "/usr/bin";
-    try {
+    await withEnv({ ...APP_CONFIG, PATH: process.env.PATH || "/usr/bin" }, () => {
       const env = mcpSpawnEnv("mcp-token-value");
       for (const key of Object.keys(APP_CONFIG)) {
         expect(env[key], `${key} must not reach a third-party command`).toBeUndefined();
@@ -1955,14 +1866,7 @@ describe("mcpSpawnEnv (third-party command isolation)", () => {
       // The child still gets its one secret and an ordinary environment.
       expect(env.MCP_CREDENTIAL).toBe("mcp-token-value");
       expect(env.PATH).toBeTruthy();
-    } finally {
-      for (const [k, v] of Object.entries(saved)) {
-        if (v === undefined) delete process.env[k];
-        else process.env[k] = v;
-      }
-      if (savedPath === undefined) delete process.env.PATH;
-      else process.env.PATH = savedPath;
-    }
+    });
   });
 });
 
@@ -2172,13 +2076,14 @@ describe("ruling 188: a CREATE takes the editor's own write-tool suggestion", ()
       ACTOR,
       { fetchImpl: mcpHttpFetch(FS_TOOLS.length, { toolNames: FS_TOOLS }) },
     );
-    // A deliberate "mark none" is an answer, not an absence: re-suggesting
-    // would nag a person who already decided.
+    // A deliberate "mark none" is an answer, not an absence: nothing is
+    // marked, and re-suggesting would nag a person who already decided.
+    expect(reviewed.mcp.writeTools).toEqual([]);
     expect(reviewed.mcp.writeToolsReviewed).toBe(true);
     expect(reviewed.writeToolsSuggestion).toEqual([]);
   });
 
-  it("an EXPLICIT list overrules the guess, and [] really means none", async () => {
+  it("an EXPLICIT list overrules the guess", async () => {
     const { db } = setup();
     const explicit = await saveMcpServer(
       db,
@@ -2193,21 +2098,6 @@ describe("ruling 188: a CREATE takes the editor's own write-tool suggestion", ()
       { fetchImpl: mcpHttpFetch(FS_TOOLS.length, { toolNames: FS_TOOLS }) },
     );
     expect(explicit.mcp.writeTools).toEqual(["write_file"]);
-
-    const none = await saveMcpServer(
-      db,
-      {
-        name: "unmarked-on-purpose",
-        transport: "HTTP",
-        target: "https://x.dev/mcp",
-        cred: "",
-        writeTools: [],
-      },
-      ACTOR,
-      { fetchImpl: mcpHttpFetch(FS_TOOLS.length, { toolNames: FS_TOOLS }) },
-    );
-    expect(none.mcp.writeTools).toEqual([]);
-    expect(none.mcp.writeToolsReviewed).toBe(true);
   });
 
   it("an UPDATE that omits the field leaves a person's marking alone", async () => {

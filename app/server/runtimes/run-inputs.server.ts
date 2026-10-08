@@ -125,7 +125,7 @@ export function resolvedResourceInputs(input: {
  * canonical block, so the capitals flagged the design as a fault on the one
  * line everyone reads. Absent keeps the specialist wording, as it does there.
  */
-export function runInputsSummary(inputs: RunInputs, kind?: RunKind): string {
+function runInputsSummary(inputs: RunInputs, kind?: RunKind): string {
   const coordinates = kind === "operator" || kind === "controller";
   const bits: string[] = [
     kind === "controller"

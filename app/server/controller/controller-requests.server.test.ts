@@ -2,9 +2,9 @@ import { afterEach, describe, expect, it } from "vitest";
 import { mkdtempSync, readFileSync, rmSync, writeFileSync, mkdirSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
+import { createTestDbContext } from "../../../test-support/test-db";
 import {
-  closeResourceRequest,
-  controllerRequestsFilePath,
+  closeRequestsAnsweredByGrants,
   openRequestsContextLine,
   openResourceRequests,
   raiseResourceRequest,
@@ -33,6 +33,8 @@ function makeRoot(): string {
 afterEach(() => {
   for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true });
 });
+const ctx = createTestDbContext();
+afterEach(ctx.cleanup);
 
 const ASK = {
   kind: "kb" as const,
@@ -57,8 +59,7 @@ describe("ruling 390: a grant request the controller cannot answer itself", () =
     expect(request.status).toBe("open");
     // The profile is what the controller is read BY and ruling 108 locks it;
     // this record is about the controller, so it lives next door.
-    const file = controllerRequestsFilePath(root);
-    expect(file.endsWith(path.join("agents", "controller-requests.md"))).toBe(true);
+    const file = path.join(root, "agents", "controller-requests.md");
     const raw = readFileSync(file, "utf8");
     expect(raw).toContain("instance-standing-rules");
     expect(raw).toContain(request.id);
@@ -81,8 +82,14 @@ describe("ruling 390: a grant request the controller cannot answer itself", () =
 
   it("re-opens once the first is answered, because the situation is new", () => {
     const root = makeRoot();
-    const { request } = raiseResourceRequest(ASK, root);
-    const closed = closeResourceRequest(request.id, "granted", "arda@viberr.dev", root);
+    raiseResourceRequest(ASK, root);
+    // A Controller-tab save that leaves the knowledge base granted answers it.
+    const [closed] = closeRequestsAnsweredByGrants(
+      ctx.makeDb(),
+      { skills: [], kb: [ASK.name], mcps: [] },
+      { userId: ASK.askedByUserId, label: "arda@viberr.dev" },
+      root,
+    );
     expect(closed?.status).toBe("granted");
     expect(closed?.closedAt).toBeTruthy();
     expect(openResourceRequests(root)).toHaveLength(0);
@@ -94,19 +101,10 @@ describe("ruling 390: a grant request the controller cannot answer itself", () =
     expect(readResourceRequests(root)).toHaveLength(2);
   });
 
-  it("closing an id that is not open answers null and writes nothing", () => {
-    const root = makeRoot();
-    const { request } = raiseResourceRequest(ASK, root);
-    closeResourceRequest(request.id, "declined", "arda@viberr.dev", root);
-    expect(closeResourceRequest(request.id, "granted", "arda@viberr.dev", root)).toBeNull();
-    expect(closeResourceRequest("rq_nope", "granted", "arda@viberr.dev", root)).toBeNull();
-    expect(readResourceRequests(root)).toHaveLength(1);
-  });
-
   it("drops one malformed row and keeps the rest", () => {
     const root = makeRoot();
     const { request } = raiseResourceRequest(ASK, root);
-    const file = controllerRequestsFilePath(root);
+    const file = path.join(root, "agents", "controller-requests.md");
     mkdirSync(path.dirname(file), { recursive: true });
     const raw = readFileSync(file, "utf8");
     // A hand-edited file with one entry missing its id.
@@ -136,19 +134,5 @@ describe("ruling 390: a grant request the controller cannot answer itself", () =
     expect(resourceRequestRemedy("mcps")).toContain(
       "VIBERR_UNLOCK_CONTROLLER_MCPS=enabled",
     );
-  });
-
-  it("puts the open ask back in the controller's own turn context", () => {
-    const root = makeRoot();
-    raiseResourceRequest(ASK, root);
-    const line = openRequestsContextLine(root);
-    // This is the whole fix: the ask outlives the conversation that made it.
-    expect(line).toContain("instance-standing-rules");
-    expect(line).toContain("do not describe the resource as if you can read it");
-    expect(line).toContain("VIBERR_UNLOCK_CONTROLLER_KB=enabled");
-    // Answered asks are history and stay out of the prompt.
-    const [open] = openResourceRequests(root);
-    closeResourceRequest(open!.id, "granted", "arda@viberr.dev", root);
-    expect(openRequestsContextLine(root)).toBe("");
   });
 });

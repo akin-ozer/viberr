@@ -654,7 +654,7 @@ function takePendingTrigger(key: string): RunOperatorInput | null {
  * moved nor dispatched afterwards (`actedAfterDelivery`); nothing otherwise.
  * The depth threads on as `nextTransitionChainDepth` would have.
  */
-export function deliveredFollowUpFor(entry: {
+function deliveredFollowUpFor(entry: {
   projectSlug: string;
   taskKey: string;
   dataRoot?: string;

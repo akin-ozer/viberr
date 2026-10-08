@@ -70,7 +70,7 @@ export function buildResourceCatalog(
   // P14-KM-14: the registry only, for BOTH profile kinds. `viberr` used to be
   // offered to the operator as a real-looking toggle over a decision the product
   // had already made: `buildOperatorToolkit` mounts the in-process server
-  // unconditionally and `resolveSpecialistMcpServers` skips the reserved name,
+  // unconditionally and `resolveSpecialistMcpServersDetailed` skips the reserved name,
   // so granting or revoking it changed nothing in either direction.
   const mcpIds = new Set<string>();
   const mcpWarnings = new Map<string, ResItemWarning>();

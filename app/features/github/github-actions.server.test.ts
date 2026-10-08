@@ -3,7 +3,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import { createTestDbContext } from "../../../test-support/test-db";
 import { setupProjectedStore } from "../../../test-support/projected-store";
 import type { TestStore } from "../../../test-support/test-store";
-import { fakeGithubFetch } from "../../../test-support/fake-github";
+import { fakeGithubFetch, unreachableFetch } from "../../../test-support/fake-github";
 import {
   createConnection,
   getConnection,
@@ -44,6 +44,23 @@ async function addFineConnection(store: TestStore, actor: { userId: string; labe
   );
 }
 
+/** GitHub as akin-ozer's token sees it once the project's repository exists:
+ *  the user, no orgs, the repository and its (empty) pull list. */
+function attachRoutes() {
+  return fakeGithubFetch({
+    "GET /user": { body: { login: "akin-ozer" } },
+    "GET /user/orgs": { body: [] },
+    [`GET /repos/${REPO}`]: {
+      // A8 (pass 16): repository write is proven from the `permissions`
+      // block GitHub returns for the authenticated token, replacing the
+      // probe that PUT a file into the user's repo. Real GitHub always
+      // sends it, so the fixture has to as well.
+      body: { full_name: REPO, permissions: { push: true } },
+    },
+    [`GET /repos/${REPO}/pulls`]: { body: [] },
+  });
+}
+
 /**
  * The add-connection → attach story behind the "eternal ~ chips" complaint:
  * the connection modal necessarily validates with `repo: null`, which pins a
@@ -62,18 +79,7 @@ describe("runSetCredential refreshes the PAT cache with project context", () => 
     expect(created.status).toBe("saved");
 
     // 2. Attach to the project — the revalidation now runs WITH the repo.
-    const attachTime = fakeGithubFetch({
-      "GET /user": { body: { login: "akin-ozer" } },
-      "GET /user/orgs": { body: [] },
-      [`GET /repos/${REPO}`]: {
-        // A8 (pass 16): repository write is proven from the `permissions`
-        // block GitHub returns for the authenticated token, replacing the
-        // probe that PUT a file into the user's repo. Real GitHub always
-        // sends it, so the fixture has to as well.
-        body: { full_name: REPO, permissions: { push: true } },
-      },
-      [`GET /repos/${REPO}/pulls`]: { body: [] },
-    });
+    const attachTime = attachRoutes();
     const outcome = await runSetCredential(store.db, store.slug, actor, {
       dataRoot: store.dataRoot,
       fetchImpl: attachTime.fetchImpl,
@@ -96,10 +102,9 @@ describe("runSetCredential refreshes the PAT cache with project context", () => 
     await addFineConnection(store, actor);
 
     // Attach while GitHub is down: bind still lands, cache stays org-level.
-    const down = fakeGithubFetch({}); // every route 404s; validator reports it
     const outcome = await runSetCredential(store.db, store.slug, actor, {
       dataRoot: store.dataRoot,
-      fetchImpl: down.fetchImpl,
+      fetchImpl: unreachableFetch(),
     });
     expect(outcome.result).toBe("attached");
     expect(getProjectCredential(store.db, store.slug)).not.toBeNull();
@@ -118,18 +123,7 @@ describe("runReconcile on a project with no branched tasks", () => {
     const store = setupProjectedStore(ctx);
     const actor = { userId: store.users.arda.id, label: "arda@viberr.test" };
     await addFineConnection(store, actor);
-    const attachTime = fakeGithubFetch({
-      "GET /user": { body: { login: "akin-ozer" } },
-      "GET /user/orgs": { body: [] },
-      [`GET /repos/${REPO}`]: {
-        // A8 (pass 16): repository write is proven from the `permissions`
-        // block GitHub returns for the authenticated token, replacing the
-        // probe that PUT a file into the user's repo. Real GitHub always
-        // sends it, so the fixture has to as well.
-        body: { full_name: REPO, permissions: { push: true } },
-      },
-      [`GET /repos/${REPO}/pulls`]: { body: [] },
-    });
+    const attachTime = attachRoutes();
     await runSetCredential(store.db, store.slug, actor, {
       dataRoot: store.dataRoot,
       fetchImpl: attachTime.fetchImpl,

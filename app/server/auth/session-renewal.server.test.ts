@@ -1,6 +1,6 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { RouterContextProvider } from "react-router";
-import { setupAppTest, type AppTestContext } from "../../../test-support/test-app";
+import { routeArgs, setupAppTest, type AppTestContext } from "../../../test-support/test-app";
 
 /**
  * F10-17 — rolling-session renewal must reach the BROWSER.
@@ -58,13 +58,7 @@ async function throughMiddleware(
 ): Promise<Response> {
   const { sessionRenewalMiddleware } = await import("~/server/auth/require-user.server");
   const result = await sessionRenewalMiddleware(
-    {
-      request,
-      url: new URL(request.url),
-      params: {},
-      pattern: "/",
-      context: new RouterContextProvider(),
-    },
+    routeArgs(request, {}, "/"),
     async () => {
       await inner(request);
       return new Response("{}", { status: 200, headers: { "Content-Type": "application/json" } });
@@ -100,13 +94,7 @@ describe("F10-17: rolling-session renewal reaches the browser", () => {
     });
 
     const response = await throughMiddleware(request, (r) =>
-      loader({
-        request: r,
-        url: new URL(r.url),
-        params: { slug: "viberr-core" },
-        pattern: "/projects/:slug",
-        context: new RouterContextProvider(),
-      }),
+      loader(routeArgs(r, { slug: "viberr-core" }, "/projects/:slug")),
     );
 
     expect(response.headers.getSetCookie().join("\n")).toContain("session_token");
@@ -149,7 +137,7 @@ describe("F10-17: rolling-session renewal reaches the browser", () => {
 
     const document = await call("/");
     expect(document.csrf).toEqual(expect.any(String));
-    expect(document.theme).toBeDefined();
+    expect(document.theme).toBe("system"); // no viberr_theme cookie: the default
     expect("liveHead" in document ? document.liveHead : undefined).toBe(41);
 
     // A `.data` answer seeds nothing: the tab's streams are already under way.

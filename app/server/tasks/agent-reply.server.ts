@@ -24,8 +24,6 @@ import type { TaskMutationContext } from "./task-mutation.server";
 import { extractMentions, RESERVED_MENTION_HANDLES } from "~/ui/mention-spans";
 import { normalizeWorkspacePaths } from "~/shared/workspace-paths";
 
-export { normalizeWorkspacePaths };
-
 /**
  * Agent-mention resolution + reply-text extraction for the
  * "comment → resume that agent's session → reply as a comment" flow.
@@ -615,9 +613,6 @@ export function resolveMentionedAgent(
 
 // ---------------------------------------------------- reply-text extraction
 
-/** Timeline-comment length cap — the full transcript stays in the agent logs. */
-const MAX_REPLY_CHARS = 1200;
-
 /**
  * Extract the FULL (untruncated) reply from a finished run's persisted lines:
  * the LAST substantial `assistant`/`agent_message` text line. Whitespace is
@@ -626,7 +621,7 @@ const MAX_REPLY_CHARS = 1200;
  *
  * The verdict classifier and the no-progress guard consume THIS (full) text —
  * a reviewer's verdict frequently lands well past 1200 chars, so classifying on
- * the truncated comment would silently drop the verdict.
+ * a truncated preview would silently drop the verdict.
  *
  * P13-RT-09: there used to be a fallback to the terminal `result` line, whose
  * text is RUNTIME STATISTICS, not prose — `"success · 3 turns · 12s · $0.02"`
@@ -639,7 +634,7 @@ const MAX_REPLY_CHARS = 1200;
  * has none: `postAgentReplyComment` logs it and posts nothing, and the stats
  * stay where they belong, in the run panel.
  */
-export function extractFullReplyText(lines: LogLine[]): string | null {
+function extractFullReplyText(lines: LogLine[]): string | null {
   const isReplyText = (l: LogLine) =>
     l.ev === "text" &&
     (l.tag === "assistant" || l.tag === "agent_message") &&
@@ -652,35 +647,8 @@ export function extractFullReplyText(lines: LogLine[]): string | null {
   return null;
 }
 
-/**
- * The reply truncated to a readable preview length with a pointer to the full
- * transcript. NO LONGER the stored timeline form (2026-07-17: comments store
- * the FULL reply and the timeline UI clamps + expands) — kept for previews and
- * the recovery reconciler's has-a-reply check.
- */
-export function extractReplyText(lines: LogLine[]): string | null {
-  const full = extractFullReplyText(lines);
-  return full == null ? null : truncate(full);
-}
-
-function truncate(text: string): string {
-  if (text.length <= MAX_REPLY_CHARS) return text;
-  return (
-    text.slice(0, MAX_REPLY_CHARS - 1).trimEnd() +
-    "…\n\n_(truncated; full report in the agent logs)_"
-  );
-}
-
-/** Read a run's persisted display lines (helper for the completion callback). */
-export function replyTextForRun(
-  db: DatabaseSync,
-  runId: string,
-): string | null {
-  const lines = listRunLines(db, runId).map((l) => l.display);
-  return extractReplyText(lines);
-}
-
-/** The full untruncated reply text of a run (for verdict + no-progress checks). */
+/** The full untruncated reply text of a run (for the verdict and no-progress
+ *  checks, and the recovery reconciler's has-a-reply check). */
 export function fullReplyTextForRun(
   db: DatabaseSync,
   runId: string,
@@ -691,10 +659,8 @@ export function fullReplyTextForRun(
 
 /** R20-3 (F20-4): the marker both runtimes append the provider's redacted
  *  sentence behind, so `runFailureReason` can split it back off. ONE source
- *  since pass 32 (P07-C): `~/shared/provider-marker`, re-exported here for
- *  the task layer's existing importers. */
+ *  since pass 32 (P07-C): `~/shared/provider-marker`. */
 import { PROVIDER_TEXT_MARKER } from "~/shared/provider-marker";
-export { PROVIDER_TEXT_MARKER };
 
 /** Classified failure classes for an errored run (F8 + R7-2 fail-fast).
  *  Ruling 130(a) (pass 34): the vocabulary lives in the client-safe leaf

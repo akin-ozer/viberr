@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { LogLine } from "./runtime-types";
-import { diffPreview, editDiff, PREVIEW_ROWS, type DiffLine, type DiffRow } from "./edit-diff";
+import { diffPreview, editDiff, type DiffLine, type DiffRow } from "./edit-diff";
 
 const W = "/data/projects/akinozer-com/tasks/WEB-3/workspace/website/";
 
@@ -146,22 +146,22 @@ describe("ruling 499: a MultiEdit marks each edit; a Write numbers the file it w
   });
 });
 
-describe("ruling 499: a long diff shows its first rows and counts the rest", () => {
+describe("ruling 499: a long diff shows its first ten rows and counts the rest", () => {
   const line = (n: number): DiffLine => ({ kind: "add", text: `l${n}`, spans: null, num: null });
 
-  it("draws a diff a couple of rows past the preview whole", () => {
-    const rows = Array.from({ length: PREVIEW_ROWS + 2 }, (_, i) => line(i));
-    expect(diffPreview(rows)).toEqual({ shown: PREVIEW_ROWS + 2, more: 0 });
+  it("draws a diff of twelve rows whole", () => {
+    const rows = Array.from({ length: 12 }, (_, i) => line(i));
+    expect(diffPreview(rows)).toEqual({ shown: 12, more: 0 });
   });
 
-  it("counts the lines behind the preview, a fold's lines included", () => {
+  it("past twelve, draws ten and counts the lines behind them, a fold's lines included", () => {
     const rows: DiffRow[] = [
-      ...Array.from({ length: PREVIEW_ROWS }, (_, i) => line(i)),
+      ...Array.from({ length: 10 }, (_, i) => line(i)),
       { kind: "fold", lines: [line(100), line(101), line(102)] },
       { kind: "edit", n: 2, of: 2, everywhere: false },
       line(200),
       line(201),
     ];
-    expect(diffPreview(rows)).toEqual({ shown: PREVIEW_ROWS, more: 5 });
+    expect(diffPreview(rows)).toEqual({ shown: 10, more: 5 });
   });
 });

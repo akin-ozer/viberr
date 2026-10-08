@@ -10,6 +10,7 @@ import {
   actorOf,
   approveReviewEntry,
   baseTaskFrontmatter,
+  REVIEWER_ENGAGEMENT,
   writeProject,
   writeTask,
   type TestStore,
@@ -28,7 +29,7 @@ import {
 } from "~/server/projections/notifications.server";
 import { readProjectFile } from "~/server/files/project-writer.server";
 import { rebuildAll } from "~/server/projections/rebuilder.server";
-import { setupProjectedStore } from "../../../test-support/projected-store";
+import { reconfigureProject, setupProjectedStore } from "../../../test-support/projected-store";
 
 import { getTaskDetail } from "~/server/projections/task-query.server";
 import { getBoardWithTasks, listProjectTasks } from "~/server/projections/board-query.server";
@@ -81,16 +82,6 @@ const DEV_ENGAGEMENT: Engagement = {
   role: "developer",
   delivers: true,
   verdictCapable: false,
-};
-/** A verdict-capable reviewer whose profileId matches recordReviewerReply's
- *  actorRef ("reviewer") — so its verdict binds to the current revision AND
- *  gates acceptance (F10-15). */
-const REVIEWER_ENGAGEMENT: Engagement = {
-  profileId: "reviewer",
-  backend: "claude",
-  role: "Review & validation",
-  delivers: false,
-  verdictCapable: true,
 };
 /** An immutable delivered revision under review. */
 function workRev(id = "rev_1"): WorkRevision {
@@ -1112,9 +1103,7 @@ describe("resolvePacket kind matrix", () => {
     const store = setupProjectedStore(ctx);
     // The Developer profile is DEPLOYED ON CODEX — the backend the retry
     // exists to escape. Without a pin, every later run reverts to it.
-    const project = readProjectFile({ projectSlug: store.slug, dataRoot: store.dataRoot })!;
-    writeProject(store.dataRoot, {
-      ...project.parsed.frontmatter,
+    reconfigureProject(store, {
       repo: null,
       agents: [
         {
@@ -1132,7 +1121,6 @@ describe("resolvePacket kind matrix", () => {
         },
       ],
     });
-    rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
     const RETRY_PACKET: TaskPacket = {
       type: "blocked",
       kind: "Blocked decision",
@@ -1444,16 +1432,7 @@ describe("resolvePacket kind matrix", () => {
   it("resolve_remote_collision: closes the unowned PR, deletes the stale remote branch, clears the R15-15 record, and reports the redelivery outcome", async () => {
     const store = setupProjectedStore(ctx);
     const { fakeGithubFetch } = await import("../../../test-support/fake-github");
-    const { createPat, setProjectCredential } = await import(
-      "~/server/secrets/pat-store.server"
-    );
-    const patActor = { userId: store.users.arda.id, label: "arda@viberr.dev" };
-    const pat = createPat(
-      store.db,
-      { userId: store.users.arda.id, label: "bot", token: "ghp_collision00000000000000000000001" },
-      patActor,
-    );
-    setProjectCredential(store.db, { projectSlug: store.slug, patId: pat.id }, patActor);
+    await collisionCredential(store);
     const github = fakeGithubFetch({
       "PATCH /repos/akin-ozer/viberr/pulls/232": { status: 200, body: { state: "closed" } },
       "DELETE /repos/akin-ozer/viberr/git/refs/heads/vib-1-work": { status: 204, body: "" },
@@ -2455,16 +2434,7 @@ describe("resolvePacket kind matrix", () => {
     // write `sha` instead of `localSha`/`remoteSha` on the archive row.
     const store = setupProjectedStore(ctx);
     const { fakeGithubFetch } = await import("../../../test-support/fake-github");
-    const { createPat, setProjectCredential } = await import(
-      "~/server/secrets/pat-store.server"
-    );
-    const patActor = { userId: store.users.arda.id, label: "arda@viberr.dev" };
-    const pat = createPat(
-      store.db,
-      { userId: store.users.arda.id, label: "bot", token: "ghp_foreignhead000000000000000000001" },
-      patActor,
-    );
-    setProjectCredential(store.db, { projectSlug: store.slug, patId: pat.id }, patActor);
+    await collisionCredential(store);
     const remoteSha = "d5f23aa".padEnd(40, "1");
     const github = fakeGithubFetch({
       "GET /repos/akin-ozer/viberr/git/ref/heads/vib-1-work": {
@@ -2615,8 +2585,14 @@ describe("resolvePacket kind matrix", () => {
       { dataRoot: store.dataRoot },
     );
     // arda (admin) + murat (maintainer) are notified; selin (the owner) is not.
-    expect(res.notified).toBeGreaterThanOrEqual(1);
-    expect(listNotifications(store.db, store.users.murat.id).length).toBeGreaterThanOrEqual(1);
+    expect(res.notified).toBe(2);
+    for (const user of [store.users.arda, store.users.murat]) {
+      expect(
+        listNotifications(store.db, user.id).filter(
+          (n) => n.title === `Decision needs a maintainer: ${STRANDED_PACKET.title}`,
+        ),
+      ).toHaveLength(1);
+    }
     expect(listNotifications(store.db, store.users.selin.id).length).toBe(0);
     // The ask lands on the timeline (with the owner's note) and is audited.
     const texts = getTaskDetail(store.db, store.slug, "VIB-1")!.timeline.map((e) => e.text);
@@ -3077,7 +3053,8 @@ describe("completeTaskMerge (S2 — finish a merge-pending PR)", () => {
       { dataRoot: store.dataRoot },
     );
     expect(result.merged).toBe(false);
-    expect(result.message).toMatch(/credential|scope|merge/i);
+    // The sentence for this cause, not any of the other three failures'.
+    expect(result.message).toBe("Configure a GitHub credential for this project first, then try again.");
     // The PR stays "accepted" — never silently flipped to "merged".
     const fm = readTaskFile({
       projectSlug: store.slug,
@@ -3934,7 +3911,7 @@ describe("ruling 189: a resolved decision amends the task goal", () => {
   it("ruling 295: an unchanged title writes nothing, and an over-long one is refused whole", async () => {
     const store = setupProjectedStore(ctx);
     withTask(store, { stage: "impl", ownerUserId: store.users.arda.id }, null);
-    const { updateTaskTitle, TASK_TITLE_MAX_CHARS } = await import("./task-edits.server");
+    const { updateTaskTitle } = await import("./task-edits.server");
     const current = readTaskFile({
       projectSlug: store.slug,
       taskKey: "VIB-1",
@@ -3954,15 +3931,16 @@ describe("ruling 189: a resolved decision amends the task goal", () => {
         .parsed.timeline.some((e) => e.title === "Title updated"),
     ).toBe(false);
 
-    // Ruling 288's rule one field over: refused by name with nothing written,
-    // never cut. CANARY: `.slice(0, TASK_TITLE_MAX_CHARS)`.
+    // Ruling 288's rule one field over: a title past ruling 295's 200
+    // characters is refused by name with nothing written, never cut.
+    // CANARY: `.slice(0, TASK_TITLE_MAX_CHARS)`.
     await expect(
       updateTaskTitle(
         store.db,
         {
           projectSlug: store.slug,
           taskKey: "VIB-1",
-          title: "x".repeat(TASK_TITLE_MAX_CHARS + 1),
+          title: "x".repeat(201),
         },
         actorOf(store.users.arda),
         { dataRoot: store.dataRoot },

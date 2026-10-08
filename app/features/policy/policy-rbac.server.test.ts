@@ -63,6 +63,7 @@ import { GOVERNED_TEMPLATE } from "~/shared/workflow/templates";
 import type { CapabilityGrant } from "~/schemas/project-file.schema";
 import type { TaskFrontmatter, TaskPacket } from "~/schemas/task-file.schema";
 import { listAuditEvents } from "../../../test-support/audit-log";
+import { reconfigureProject } from "../../../test-support/projected-store";
 
 /**
  * THE binding test the matrix-as-source design promises (app/shared/rbac.ts):
@@ -216,19 +217,6 @@ function resetTaskOwner(ownerUserId: string, patch: Partial<TaskFrontmatter> = {
       ...patch,
     }),
     goal: "Exercise the canonical guards per role.",
-  });
-  rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
-}
-
-/** A SECOND task, so "authority on my task" can be told apart from "authority". */
-function writeOtherTask(key: string, patch: Partial<TaskFrontmatter> = {}) {
-  writeTask(store.dataRoot, store.slug, {
-    frontmatter: baseTaskFrontmatter(key, {
-      stage: "impl",
-      title: `Other task ${key}`,
-      ...patch,
-    }),
-    goal: "A task the actor does not own.",
   });
   rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
 }
@@ -676,9 +664,7 @@ function matrixDrivers() {
         // project the role tier is all that locks it — nothing drove that.
         label: "setProjectArchived (restore this project)",
         reset: () => {
-          const file = readProjectFile({ projectSlug: store.slug, dataRoot: store.dataRoot })!;
-          writeProject(store.dataRoot, { ...file.parsed.frontmatter, archived: true });
-          rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
+          reconfigureProject(store, { archived: true });
         },
         run: async (actor) => {
           await setProjectArchived(store.db, { projectSlug: store.slug, archived: false }, actor, {
@@ -798,9 +784,7 @@ describe("RBAC enforcement is bound to ACTION_ROLES (single-source guarantee)", 
   it("archived project FREEZES github/credential mutation (R8-5): even an admin is denied (409)", () => {
     // Archive the project (read-only per R6-3). Credential mutation no longer
     // passes allowArchived, so the mutable gate fires BEFORE the role check.
-    const file = readProjectFile({ projectSlug: store.slug, dataRoot: store.dataRoot })!;
-    writeProject(store.dataRoot, { ...file.parsed.frontmatter, archived: true });
-    rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
+    reconfigureProject(store, { archived: true });
     const admin = actorOf(store.users.arda);
     // grant-github-scope (change the credential) is admin-held, yet the archived
     // gate rejects it with a 409 (not a 403) — restore first.
@@ -849,57 +833,11 @@ describe("RBAC enforcement is bound to ACTION_ROLES (single-source guarantee)", 
 
 /**
  * R6-2 / R14-2 / FR37 — a task's human OWNER holds the decisions ON THEIR OWN
- * TASK whatever their project role. BOTH halves matter, and only the first one
- * used to be tested here: the "…and a contributor who does NOT own it is still
- * denied" leg drove DENIZ, who is a NON-MEMBER — that assertion passes on the
- * membership gate alone and would still pass if `ownerException` handed
- * acceptance authority to every contributor in the project. The second task
- * below is the real control.
+ * TASK whatever their project role. The next block drives that authority, and
+ * its limit to the one task, through every consumer of `ownerException`; this
+ * one pins where the exception stops.
  */
 describe("R6-2: task-owner authority is scoped to THAT task", () => {
-  const acceptOn = (taskKey: string, user: { id: string; email: string }) =>
-    guardAllowed(() =>
-      completeTaskMerge(
-        store.db,
-        { projectSlug: store.slug, taskKey },
-        actorOf(user),
-        { dataRoot: store.dataRoot },
-      ),
-    );
-
-  it("a CONTRIBUTOR owner may accept their own task — and no other task", async () => {
-    resetTaskOwner(store.users.selin.id); // selin owns VIB-1
-    // VIB-2 is owned by SOMEONE ELSE, not merely unowned. An unowned control
-    // proves nothing: `ownerException` short-circuits on a null owner, so the
-    // identity comparison — the half that makes the authority task-scoped — is
-    // only load-bearing when there IS an owner to be confused with. (Caught by
-    // canarying this case: with `ownerUserId === actor.userId` deleted from
-    // ownerException, an unowned VIB-2 still refused selin and the test stayed
-    // green.)
-    writeOtherTask("VIB-2", { ownerUserId: store.users.arda.id });
-    expect(
-      await acceptOn("VIB-1", store.users.selin),
-      "a contributor OWNER may accept their own task (R6-2)",
-    ).toBe(true);
-    expect(
-      await acceptOn("VIB-2", store.users.selin),
-      "the SAME contributor must be denied on a task they do not own",
-    ).toBe(false);
-    // A maintainer needs no ownership at all — the tier still works.
-    expect(await acceptOn("VIB-2", store.users.murat)).toBe(true);
-  });
-
-  it("the owner exception needs a LIVE own-task role: a viewer owner is still denied", async () => {
-    // `ownerException` re-checks `roleCan(role, "own-task")`, so a seat left
-    // behind by a demotion (or hand-written into the file) does not carry
-    // acceptance authority. elif is a viewer.
-    resetTaskOwner(store.users.elif.id);
-    expect(await acceptOn("VIB-1", store.users.elif)).toBe(false);
-    // …and a seat held by someone who is no longer a member at all.
-    resetTaskOwner(store.users.deniz.id);
-    expect(await acceptOn("VIB-1", store.users.deniz)).toBe(false);
-  });
-
   it("the owner exception does NOT reach the admin-only escape hatch (force-accept)", async () => {
     // force-accept-completion deliberately bypasses the review gate (DG-2), so
     // it is admin-only and takes no owner exception — otherwise any contributor
@@ -913,6 +851,21 @@ describe("R6-2: task-owner authority is scoped to THAT task", () => {
         { dataRoot: store.dataRoot },
       ),
     ).rejects.toMatchObject({ status: 403 });
+  });
+
+  it("a maintainer still accepts a task someone else owns: the exception adds authority, never takes the tier's", async () => {
+    // CANARY: refuse a non-owner whenever the task has an owner.
+    resetTaskOwner(store.users.selin.id);
+    expect(
+      await guardAllowed(() =>
+        completeTaskMerge(
+          store.db,
+          { projectSlug: store.slug, taskKey: "VIB-1" },
+          actorOf(store.users.murat),
+          { dataRoot: store.dataRoot },
+        ),
+      ),
+    ).toBe(true);
   });
 });
 
@@ -1433,11 +1386,9 @@ describe("ALWAYS_HUMAN capabilities are unreachable whatever the grants say", ()
     // the chain), and such a row carries no `locked` flag. If the guard rested
     // on that flag alone, `impl → Done: auto` would be accepted and the terminal
     // stage would be machine-reachable on a perfectly ordinary project.
-    const file = readProjectFile({ projectSlug: store.slug, dataRoot: store.dataRoot })!;
-    writeProject(store.dataRoot, {
-      ...file.parsed.frontmatter,
+    reconfigureProject(store, (fm) => ({
       workflow: [
-        ...file.parsed.frontmatter.workflow,
+        ...fm.workflow,
         {
           from: "impl",
           to: TERMINAL_STAGE,
@@ -1446,8 +1397,7 @@ describe("ALWAYS_HUMAN capabilities are unreachable whatever the grants say", ()
           locked: false,
         },
       ],
-    });
-    rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
+    }));
     const admin = actorOf(store.users.arda);
     for (const boundary of ["auto", "approval"]) {
       await expect(
@@ -1473,14 +1423,11 @@ describe("ALWAYS_HUMAN capabilities are unreachable whatever the grants say", ()
     // cannot see (that edge is refused by the terminal-stage clause whether or
     // not the row is locked). `locked` is how a workflow row declares itself
     // non-negotiable; without this, deleting the flag check would be invisible.
-    const file = readProjectFile({ projectSlug: store.slug, dataRoot: store.dataRoot })!;
-    writeProject(store.dataRoot, {
-      ...file.parsed.frontmatter,
-      workflow: file.parsed.frontmatter.workflow.map((w) =>
+    reconfigureProject(store, (fm) => ({
+      workflow: fm.workflow.map((w) =>
         w.from === "triage" && w.to === "ready" ? { ...w, locked: true } : w,
       ),
-    });
-    rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
+    }));
     await expect(
       setTransitionBoundary(
         store.db,

@@ -11,13 +11,11 @@ import {
 } from "../../../test-support/toolchain";
 import {
   PROBE_LIMIT,
-  PROBE_NAME_RE,
   cachedToolchain,
   probeTool,
   probeTools,
   resolveToolchain,
   shellInventoryPrompt,
-  versionOf,
   type CommandRunner,
   type Toolchain,
 } from "./toolchain.server";
@@ -53,7 +51,7 @@ function scriptedRunner(
   };
 }
 
-describe("versionOf", () => {
+describe("the version a --version answer carries", () => {
   it.each([
     ["v26.8.2\n", "26.8.2"],
     ["11.19.1\n", "11.19.1"],
@@ -63,9 +61,8 @@ describe("versionOf", () => {
     ["1.2.3-rc.1+build", "1.2.3-rc.1+build"],
     ["not a version", null],
     ["", null],
-    [null, null],
-  ])("reads %j as %j", (text, expected) => {
-    expect(versionOf(text)).toBe(expected);
+  ])("reads %j as %j", (stdout, expected) => {
+    expect(resolveToolchain({ run: () => ({ ok: true, stdout }) }).npm).toBe(expected);
   });
 });
 
@@ -437,9 +434,10 @@ describe("F39-1: probeTool", () => {
       // CANARY: relax PROBE_NAME_RE and these reach a child process.
       expect(calls, bad).toHaveLength(0);
     }
-    expect(PROBE_NAME_RE.test("golangci-lint")).toBe(true);
-    expect(PROBE_NAME_RE.test("go1.25.1")).toBe(true);
-    expect(PROBE_NAME_RE.test("g++")).toBe(true);
+    // A dot, a plus or a dash still makes a bare command name, which is probed.
+    for (const good of ["golangci-lint", "go1.25.1", "g++"]) {
+      expect(probeTool(good, { run: runnerFor([good]).run }).present, good).toBe(true);
+    }
   });
 
   it("probeTools de-duplicates, keeps order, caps the count and memoizes a tool it found", () => {

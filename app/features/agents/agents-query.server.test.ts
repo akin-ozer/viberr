@@ -3,10 +3,7 @@ import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { createTestDbContext } from "../../../test-support/test-db";
 import { seedDefaultAgentAssets } from "~/server/seed/default-assets.server";
-import {
-  capabilitiesToActionLabels,
-  effectiveProfileView,
-} from "./agents-query.server";
+import { effectiveProfileView } from "./agents-query.server";
 import type {
   AgentDeployment,
   AgentDeploymentDefinition,
@@ -18,21 +15,48 @@ import { resolveSpecialistDisallowedTools } from "~/server/tasks/specialist-tool
 
 const cap = (capabilityId: string, mode: CapabilityMode) => ({ capabilityId, mode });
 
+/** A specialist deployment with its own definition and no template behind it. */
+const specialistDeployment = (
+  capabilities: CapabilityGrant[],
+  extras: AgentDeployment["extras"] = [],
+): AgentDeployment => ({
+  profileId: "developer",
+  capabilities,
+  extras,
+  definition: {
+    kind: "specialist",
+    name: "Developer",
+    role: "Implementation",
+  },
+});
+
+/** An operator deployment with no autonomy stored (so supervised). */
+const operatorDeployment = (capabilities: CapabilityGrant[]): AgentDeployment => ({
+  profileId: "operator",
+  capabilities,
+  extras: [],
+  definition: { kind: "operator" },
+});
+
+/** The action buckets the profile detail, the matrix and the Policy counts
+ *  render, as the view hands them over. */
+const actionsOf = (deployment: AgentDeployment) =>
+  effectiveProfileView(deployment, undefined, absentDeliverReviewPrMode(false)).actions;
+
 /**
  * NEW-3: `human` (a structural always-human lock) and `off` (withheld from this
  * agent) are SEPARATE buckets. Conflating them made an explicitly withheld
  * capability render as "Reserved for humans" in the matrix / profile detail /
  * policy "N human" count, when it is simply not granted.
  */
-describe("capabilitiesToActionLabels — off vs human separation (NEW-3)", () => {
+describe("the action buckets — off vs human separation (NEW-3)", () => {
   it("routes mode 'off' to the `off` bucket and mode 'human' to `forbidden`", () => {
-    const out = capabilitiesToActionLabels(
-      [
+    const out = actionsOf(
+      specialistDeployment([
         cap("commit-push-branch", "direct"),
         cap("report-validation-verdict", "off"), // withheld → off, NOT reserved
         cap("merge-pull-request", "human"), // structural always-human → forbidden
-      ],
-      [],
+      ]),
     );
     expect(out.direct).toContain("Commit & push to the branch");
     // The withheld verdict is "not granted", NOT "reserved for humans".
@@ -43,10 +67,35 @@ describe("capabilitiesToActionLabels — off vs human separation (NEW-3)", () =>
     expect(out.off).not.toContain("Merge a pull request");
   });
 
-  it("recommend stays its own bucket", () => {
-    const out = capabilitiesToActionLabels([cap("stage-transitions", "recommend")], []);
-    expect(out.recommend).toContain("Stage transitions");
-    expect(out.off).toEqual([]);
+  it("renders catalog labels in the stored order and appends extras to their own bucket", () => {
+    const out = actionsOf(
+      specialistDeployment(
+        [
+          cap("author-test-cases", "direct"),
+          cap("attach-evidence-references", "direct"),
+          cap("merge-pull-request", "human"),
+          cap("transition-to-done", "human"),
+        ],
+        [{ label: "Run the validation suite", mode: "direct" }],
+      ),
+    );
+    // The stored grants lead (the view materializes the absent ones after
+    // them), and the extra comes last.
+    expect(out.direct.slice(0, 2)).toEqual([
+      "Author test cases",
+      "Attach evidence references",
+    ]);
+    expect(out.direct.at(-1)).toBe("Run the validation suite");
+    expect(out.forbidden.slice(0, 2)).toEqual([
+      "Merge a pull request",
+      "Transition a task to Done",
+    ]);
+  });
+
+  it("keeps unknown capability ids tolerantly (renders the id)", () => {
+    expect(
+      actionsOf(specialistDeployment([cap("not-a-real-cap", "direct")])).direct,
+    ).toContain("not-a-real-cap");
   });
 });
 
@@ -57,17 +106,16 @@ describe("capabilitiesToActionLabels — off vs human separation (NEW-3)", () =>
  * brand-new docs writer holding "Approve the review" and "Request changes"
  * under ACTS DIRECTLY — authority the completion pipeline refuses it.
  */
-describe("capabilitiesToActionLabels — verdict outcomes follow the verdict (F15-06)", () => {
+describe("the action buckets — verdict outcomes follow the verdict (F15-06)", () => {
   it("never lists approve/request-changes as granted without verdict authority", () => {
-    const out = capabilitiesToActionLabels(
-      [
+    const out = actionsOf(
+      specialistDeployment([
         cap("report-validation-verdict", "off"),
         cap("approve-review", "direct"),
         cap("request-changes", "direct"),
         cap("post-quality-flags", "direct"),
         cap("read-repo-diff", "direct"),
-      ],
-      [],
+      ]),
     );
     expect(out.direct).not.toContain("Approve the review");
     expect(out.direct).not.toContain("Request changes");
@@ -78,13 +126,12 @@ describe("capabilitiesToActionLabels — verdict outcomes follow the verdict (F1
   });
 
   it("keeps them for a profile that explicitly holds the verdict (the reviewer)", () => {
-    const out = capabilitiesToActionLabels(
-      [
+    const out = actionsOf(
+      specialistDeployment([
         cap("report-validation-verdict", "direct"),
         cap("approve-review", "direct"),
         cap("request-changes", "direct"),
-      ],
-      [],
+      ]),
     );
     expect(out.direct).toContain("Approve the review");
     expect(out.direct).toContain("Request changes");
@@ -99,33 +146,7 @@ describe("capabilitiesToActionLabels — verdict outcomes follow the verdict (F1
  * DIRECTLY — authority the server refuses — unless the autonomy ceiling is
  * applied, the exact F15-06 class one axis over.
  */
-describe("capabilitiesToActionLabels — autonomy ceiling on accept-completion (F20-9/R20-7)", () => {
-  it("a SUPERVISED operator's direct accept-completion renders RECOMMENDS ONLY, not ACTS DIRECTLY", () => {
-    const out = capabilitiesToActionLabels(
-      [
-        cap("completion-for-acceptance", "direct"),
-        cap("dispatch-agents", "direct"),
-      ],
-      [],
-      "supervised",
-    );
-    // Canary: drop the `autonomy` arg / the ceiling and this flips back to `direct`.
-    expect(out.direct).not.toContain("Accept completion into Done");
-    expect(out.recommend).toContain("Accept completion into Done");
-    // The ceiling touches ONLY accept-completion — other grants are unaffected.
-    expect(out.direct).toContain("Select & run agents");
-  });
-
-  it("a FULL-autonomy operator keeps it under ACTS DIRECTLY (the exception is live)", () => {
-    const out = capabilitiesToActionLabels(
-      [cap("completion-for-acceptance", "direct")],
-      [],
-      "full",
-    );
-    expect(out.direct).toContain("Accept completion into Done");
-    expect(out.recommend).not.toContain("Accept completion into Done");
-  });
-
+describe("the action buckets — autonomy ceiling on accept-completion (F20-9/R20-7)", () => {
   it("F37-65: a FULL-autonomy operator's RECOMMEND grant renders ACTS DIRECTLY, because the runtime promotes it", () => {
     // The ceiling only ever mirrored the DOWNGRADE. `gate()` does the other
     // half too: `authority.autonomy === "full" ? "direct" : "recommend"` for
@@ -133,27 +154,19 @@ describe("capabilitiesToActionLabels — autonomy ceiling on accept-completion (
     // acted directly on grants this display called "Recommends only" — the
     // label whose legend says it proposes a card a person applies.
     // CANARY: restore `if (autonomy === "full") return grants.map(...)`.
-    const out = capabilitiesToActionLabels(
-      [
+    const out = actionsOf({
+      ...operatorDeployment([
         cap("deliver-review-pr", "recommend"),
         cap("completion-for-acceptance", "recommend"),
-      ],
-      [],
-      "full",
-    );
+      ]),
+      definition: { kind: "operator", autonomy: "full" },
+    });
     expect(out.direct).toContain("Deliver the branch & open the review PR");
     expect(out.recommend).not.toContain("Deliver the branch & open the review PR");
     // Acceptance is the one carve-out the runtime keeps at recommend whatever
     // the autonomy (owner ruling Q1), so it must NOT be promoted.
     expect(out.recommend).toContain("Accept completion into Done");
     expect(out.direct).not.toContain("Accept completion into Done");
-  });
-
-  it("F37-65: a SUPERVISED operator's recommend grant is untouched", () => {
-    // The promotion is gated on full autonomy. CANARY: promote unconditionally.
-    const out = capabilitiesToActionLabels([cap("deliver-review-pr", "recommend")], [], "supervised");
-    expect(out.recommend).toContain("Deliver the branch & open the review PR");
-    expect(out.direct).not.toContain("Deliver the branch & open the review PR");
   });
 
   it("effectiveProfileView threads the operator's own autonomy into the ceiling", () => {
@@ -170,7 +183,7 @@ describe("capabilitiesToActionLabels — autonomy ceiling on accept-completion (
       if (autonomy) definition.autonomy = autonomy;
       return {
         profileId: "operator",
-        capabilities: [cap("completion-for-acceptance", mode)],
+        capabilities: [cap("completion-for-acceptance", mode), cap("dispatch-agents", "direct")],
         extras: [],
         definition,
       };
@@ -182,8 +195,11 @@ describe("capabilitiesToActionLabels — autonomy ceiling on accept-completion (
       absentDeliverReviewPrMode(false),
     );
     expect(supervised.autonomy).toBe("supervised");
+    // Canary: drop the `autonomy` arg / the ceiling and this flips back to `direct`.
     expect(supervised.actions.recommend).toContain("Accept completion into Done");
     expect(supervised.actions.direct).not.toContain("Accept completion into Done");
+    // The ceiling touches ONLY accept-completion — other grants are unaffected.
+    expect(supervised.actions.direct).toContain("Select & run agents");
 
     const full = effectiveProfileView(
       opDeployment("full", "direct"),
@@ -192,6 +208,7 @@ describe("capabilitiesToActionLabels — autonomy ceiling on accept-completion (
     );
     expect(full.autonomy).toBe("full");
     expect(full.actions.direct).toContain("Accept completion into Done");
+    expect(full.actions.recommend).not.toContain("Accept completion into Done");
 
     // No autonomy on the deployment resolves to supervised, so the ceiling holds.
     const defaulted = effectiveProfileView(
@@ -212,15 +229,6 @@ describe("capabilitiesToActionLabels — autonomy ceiling on accept-completion (
  * that claims to list the policy, and it must be editable there.
  */
 describe("R15-2: a pre-R15-2 operator deployment still shows its delivery grant", () => {
-  const operatorDeployment = (
-    capabilities: CapabilityGrant[],
-  ): AgentDeployment => ({
-    profileId: "operator",
-    capabilities,
-    extras: [],
-    definition: { kind: "operator" },
-  });
-
   const noGrant = [
     cap("dispatch-agents", "direct"),
     cap("stage-transitions", "recommend"),
@@ -305,13 +313,6 @@ describe("R15-2: a pre-R15-2 operator deployment still shows its delivery grant"
  * asserts a mode the runtime does not use" class (fourth recurrence).
  */
 describe("A-1/A-2 (pass 24): operator materialization matches the runtime gate", () => {
-  const operatorDeployment = (capabilities: CapabilityGrant[]): AgentDeployment => ({
-    profileId: "operator",
-    capabilities,
-    extras: [],
-    definition: { kind: "operator" },
-  });
-
   it("materializes an absent update-task-branch at the delivery-gate mode (auto ⇒ direct)", () => {
     const view = effectiveProfileView(
       operatorDeployment([cap("deliver-review-pr", "direct")]),
@@ -357,19 +358,6 @@ describe("A-1/A-2 (pass 24): operator materialization matches the runtime gate",
  * recurrence F15-20 → BUG-1 → A1).
  */
 describe("A1: read surfaces materialize an absent grant at its runtime mode", () => {
-  const specialistDeployment = (
-    capabilities: CapabilityGrant[],
-  ): AgentDeployment => ({
-    profileId: "developer",
-    capabilities,
-    extras: [],
-    definition: {
-      kind: "specialist",
-      name: "Developer",
-      role: "Implementation",
-    },
-  });
-
   it("shows an ABSENT permissive-default grant (web egress) as Allowed, agreeing with the enforcement layer", () => {
     const grants = [cap("execute-code-or-write-repo", "direct")]; // web egress ABSENT
     const view = effectiveProfileView(

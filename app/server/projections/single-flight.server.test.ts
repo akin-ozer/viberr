@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   REBUILD_MIN_INTERVAL_MS,
   RESCAN_MIN_INTERVAL_MS,
@@ -13,42 +13,41 @@ import {
  */
 
 describe("runSingleFlight", () => {
+  // The cooldown reads the clock: each case sets it.
+  beforeEach(() => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+  });
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
   it("runs the first call and refuses the next one inside the interval", () => {
     let runs = 0;
-    let clock = 1_000;
-    const call = () =>
-      runSingleFlight("k-first", () => ++runs, {
-        minIntervalMs: 10_000,
-        now: () => clock,
-      });
+    vi.setSystemTime(1_000);
+    const call = () => runSingleFlight("k-first", () => ++runs, { minIntervalMs: 10_000 });
 
     expect(call()).toEqual({ status: "ran", result: 1 });
     expect(call()).toEqual({ status: "throttled", retryAfterMs: 10_000 });
 
-    clock += 4_000;
+    vi.setSystemTime(5_000);
     expect(call()).toEqual({ status: "throttled", retryAfterMs: 6_000 });
     expect(runs).toBe(1);
   });
 
   it("runs again once the interval has elapsed", () => {
     let runs = 0;
-    let clock = 0;
-    const call = () =>
-      runSingleFlight("k-elapsed", () => ++runs, {
-        minIntervalMs: 10_000,
-        now: () => clock,
-      });
+    vi.setSystemTime(0);
+    const call = () => runSingleFlight("k-elapsed", () => ++runs, { minIntervalMs: 10_000 });
 
     call();
-    clock = 10_000;
+    vi.setSystemTime(10_000);
     expect(call()).toEqual({ status: "ran", result: 2 });
     expect(runs).toBe(2);
   });
 
   it("keys cooldowns independently — rescan never throttles rebuild", () => {
-    let clock = 0;
-    const run = (key: string) =>
-      runSingleFlight(key, () => key, { minIntervalMs: 10_000, now: () => clock });
+    vi.setSystemTime(0);
+    const run = (key: string) => runSingleFlight(key, () => key, { minIntervalMs: 10_000 });
 
     expect(run("projections:rescan").status).toBe("ran");
     expect(run("projections:rebuild").status).toBe("ran");
@@ -56,21 +55,20 @@ describe("runSingleFlight", () => {
   });
 
   it("holds the cooldown when the work THROWS — a failing sweep is the one not to hammer", () => {
-    let clock = 0;
+    vi.setSystemTime(0);
     const boom = () =>
       runSingleFlight(
         "k-throws",
         () => {
           throw new Error("sweep failed");
         },
-        { minIntervalMs: 10_000, now: () => clock },
+        { minIntervalMs: 10_000 },
       );
 
     expect(boom).toThrowError("sweep failed");
-    expect(
-      runSingleFlight("k-throws", () => "ok", { minIntervalMs: 10_000, now: () => clock })
-        .status,
-    ).toBe("throttled");
+    expect(runSingleFlight("k-throws", () => "ok", { minIntervalMs: 10_000 }).status).toBe(
+      "throttled",
+    );
   });
 });
 

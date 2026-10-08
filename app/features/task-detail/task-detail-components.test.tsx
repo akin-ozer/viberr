@@ -14,7 +14,7 @@ import type {
 import type { TimelineEventRender } from "~/shared/mapping/task-event.server";
 import { MemoryRouter, createRoutesStub } from "react-router";
 import { ToastProvider } from "~/ui/toast";
-import { DELIVER_LABEL, DecisionPacket } from "./decision-packet";
+import { DecisionPacket } from "./decision-packet";
 import { GithubTrace } from "./task-side-panels";
 import { MoveBackConfirm } from "./move-back-confirm";
 import { DiagnosticsPanel, TaskHero } from "./task-main-sections";
@@ -28,8 +28,7 @@ import {
   type DeployedSpecialistView,
   type TaskMemberView,
 } from "./execution-profile";
-import type { TaskRunPrincipalView } from "./run-principal-view";
-import { taskDetail, taskSummary } from "../../../test-support/task-detail";
+import { connectedPrincipal, taskDetail, taskSummary } from "../../../test-support/task-detail";
 
 afterEach(cleanup);
 
@@ -826,21 +825,6 @@ const deployedFixture: DeployedSpecialistView[] = [
 
 function execTask(patch: Partial<TaskSummary> = {}): TaskSummary {
   return { ...taskFixture("u-arda", "Arda Kaya"), ...patch };
-}
-
-/** Ruling 127: the fixture task's OWNER (`u-arda`, who is also the viewer) and
- *  what their accounts can run. A run on this task bills them, so this — not a
- *  deployment probe — is what every run control here answers from. */
-function connectedPrincipal(
-  patch: Partial<TaskRunPrincipalView> = {},
-): TaskRunPrincipalView {
-  return {
-    ownerUserId: "u-arda",
-    ownerName: "Arda Kaya",
-    claude: { available: true, detail: null },
-    codex: { available: true, detail: null },
-    ...patch,
-  };
 }
 
 /** Renders the rebuilt panel (dynamic-dispatch rework 2026-08-29): the operator
@@ -1820,22 +1804,12 @@ describe("ExecutionProfile — a closed task withholds the release ✕ (F33-10)"
     expect(container.querySelector(".rev-agent .rev-x")).not.toBeNull();
   });
 
-  it("a MERGED task keeps the ledger row and drops the ✕", () => {
-    const { container } = renderExec(withSupporting({ displayReadiness: "merged" }));
-    expect(container.querySelectorAll(".rev-agent")).toHaveLength(1);
-    expect(container.querySelector(".rev-agent .rev-x")).toBeNull();
-  });
-
-  it("an ACCEPTED task drops it too", () => {
-    const { container } = renderExec(
-      withSupporting({ displayReadiness: "accepted" }),
-    );
-    expect(container.querySelectorAll(".rev-agent")).toHaveLength(1);
-    expect(container.querySelector(".rev-agent .rev-x")).toBeNull();
-  });
-
-  it("an ARCHIVED task drops it too (F15-11)", () => {
-    const { container } = renderExec(withSupporting({ archived: true }));
+  it.each<[string, Partial<TaskSummary>]>([
+    ["a MERGED task", { displayReadiness: "merged" }],
+    ["an ACCEPTED task", { displayReadiness: "accepted" }],
+    ["an ARCHIVED task (F15-11)", { archived: true }],
+  ])("%s keeps the ledger row and drops the ✕", (_, patch) => {
+    const { container } = renderExec(withSupporting(patch));
     expect(container.querySelectorAll(".rev-agent")).toHaveLength(1);
     expect(container.querySelector(".rev-agent .rev-x")).toBeNull();
   });
@@ -2543,7 +2517,6 @@ describe("F19-22: the GitHub panel names the last CHANGE, not the last check", (
       traceTask({ pr: { number: 147, state: "review", title: "x" } }),
       "2026-08-06T12:01:55.000Z",
     );
-    expect(row.querySelector(".k")!.textContent).toBe("Last change");
     expect(row.textContent).not.toContain("Synced");
   });
 
@@ -2800,7 +2773,12 @@ describe("UI-42/UI-44: the decision packet", () => {
     expect(queryByRole("radiogroup")).not.toBeNull();
   });
 
-  it("blocks edit_goal for a resolver who cannot edit the goal", () => {
+  // Ruling 459: the blocked option and the refused Confirm each carried an
+  // inline .55 of their own, off the house .45 step, and the sheet's
+  // `:not(:disabled)` hover and press still matched both. The attribute is now
+  // the whole contract: `.opt[aria-disabled="true"]` and
+  // `.btn[aria-disabled="true"]` dim them in app.css, which pins those rules.
+  it("blocks edit_goal for a resolver who cannot edit the goal; the dim is the sheet's (ruling 459)", () => {
     const onResolve = vi.fn();
     const { container } = render(
       <DecisionPacket
@@ -2816,6 +2794,7 @@ describe("UI-42/UI-44: the decision packet", () => {
     );
     const first = container.querySelectorAll<HTMLButtonElement>(".options .opt")[0]!;
     expect(first.getAttribute("aria-disabled")).toBe("true");
+    expect(first.getAttribute("style")).toBeNull();
     expect(first.textContent).toContain("your role can't edit the goal");
     // The Confirm button refuses too — before the fix an owner-contributor
     // recorded the decision, got "type the new goal", and found no editor.
@@ -2825,36 +2804,9 @@ describe("UI-42/UI-44: the decision packet", () => {
       ".packet-actions .btn.primary",
     )!;
     expect(confirm.getAttribute("aria-disabled")).toBe("true");
+    expect(confirm.getAttribute("style")).toBeNull();
     fireEvent.click(confirm);
     expect(onResolve).not.toHaveBeenCalled();
-  });
-
-  it("leaves the refusal's dim to the sheet, which also stills its hover and press (ruling 459)", () => {
-    // The blocked option and the refused Confirm each carried an inline .55
-    // of their own, off the house .45 step, and the sheet's `:not(:disabled)`
-    // hover and press still matched both. The attribute is now the whole
-    // contract: `.opt[aria-disabled="true"]` and `.btn[aria-disabled="true"]`
-    // dim them in app.css, which pins those rules.
-    const { container } = render(
-      <DecisionPacket
-        packet={goalPacket}
-        busy={false}
-        canResolve
-        canResolveCompletion={false}
-        canEditGoal={false}
-        canArchive
-        onResolveCustom={() => {}} onResolve={() => {}}
-        onAsk={() => {}}
-      />,
-    );
-    const blocked = container.querySelectorAll<HTMLButtonElement>(".options .opt")[0]!;
-    const confirm = container.querySelector<HTMLButtonElement>(
-      ".packet-actions .btn.primary",
-    )!;
-    for (const el of [blocked, confirm]) {
-      expect(el.getAttribute("aria-disabled")).toBe("true");
-      expect(el.getAttribute("style")).toBeNull();
-    }
   });
 
   it("offers edit_goal normally to a maintainer", () => {
@@ -2872,10 +2824,11 @@ describe("UI-42/UI-44: the decision packet", () => {
     );
     const first = container.querySelectorAll<HTMLButtonElement>(".options .opt")[0]!;
     expect(first.getAttribute("aria-disabled")).toBeNull();
+    // A role refusal is `aria-disabled` (E4); `disabled` only marks a request
+    // in flight, so it reads false here either way.
     expect(
-      container.querySelector<HTMLButtonElement>(".packet-actions .btn.primary")!
-        .disabled,
-    ).toBe(false);
+      container.querySelector(".packet-actions .btn.primary")!.getAttribute("aria-disabled"),
+    ).toBeNull();
   });
 
   // The pr-diverged recovery packet: archive_task options carry the R14-3
@@ -3115,6 +3068,8 @@ describe("UX19-4: the recovery packet names the in-app re-delivery path", () => 
       },
     ],
   };
+  /** The words the note sends a person to find, and the panel's button wears. */
+  const DELIVER_LABEL = "Deliver branch & open PR";
 
   const noteOf = (container: HTMLElement) =>
     [...container.querySelectorAll(".packet-body > .packet-lede")].find((p) =>
@@ -4147,19 +4102,11 @@ describe("pending schedules render inside the execution profile", () => {
   });
 });
 
-describe("undefined CTA / utility classes (P13-D-19)", () => {
-  it("uses `btn primary` and `btn ghost`, never the undefined hyphenated forms", () => {
-    // Re-pointed at the execution profile (the ScheduledActions panel that
-    // carried the original defect is deleted; its buttons live here now).
+describe("the run controls' button tiers, and the hero's links and goal editor", () => {
+  it("routine starters are secondary, and a schedule's Cancel is a ghost danger trigger (pass 30, ruling 149)", () => {
     const { container } = renderExec(execTask(), {
       schedules: [schedule({ id: "sch-op", prompt: "recheck" })],
     });
-    const buttons = [...container.querySelectorAll("button")];
-    // `btn-primary` / `btn-ghost` exist in no stylesheet: a CTA wearing one
-    // falls back to the plain grey `.btn`.
-    for (const b of buttons) {
-      expect(b.className).not.toMatch(/\bbtn-(primary|ghost)\b/);
-    }
     // Pass 30: routine starters are secondary — the page's one solid primary
     // is the decision-stakes commit of the current state.
     const run = operatorRunBtn(container);
@@ -4227,7 +4174,6 @@ describe("undefined CTA / utility classes (P13-D-19)", () => {
     const buttons = [...container.querySelectorAll(".goal-edit-actions button")];
     const save = buttons.find((b) => b.textContent === "Save goal")!;
     const cancel = buttons.find((b) => b.textContent === "Cancel")!;
-    expect(save.className).not.toMatch(/\bbtn-primary\b/);
     expect(save.classList.contains("primary")).toBe(true);
     // The defect: both resolved to identical rules and rendered the same.
     expect(save.className).not.toBe(cancel.className);

@@ -53,7 +53,7 @@ import { sealSecret } from "~/server/secrets/secret-box.server";
 import { resolveSpecialistMcpServersDetailed } from "~/server/tasks/specialist-mcp.server";
 import { startHttpUpstream } from "../../../test-support/mcp-upstream";
 import { signInWithOAuth, startOAuthMcpServer } from "../../../test-support/mcp-oauth-server";
-import { resetMcpOAuthForTests, signOutMcpOAuth } from "~/server/org/mcp-oauth.server";
+import { signOutMcpOAuth } from "~/server/org/mcp-oauth.server";
 import { listAuditEvents } from "../../../test-support/audit-log";
 import { withEnv } from "../../../test-support/env";
 import {
@@ -1279,7 +1279,6 @@ describe("governed actions record audit rows (table-driven)", () => {
                 await signOutMcpOAuth(store.db, id, actorArda());
               }
             } finally {
-              resetMcpOAuthForTests();
               await oauth.close();
             }
           },

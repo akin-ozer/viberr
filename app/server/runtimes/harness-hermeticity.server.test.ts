@@ -10,7 +10,7 @@ import path from "node:path";
 import { loadEnvFile } from "node:process";
 import { afterEach, describe, expect, it } from "vitest";
 import { z } from "zod";
-import type { CodexClient, CodexFactory } from "./codex-runtime.server";
+import type { CodexClient } from "./codex-runtime.server";
 import type { ThreadEvent } from "@openai/codex-sdk";
 import type { RunSpec } from "./adapter.server";
 import {
@@ -110,30 +110,34 @@ describe("test-harness hermeticity", () => {
   });
 });
 
+/** The env each provider SDK was handed. */
+interface Captured {
+  claude: Record<string, string> | undefined;
+  codex: Record<string, string> | undefined;
+}
+
 /**
- * Ruling 127, the input-side invariant end to end: the process a run spawns
- * sees the credential of the ONE person that run bills, and no other.
- *
- * Driven through the REAL pieces — a migrated database, the real credential
- * store (sealed with the suite's own encryption key), `runCredentialFor`, and
- * the production `createAdapters` factory with the two provider SDKs faked so
- * nothing bills. What is asserted is the env each SDK was actually handed.
+ * The production `createAdapters` factory with the two provider SDKs faked so
+ * nothing bills: Claude answers with one success result, Codex completes one
+ * turn. `seen` records the env each SDK was handed.
  */
-describe("a run's child env carries exactly its principal's credential", () => {
-  const ctx = createTestDbContext();
-  afterEach(() => ctx.cleanup());
-
-  interface Captured {
-    claude: Record<string, string> | undefined;
-    codex: Record<string, string> | undefined;
-  }
-
-  async function startWithEnv(env: Record<string, string>): Promise<Captured> {
-    const captured: Captured = { claude: undefined, codex: undefined };
-    const codexFactory: CodexFactory = (options) => {
-      captured.codex = options?.env;
+function recordingAdapters() {
+  const seen: Captured = { claude: undefined, codex: undefined };
+  const adapters = createAdapters({
+    claudeQueryFn: (params) => {
+      seen.claude = params.options?.env;
+      return fakeClaudeQuery({
+        type: "result",
+        subtype: "success",
+        is_error: false,
+        num_turns: 1,
+        usage: {},
+      });
+    },
+    codexFactory: (options) => {
+      seen.codex = options?.env;
       const thread: ReturnType<CodexClient["startThread"]> = {
-        id: "thread-principal",
+        id: "thread-fake",
         async runStreamed() {
           const events = (async function* (): AsyncGenerator<ThreadEvent> {
             yield {
@@ -151,20 +155,26 @@ describe("a run's child env carries exactly its principal's credential", () => {
         },
       };
       return { startThread: () => thread, resumeThread: () => thread };
-    };
-    const adapters = createAdapters({
-      claudeQueryFn: (params) => {
-        captured.claude = params.options?.env;
-        return fakeClaudeQuery({
-          type: "result",
-          subtype: "success",
-          is_error: false,
-          num_turns: 1,
-          usage: {},
-        });
-      },
-      codexFactory,
-    });
+    },
+  });
+  return { adapters, seen };
+}
+
+/**
+ * Ruling 127, the input-side invariant end to end: the process a run spawns
+ * sees the credential of the ONE person that run bills, and no other.
+ *
+ * Driven through the REAL pieces — a migrated database, the real credential
+ * store (sealed with the suite's own encryption key), `runCredentialFor`, and
+ * the production `createAdapters` factory with the two provider SDKs faked so
+ * nothing bills. What is asserted is the env each SDK was actually handed.
+ */
+describe("a run's child env carries exactly its principal's credential", () => {
+  const ctx = createTestDbContext();
+  afterEach(() => ctx.cleanup());
+
+  async function startWithEnv(env: Record<string, string>): Promise<Captured> {
+    const { adapters, seen } = recordingAdapters();
     const spec: RunSpec = {
       runId: "run_principal",
       projectSlug: "viberr-core",
@@ -182,7 +192,7 @@ describe("a run's child env carries exactly its principal's credential", () => {
     adapters.claude.start(spec, sink);
     adapters.codex.start({ ...spec, backend: "codex" }, sink);
     for (let i = 0; i < 20; i++) await new Promise((r) => setTimeout(r, 0));
-    return captured;
+    return seen;
   }
 
   it("carries the principal's key and its home, and nothing else credential-shaped", async () => {
@@ -390,26 +400,7 @@ describe("the keys Viberr adds to a run's child env are named (ruling 371)", () 
     insertUser(db, { id: "u_window", email: "window@viberr.test", name: "Window", role: "member" });
     await connectFakeBackend(db, "u_window", backend);
     const credential = runCredentialFor(db, "u_window", backend, dataRoot);
-    let seen: Record<string, string> | undefined;
-    const adapters = createAdapters({
-      claudeQueryFn: (params) => {
-        seen = params.options?.env;
-        return fakeClaudeQuery({ type: "result", subtype: "success", is_error: false, num_turns: 1, usage: {} });
-      },
-      codexFactory: (options) => {
-        seen = options?.env;
-        const thread: ReturnType<CodexClient["startThread"]> = {
-          id: "thread-window",
-          async runStreamed() {
-            const events = (async function* (): AsyncGenerator<ThreadEvent> {
-              yield { type: "turn.completed", usage: { input_tokens: 1, cached_input_tokens: 0, cache_write_input_tokens: 0, output_tokens: 1, reasoning_output_tokens: 0 } };
-            })();
-            return { events };
-          },
-        };
-        return { startThread: () => thread, resumeThread: () => thread };
-      },
-    });
+    const { adapters, seen } = recordingAdapters();
     // What `startRun` assembles for THIS kind: the credential env, the caller
     // overlay, the window, then the marker — through the real policy home.
     const { contextWindowEnv } = await import("./context-policy.server");
@@ -427,8 +418,9 @@ describe("the keys Viberr adds to a run's child env are named (ruling 371)", () 
     adapters[backend].start(spec, { onLine: () => {}, onExit: () => {} });
     for (let i = 0; i < 20; i++) await new Promise((r) => setTimeout(r, 0));
     const base = filteredSpawnEnv();
-    const added = Object.keys(seen ?? {}).filter((key) => !(key in base) || seen![key] !== base[key]).sort();
-    return { added, seen: seen ?? {} };
+    const child = seen[backend] ?? {};
+    const added = Object.keys(child).filter((key) => !(key in base) || child[key] !== base[key]).sort();
+    return { added, seen: child };
   }
 
   it("ruling 376: no kind carries a window key — the child env is the credential, the home, git, the marker and the auto-memory switch", async () => {

@@ -1,7 +1,7 @@
 import { parseEnv } from "node:util";
 
 /** `compose.yml`'s `${PORT:-3000}` default, which is also the image's `ENV PORT`. */
-export const COMPOSE_DEFAULT_PORT = "3000";
+const COMPOSE_DEFAULT_PORT = "3000";
 
 /**
  * The host port `compose.yml` publishes the app on, resolved the way compose

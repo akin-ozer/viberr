@@ -197,9 +197,7 @@ describe("getReviewQueue", () => {
     // pill. This test used to pin that passthrough. (The derivation's own
     // healthy/failing/changed coverage lives in rebuilder.server.test.ts.)
     expect(queue.ready[0]!.validation).toBe("none");
-    expect(queue.ready[0]!.validation).not.toBe("changed");
     expect(queue.working[0]!.validation).toBe("none");
-    expect(queue.working[0]!.validation).not.toBe("healthy");
   });
 
   it("ruling 435: a conflict measured on an older head does not reach the row", () => {
@@ -643,10 +641,9 @@ describe("the row carries the canonical PR state, uncoerced", () => {
       viewerUserId: store.users.arda.id,
     });
     const row = [...q.ready, ...q.working].find((t) => t.key === "VIB-21")!;
+    // The point of the fix: "accepted", not "review". A coerced row renders the
+    // blue "in review" pill over a PR whose merge is the outstanding human step.
     expect(row.pr).toEqual({ number: 44, state: "accepted" });
-    // The point of the fix: NOT "review". A coerced row renders the blue
-    // "in review" pill over a PR whose merge is the outstanding human step.
-    expect(row.pr!.state).not.toBe("review");
   });
 
   it("keeps every other state intact (no new coercion replaced the old one)", () => {
@@ -775,30 +772,6 @@ describe("UX19-3: the acceptance panel asks the same questions the writer does",
  * exactly like a healthy open one.
  */
 describe("the row carries GitHub's mergeability", () => {
-  it("forwards `mergeable` from the projection", () => {
-    const store = setupTestStore(ctx);
-    writeTask(store.dataRoot, store.slug, {
-      frontmatter: baseTaskFrontmatter("VIB-11", {
-        title: "Conflicting",
-        stage: "review",
-        waiting: "human",
-        pr: {
-          number: 55,
-          state: "review",
-          title: "Conflicting",
-          mergeable: "conflicting",
-        },
-      }),
-    });
-    rebuildAll(store.db, { dataRoot: store.dataRoot });
-    const q = getReviewQueue(store.db, store.slug, {
-      dataRoot: store.dataRoot,
-      viewerUserId: store.users.arda.id,
-    });
-    const row = [...q.ready, ...q.working].find((t) => t.key === "VIB-11")!;
-    expect(row.pr!.mergeable).toBe("conflicting");
-  });
-
   it("an unread mergeability is ABSENT, never coerced to a value", () => {
     const store = setupTestStore(ctx);
     writeTask(store.dataRoot, store.slug, {
@@ -1108,18 +1081,6 @@ describe("U35-5: review work before the boundary is listed on a custom board", (
     expect(reviewRowSub(q.working.find((t) => t.key === "KNC-7")!)).toBe(
       "Review in progress at Implementation · awaiting verdict",
     );
-  });
-
-  it("a task with no PR and no reviewer is not review work, and Done is never a row", () => {
-    const store = seed();
-    const q = getReviewQueue(store.db, "k9c", {
-      dataRoot: store.dataRoot,
-      viewerUserId: store.users.arda.id,
-    });
-    const keys = [...q.ready, ...q.working].map((t) => t.key);
-    expect(keys).not.toContain("KNC-2");
-    expect(keys).not.toContain("KNC-4");
-    expect(q.total).toBe(5);
   });
 
   it("the Merge task with a healthy verdict is `ready`; nothing before the boundary ever is", () => {

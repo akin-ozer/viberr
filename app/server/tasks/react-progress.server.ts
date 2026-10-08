@@ -123,14 +123,14 @@ export function taskHeadState(fm: {
 }
 
 /** The longest report excerpt the capped packet quotes. */
-export const STUCK_REPORT_EXCERPT_MAX = 280;
+const STUCK_REPORT_EXCERPT_MAX = 280;
 
 /**
  * The first paragraph of an agent's report, heading marks and bookkeeping
  * lines dropped, whitespace collapsed and capped at
  * {@link STUCK_REPORT_EXCERPT_MAX} with an ellipsis. Null for an empty report.
  */
-export function reportExcerpt(text: string | null): string | null {
+function reportExcerpt(text: string | null): string | null {
   if (!text) return null;
   const paragraphs = text
     .split(/\n\s*\n/)
@@ -152,7 +152,7 @@ export function reportExcerpt(text: string | null): string | null {
 }
 
 /** The sentence naming the head and its delivery state. */
-export function headStateSentence(state: TaskHeadState): string {
+function headStateSentence(state: TaskHeadState): string {
   switch (state.kind) {
     case "none":
       return "No committed head is on record for this task.";

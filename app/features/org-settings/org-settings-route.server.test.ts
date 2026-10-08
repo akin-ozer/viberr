@@ -78,10 +78,12 @@ function unwrap(result: SettingsActionData): SettingsReply {
   return "data" in result ? result.data : result;
 }
 
-async function postAction(
+/** One action as `userId`, its reply as the route returned it: a refusal
+ *  still in its `data()` envelope, with the status the route chose. */
+async function postActionRaw(
   userId: string,
   fields: Record<string, string>,
-): Promise<SettingsReply> {
+): Promise<SettingsActionData> {
   const { action } = await import("~/routes/org.settings");
   const { cookie, sessionId } = await app.cookieFor(userId);
   const csrf = await app.csrfFor(sessionId);
@@ -94,8 +96,14 @@ async function postAction(
   });
   // SAFETY: as in runLoader — the action reads `request` only, so this stub
   // carries everything the call executes.
-  const result = await action({ request, params: {}, context: {} } as never);
-  return unwrap(result);
+  return action({ request, params: {}, context: {} } as never);
+}
+
+async function postAction(
+  userId: string,
+  fields: Record<string, string>,
+): Promise<SettingsReply> {
+  return unwrap(await postActionRaw(userId, fields));
 }
 
 describe("RBAC", () => {
@@ -602,11 +610,10 @@ describe("controller config locks (ruling 108)", () => {
     expect(details.definitionEdited).toBe(false);
   });
 
-  it("controllerSectionLocks: locked unless the env flag parses truthy", async () => {
-    const { controllerSectionLocks } = await import(
-      "~/server/controller/controller-profile.server"
-    );
-    expect(controllerSectionLocks({})).toEqual({
+  it("the loader's locks: a section stays locked unless its env flag reads enabled", async () => {
+    // What the Controller tab renders (`controllerLocks`), read from the env a
+    // deployment sets.
+    expect((await runLoader(ids.arda)).controllerLocks).toEqual({
       skills: true,
       kb: true,
       mcps: true,
@@ -614,14 +621,21 @@ describe("controller config locks (ruling 108)", () => {
     });
     // Only `enabled` unlocks (case-insensitive, trimmed); `disabled`, a stale
     // `1`, and anything unexpected keep the section locked — a typo fails safe.
-    expect(
-      controllerSectionLocks({
+    const flagged = await withEnv(
+      {
         VIBERR_UNLOCK_CONTROLLER_KB: "enabled",
         VIBERR_UNLOCK_CONTROLLER_SKILLS: " ENABLED ",
         VIBERR_UNLOCK_CONTROLLER_MCPS: "disabled",
         VIBERR_UNLOCK_CONTROLLER_INSTRUCTIONS: "1",
-      }),
-    ).toEqual({ skills: false, kb: false, mcps: true, instructions: true });
+      },
+      () => runLoader(ids.arda),
+    );
+    expect(flagged.controllerLocks).toEqual({
+      skills: false,
+      kb: false,
+      mcps: true,
+      instructions: true,
+    });
   });
 });
 
@@ -664,19 +678,13 @@ describe("controller grant requests are answered in the app (ruling 390)", () =>
   async function published<T>(
     body: () => Promise<T>,
   ): Promise<{ result: T; wire: string }> {
-    const { connectSseClient } = await import("~/server/events/sse-broker.server");
-    const writes: string[] = [];
-    const handle = connectSseClient({
-      userId: "u_watcher",
-      scopes: [{ kind: "user" }],
-      lastEventId: null,
-      write: (chunk) => writes.push(chunk),
-    });
+    const { recordSse } = await import("../../../test-support/sse-client");
+    const sse = recordSse("u_watcher");
     try {
       const result = await body();
-      return { result, wire: writes.join("") };
+      return { result, wire: sse.wire() };
     } finally {
-      handle.close();
+      sse.close();
     }
   }
 
@@ -690,7 +698,6 @@ describe("controller grant requests are answered in the app (ruling 390)", () =>
     const { resolveControllerConfig } = await import(
       "~/server/controller/controller-profile.server"
     );
-    const { resetEnvCacheForTests } = await import("~/server/config/env.server");
     const before = resolveControllerConfig(app.dataRoot);
     expect(before.kb).not.toContain("architecture-notes");
     const { request: asked } = raiseResourceRequest(
@@ -708,11 +715,9 @@ describe("controller grant requests are answered in the app (ruling 390)", () =>
     );
     expect(await listedIds()).toEqual(expect.arrayContaining([asked.id, other.id]));
 
-    // The deployment unlocks the knowledge-base section (ruling 108). The
-    // restart is the env cache reset.
-    vi.stubEnv("VIBERR_UNLOCK_CONTROLLER_KB", "enabled");
-    resetEnvCacheForTests();
-    try {
+    // The deployment unlocks the knowledge-base section (ruling 108), in its
+    // env as production reads it.
+    await withEnv({ VIBERR_UNLOCK_CONTROLLER_KB: "enabled" }, async () => {
       const { result: reply, wire } = await published(() =>
         postAction(ids.arda, {
           intent: "controller-save",
@@ -736,7 +741,6 @@ describe("controller grant requests are answered in the app (ruling 390)", () =>
       expect(answered.closedByLabel).toBe("arda@viberr.dev");
       expect(answered.closedAt).toBeTruthy();
       // Only the request this save answered. The skill was not granted.
-      expect(rows.find((r) => r.id === other.id)!.status).toBe("open");
       const listed = await listedIds();
       expect(listed).not.toContain(asked.id);
       expect(listed).toContain(other.id);
@@ -765,10 +769,7 @@ describe("controller grant requests are answered in the app (ruling 390)", () =>
       });
       expect(restored.ok).toBe(true);
       expect(resolveControllerConfig(app.dataRoot).kb).toEqual(before.kb);
-    } finally {
-      vi.unstubAllEnvs();
-      resetEnvCacheForTests();
-    }
+    });
   });
 
   it("a request for a resource the controller already holds is answered by the next save, locked or not", async () => {
@@ -805,7 +806,7 @@ describe("controller grant requests are answered in the app (ruling 390)", () =>
   });
 
   it("a save that leaves the requested resource ungranted answers nothing", async () => {
-    const { raiseResourceRequest, readResourceRequests } = await import(
+    const { raiseResourceRequest } = await import(
       "~/server/controller/controller-requests.server"
     );
     const { resolveControllerConfig } = await import(
@@ -829,9 +830,6 @@ describe("controller grant requests are answered in the app (ruling 390)", () =>
     expect(reply.ok).toBe(true);
     // CANARY: close every open request on any save and this goes red.
     expect(reply.toast).toBe("Controller updated. Changes apply from its next turn");
-    expect(readResourceRequests(app.dataRoot).find((r) => r.id === request.id)!.status).toBe(
-      "open",
-    );
     expect(await listedIds()).toContain(request.id);
   });
 
@@ -849,9 +847,7 @@ describe("controller grant requests are answered in the app (ruling 390)", () =>
     await expect(
       postAction(ids.selin, { intent: "controller-request-decline", requestId: request.id }),
     ).rejects.toMatchObject({ status: 403 });
-    expect(readResourceRequests(app.dataRoot).find((r) => r.id === request.id)!.status).toBe(
-      "open",
-    );
+    expect(await listedIds()).toContain(request.id);
 
     const { result: reply, wire } = await published(() =>
       postAction(ids.arda, {
@@ -1055,10 +1051,13 @@ describe("E5: route-only authority gates", () => {
   it("agent-delete of a DEPLOYED profile is refused with a 409 (in_use → the route maps it)", async () => {
     // The demo seed deploys every template in viberr-core, so deleting one
     // must refuse — the route's in_use → 409 mapping.
-    const result = await postAction(ids.arda, {
+    // CANARY: refuse `in_use` with the default status and this reads 400.
+    const raw = await postActionRaw(ids.arda, {
       intent: "agent-delete",
       profileId: "developer",
     });
+    expect("data" in raw ? raw.init?.status : 200).toBe(409);
+    const result = unwrap(raw);
     expect(result.ok).toBe(false);
     // The refusal names the profile and the deployments blocking it — a bare
     // "in use" would leave the admin nothing to act on.

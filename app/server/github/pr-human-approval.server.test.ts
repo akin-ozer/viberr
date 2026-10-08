@@ -13,7 +13,6 @@ import { acceptanceRefusalFor, acceptanceStanding } from "~/server/tasks/task-ac
 import {
   derivePrHumanApproval,
   humanVerdictApproval,
-  humanVerdictNote,
   PR_HUMAN_APPROVAL_KEY,
   readPrHumanApproval,
   resolveGithubHandle,
@@ -208,29 +207,16 @@ describe("derivePrHumanApproval — fail closed unless it is confidently a membe
   });
 });
 
-/** The binding itself (current revision, re-delivery, a non-counted record) is
- *  proven at the gate, in the R19-B describe below. */
-describe("humanVerdictApproval — the stored record, read and named", () => {
-  const counted: PrHumanApproval = {
-    login: "muratdev",
-    commitSha: DELIVERED,
-    at: "2026-08-08T09:00:00Z",
-    userId: "u_murat",
-    name: "Murat Test",
-    status: "counted",
-  };
-
+/** The binding itself (current revision, re-delivery, a non-counted record) and
+ *  the sentence naming the approver are proven at the gate, in the R19-B
+ *  describe below. */
+describe("humanVerdictApproval — the stored record, read", () => {
   it("garbage in the file reads as 'no approval', never as a throw", () => {
     // `prRefSchema` is loose, so a hand-edited string under the approval key is
     // a type-valid PrRef — exactly the garbage a task.md can carry at rest.
     const pr: PrRef = { number: 1, state: "review", title: "t", humanApproval: "yes" };
     expect(readPrHumanApproval(pr)).toBeNull();
     expect(humanVerdictApproval({ pr, workRevision: revision() })).toBeNull();
-  });
-
-  it("names the human and the commit — a satisfied gate is never anonymous", () => {
-    expect(humanVerdictNote(counted)).toContain("Murat Test (@muratdev)");
-    expect(humanVerdictNote(counted)).toContain(DELIVERED.slice(0, 7));
   });
 });
 
@@ -289,7 +275,9 @@ describe("R19-B — the acceptance verdict gate accepts a member's GitHub approv
     ).affordance;
     expect(affordance.canAccept).toBe(true);
     expect(affordance.verdictSatisfiedBy).toContain("Approved on GitHub by");
-    expect(affordance.verdictSatisfiedBy).toContain(store.users.murat.name);
+    // The human AND the commit: a satisfied gate is never anonymous.
+    expect(affordance.verdictSatisfiedBy).toContain(`${store.users.murat.name} (@muratdev)`);
+    expect(affordance.verdictSatisfiedBy).toContain(DELIVERED.slice(0, 7));
   });
 
   it("STAYS BLOCKED on an approval of an older commit, and says which one", () => {

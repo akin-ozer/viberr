@@ -5,16 +5,15 @@ import {
   approveReviewEntry,
   baseTaskFrontmatter,
   setupTestStore,
-  writeProject,
   writeTask,
   type TestStore,
 } from "../../../test-support/test-store";
-import { readProjectFile } from "~/server/files/project-writer.server";
 import { readTaskFile } from "~/server/files/task-writer.server";
 import { rebuildAll } from "~/server/projections/rebuilder.server";
 import { installFakeRuntime } from "../../../test-support/fake-runtime";
 import { deployDeliveryOperator } from "../../../test-support/delivery-operator";
 import { flush, waitFor } from "../../../test-support/polling";
+import { reconfigureProject } from "../../../test-support/projected-store";
 
 /**
  * R18-2 / F18-10 — a FULL-autonomy delivery re-queues the operator so an
@@ -245,13 +244,10 @@ describe("R18-2 — a full-autonomy delivery re-queues the operator", () => {
 
   it("D. no operator deployed → no re-trigger, delivery still ok", async () => {
     // A project with a repo but no operator agent.
-    const file = readProjectFile({ projectSlug: store.slug, dataRoot: store.dataRoot })!;
-    writeProject(store.dataRoot, {
-      ...file.parsed.frontmatter,
+    reconfigureProject(store, {
       repo: "akin-ozer/viberr",
       agents: [],
     });
-    rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
     seedTask();
     const outcome = await performDelivery(
       store.db,
@@ -454,11 +450,11 @@ describe("R20-1 — a settled recovery decision re-queues the operator", () => {
     expect(parsed.packet).toBeNull();
     expect(parsed.frontmatter.schedules).toHaveLength(1);
 
-    // Settled far longer than a re-queue needs: the sibling test above resolves
-    // `block_on_policy` on this same harness and sees its call, so a call here
-    // would be observable — "not called" is a real absence, not a race won by
-    // being too fast.
-    await new Promise((r) => setTimeout(r, 1_000));
+    // A re-queue would already have landed: `autoInvokeOperator`'s only await
+    // before `runOperator` is the import of a module packet-resolution has
+    // already loaded, so its call lands before `resolvePacket` returns. After
+    // one more settle, "not called" is a real absence.
+    await flush();
     // CANARY: remove `wait_for_window` from NO_REQUEUE and this fires — a run
     // against the very quota the decision exists to wait out, which live on
     // SHOP-18 was refused and opened a NEW packet asking the same question.
@@ -530,7 +526,7 @@ describe("R20-1 — a settled recovery decision re-queues the operator", () => {
     expect(decision.text).toContain("waits on VIB-2");
     expect(decision.text).not.toContain("unblocked");
 
-    await new Promise((r) => setTimeout(r, 1_000));
+    await flush();
     // CANARY: remove `block_on_dependencies` from NO_REQUEUE.
     expect(runOp).not.toHaveBeenCalled();
   });
@@ -583,7 +579,7 @@ describe("R20-1 — a settled recovery decision re-queues the operator", () => {
     expect(note!.text).toContain("set what it waits on from the task page");
     // And still no run: the decision was "do not run", and a failed side effect
     // does not turn that into a dispatch.
-    await new Promise((r) => setTimeout(r, 300));
+    await flush();
     expect(runOp).not.toHaveBeenCalled();
   });
 

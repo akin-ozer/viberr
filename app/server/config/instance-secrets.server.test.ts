@@ -1,9 +1,10 @@
 import { existsSync, mkdirSync, readdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
+import { withEnv } from "../../../test-support/env";
 import { createTempDirs } from "../../../test-support/temp-dirs";
 import { errorMessage } from "../../shared/errors";
-import { getEnv, parseEnv, resetEnvCacheForTests } from "./env.server";
+import { getEnv, parseEnv } from "./env.server";
 import {
   createInstanceSecrets,
   instanceSecretsPath,
@@ -88,29 +89,19 @@ describe("generated instance secrets (ruling 504)", () => {
     expect(readFileSync(file, "utf8")).toContain("cut off");
   });
 
-  it("is what getEnv() hands the whole process when the environment sets neither", () => {
+  it("is what getEnv() hands the whole process when the environment sets neither", async () => {
     const dataRoot = temp.make("viberr-secrets-");
-    const keys = ["VIBERR_DATA_ROOT", "VIBERR_SESSION_SECRET", "VIBERR_SECRET_ENCRYPTION_KEY"];
-    const saved = Object.fromEntries(keys.map((key) => [key, process.env[key]]));
-    try {
-      process.env.VIBERR_DATA_ROOT = dataRoot;
-      process.env.VIBERR_SESSION_SECRET = "";
-      process.env.VIBERR_SECRET_ENCRYPTION_KEY = "";
-      resetEnvCacheForTests();
-
-      const env = getEnv();
-      const generated = readInstanceSecrets(dataRoot);
-      expect(generated).not.toBeNull();
-      expect(env.VIBERR_SESSION_SECRET).toBe(generated?.VIBERR_SESSION_SECRET);
-      expect(env.VIBERR_SECRET_ENCRYPTION_KEY.toString("base64")).toBe(
-        generated?.VIBERR_SECRET_ENCRYPTION_KEY,
-      );
-    } finally {
-      for (const [key, value] of Object.entries(saved)) {
-        if (value === undefined) delete process.env[key];
-        else process.env[key] = value;
-      }
-      resetEnvCacheForTests();
-    }
+    await withEnv(
+      { VIBERR_DATA_ROOT: dataRoot, VIBERR_SESSION_SECRET: "", VIBERR_SECRET_ENCRYPTION_KEY: "" },
+      () => {
+        const env = getEnv();
+        const generated = readInstanceSecrets(dataRoot);
+        expect(generated).not.toBeNull();
+        expect(env.VIBERR_SESSION_SECRET).toBe(generated?.VIBERR_SESSION_SECRET);
+        expect(env.VIBERR_SECRET_ENCRYPTION_KEY.toString("base64")).toBe(
+          generated?.VIBERR_SECRET_ENCRYPTION_KEY,
+        );
+      },
+    );
   });
 });

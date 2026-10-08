@@ -1036,7 +1036,7 @@ export interface AuditActorOption {
  * Both legs decode the instrument, so a row whose user no longer resolves
  * reads "<email> (via the controller)" rather than a third rendering.
  */
-export function auditActorDisplay(row: {
+function auditActorDisplay(row: {
   actor_name: string | null;
   actor_label: string;
 }): string {
@@ -1045,7 +1045,7 @@ export function auditActorDisplay(row: {
   return row.actor_name ?? displayAuditActorLabel(row.actor_label);
 }
 
-export function displayAuditActorLabel(raw: string): string {
+function displayAuditActorLabel(raw: string): string {
   const ref = decodeActorRef(raw);
   switch (ref.kind) {
     case "agent":

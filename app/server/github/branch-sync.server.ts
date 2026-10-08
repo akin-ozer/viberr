@@ -19,7 +19,6 @@ import {
 } from "./github-client.server";
 import { ensureDefaultBranch } from "./repo-bootstrap.server";
 import { markWriteScopeProven } from "~/server/secrets/pat-store.server";
-export { isMissingRefAnswer };
 import {
   getProjectGithubContext,
   type GithubContextFailure,
@@ -71,7 +70,7 @@ function branchNameSuffix(): string {
 }
 
 /** The n-th candidate name for a task: canonical first, then suffixed. */
-export function taskBranchCandidate(taskKey: string, attempt: number): string {
+function taskBranchCandidate(taskKey: string, attempt: number): string {
   const canonical = taskBranchName(taskKey);
   return attempt === 0 ? canonical : `${canonical}-${branchNameSuffix()}`;
 }
@@ -613,7 +612,7 @@ const ghRefSchema = z.object({ object: z.object({ sha: z.string() }) });
  * returns fresh compare data. Every failure mode is a typed result; a 403
  * creating the ref opens a `repo` scope violation carried by the task.
  */
-export async function ensureTaskBranch(
+async function ensureTaskBranch(
   db: DatabaseSync,
   input: { projectSlug: string; taskKey: string },
   actor: AuditActor,

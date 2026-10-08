@@ -156,7 +156,7 @@ export const RBAC_DEFINITIONS = [
 
 export type RbacAction = (typeof RBAC_DEFINITIONS)[number]["id"];
 
-export const ACTION_ROLES = new Map<RbacAction, readonly ProjectRole[]>(
+const ACTION_ROLES = new Map<RbacAction, readonly ProjectRole[]>(
   RBAC_DEFINITIONS.map(
     ({ id, roles }): [RbacAction, readonly ProjectRole[]] => [id, roles],
   ),

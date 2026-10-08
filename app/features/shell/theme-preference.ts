@@ -10,7 +10,10 @@ export function applyThemePreference(theme: ThemePreference): void {
   );
 }
 
-/** How long a theme change takes. */
+/** How long a theme change takes. Exported with no importer on purpose:
+ *  exported, the build inlines it at its two uses; module-local, it ships as
+ *  a variable, 7 to 11 B more gzip on every route closure the ruling-457
+ *  ratchet budgets (measured 2026-10-08). */
 export const THEME_FLIP_MS = 250;
 /** Every property the tokens paint, on one clock. */
 const FLIP_CSS =

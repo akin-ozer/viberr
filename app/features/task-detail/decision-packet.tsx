@@ -64,11 +64,11 @@ import {
  */
 
 /**
- * UX19-4 — the exact label of the GitHub panel's delivery button
- * (`task-side-panels.tsx`). The note below points a human at a control BY NAME,
- * so it is exported and the co-located test renders `GithubTrace` beside this
- * card and asserts the panel's button carries this very string — two files that
- * cannot drift apart into a note pointing at a control nobody can find.
+ * UX19-4 — the exact label of the GitHub panel's delivery button. The note
+ * below points a human at a control BY NAME, so the button
+ * (`task-side-panels.tsx`) reads this one string too: the note cannot drift
+ * into naming a control nobody can find. task-detail-components.test.tsx pins
+ * the label as a person reads it on both.
  */
 export const DELIVER_LABEL = "Deliver branch & open PR";
 

@@ -89,7 +89,7 @@ export function workspaceViewLabel(view: WorkspaceNavItem["id"]): string {
  * 623). Its identity header stays under this one, and its band fills the
  * height this one leaves (app.css).
  */
-export const STANDALONE_PAGES: readonly { path: string; label: string }[] = [
+const STANDALONE_PAGES: readonly { path: string; label: string }[] = [
   { path: "/org/settings", label: "Instance settings" },
   { path: "/controller", label: "Controller" },
   { path: "/insights", label: "Insights" },

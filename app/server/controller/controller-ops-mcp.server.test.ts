@@ -241,25 +241,9 @@ const HEALTH_REPLY = z.object({
   runs: z.object({ cap: z.number(), live: z.number(), queued: z.number() }),
   // C05-A (pass 32): the pinned browser executable's PATH, org admins only.
   browserDetail: z.string().optional(),
-  // Ruling 182, narrowed by ruling 185: what this host can run — tool versions
-  // (null when absent) and the pinned CLI packages; the sandbox verdict went
-  // with the sandbox. Inherited from `healthSnapshot`, never a second probe.
-  toolchain: z.strictObject({
-    node: z.string().nullable(),
-    npm: z.string().nullable(),
-    git: z.string().nullable(),
-    python3: z.string().nullable(),
-    go: z.string().nullable(),
-    // Ruling 191: the five a run reaches for and cannot install.
-    make: z.string().nullable(),
-    docker: z.string().nullable(),
-    pnpm: z.string().nullable(),
-    yarn: z.string().nullable(),
-    curl: z.string().nullable(),
-    codexCli: z.string().nullable(),
-    claudeAgentSdk: z.string().nullable(),
-
-  }),
+  // Ruling 182: the host toolchain. Its key list is toolchain.server.test.ts's;
+  // this reply relays the snapshot's (asserted at the first instance_health case).
+  toolchain: z.record(z.string(), z.string().nullable()),
   // F32-9 (pass 32): what each backend last told us — the reading the
   // Insights page shows, so the controller cannot answer "no quota exhaustion
   // flagged" from a poorer source than the admin's own page.
@@ -284,7 +268,7 @@ const RUN_LOG_REPLY = z.strictObject({
     logLines: z.number(),
   }),
   /**
-   * Page position stated in full. `getRunLog`'s own headSeq/oldestSeq/hasMore
+   * Page position stated in full. `runLogPage`'s own headSeq/oldestSeq/hasMore
    * are page-local cursors for a stateful console — the schema refuses them, so
    * relaying them again would fail here rather than reach a model that has no
    * second source to check them against.
@@ -448,19 +432,14 @@ describe("instance_health: aggregates, open to any signed-in person", () => {
   });
 
   it("names the pinned browser executable's path to org admins only (C05-A)", async () => {
-    const { resetEnvCacheForTests } = await import("~/server/config/env.server");
-    process.env.VIBERR_BROWSER_EXECUTABLE = "/nonexistent/chromium-not-installed";
-    resetEnvCacheForTests();
-    try {
+    const { withEnv } = await import("../../../test-support/env");
+    await withEnv({ VIBERR_BROWSER_EXECUTABLE: "/nonexistent/chromium-not-installed" }, async () => {
       const member = parsed(HEALTH_REPLY, await call(ids.nonMember, "instance_health"));
       expect(JSON.stringify(member)).not.toContain("/nonexistent");
       expect(member.browserDetail).toBeUndefined();
       const admin = parsed(HEALTH_REPLY, await call(ids.orgAdmin, "instance_health"));
       expect(admin.browserDetail).toContain("/nonexistent/chromium-not-installed");
-    } finally {
-      delete process.env.VIBERR_BROWSER_EXECUTABLE;
-      resetEnvCacheForTests();
-    }
+    });
   });
 
   it("ruling 146: carries a refused credential and a spent quota window, and neither is an INSTANCE fault", async () => {
@@ -537,13 +516,7 @@ describe("instance_health: aggregates, open to any signed-in person", () => {
         HEALTH_REPLY,
         await call(ids.orgAdmin, "instance_health"),
       );
-      for (const row of [...member.backendCredentials, ...admin.backendCredentials]) {
-        expect(Object.keys(row).sort()).toEqual([
-          "askerConnected",
-          "backend",
-          "connectedUsers",
-        ]);
-      }
+      // Both parsed through HEALTH_REPLY's strict row: its three keys, no other.
       // The instance-level count is the same for both — it is a fact about the
       // instance, not about the asker.
       expect(member.backendCredentials.map((c) => c.connectedUsers)).toEqual(
@@ -864,7 +837,7 @@ describe("read_run_log: every page is bounded, and says where it sits", () => {
     expect(forward.page.newerExist).toBe(true);
     expect(forward.page.next.newer).toEqual({ since: 15 });
     expect(forward.page.olderExist).toBe(true);
-    // The forward path is bounded even when no limit is named: `getRunLog`
+    // The forward path is bounded even when no limit is named: `runLogPage`
     // ignores `limit` in forward mode by design, so the bound is the tool's.
     const unbounded = parsed(RUN_LOG_REPLY, await page({ since: 10 }));
     expect(unbounded.lines.length).toBe(DEFAULT_PAGE);
@@ -930,7 +903,7 @@ describe("read_run_log: every page is bounded, and says where it sits", () => {
   });
 
   it("an empty page says it is empty without inventing a sequence number", async () => {
-    // Past the end of the run: `getRunLog` would answer headSeq = the cursor
+    // Past the end of the run: `runLogPage` would answer headSeq = the cursor
     // the caller sent, a number that exists nowhere in the run.
     const body = parsed(RUN_LOG_REPLY, await page({ since: 10_000 }));
     expect(body.lines).toEqual([]);
@@ -1058,26 +1031,8 @@ describe("read_store_doc: org admins only, like the store browser", () => {
     });
     expect(missing).toContain("has no `gone.md`");
     expect(missing).toContain("not a git repository");
+    // Ruling 246: and the two doors that do read a repo file.
+    expect(missing).toContain("Open it on GitHub, or ask an agent on a task with a checkout.");
     expect(missing).not.toContain("no longer exists");
-  });
-
-  /**
-   * Ruling 246: the live shape. The controller asked for `make/stack.mk` — a
-   * path in the project's git repository — and was told Viberr "only opens text
-   * documents", so it retried as `.md` and was told the file "no longer exists".
-   * Two refusals, two causes that were not the reason, and the real limit
-   * stated by neither.
-   */
-  it("ruling 246: a repository path is answered by SCOPE, never by its extension", async () => {
-    const message = await call(ids.orgAdmin, "read_store_doc", {
-      kind: "kb",
-      id: kbId,
-      path: ["make", "stack.mk"],
-    });
-    // CANARY: put the extension check back in front of the existence check in
-    // `readStoreDoc` and this reads "only opens text documents".
-    expect(message).not.toContain("only opens text documents");
-    expect(message).toContain("not a git repository");
-    expect(message).toContain("Open it on GitHub");
   });
 });

@@ -168,11 +168,10 @@ const MIN_SECRET_VALUE_LEN = 12;
  * disagree about what must not be shown.
  */
 export function createLineRedactor(
-  env: NodeJS.ProcessEnv = process.env,
   extraSecrets: readonly string[] = [],
 ): (text: string) => string {
   const values = new Set<string>();
-  for (const [key, value] of Object.entries(env)) {
+  for (const [key, value] of Object.entries(process.env)) {
     if (value === undefined || value.length < MIN_SECRET_VALUE_LEN) continue;
     if (!CREDENTIAL_ENV_RE.test(key)) continue;
     values.add(value);
@@ -294,7 +293,7 @@ export function createRunSink(
   // P13-U-1: built once per run — see createLineRedactor. `opts.secrets` is the
   // principal's own credential (ruling 127), which lives sealed in the database
   // rather than in this process's env, so the env sweep could not find it.
-  const redact = createLineRedactor(process.env, opts.secrets ?? []);
+  const redact = createLineRedactor(opts.secrets ?? []);
   // Ruling 130(d): whose account this run bills, for the quota and credential
   // observation records (ruling 127: a run bills one person's credential).
   const runRow = getRun(db, spec.runId);

@@ -227,7 +227,7 @@ export const FIRST_CALL_LARGE_WRITE_TOKENS = 100_000;
  * measured"; this is the retention the measurement looks for. If Codex resumes
  * idle past ten minutes read their prefix back, the Codex TTL moves toward it.
  */
-export const EXTENDED_CACHE_RETENTION_MS = 24 * 60 * 60 * 1000;
+const EXTENDED_CACHE_RETENTION_MS = 24 * 60 * 60 * 1000;
 
 /**
  * Ruling 505: the idle edges Insights sorts resumes by, ascending: every TTL
@@ -264,7 +264,7 @@ export const OPERATOR_BURST_WINDOW_MS = 60 * 1000;
  * PR, knowledge bases) are NOT in it: they ride `developer_instructions`,
  * which Codex re-renders after compaction by construction.
  */
-export const CODEX_COMPACT_PROMPT =
+const CODEX_COMPACT_PROMPT =
   "You are compacting the context of an agent run that Viberr coordinates. Write a " +
   "summary the same agent can resume from without re-reading the history. It " +
   "MUST keep, verbatim where they are short: the task key and its goal; the " +

@@ -345,7 +345,7 @@ function kbRowForId(db: DatabaseSync, id: string | null | undefined): KbRow | nu
   return (db.prepare(`${KB_SQL} WHERE dir = ?`).get(dir) as KbRow | undefined) ?? null;
 }
 
-export function getKnowledgeBase(
+function getKnowledgeBase(
   db: DatabaseSync,
   id: string,
   ctx: OrgSeedContext = {},
@@ -1145,7 +1145,7 @@ export function listMcpServerNames(db: DatabaseSync): string[] {
   return rows.map((r) => r.name);
 }
 
-export function getMcpServer(
+function getMcpServer(
   db: DatabaseSync,
   id: string,
 ): McpView | null {
@@ -1320,7 +1320,7 @@ export type StdioDiscovery =
  * whitespace, so a command with a quoted path or a JSON argument connected
  * perfectly inside a run while Settings reported it "unreachable" — the exact
  * health-vs-runtime divergence P13-KM-05 fixed for credentials (P14-KM-04).
- * One parser, used by discovery here and by `resolveSpecialistMcpServers`.
+ * One parser, used by discovery here and by `resolveSpecialistMcpServersDetailed`.
  */
 export function splitMcpCommand(target: string): string[] {
   const out: string[] = [];
@@ -1339,9 +1339,8 @@ export function splitMcpCommand(target: string): string[] {
  * `npx`/`bunx`/the `dlx` family are SILENT while the registry resolves, which
  * is exactly the N20-2 gap — a cold probe timed out with no warm-up. Matched on
  * argv, never the raw string, so `my-server --npx-mode` is not a false positive.
- * Exported for its test.
  */
-export function isFirstRunInstallerCommand(argv: string[]): boolean {
+function isFirstRunInstallerCommand(argv: string[]): boolean {
   const bin = (argv[0] ?? "").split(/[\\/]/).pop()?.toLowerCase() ?? "";
   const next = (argv[1] ?? "").toLowerCase();
   if (["npx", "bunx", "uvx", "pipx"].includes(bin)) return true;
@@ -1380,7 +1379,7 @@ export async function discoverStdioMcpTools(
     let child: McpChild;
     try {
       // P13-KM-05: a credentialed stdio server is spawned WITH its credential,
-      // exactly as `resolveSpecialistMcpServers` does at run time. Probing
+      // exactly as `resolveSpecialistMcpServersDetailed` does at run time. Probing
       // without it reported "unreachable" in Settings for servers that work
       // perfectly inside a run.
       child = spawnImpl(parts[0]!, parts.slice(1), options.token ?? null);
@@ -2505,7 +2504,7 @@ function skillRowForId(
   );
 }
 
-export function getSkill(
+function getSkill(
   db: DatabaseSync,
   id: string,
   ctx: OrgSeedContext = {},

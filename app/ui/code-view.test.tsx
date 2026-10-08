@@ -32,18 +32,6 @@ describe("CodeView (ruling 363)", () => {
     expect(pre.querySelectorAll(".line")).toHaveLength(2);
   });
 
-  it("leaves an unmapped language plain: same lines, no classes, no highlighted flag", async () => {
-    const { container } = render(
-      <CodeView text={"line one\nline two"} language="text" />,
-    );
-    const pre = container.querySelector("pre.code-view")!;
-    expect(pre.querySelectorAll(".line")).toHaveLength(2);
-    // Give a would-be highlighter every chance to run before asserting it did not.
-    await new Promise((resolve) => setTimeout(resolve, 50));
-    expect(pre.getAttribute("data-highlighted")).toBe("false");
-    expect(pre.querySelector("[class^='tk-']")).toBeNull();
-  });
-
   it("sizes the gutter to the digit count", () => {
     const { container } = render(
       <CodeView

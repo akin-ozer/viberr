@@ -139,7 +139,7 @@ into the env schema and `.env.example` (`env.server.test.ts`).
 |---|---|---|
 | `docs/architecture/file-formats.md` | `file-formats-sync.test.ts` | §2 documents every `TASK_FRONTMATTER_KEYS` entry, §4 every `AGENT_PROFILE_KNOWN_KEYS` entry; the `## Packet` "The N kinds:" enumeration equals `PACKET_OPTION_KINDS` in order, and every stated count equals its length |
 | `docs/architecture/file-formats.md` (append contract) | `task-file.server.test.ts` | never says "display sorts by timestamp"; keeps "it does not undo it" |
-| `docs/architecture/decisions.md` | `rulings-supersession.test.ts` | states its supersession convention, and every ruling a later one changes carries an inline marker (ruling 341) |
+| `docs/architecture/decisions.md` | `rulings-supersession.test.ts` | every ruling a later one changes carries an inline marker (ruling 341) |
 | `docs/operations/runbook.md`, `docs/operations/deployment.md`, `docs/development/scripts.md` | `runbook-db-read.test.ts` | copy first, never a second connection to a live projection; in-container backups use an absolute `--out` outside `/data` (ruling 158) |
 | `README.md`, `docs/operations/deployment.md` | `store-volume-wiring.test.ts` | the first shell block that runs Compose is the install: it runs `docker compose up`, with no `.env` copy and no `docker volume create` (ruling 504) |
 | `docs/architecture/codebase-map.md` | `app/features/shell/nav.test.ts` | contains `` `nav.ts` order: `` and the rail labels in order |

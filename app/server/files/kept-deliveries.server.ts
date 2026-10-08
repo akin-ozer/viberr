@@ -40,7 +40,7 @@ const STAMP = /^(\d{4}-\d{2}-\d{2})T(\d{2}):(\d{2}):(\d{2}(?:\.\d{1,9})?)Z$/;
 /** Its folder: the time's colons as dashes, a name every file system takes. */
 const STAMP_DIR = /^(\d{4}-\d{2}-\d{2})T(\d{2})-(\d{2})-(\d{2}(?:\.\d{1,9})?)Z$/;
 
-export function taskDeliveriesDir(slug: string, key: string, dataRoot?: string): string {
+function taskDeliveriesDir(slug: string, key: string, dataRoot?: string): string {
   return path.join(taskDir(slug, key, dataRoot), "deliveries");
 }
 

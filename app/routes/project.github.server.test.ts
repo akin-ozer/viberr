@@ -1,7 +1,5 @@
-import { RouterContextProvider } from "react-router";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import type { AuditEventInput } from "~/server/audit/audit-recorder.server";
-import { setupAppTest, type AppTestContext } from "../../test-support/test-app";
+import { routeArgs, setupAppTest, type AppTestContext } from "../../test-support/test-app";
 
 /**
  * F19-22 — the GitHub page's freshness chip needs TWO facts and the loader only
@@ -13,7 +11,9 @@ import { setupAppTest, type AppTestContext } from "../../test-support/test-app";
  * last pass that CHANGED something. `reconcileCheck` is the last pass that RAN,
  * off the per-tick `github.reconcile.task` audit row. These pin that the loader
  * ships both, keeps them independent, and reports the check honestly when there
- * is none.
+ * is none; which rows count as a check (the union with the human sweep's row,
+ * one project's alone) is `latestProjectReconcileCheckAt`'s, proven in the same
+ * audit-query suite.
  */
 
 let app: AppTestContext;
@@ -31,21 +31,12 @@ async function loadGithubPage() {
   const { loader } = await import("~/routes/project.github");
   const { cookie } = await app.cookieFor(ardaId);
   const request = app.request("/projects/viberr-core/github", { cookie });
-  return await loader({
-    request,
-    url: new URL(request.url),
-    params: { slug: "viberr-core" },
-    pattern: "/projects/:slug/github",
-    context: new RouterContextProvider(),
-  });
+  return await loader(routeArgs(request, { slug: "viberr-core" }, "/projects/:slug/github"));
 }
 
 /** Write one completed-pass audit row at a chosen age, the way a poller tick
  *  does (per-task, system actor, no project-summary row). */
-async function recordPass(
-  minutesAgo: number,
-  over: Partial<AuditEventInput> = {},
-) {
+async function recordPass(minutesAgo: number) {
   const { recordAudit } = await import("~/server/audit/audit-recorder.server");
   const occurredAt = new Date(Date.now() - minutesAgo * 60_000).toISOString();
   // recordAudit stamps `new Date()`; the row is re-dated in place so the test
@@ -55,7 +46,6 @@ async function recordPass(
     actor: { userId: null, label: "system" },
     projectSlug: "viberr-core",
     taskKey: "VIB-1",
-    ...over,
   });
   app.db
     .prepare(
@@ -103,24 +93,5 @@ describe("F19-22: the GitHub loader ships the last CHECK beside the last change"
     // has no reconcile provenance at all, so the old single-number chip had
     // nothing to warn with here.
     expect(data.view.reconcile.at).toBeNull();
-  });
-
-  it("takes the NEWEST pass, unioning per-task ticks with a human sweep", async () => {
-    clearPasses();
-    await recordPass(90);
-    const sweep = await recordPass(6, {
-      action: "github.reconcile.project",
-      taskKey: undefined,
-    });
-    const data = await loadGithubPage();
-    expect(data.reconcileCheck.at).toBe(sweep);
-    expect(data.reconcileCheck.stale).toBe(false);
-  });
-
-  it("ignores another project's passes", async () => {
-    clearPasses();
-    await recordPass(3, { projectSlug: "some-other-project" });
-    const data = await loadGithubPage();
-    expect(data.reconcileCheck.at).toBeNull();
   });
 });

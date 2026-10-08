@@ -770,7 +770,7 @@ const AGENT_REPORT_CAP = 4000;
 // 440 made it the one cut for everything such an operator is handed, so it
 // lives beside the snapshot (`AGENT_REPORT_CAP_TOOLLESS`).
 
-export function agentReportBlock(
+function agentReportBlock(
   trigger: OperatorTrigger,
   agentReply?: string,
   opts: { toolless?: boolean } = {},

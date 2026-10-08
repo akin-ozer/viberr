@@ -67,8 +67,8 @@ const sqliteErrcodeSchema = z
   .catch(NO_ERRCODE);
 
 /** True only for a CORRUPTION result code / message — not an I/O or permission
- *  failure (which must never trigger a heal). Exported for the unit test. */
-export function isCorruptionError(cause: unknown): boolean {
+ *  failure (which must never trigger a heal). */
+function isCorruptionError(cause: unknown): boolean {
   const errcode = sqliteErrcodeSchema.parse(cause);
   if (errcode === SQLITE_CORRUPT || errcode === SQLITE_NOTADB) return true;
   const message = errorMessage(cause);
@@ -123,7 +123,7 @@ export type ProjectionDbState = "ok" | "corrupt" | "unreadable";
  * open/read failure that is NOT corruption — a permissions/IO problem the boot
  * must surface, never silently rebuild over).
  */
-export function projectionDbState(dbPath: string): ProjectionDbState {
+function projectionDbState(dbPath: string): ProjectionDbState {
   if (!existsSync(dbPath)) return "ok";
   let db: DatabaseSync | undefined;
   try {

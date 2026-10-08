@@ -206,19 +206,6 @@ export function workspaceGitWhenIsolationOff(): WorkspaceGit | null {
   return launchesAgents() ? null : workspaceGitAs(null);
 }
 
-/** {@link workspaceGitWhenIsolationOff} as an {@link Exec}: with isolation on,
- *  every call fails with that reason instead of running as the server. */
-export function workspaceExecWhenIsolationOff(): Exec {
-  const git = workspaceGitWhenIsolationOff();
-  if (git) return git.exec;
-  return () =>
-    Promise.resolve({
-      ok: false,
-      stdout: "",
-      stderr: "no person is named to run the workspace's git as (ruling 460)",
-    });
-}
-
 /** Where a task's workspace git comes from. */
 export interface TaskWorkspaceRef {
   projectSlug: string;

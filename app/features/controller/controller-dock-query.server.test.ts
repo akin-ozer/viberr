@@ -51,6 +51,8 @@ import { NEW_CONVERSATION_PARAM } from "./conversation-param";
 
 const SLUG = "viberr-core";
 const OTHER_SLUG = "billing-service";
+/** The turn a view carries when nothing is working on its thread. */
+const IDLE_TURN_VIEW = { working: false, runId: null, phase: null, step: null, answering: null, queued: [], steering: [] };
 
 const ctx = createTestDbContext();
 afterEach(() => {
@@ -233,7 +235,7 @@ describe("getControllerDock — the dock lists one place's threads", () => {
     expect(opened.staleSelection).toBe(false);
     expect(opened.messages.map((m) => m.text)).toEqual(["Which tasks are waiting on me?"]);
     expect(opened.viewerOwnsActive).toBe(true);
-    expect(opened.turn).toEqual({ working: false, runId: null, phase: null, step: null, answering: null, queued: [], steering: [] });
+    expect(opened.turn).toEqual(IDLE_TURN_VIEW);
     expect(opened.threads.map((t) => t.id)).toEqual([newest.id, older.id]);
     // A thread nobody has spoken in yet still carries a label in the list —
     // an empty title would render as an unclickable-looking blank row.
@@ -249,7 +251,7 @@ describe("getControllerDock — the dock lists one place's threads", () => {
     });
     expect(blank.conversation).toBeNull();
     expect(blank.messages).toEqual([]);
-    expect(blank.turn).toEqual({ working: false, runId: null, phase: null, step: null, answering: null, queued: [], steering: [] });
+    expect(blank.turn).toEqual(IDLE_TURN_VIEW);
     expect(blank.staleSelection).toBe(false);
     // The thread list is still there: "new" empties the transcript, not the panel.
     expect(blank.threads.map((t) => t.id)).toEqual([newest.id, older.id]);
@@ -305,7 +307,7 @@ describe("getControllerDock — the dock lists one place's threads", () => {
     expect(empty.staleSelection).toBe(true);
     expect(empty.conversation).toBeNull();
     expect(empty.messages).toEqual([]);
-    expect(empty.turn).toEqual({ working: false, runId: null, phase: null, step: null, answering: null, queued: [], steering: [] });
+    expect(empty.turn).toEqual(IDLE_TURN_VIEW);
     expect(empty.threads).toEqual([]);
     expect(empty.viewerOwnsActive).toBe(false);
   });
@@ -394,7 +396,7 @@ describe("unavailableDockView — the benign refusal", () => {
     expect(view.threads).toEqual([]);
     expect(view.conversation).toBeNull();
     expect(view.messages).toEqual([]);
-    expect(view.turn).toEqual({ working: false, runId: null, phase: null, step: null, answering: null, queued: [], steering: [] });
+    expect(view.turn).toEqual(IDLE_TURN_VIEW);
     expect(view.viewerOwnsActive).toBe(false);
     // Not a stale selection: nothing was selected, and the client must not be
     // told to forget an id it never sent.

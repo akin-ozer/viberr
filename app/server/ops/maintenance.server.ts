@@ -386,17 +386,13 @@ export function checkDiskPressure(
 export function startMaintenanceScheduler(
   db: DatabaseSync,
   options: {
-    intervalMs?: number;
-    diskCheckIntervalMs?: number;
     /** Production takes the configured data root; tests pass their own. */
     dataRoot?: string;
   } = {},
 ): void {
   if (timers().length > 0) return;
 
-  const configured = configuredPeriodsMs();
-  const intervalMs = options.intervalMs ?? configured.intervalMs;
-  const diskMs = options.diskCheckIntervalMs ?? configured.diskCheckIntervalMs;
+  const { intervalMs, diskCheckIntervalMs: diskMs } = configuredPeriodsMs();
   const rootOption = options.dataRoot ? { dataRoot: options.dataRoot } : {};
 
   let passRunning = false;

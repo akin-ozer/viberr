@@ -1,6 +1,6 @@
-import { RouterContextProvider } from "react-router";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import {
+  routeArgs,
   setupAppTest,
   type AppTestContext,
 } from "../../test-support/test-app";
@@ -42,13 +42,7 @@ async function post(fields: Record<string, string>): Promise<DocReply> {
   fd.set("id", "kb_seed_arch");
   fd.set("_csrf", await app.csrfFor(sessionId));
   const request = app.request("/org/settings", { method: "POST", body: fd, cookie });
-  const result = await action({
-    request,
-    url: new URL(request.url),
-    pattern: "/org/settings",
-    params: {},
-    context: new RouterContextProvider(),
-  });
+  const result = await action(routeArgs(request, {}, "/org/settings"));
   // `fail()` answers through `data()`, which parks the body under `.data`;
   // `ok()` hands the body back directly.
   return "data" in result ? result.data : result;

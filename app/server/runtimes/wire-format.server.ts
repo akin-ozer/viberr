@@ -557,7 +557,7 @@ export function claudeReportedTotals(
   return e.type === "result" ? foldClaudeResultUsage(e) : null;
 }
 
-export function sessionShareOf(
+function sessionShareOf(
   previous: ClaudeResultUsage | null | undefined,
   reported: ClaudeResultUsage,
 ): ClaudeResultUsage {
@@ -598,7 +598,7 @@ export function sessionShareOf(
  * written before the ruling and one written after mean the same thing; only
  * the calls counted grew (subagents, sidechains, compaction).
  */
-export function foldClaudeResultUsage(e: ClaudeEnvelope): ClaudeResultUsage {
+function foldClaudeResultUsage(e: ClaudeEnvelope): ClaudeResultUsage {
   const models = e.modelUsage.map((m) => ({
     model: m.model,
     in: m.inputTokens + m.cacheCreationInputTokens + m.cacheReadInputTokens,

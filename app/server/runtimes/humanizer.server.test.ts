@@ -2,7 +2,6 @@ import { mkdirSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { afterAll, afterEach, describe, expect, it } from "vitest";
 import { z } from "zod";
-import type { CapabilityMode } from "~/schemas/project-file.schema";
 import { sha256Hex } from "~/server/files/content-hash.server";
 import { splitFrontmatter } from "~/server/files/frontmatter.server";
 import { seedOrgResources } from "~/server/org/org-seed.server";
@@ -21,6 +20,7 @@ import { buildOperatorSystemPrompt } from "./operator-prompt.server";
 import type { RealBackend } from "./runtime-registry.server";
 import { createTempDirs } from "../../../test-support/temp-dirs";
 import { createTestDbContext } from "../../../test-support/test-db";
+import { operatorAuthority } from "../../../test-support/operator-snapshot";
 
 /**
  * Ruling 502: every operator run and every controller turn writes under the
@@ -104,37 +104,23 @@ describe("ruling 502: the prompt section", () => {
 
 describe("ruling 502: every operator drive carries it, and its disclosure never names it", () => {
   function authority(overrides: Partial<OperatorAuthority> = {}): OperatorAuthority {
-    return {
-      policy: new Map<string, CapabilityMode>([["transition-to-done", "human"]]),
-      autonomy: "supervised",
-      backend: "claude",
-      model: "sonnet",
-      effort: "",
-      name: "Operator",
-      skills: [],
-      kb: [],
-      mcps: [],
-      persona: null,
-      deployed: true,
-      humanGatedBeforeWork: false,
-      ...overrides,
-    };
+    return operatorAuthority({ "transition-to-done": "human" }, overrides);
   }
 
   function occurrences(text: string, part: string): number {
     return text.split(part).length - 1;
   }
 
-  // The second value is `isolatedWritableRoot`: the Codex operator's posture.
-  const postures: Array<[string, boolean]> = [
-    ["Claude", false],
-    ["Codex", true],
+  // The third value is `isolatedWritableRoot`: the Codex operator's posture.
+  const postures: Array<[string, RealBackend, boolean]> = [
+    ["Claude", "claude", false],
+    ["Codex", "codex", true],
   ];
 
-  it.each(postures)("closes the static block of a %s drive, once, and stays out of the tail", (_backend, isolated) => {
+  it.each(postures)("closes the static block of a %s drive, once, and stays out of the tail", (_label, backend, isolated) => {
     const dataRoot = temp.make("viberr-humanizer-op-");
     const build = buildOperatorSystemPrompt(
-      authority(),
+      authority({ backend }),
       dataRoot,
       undefined,
       { kind: "none" },

@@ -513,14 +513,12 @@ describe("NotificationsPage", () => {
  * user-glyph assertion fails.
  */
 describe("ntfMeta — the pass-34 kinds", () => {
-  it("ownership: the user glyph on the transition palette", () => {
-    expect(ntfMeta({ kind: "ownership" })).toEqual({ icon: "user", cls: "act-transition" });
-  });
-  it("dependency: the lock glyph on the transition palette", () => {
-    expect(ntfMeta({ kind: "dependency" })).toEqual({ icon: "lock", cls: "act-transition" });
-  });
-  it("an unknown kind still falls back to alert/policy (UI-57)", () => {
-    expect(ntfMeta({ kind: "whatever" })).toEqual({ icon: "alert", cls: "act-policy" });
+  it.each([
+    ["ownership: the user glyph on the transition palette", "ownership", { icon: "user", cls: "act-transition" }],
+    ["dependency: the lock glyph on the transition palette", "dependency", { icon: "lock", cls: "act-transition" }],
+    ["an unknown kind still falls back to alert/policy (UI-57)", "whatever", { icon: "alert", cls: "act-policy" }],
+  ])("%s", (_title, kind, meta) => {
+    expect(ntfMeta({ kind })).toEqual(meta);
   });
 });
 

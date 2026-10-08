@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { buildCodexOperatorPrompt, buildOperatorTurnPrompt } from "./operator-prompt.server";
+import { buildOperatorTurnPrompt } from "./operator-prompt.server";
 import { operatorSnapshot } from "../../../test-support/operator-snapshot";
 
 /**
@@ -46,11 +46,6 @@ describe("operator triage gate — disclose a substituted delegated ask (R20-9)"
   it("Claude triage prompt tells the operator to disclose gathering on the agent's behalf", () => {
     const prompt = buildOperatorTurnPrompt(TRIAGE, "create");
     expect(prompt).toContain("DELEGATED a clarifying question to the delivering agent");
-    expect(prompt).toContain("on the delivering agent's behalf");
-  });
-
-  it("Codex triage prompt carries the same disclosure clause", () => {
-    const prompt = buildCodexOperatorPrompt(TRIAGE, "create");
     expect(prompt).toContain("on the delivering agent's behalf");
   });
 });

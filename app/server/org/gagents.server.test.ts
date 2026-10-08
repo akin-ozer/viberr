@@ -17,7 +17,6 @@ import {
   listGlobalAgentProfiles,
   resolveResourceGrants,
   saveGlobalAgentProfile,
-  usedByProject,
 } from "./gagents.server";
 
 /**
@@ -104,7 +103,6 @@ describe("global agent profiles", () => {
       kbs: ["Coding standards"],
     });
     expect(list[1]!.used).toBe(1);
-    expect(usedByProject(db)).toEqual({ developer: 2, reviewer: 1 });
   });
 
   it("create writes a template file; duplicate names are refused", async () => {

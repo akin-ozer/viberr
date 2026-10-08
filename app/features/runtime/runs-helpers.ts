@@ -28,7 +28,7 @@ export interface RunStateBadge {
 }
 
 /** state → the badge for pills/states (runs.md §2). */
-export const RUN_STATE = {
+const RUN_STATE = {
   running: { kind: "agent", label: "running" },
   idle: { kind: "neutral", label: "idle" },
   done: { kind: "done", label: "finished" },

@@ -2,6 +2,7 @@ import type {
   McpSdkServerConfigWithInstance,
   SdkMcpToolDefinition,
 } from "@anthropic-ai/claude-agent-sdk";
+import type { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { expect } from "vitest";
 import { z } from "zod";
 import type { SpecialistMcpServerConfig } from "~/server/tasks/specialist-mcp.server";
@@ -48,9 +49,10 @@ export function toolLoading(
 }
 
 /**
- * Call one of a controller server's tools (`viberr_controller` or `viberr_ops`)
- * by name and return its text reply. The caller builds the toolkit AS the
- * asking user and passes its `tools`; a name that is not there fails the test.
+ * Call one tool of an in-process toolkit (the controller's `viberr_controller`
+ * or `viberr_ops`, or an operator's) by name and return its text reply. The
+ * caller builds the toolkit as the asking user (or with the operator's
+ * authority) and passes its `tools`; a name that is not there fails the test.
  */
 export async function callToolText(
   tools: SdkMcpToolDefinition<any>[],
@@ -59,10 +61,9 @@ export async function callToolText(
 ): Promise<string> {
   const tool = tools.find((t) => t.name === toolName);
   expect(tool, `tool ${toolName} must exist`).toBeTruthy();
-  // SAFETY: every controller handler is wrapped by `controllerToolGuards`'
-  // `run`/`runWith`, which always answers through `textResult`
-  // (app/server/runtimes/strict-tool.server.ts):
-  // { content: [{ type: "text", text }] }.
+  // SAFETY: every toolkit handler answers through strict-tool.server.ts's
+  // `textResult`, or `imageResult`, whose first block is the same text:
+  // { content: [{ type: "text", text }, …] }.
   const result = (await tool!.handler(args, {})) as {
     content: { text: string }[];
   };
@@ -108,7 +109,7 @@ export async function publishedInstructions(
 }
 
 /** A real MCP client, connected over an in-memory pair to a mount's live server. */
-async function connectedClient(server: McpSdkServerConfigWithInstance, name: string) {
+export async function connectedClient(server: McpSdkServerConfigWithInstance, name = "probe"): Promise<Client> {
   const { Client } = await import("@modelcontextprotocol/sdk/client/index.js");
   const { InMemoryTransport } = await import("@modelcontextprotocol/sdk/inMemory.js");
   const [clientEnd, serverEnd] = InMemoryTransport.createLinkedPair();

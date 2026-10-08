@@ -1,9 +1,9 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import path from "node:path";
-import { RouterContextProvider } from "react-router";
 import { z } from "zod";
 import {
+  routeArgs,
   setupAppTest,
   type AppTestContext,
 } from "../../../test-support/test-app";
@@ -52,13 +52,7 @@ async function runLoader(
   const { loader } = await import("~/routes/project.settings");
   const { cookie } = await app.cookieFor(userId);
   const request = app.request(`/projects/${slug}/settings`, { cookie });
-  return loader({
-    request,
-    url: new URL(request.url),
-    params: { slug },
-    pattern: SETTINGS_PATTERN,
-    context: new RouterContextProvider(),
-  });
+  return loader(routeArgs(request, { slug }, SETTINGS_PATTERN));
 }
 
 async function postAction(
@@ -76,13 +70,7 @@ async function postAction(
     body,
     headers: { "Content-Type": "application/x-www-form-urlencoded" },
   });
-  return action({
-    request,
-    url: new URL(request.url),
-    params: { slug },
-    pattern: SETTINGS_PATTERN,
-    context: new RouterContextProvider(),
-  });
+  return action(routeArgs(request, { slug }, SETTINGS_PATTERN));
 }
 
 /**
@@ -311,9 +299,11 @@ describe("stage editor", () => {
     expect(view.stages).toHaveLength(5);
   });
 
-  it("rejects stage mutations from non-admins", async () => {
+  it("rejects stage mutations from a maintainer (edit-policy is admin-only)", async () => {
+    // The tier just below the grant: a contributor would be refused by a
+    // maintainer-level gate too.
     const result = actionOutcome(
-      await postAction(ids.selin, { intent: "add-stage" }),
+      await postAction(ids.murat, { intent: "add-stage" }),
     );
     expect(result.status).toBe(403);
   });
@@ -350,7 +340,7 @@ describe("members", () => {
     expect(result.error).toBe("deniz@viberr.dev is already a member");
   });
 
-  it("invites an unregistered email by creating a passwordless whitelist user", async () => {
+  it("invites an unregistered email by creating an account seated as Viewer", async () => {
     const result = actionOutcome(
       await postAction(ids.arda, {
         intent: "invite",
@@ -431,13 +421,22 @@ describe("members", () => {
         )
         .get(ids.selin),
     ).toMatchObject({ n: 0 });
-    // Restore Selin via invite + role change back to reviewer (Policy owns
-    // roles; the settings invite always lands on Viewer).
+    // Restore Selin as the contributor the later cases drive: the settings
+    // invite always seats a Viewer, so her role goes back through the Policy
+    // page's writer.
     await postAction(ids.arda, {
       intent: "invite",
       name: "Selin Aksoy",
       email: "selin@viberr.dev",
     });
+    const { setMemberRole } = await import(
+      "~/features/policy/policy-actions.server"
+    );
+    await setMemberRole(
+      app.db,
+      { projectSlug: "viberr-core", targetUserId: ids.selin, role: "contributor" },
+      { userId: ids.arda, label: "arda@viberr.dev" },
+    );
   });
 
   it("membership CRUD is admin-only", async () => {
@@ -458,11 +457,11 @@ describe("grant-scope", () => {
   // action are deleted — nothing ever wrote `task.repo`, so the flag gated
   // nothing in either direction. One project, one repository.
 
-  it("grant-scope: reviewer refused; admin with no PAT gets the typed copy", async () => {
+  it("grant-scope: a contributor is refused; an admin with no PAT gets the typed copy", async () => {
     const denied = actionOutcome(
       await postAction(ids.selin, { intent: "grant-scope" }),
     );
-    // Selin was re-invited as viewer above → still not admin|maintainer.
+    // Selin is a contributor, below the admin|maintainer tier.
     expect(denied.status).toBe(403);
 
     const result = await postAction(ids.arda, { intent: "grant-scope" });

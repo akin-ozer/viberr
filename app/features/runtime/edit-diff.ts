@@ -229,7 +229,9 @@ export function editDiff(line: LogLine): EditDiff | null {
   return null;
 }
 
-/** Rows drawn before the rest waits behind "Show N more lines". */
+/** Rows drawn before the rest waits behind "Show N more lines". Exported with
+ *  no importer on purpose: module-local, it grows both Controller pages'
+ *  closures by a byte (ruling 457's ratchet). */
 export const PREVIEW_ROWS = 10;
 
 /**

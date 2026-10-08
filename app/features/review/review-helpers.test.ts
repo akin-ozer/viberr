@@ -32,7 +32,7 @@ describe("reviewRowSub", () => {
   it("falls back to the newest event text (markdown stripped)", () => {
     expect(
       reviewRowSub({ ...base, latestEventText: "**Transition request:** move on" }),
-    ).toContain("Transition request:");
+    ).toBe("Transition request: move on");
   });
 
   // F19-31: this test USED to pin "Agent working — the packet arrives at the
@@ -221,27 +221,15 @@ describe("reviewRowSub terminal GitHub facts (R16-3)", () => {
 describe("ruling 138: reviewRowSub on a decided edit_goal packet", () => {
   it("says a goal edit is owed instead of re-offering the packet", () => {
     // Canary: drop the `goalEditPending` branch.
-    const base = {
+    const decided: ReviewRowView = {
+      ...base,
       key: "VIB-9",
-      title: "t",
-      stageName: "Review",
-      atAcceptanceBoundary: true,
-      priority: "normal" as const,
-      labels: [],
-      dueDate: null,
-      waiting: "human" as const,
+      waiting: "human",
       packet: { kind: "Blocked decision", title: "Scope needed" },
       goalEditPending: true,
-      latestEventText: null,
-      pr: null,
-      validation: "none" as const,
-      blockReason: null,
-      lastActivityAt: null,
-      quiet: false,
-      continuity: null,
     };
-    expect(reviewRowSub(base)).toBe("Goal edit pending: save the edited goal to clear the decision packet.");
-    expect(reviewRowSub({ ...base, goalEditPending: false })).toBe("Blocked decision: Scope needed");
+    expect(reviewRowSub(decided)).toBe("Goal edit pending: save the edited goal to clear the decision packet.");
+    expect(reviewRowSub({ ...decided, goalEditPending: false })).toBe("Blocked decision: Scope needed");
   });
 });
 
@@ -263,21 +251,14 @@ describe("U35-5: reviewRowSub for review work before the boundary", () => {
     blockReason: "Waiting on 1 required reviewer approval of the current revision.",
   };
 
-  it("names the stage, the PR and the pending verdict, outranking the boundary block reason", () => {
-    expect(reviewRowSub(atValidation)).toBe(
-      "Review in progress at Validation · PR #8 · awaiting verdict",
-    );
-  });
-
-  it("says changes requested for a failing revision", () => {
-    expect(reviewRowSub({ ...atValidation, validation: "failing" })).toBe(
-      "Review in progress at Validation · PR #8 · changes requested",
-    );
-  });
-
-  it("says approved when the verdict landed and the PR is still open", () => {
-    expect(reviewRowSub({ ...atValidation, validation: "healthy" })).toBe(
-      "Review in progress at Validation · PR #8 · approved",
+  it.each<[ReviewRowView["validation"], string]>([
+    ["changed", "awaiting verdict"],
+    ["failing", "changes requested"],
+    // The verdict landed and the PR is still open.
+    ["healthy", "approved"],
+  ])("names the stage, the PR and the verdict (%s → %s), outranking the boundary block reason", (validation, verdict) => {
+    expect(reviewRowSub({ ...atValidation, validation })).toBe(
+      `Review in progress at Validation · PR #8 · ${verdict}`,
     );
   });
 

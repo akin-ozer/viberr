@@ -139,6 +139,19 @@ describe("authenticate (better-auth session)", () => {
     const { cookie } = await app.cookieFor(user.id);
     const auth = await authenticate(app.request("/x", { cookie }));
     expect(auth?.pwresetRequired).toBe(true);
+    // The live session still goes to /login (the set-new-password step) from
+    // every guarded page; only the reset itself opts in.
+    // CANARY: drop requireAuth's pwresetRequired check and the board loads.
+    const gated: unknown = await requireAuth(
+      app.request("/projects/acme/board", { cookie }),
+    ).catch((e) => e);
+    expect(gated instanceof Response ? gated.headers.get("Location") : null).toBe(
+      `/login?returnTo=${encodeURIComponent("/projects/acme/board")}`,
+    );
+    const allowed = await requireAuth(app.request("/login", { cookie }), {
+      allowPendingPasswordReset: true,
+    });
+    expect(allowed.user.id).toBe(user.id);
   });
 });
 
@@ -217,33 +230,25 @@ describe("requireAuth login redirect (returnTo normalization)", () => {
     throw new Error("requireAuth did not throw for an unauthenticated request");
   }
 
-  it("strips the .data suffix and _routes param from single-fetch URLs", async () => {
-    const location = await redirectLocationFor(
+  it.each<[string, string, string]>([
+    [
+      "strips the .data suffix and _routes param from single-fetch URLs",
       "/projects/acme/board.data?_routes=routes%2Fproject.board",
-    );
-    expect(location).toBe(
       `/login?returnTo=${encodeURIComponent("/projects/acme/board")}`,
-    );
-  });
-
-  it("keeps real search params while stripping the wire format", async () => {
-    const location = await redirectLocationFor(
+    ],
+    [
+      "keeps real search params while stripping the wire format",
       "/projects/acme/board.data?view=list&_routes=routes%2Fproject.board",
-    );
-    expect(location).toBe(
       `/login?returnTo=${encodeURIComponent("/projects/acme/board?view=list")}`,
-    );
-  });
-
-  it("treats the root single-fetch URL like the root document request", async () => {
-    expect(await redirectLocationFor("/_.data")).toBe("/login");
-    expect(await redirectLocationFor("/")).toBe("/login");
-  });
-
-  it("preserves document-request URLs untouched", async () => {
-    const location = await redirectLocationFor("/projects/acme/board?view=list");
-    expect(location).toBe(
+    ],
+    ["treats the root single-fetch URL like the root document request", "/_.data", "/login"],
+    ["sends the root document request to a bare /login", "/", "/login"],
+    [
+      "preserves document-request URLs untouched",
+      "/projects/acme/board?view=list",
       `/login?returnTo=${encodeURIComponent("/projects/acme/board?view=list")}`,
-    );
+    ],
+  ])("%s", async (_name, path, location) => {
+    expect(await redirectLocationFor(path)).toBe(location);
   });
 });

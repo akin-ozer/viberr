@@ -3,11 +3,11 @@ import { createTestDbContext } from "../../../test-support/test-db";
 import {
   actorOf,
   baseTaskFrontmatter,
+  REVIEWER_ENGAGEMENT,
   writeTask,
   type TestStore,
 } from "../../../test-support/test-store";
 import type {
-  Engagement,
   TaskPacket,
   WorkRevision,
 } from "~/schemas/task-file.schema";
@@ -53,14 +53,6 @@ const ACCEPT_PACKET: TaskPacket = {
     { kind: "accept_completion", t: "Accept completion", d: "", rec: true },
     { kind: "request_edit", t: "Request one edit", d: "", rec: false },
   ],
-};
-
-const REVIEWER: Engagement = {
-  profileId: "reviewer",
-  backend: "claude",
-  role: "Review & validation",
-  delivers: false,
-  verdictCapable: true,
 };
 
 function revision(): WorkRevision {
@@ -264,6 +256,10 @@ describe("P14-LV-02: acceptance respects the workflow graph", () => {
     expect(task.stage).toBe("done");
     const detail = getTaskDetail(store.db, store.slug, "VIB-1");
     expect(detail?.timeline[0]).toMatchObject({ type: "completion" });
+    // Nothing was ever delivered, so validation derives "none". The old code
+    // stamped "healthy" here, which is how a task with no diff at all wore a
+    // green validation chip on the board.
+    expect(taskFile(store).parsed.frontmatter.validation).toBe("none");
   });
 
   it("V18 (pass-31 review): a real stage move clears the durable deliberate-hold marker", async () => {
@@ -283,26 +279,12 @@ describe("P14-LV-02: acceptance respects the workflow graph", () => {
     expect(fm.heldAtStage).toBeNull();
   });
 
-  it("derives 'none' for accepted work nothing was ever delivered for", async () => {
-    const store = setupProjectedStore(ctx);
-    seed(store, { stage: "review", waiting: "human" });
-    await transitionStage(
-      store.db,
-      { projectSlug: store.slug, taskKey: "VIB-1", toStageId: "done", manual: true },
-      actorOf(store.users.arda),
-      { dataRoot: store.dataRoot },
-    );
-    // The old code stamped "healthy" here, which is how a task with no diff at
-    // all wore a green validation chip on the board.
-    expect(taskFile(store).parsed.frontmatter.validation).toBe("none");
-  });
-
   it("derives 'healthy' when every required reviewer really approved the revision", async () => {
     const store = setupProjectedStore(ctx);
     seed(store, {
       stage: "review",
       waiting: "human",
-      engagements: [REVIEWER],
+      engagements: [REVIEWER_ENGAGEMENT],
       workRevision: revision(),
       verdicts: [approval()],
       validation: "healthy",

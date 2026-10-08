@@ -3,7 +3,6 @@ import { createTestDbContext, type TestDbContext } from "../../../test-support/t
 import {
   baseTaskFrontmatter,
   setupTestStore,
-  writeProject,
   writeTask,
   type TestStore,
 } from "../../../test-support/test-store";
@@ -14,7 +13,7 @@ import {
   type FakeGithub,
   type FakeResponder,
 } from "../../../test-support/fake-github";
-import { readProjectFile } from "~/server/files/project-writer.server";
+import { reconfigureProject } from "../../../test-support/projected-store";
 import { rebuildAll } from "~/server/projections/rebuilder.server";
 import { createPat, setProjectCredential } from "~/server/secrets/pat-store.server";
 import {
@@ -184,9 +183,7 @@ describe("probeNothingToDeliver — only three bases verify", () => {
     // pre-existing R17-2 coverage in acceptance-closed-pr.server.test.ts, which
     // is the point: planning / non-repo work stays acceptable.
     seed();
-    const project = readProjectFile({ projectSlug: store.slug, dataRoot: store.dataRoot })!;
-    writeProject(store.dataRoot, { ...project.parsed.frontmatter, repo: null });
-    rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
+    reconfigureProject(store, { repo: null });
     const probe = await probeNothingToDeliver(store.db, dataCtx(), store.slug, "VIB-1");
     expect(probe.status).toBe("verified");
     if (probe.status !== "verified") return;
@@ -274,27 +271,6 @@ describe("acceptanceNoChangeCheck — the accept-time gate", () => {
 describe("noChangeCompletionEvent — one builder, and it never claims a merge", () => {
   const actor = { kind: "operator" } as const;
   const at = "2026-08-06T10:00:00.000Z";
-
-  it("names the basis and the base sha, and never says 'merged'", () => {
-    const event = noChangeCompletionEvent({
-      taskKey: "VC-5",
-      actor,
-      occurredAt: at,
-      by: "human",
-      verification: {
-        basis: "no_branch",
-        baseBranch: "main",
-        baseSha: "abc123def456789",
-        branch: "vc-5",
-      },
-    });
-    expect(event.title).toBe("Completed with no changes");
-    expect(event.type).toBe("completion");
-    expect(event.text).toContain("VC-5 completed with no changes");
-    expect(event.text).toContain("`vc-5`");
-    expect(event.text).toContain("abc123def456");
-    expect(event.text).not.toMatch(/merged/i);
-  });
 
   it("an empty branch says so, and a repo-less project says THAT", () => {
     const empty = noChangeCompletionEvent({

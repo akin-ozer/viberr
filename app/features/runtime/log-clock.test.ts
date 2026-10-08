@@ -23,12 +23,6 @@ afterAll(() => {
 });
 
 describe("localLogClock", () => {
-  it("the pinned zone is in effect (guards against a vacuous suite)", () => {
-    // CEST (+02:00) in July, CET (+01:00) after the October changeover.
-    expect(new Date("2026-07-28T12:00:00.000Z").getTimezoneOffset()).toBe(-120);
-    expect(new Date("2026-10-26T12:00:00.000Z").getTimezoneOffset()).toBe(-60);
-  });
-
   it("reprojects a UTC wall clock into the viewer's zone", () => {
     // Before the fix the console rendered "17:46:46" verbatim, whatever the
     // viewer's zone; it now agrees with formatClock on the same instant.

@@ -1,6 +1,6 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { RouterContextProvider } from "react-router";
 import {
+  routeArgs,
   setupAppTest,
   type AppTestContext,
 } from "../../../test-support/test-app";
@@ -59,13 +59,7 @@ async function load(query: string, cookie?: string): Promise<Response> {
     `/resources/model-catalog${query}`,
     cookie ? { cookie } : {},
   );
-  return await loader({
-    request,
-    url: new URL(request.url),
-    params: {},
-    pattern: "/resources/model-catalog",
-    context: new RouterContextProvider(),
-  });
+  return await loader(routeArgs(request, {}, "/resources/model-catalog"));
 }
 
 async function runLoader(
@@ -110,9 +104,13 @@ describe("resources/model-catalog", () => {
   });
 
   it("defaults an unknown/missing backend to claude", async () => {
-    const res = await runLoader("", ardaId);
-    const body: ModelCatalogBody = await res.json();
-    expect(body.data.defaultModel).toBe("sonnet");
+    // CANARY: send a backend name the route does not know to Codex, and
+    // `gemini` reads Codex's default model.
+    for (const query of ["", "?backend=gemini"]) {
+      const res = await runLoader(query, ardaId);
+      const body: ModelCatalogBody = await res.json();
+      expect(body.data.defaultModel, query).toBe("sonnet");
+    }
   });
 
   /**
@@ -208,13 +206,14 @@ describe("resources/model-catalog", () => {
   // model `unavailable` from the `model_availability` marks — the picker then
   // disables + explains a model a real run proved this account can't use.
   it("stamps a provider-refused model unavailable so the picker can disable it", async () => {
-    const { markModelUnavailable, clearModelMark } = await import(
+    const { noteModelAvailabilityFromFailure, clearModelMark } = await import(
       "~/server/runtimes/model-availability.server"
     );
-    markModelUnavailable(app.db, {
+    noteModelAvailabilityFromFailure(app.db, {
+      runId: "run_refused",
       backend: "codex",
       model: "gpt-5.6-sol",
-      reason:
+      providerText:
         "The 'gpt-5.6-sol' model is not supported when using Codex with a ChatGPT account.",
     });
     try {

@@ -9,6 +9,7 @@ import {
   writeProject,
   type TestStore,
 } from "../../../test-support/test-store";
+import { reconfigureProject } from "../../../test-support/projected-store";
 import { kbDirPath } from "~/server/files/file-store-root.server";
 import { readKbIndexes } from "~/server/files/kb-injection.server";
 import { readProjectFile } from "~/server/files/project-writer.server";
@@ -34,9 +35,7 @@ afterEach(ctx.cleanup);
 /** A project with no repository, and the rulings knowledge base it names. */
 function repoLess(rulingsKb: string | null): TestStore {
   const store = setupTestStore(ctx);
-  const file = readProjectFile({ projectSlug: store.slug, dataRoot: store.dataRoot })!;
-  writeProject(store.dataRoot, { ...file.parsed.frontmatter, repo: null, rulingsKb });
-  rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
+  reconfigureProject(store, { repo: null, rulingsKb });
   return store;
 }
 

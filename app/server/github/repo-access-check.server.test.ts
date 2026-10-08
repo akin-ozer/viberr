@@ -1,9 +1,13 @@
 import { afterEach, describe, expect, it } from "vitest";
 import { createTestDbContext } from "../../../test-support/test-db";
 import { setupProjectedStore } from "../../../test-support/projected-store";
-import { fakeGithubFetch, unreachableFetch } from "../../../test-support/fake-github";
+import {
+  fakeGithubFetch,
+  unreachableFetch,
+  type FakeResponseSpec,
+} from "../../../test-support/fake-github";
 import { createPat, setProjectCredential } from "~/server/secrets/pat-store.server";
-import { checkRepoAccess } from "./repo-access-check.server";
+import { checkRepoAccess, type RepoAccessResult } from "./repo-access-check.server";
 
 const ctx = createTestDbContext();
 afterEach(ctx.cleanup);
@@ -89,136 +93,58 @@ describe("checkRepoAccess", () => {
     );
   });
 
-  it("connected: a 200 repo body maps to the remote default branch and privacy", async () => {
-    const store = setupWithCredential();
-    const gh = fakeGithubFetch({
-      [`GET ${REPO_PATH}`]: {
-        body: {
-          full_name: "akin-ozer/viberr",
-          private: true,
-          default_branch: "develop",
-        },
-      },
-    });
-    const result = await checkRepoAccess(store.db, store.slug, {
-      fetchImpl: gh.fetchImpl,
-    });
-    expect(result).toEqual({
-      status: "connected",
-      repo: "akin-ozer/viberr",
-      remoteDefaultBranch: "develop",
-      private: true,
-    });
-  });
+  const SSO_PENDING =
+    "Although you appear to have the correct authorization credentials, access to this repository requires the organization to grant SSO approval, which is still pending.";
+  const PAT_NOT_ALLOWED = "Resource not accessible by personal access token";
 
-  it("connected: a body missing every field degrades to the configured repo, no branch, public", async () => {
+  it.each<[string, FakeResponseSpec | "unreachable", RepoAccessResult]>([
+    [
+      "connected: a 200 repo body maps to the remote default branch and privacy",
+      { body: { full_name: "akin-ozer/viberr", private: true, default_branch: "develop" } },
+      { status: "connected", repo: "akin-ozer/viberr", remoteDefaultBranch: "develop", private: true },
+    ],
+    [
+      "connected: a body missing every field degrades to the configured repo, no branch, public",
+      { body: {} },
+      { status: "connected", repo: "akin-ozer/viberr", remoteDefaultBranch: null, private: false },
+    ],
+    [
+      "auth_failed/expired: a 401 whose message says the token expired classifies as expired",
+      { status: 401, body: { message: "Your token has expired. Please generate a new token." } },
+      { status: "auth_failed", repo: "akin-ozer/viberr", reason: "expired" },
+    ],
+    [
+      "auth_failed/revoked: a 401 'Bad credentials' (no 'expired') classifies as revoked",
+      { status: 401, body: { message: "Bad credentials" } },
+      { status: "auth_failed", repo: "akin-ozer/viberr", reason: "revoked" },
+    ],
+    [
+      "org_approval_missing: a 403 SSO/approval message routes to the org-approval arm",
+      { status: 403, body: { message: SSO_PENDING } },
+      { status: "org_approval_missing", repo: "akin-ozer/viberr", message: SSO_PENDING },
+    ],
+    [
+      "forbidden: a plain 403 with no org/approval/policy keyword stays a bare forbidden",
+      { status: 403, body: { message: PAT_NOT_ALLOWED } },
+      { status: "forbidden", repo: "akin-ozer/viberr", message: PAT_NOT_ALLOWED },
+    ],
+    [
+      "repo_not_found: a 404 maps to the not-found arm",
+      { status: 404, body: { message: "Not Found" } },
+      { status: "repo_not_found", repo: "akin-ozer/viberr" },
+    ],
+    [
+      "network_unavailable: a transport failure (never an HTTP status) hits the network arm",
+      "unreachable",
+      { status: "network_unavailable", repo: "akin-ozer/viberr" },
+    ],
+  ])("%s", async (_label, answer, expected) => {
     const store = setupWithCredential();
-    const gh = fakeGithubFetch({
-      [`GET ${REPO_PATH}`]: { body: {} },
-    });
-    const result = await checkRepoAccess(store.db, store.slug, {
-      fetchImpl: gh.fetchImpl,
-    });
-    expect(result).toEqual({
-      status: "connected",
-      repo: "akin-ozer/viberr",
-      remoteDefaultBranch: null,
-      private: false,
-    });
-  });
-
-  it("auth_failed/expired: a 401 whose message says the token expired classifies as expired", async () => {
-    const store = setupWithCredential();
-    const gh = fakeGithubFetch({
-      [`GET ${REPO_PATH}`]: {
-        status: 401,
-        body: { message: "Your token has expired. Please generate a new token." },
-      },
-    });
-    const result = await checkRepoAccess(store.db, store.slug, {
-      fetchImpl: gh.fetchImpl,
-    });
-    expect(result).toEqual({
-      status: "auth_failed",
-      repo: "akin-ozer/viberr",
-      reason: "expired",
-    });
-  });
-
-  it("auth_failed/revoked: a 401 'Bad credentials' (no 'expired') classifies as revoked", async () => {
-    const store = setupWithCredential();
-    const gh = fakeGithubFetch({
-      [`GET ${REPO_PATH}`]: {
-        status: 401,
-        body: { message: "Bad credentials" },
-      },
-    });
-    const result = await checkRepoAccess(store.db, store.slug, {
-      fetchImpl: gh.fetchImpl,
-    });
-    expect(result).toEqual({
-      status: "auth_failed",
-      repo: "akin-ozer/viberr",
-      reason: "revoked",
-    });
-  });
-
-  it("org_approval_missing: a 403 SSO/approval message routes to the org-approval arm", async () => {
-    const store = setupWithCredential();
-    const message =
-      "Although you appear to have the correct authorization credentials, access to this repository requires the organization to grant SSO approval, which is still pending.";
-    const gh = fakeGithubFetch({
-      [`GET ${REPO_PATH}`]: { status: 403, body: { message } },
-    });
-    const result = await checkRepoAccess(store.db, store.slug, {
-      fetchImpl: gh.fetchImpl,
-    });
-    expect(result).toEqual({
-      status: "org_approval_missing",
-      repo: "akin-ozer/viberr",
-      message,
-    });
-  });
-
-  it("forbidden: a plain 403 with no org/approval/policy keyword stays a bare forbidden", async () => {
-    const store = setupWithCredential();
-    const message = "Resource not accessible by personal access token";
-    const gh = fakeGithubFetch({
-      [`GET ${REPO_PATH}`]: { status: 403, body: { message } },
-    });
-    const result = await checkRepoAccess(store.db, store.slug, {
-      fetchImpl: gh.fetchImpl,
-    });
-    expect(result).toEqual({
-      status: "forbidden",
-      repo: "akin-ozer/viberr",
-      message,
-    });
-  });
-
-  it("repo_not_found: a 404 maps to the not-found arm", async () => {
-    const store = setupWithCredential();
-    const gh = fakeGithubFetch({
-      [`GET ${REPO_PATH}`]: { status: 404, body: { message: "Not Found" } },
-    });
-    const result = await checkRepoAccess(store.db, store.slug, {
-      fetchImpl: gh.fetchImpl,
-    });
-    expect(result).toEqual({
-      status: "repo_not_found",
-      repo: "akin-ozer/viberr",
-    });
-  });
-
-  it("network_unavailable: a transport failure (never an HTTP status) hits the network arm", async () => {
-    const store = setupWithCredential();
-    const result = await checkRepoAccess(store.db, store.slug, {
-      fetchImpl: unreachableFetch(),
-    });
-    expect(result).toEqual({
-      status: "network_unavailable",
-      repo: "akin-ozer/viberr",
-    });
+    const fetchImpl =
+      answer === "unreachable"
+        ? unreachableFetch()
+        : fakeGithubFetch({ [`GET ${REPO_PATH}`]: answer }).fetchImpl;
+    expect(await checkRepoAccess(store.db, store.slug, { fetchImpl })).toEqual(expected);
   });
 
   it("no_pat_configured: the context failure passes straight through before any request", async () => {

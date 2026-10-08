@@ -19,7 +19,6 @@ import { writeStoreDoc } from "./store-files.server";
 import {
   kbProposalCountsByProject,
   legacyProposalsSpan,
-  listKbProposals,
   listProjectKbProposals,
   parseKbProposals,
   resolveKbProposal,
@@ -129,13 +128,16 @@ describe("the proposals section of a document", () => {
   });
 
   it("reads a nested document where it stands", async () => {
+    seedTask("VIB-1");
     const kb = await seedWithProposals(
       "runbook",
       "# Step 1\n\n- Run `npm run build`.\n",
       [{ line: "Run npm run build", correction: "Run the measured build." }],
       "deploy/step-1.md",
     );
-    expect(listKbProposals(store.dataRoot).map((p) => `${p.kb}/${p.doc}`)).toEqual([`${kb}/deploy/step-1.md`]);
+    expect(listProjectKbProposals(store.db, store.slug, store.dataRoot).map((p) => `${p.kb}/${p.doc}`)).toEqual([
+      `${kb}/deploy/step-1.md`,
+    ]);
   });
 });
 
@@ -178,7 +180,6 @@ describe("resolveKbProposal", () => {
     );
     expect(r.outcome).toBe("done");
     expect(read(kb)).toBe("# Facts\n\n- T-003: wrangler 4.139.0\n- T-013: dist/server/\n");
-    expect(listKbProposals(store.dataRoot)).toEqual([]);
     const row = listAuditEvents(store.db, { action: "org.kb.proposal_promoted" })[0];
     expect(row?.details).toMatchObject({ id, kb, doc: "facts.md", reason: "Measured on WEB-1." });
   });
@@ -216,7 +217,7 @@ describe("resolveKbProposal", () => {
     expect(body).toContain("# Facts\n\n- A.\n");
     expect(body).toContain("## Later\n\nMore.\n");
     expect(body).not.toContain("First.");
-    expect(listKbProposals(store.dataRoot).map((p) => p.correction)).toEqual(["Second."]);
+    expect(parseKbProposals(kb, "facts.md", body).map((p) => p.correction)).toEqual(["Second."]);
     const gone = await resolveKbProposal(
       store.db,
       { id: first, action: "dismiss", reason: "again" },

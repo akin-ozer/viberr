@@ -22,7 +22,7 @@ import {
 import { createGithubClient } from "./github-client.server";
 import {
   deriveSyncState,
-  ensureTaskBranch, ensureTaskBranchBestEffort,
+  ensureTaskBranchBestEffort,
   getBranchCompare,
   taskBranchName,
   taskCommits,
@@ -338,7 +338,7 @@ describe("ensureTaskBranch", () => {
       },
       [`GET ${REPO_PATH}/compare/main...${branch}`]: compareRoute([]),
     });
-    const result = await ensureTaskBranch(
+    const result = await ensureTaskBranchBestEffort(
       store.db,
       { projectSlug: store.slug, taskKey: "VIB-201" },
       ACTOR,
@@ -395,7 +395,7 @@ describe("ensureTaskBranch", () => {
       },
       [`GET ${REPO_PATH}/compare/main...vib-210`]: compareRoute([]),
     });
-    const result = await ensureTaskBranch(
+    const result = await ensureTaskBranchBestEffort(
       store.db,
       { projectSlug: store.slug, taskKey: "VIB-210" },
       ACTOR,
@@ -454,7 +454,7 @@ describe("ensureTaskBranch", () => {
         body: { object: { sha: "basesha11" } },
       },
     });
-    const result = await ensureTaskBranch(
+    const result = await ensureTaskBranchBestEffort(
       store.db,
       { projectSlug: store.slug, taskKey: "VIB-211" },
       ACTOR,
@@ -473,7 +473,7 @@ describe("ensureTaskBranch", () => {
         body: { message: "Resource not accessible by personal access token" },
       },
     });
-    const result = await ensureTaskBranch(
+    const result = await ensureTaskBranchBestEffort(
       store.db,
       { projectSlug: store.slug, taskKey: "VIB-212" },
       ACTOR,
@@ -488,6 +488,9 @@ describe("ensureTaskBranch", () => {
   it("is idempotent: an existing branch is success without a create call", async () => {
     const store = setupWithCredential("VIB-202", "vib-202-existing");
     const gh = fakeGithubFetch({
+      // B11: the probe addresses `heads/<branch>` with the separator literal;
+      // GitHub does not resolve `heads%2F<branch>`. CANARY: send the ref through
+      // `encodeURIComponent` and the probe misses into the create path.
       [`GET ${REPO_PATH}/git/ref/heads/vib-202-existing`]: {
         body: { object: { sha: "headsha" } },
       },
@@ -496,7 +499,7 @@ describe("ensureTaskBranch", () => {
         2,
       ),
     });
-    const result = await ensureTaskBranch(
+    const result = await ensureTaskBranchBestEffort(
       store.db,
       { projectSlug: store.slug, taskKey: "VIB-202" },
       ACTOR,
@@ -534,7 +537,7 @@ describe("ensureTaskBranch", () => {
       },
       [`GET ${REPO_PATH}/compare/main...vib-203-race`]: compareRoute([]),
     });
-    const result = await ensureTaskBranch(
+    const result = await ensureTaskBranchBestEffort(
       store.db,
       { projectSlug: store.slug, taskKey: "VIB-203" },
       ACTOR,
@@ -558,7 +561,7 @@ describe("ensureTaskBranch", () => {
         body: { message: "Resource not accessible by personal access token" },
       },
     });
-    const result = await ensureTaskBranch(
+    const result = await ensureTaskBranchBestEffort(
       store.db,
       { projectSlug: store.slug, taskKey: "VIB-204" },
       ACTOR,
@@ -587,7 +590,7 @@ describe("ensureTaskBranch", () => {
     });
     rebuildAll(bare.db, { dataRoot: bare.dataRoot });
     expect(
-      await ensureTaskBranch(
+      await ensureTaskBranchBestEffort(
         bare.db,
         { projectSlug: bare.slug, taskKey: "VIB-205" },
         ACTOR,
@@ -607,7 +610,7 @@ describe("ensureTaskBranch", () => {
       [`PUT ${REPO_PATH}/contents/README.md`]: { status: 500, body: { message: "boom" } },
     });
     expect(
-      await ensureTaskBranch(
+      await ensureTaskBranchBestEffort(
         store.db,
         { projectSlug: store.slug, taskKey: "VIB-206" },
         ACTOR,
@@ -617,7 +620,7 @@ describe("ensureTaskBranch", () => {
 
     // Unknown task.
     expect(
-      await ensureTaskBranch(
+      await ensureTaskBranchBestEffort(
         store.db,
         { projectSlug: store.slug, taskKey: "VIB-999" },
         ACTOR,
@@ -653,7 +656,7 @@ describe("ruling 128: ensureTaskBranch bootstraps an empty repository", () => {
       [`POST ${REPO_PATH}/git/refs`]: { status: 201, body: { ref: "refs/heads/vib-207" } },
       [`GET ${REPO_PATH}/compare/main...vib-207`]: compareRoute([]),
     });
-    const result = await ensureTaskBranch(
+    const result = await ensureTaskBranchBestEffort(
       store.db,
       { projectSlug: store.slug, taskKey: "VIB-207" },
       ACTOR,
@@ -687,7 +690,7 @@ describe("ruling 670: ensureTaskBranch cuts the task branch from a default branc
       [`POST ${REPO_PATH}/git/refs`]: { status: 201, body: { ref: "refs/heads/vib-208" } },
       [`GET ${REPO_PATH}/compare/master...vib-208`]: compareRoute([]),
     });
-    const result = await ensureTaskBranch(
+    const result = await ensureTaskBranchBestEffort(
       store.db,
       { projectSlug: store.slug, taskKey: "VIB-208" },
       ACTOR,
@@ -701,34 +704,6 @@ describe("ruling 670: ensureTaskBranch cuts the task branch from a default branc
     expect(listAuditEvents(store.db).find((e) => e.action === "github.branch.created")?.details).toMatchObject({
       from: "master",
     });
-  });
-});
-
-describe("ref paths (B11)", () => {
-  it("addresses `heads/<branch>` with the separator intact", async () => {
-    // The fixtures above used to register `git/ref/heads%2F<branch>`, because
-    // the code sent `encodeURIComponent("heads/" + branch)`. GitHub does not
-    // resolve that ref, so the existence probe could never succeed and every
-    // call fell through to the create path — where a 422 reads as idempotent
-    // success, which is why nothing ever looked broken. The separator has to
-    // stay literal; only the segments are escaped.
-    const store = setupWithCredential("VIB-900", "vib-900");
-    const gh = fakeGithubFetch({
-      [`GET ${REPO_PATH}/git/ref/heads/vib-900`]: {
-        body: { ref: "refs/heads/vib-900", object: { sha: "a".repeat(40) } },
-      },
-    });
-    const result = await ensureTaskBranch(
-      store.db,
-      { projectSlug: store.slug, taskKey: "VIB-900" },
-      ACTOR,
-      { dataRoot: store.dataRoot, fetchImpl: gh.fetchImpl },
-    );
-    expect(result.status).toBe("synced"); // the ref already existed
-    // The probe HIT, so no create was attempted — the observable proof that the
-    // ref resolved rather than 404ing into the idempotent create path.
-    expect(gh.callsTo(`GET ${REPO_PATH}/git/ref/heads/vib-900`)).toHaveLength(1);
-    expect(gh.callsTo(`POST ${REPO_PATH}/git/refs`)).toHaveLength(0);
   });
 });
 

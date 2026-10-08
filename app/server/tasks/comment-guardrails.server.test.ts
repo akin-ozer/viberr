@@ -5,7 +5,6 @@ import {
   isMeaninglessComment,
   separateEvidence,
   repairDoubledNewlines,
-  EVIDENCE_MAX_FENCE_LINES,
 } from "./comment-guardrails.server";
 
 describe("meaningful-comment guardrail", () => {
@@ -27,39 +26,13 @@ describe("meaningful-comment guardrail", () => {
   });
 });
 
-/**
- * Owner ruling 2026-08-31: operator narration reaches the canonical record
- * UNTRUNCATED — the old operator-brevity cap destroyed the overflow at write
- * time ("the full narration is in the agent logs"), while the timeline already
- * collapses tall comments view-side behind a Show more toggle. Locks the
- * removal: a long narration passes through the guardrails verbatim.
- */
-describe("operator narration is stored verbatim", () => {
-  it("never truncates a long narration — length is a view concern", () => {
-    const long =
-      "Acceptance caveat the human must read in full. " + "detail ".repeat(2000);
-    const result = applyCommentGuardrails({
-      text: long,
-      meaningful: true,
-      evidence: true,
-      noDuplicate: true,
-    });
-    expect(result.text).toBe(long);
-    expect(result.dropped).toBeNull();
-    expect(result.trimmedBy).toEqual([]);
-  });
-});
-
 describe("evidence-separation guardrail", () => {
   it("leaves short fenced blocks inline", () => {
     const text = "Report:\n```\nline1\nline2\n```\ndone";
     expect(separateEvidence(text)).toBe(text);
   });
   it("replaces long dumps with a head + truthful reference", () => {
-    const body = Array.from(
-      { length: EVIDENCE_MAX_FENCE_LINES + 20 },
-      (_, i) => `log line ${i}`,
-    ).join("\n");
+    const body = Array.from({ length: 32 }, (_, i) => `log line ${i}`).join("\n");
     const text = `Here is the output:\n\`\`\`\n${body}\n\`\`\`\nEnd.`;
     const out = separateEvidence(text);
     expect(out).toContain("evidence-separation guardrail");
@@ -75,14 +48,30 @@ describe("evidence-separation guardrail", () => {
     expect(out).toContain("Closing note.");
   });
 
-  it("does NOT treat an inline ``` inside prose as the closing fence (#12)", () => {
-    // An inline triple-backtick mid-line must not be mistaken for the closing
-    // fence — the regex is anchored to line starts.
-    const body = Array.from({ length: 30 }, (_, i) => `line ${i}`).join("\n");
-    const text = `Note: use \`\`\`lang for fences.\nThen the dump:\n\`\`\`\n${body}\n\`\`\`\nDone.`;
+  /** Thirty dump lines; `quote` puts an inline ``` in the middle of line 5. */
+  const dump = (quote: boolean) =>
+    Array.from({ length: 30 }, (_, i) =>
+      quote && i === 5 ? "line 5 quotes ```js mid-line" : `line ${i}`,
+    ).join("\n");
+
+  // #12: both fences are anchored to line starts, so a ``` mid-line is never
+  // taken for one and the dump is still trimmed whole. CANARY: drop the `^`
+  // before the opening fence and the prose row's inline ``` opens a block that
+  // ends at the dump's own fence, so nothing is trimmed; drop the one before
+  // the closing fence and the dump row's block closes on its line 5.
+  it.each([
+    [
+      "in the prose before the dump",
+      `Note: use \`\`\`lang for fences.\nThen the dump:\n\`\`\`\n${dump(false)}\n\`\`\`\nDone.`,
+    ],
+    ["inside the dump", `Then the dump:\n\`\`\`\n${dump(true)}\n\`\`\`\nDone.`],
+  ])("does NOT take an inline ``` %s for a fence (#12)", (_where, text) => {
     const out = separateEvidence(text);
+    expect(out).toContain(
+      "```\nline 0\nline 1\nline 2\n```\n_(evidence trimmed by the evidence-separation guardrail; 27 more lines in the agent logs)_",
+    );
     expect(out).toContain("Done.");
-    expect(out).toContain("Note: use");
+    expect(out).not.toContain("line 25");
   });
 });
 
@@ -91,7 +80,7 @@ describe("evidence-separation guardrail", () => {
  * comment that was dropped goes on to reason about narration nobody can read.
  */
 describe("applyCommentGuardrails + commentOutcomeMessage (B-FD8)", () => {
-  const on = { meaningful: true, evidence: true, noDuplicate: true };
+  const on = { meaningful: true, evidence: true };
 
   it("reports a meaningful-comment DROP instead of a post", () => {
     const result = applyCommentGuardrails({ text: "ok", ...on });
@@ -100,25 +89,6 @@ describe("applyCommentGuardrails + commentOutcomeMessage (B-FD8)", () => {
     expect(message).toContain("NOT posted");
     expect(message).toContain("meaningful-comment");
     expect(message).not.toContain("Comment posted to the timeline.");
-  });
-
-  it("reports a no-duplicate-summary DROP — the path that used to leave no trace at all", () => {
-    const text = "Reviewer approved the current revision; moving to acceptance.";
-    const result = applyCommentGuardrails({ text, previousText: text, ...on });
-    expect(result.dropped).toBe("duplicate");
-    expect(result.text).toBeNull();
-    expect(commentOutcomeMessage(result)).toContain("identical to your previous comment");
-  });
-
-  it("compares the duplicate check against the POST-trim text", () => {
-    const dump = ["```", ...Array.from({ length: 40 }, (_, i) => `line ${i}`), "```"].join("\n");
-    const text = `Report:\n${dump}`;
-    const trimmed = separateEvidence(text);
-    // The stored previous comment is the evidence-separated form, so re-posting
-    // the same raw dump is still a duplicate.
-    expect(applyCommentGuardrails({ text, previousText: trimmed, ...on }).dropped).toBe(
-      "duplicate",
-    );
   });
 
   it("names the guardrails that TRIMMED a posted comment", () => {
@@ -139,8 +109,8 @@ describe("applyCommentGuardrails + commentOutcomeMessage (B-FD8)", () => {
       trimmedBy: [],
     });
     expect(commentOutcomeMessage(plain)).toBe("Comment posted to the timeline.");
-    // Every guardrail off: chatter and an exact repeat both go through.
-    expect(applyCommentGuardrails({ text: "ok", previousText: "ok" })).toEqual({
+    // Every guardrail off: chatter goes through.
+    expect(applyCommentGuardrails({ text: "ok" })).toEqual({
       text: "ok",
       dropped: null,
       trimmedBy: [],

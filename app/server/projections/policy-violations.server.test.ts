@@ -1,6 +1,5 @@
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { createTestDbContext } from "../../../test-support/test-db";
-import { runDemoSeed } from "../../../test-support/demo-seed";
 import { onProjectionEvent } from "~/server/events/projection-events.server";
 import { listAuditEvents } from "../../../test-support/audit-log";
 import {
@@ -44,22 +43,6 @@ describe("scope violations (phase 7 — table-backed, ruling 5)", () => {
     expect(countOpenPolicyViolations(db, "ax-clone")).toBe(1);
   });
 
-  it("the demo seed re-adds the mock VIB-142 violation (rail badge = 1)", async () => {
-    const db = ctx.makeDb();
-    const dataRoot = ctx.makeTempDir();
-    await runDemoSeed(db, { dataRoot });
-    expect(countOpenPolicyViolations(db, "viberr-core")).toBe(1);
-    expect(countOpenPolicyViolations(db, "deploy-pipeline")).toBe(0);
-    const open = listScopeViolations(db, "viberr-core", { status: "open" });
-    expect(open).toHaveLength(1);
-    expect(open[0]).toMatchObject({
-      projectSlug: "viberr-core",
-      taskKey: "VIB-142",
-      scope: "pull_request:write",
-      status: "open",
-    });
-  });
-
   it("openScopeViolation is idempotent per (project, scope, task)", () => {
     // A fresh (empty) DB carries no scope violations — the mock seed moved out of
     // the schema when migrations were squashed. The FIRST open creates the row.
@@ -100,6 +83,8 @@ describe("scope violations (phase 7 — table-backed, ruling 5)", () => {
     expect(otherTask.created).toBe(true);
     expect(otherScope.created).toBe(true);
     expect(countOpenPolicyViolations(db, "viberr-core")).toBe(3);
+    // The badge is per board: another project's rail reads none of them.
+    expect(countOpenPolicyViolations(db, "deploy-pipeline")).toBe(0);
   });
 
   it("resolve closes exactly one row, is idempotent, and reopening works after", () => {
@@ -180,18 +165,27 @@ describe("scope violations (phase 7 — table-backed, ruling 5)", () => {
 
   it("listScopeViolations filters by status, newest first", () => {
     const db = ctx.makeDb();
-    openScopeViolation(db, {
-      projectSlug: "proj-x",
-      taskKey: "X-1",
-      scope: "repo",
-    });
-    const second = openScopeViolation(db, {
-      projectSlug: "proj-x",
-      taskKey: "X-2",
-      scope: "repo",
-    });
+    vi.useFakeTimers({ toFake: ["Date"] });
+    let second: ReturnType<typeof openScopeViolation>;
+    try {
+      vi.setSystemTime(new Date("2026-07-05T09:00:00.000Z"));
+      openScopeViolation(db, {
+        projectSlug: "proj-x",
+        taskKey: "X-1",
+        scope: "repo",
+      });
+      vi.setSystemTime(new Date("2026-07-05T10:00:00.000Z"));
+      second = openScopeViolation(db, {
+        projectSlug: "proj-x",
+        taskKey: "X-2",
+        scope: "repo",
+      });
+    } finally {
+      vi.useRealTimers();
+    }
     resolveScopeViolation(db, second.violation.id);
-    expect(listScopeViolations(db, "proj-x")).toHaveLength(2);
+    // CANARY: list oldest first and X-1 leads.
+    expect(listScopeViolations(db, "proj-x").map((v) => v.taskKey)).toEqual(["X-2", "X-1"]);
     expect(
       listScopeViolations(db, "proj-x", { status: "open" }).map((v) => v.taskKey),
     ).toEqual(["X-1"]);

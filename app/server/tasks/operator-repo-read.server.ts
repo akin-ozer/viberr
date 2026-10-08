@@ -84,7 +84,7 @@ const GIT_CONFIG_TIMEOUT_MS = 10_000;
  * UTF-8 bytes, at `READ_PAGE_BYTES`, the most a Codex run's code-mode tool
  * output carries whole, since an operator may run on Codex.
  */
-export const DEFAULT_BRANCH_READ_PAGE_BYTES = READ_PAGE_BYTES;
+const DEFAULT_BRANCH_READ_PAGE_BYTES = READ_PAGE_BYTES;
 /**
  * The largest file a read will load to page through. The mirror is local, so
  * this bounds memory, not the network. It was the page cap times four

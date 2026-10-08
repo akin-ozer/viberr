@@ -1,6 +1,6 @@
-import { RouterContextProvider } from "react-router";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import {
+  routeArgs,
   setupAppTest,
   type AppTestContext,
 } from "../../test-support/test-app";
@@ -46,22 +46,10 @@ async function saveMcp(
   for (const [key, value] of Object.entries(fields)) fd.set(key, value);
   fd.set("_csrf", csrf);
   const request = app.request("/org/settings", { method: "POST", body: fd, cookie });
-  try {
-    const result = await action({
-      request,
-      url: new URL(request.url),
-      pattern: "/org/settings",
-      params: {},
-      context: new RouterContextProvider(),
-    });
-    const body = "data" in result ? result.data : result;
-    const status = "init" in result ? (result.init?.status ?? 200) : 200;
-    return { status, body };
-  } catch (thrown) {
-    // requireRoleAuth throws a Response for a non-admin.
-    if (thrown instanceof Response) return { status: thrown.status, body: { ok: false } };
-    throw thrown;
-  }
+  const result = await action(routeArgs(request, {}, "/org/settings"));
+  const body = "data" in result ? result.data : result;
+  const status = "init" in result ? (result.init?.status ?? 200) : 200;
+  return { status, body };
 }
 
 const server = () => listMcpServers(app.db).find((m) => m.name === "gh-tools");

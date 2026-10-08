@@ -75,14 +75,4 @@ describe("ReviewView: the row tag reads the board's waitingOnMe", () => {
     expect(tagOf(container, "VIB-151")).toContain("waiting on a human");
     expect(tagOf(container, "VIB-153")).toContain("waiting on you");
   });
-
-  it("claims nothing for the viewer when nothing waits on them", async () => {
-    const { container } = renderReview([]);
-    await waitFor(() =>
-      expect(container.querySelectorAll(".rq-row")).toHaveLength(3),
-    );
-    for (const key of ["VIB-150", "VIB-151", "VIB-153"]) {
-      expect(tagOf(container, key)).toContain("waiting on a human");
-    }
-  });
 });

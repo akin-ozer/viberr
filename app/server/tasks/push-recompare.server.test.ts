@@ -20,6 +20,7 @@ import { operatorDeliverForReview } from "./operator-moves.server";
 import { operatorSnapshot } from "./operator-snapshot.server";
 import type { OperatorAuthority } from "./operator-authority.server";
 import type { TaskActionContext } from "./task-action-core.server";
+import { operatorAuthority } from "../../../test-support/operator-snapshot";
 
 /**
  * Ruling 494 (pass 40, F40-70): a push that moves a task's branch re-compares
@@ -60,20 +61,7 @@ afterEach(() => ctx.cleanup());
 const task = () => ({ projectSlug: store.slug, taskKey: "VIB-1" });
 
 function authority(): OperatorAuthority {
-  return {
-    policy: new Map([["deliver-review-pr", "direct"]]),
-    autonomy: "supervised",
-    backend: "claude",
-    model: "sonnet",
-    effort: "",
-    name: "Operator",
-    skills: [],
-    kb: [],
-    mcps: [],
-    persona: null,
-    deployed: true,
-    humanGatedBeforeWork: false,
-  };
+  return operatorAuthority({ "deliver-review-pr": "direct" });
 }
 
 function revision(headSha: string): WorkRevision {

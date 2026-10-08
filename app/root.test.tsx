@@ -153,6 +153,8 @@ describe("root ErrorBoundary (route error responses)", () => {
  * error came with the document: its server render and the hydration of that
  * markup. Root does not re-run on a navigation, so an error met later sits
  * beside an earlier request's id and must show none rather than a wrong one.
+ * The server render itself, with root's real loader and without its data, is
+ * `entry.server.test.ts`'s, through React Router's own handler.
  */
 describe("root ErrorBoundary request id (ruling 458(d))", () => {
   const documentData = {
@@ -165,12 +167,6 @@ describe("root ErrorBoundary request id (ruling 458(d))", () => {
   const boundary = (error: Error, loaderData?: typeof documentData) => (
     <ErrorBoundary error={error} params={{}} loaderData={loaderData} />
   );
-
-  it("the server render names the document request's id", () => {
-    expect(renderToString(boundary(serverError, documentData))).toContain(
-      'Request id: <code class="mono">a1b2c3d4e5f6</code>',
-    );
-  });
 
   describe("after hydration", () => {
     let container: HTMLDivElement;
@@ -209,9 +205,5 @@ describe("root ErrorBoundary request id (ruling 458(d))", () => {
     // CANARY: show `loaderData.requestId` unconditionally and this reads the id.
     const { container } = render(boundary(serverError, documentData));
     expect(container.textContent).not.toContain("Request id");
-  });
-
-  it("no root data (root's own loader failed) shows none", () => {
-    expect(renderToString(boundary(serverError))).not.toContain("Request id");
   });
 });

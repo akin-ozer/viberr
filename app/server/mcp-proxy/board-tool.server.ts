@@ -135,7 +135,7 @@ export const TASK_ATTACHMENT_TOOL: Tool = {
  * the door, which keeps only a picture of the size asked, refused it with a
  * sentence that named nothing the run could change.
  */
-export const CAPTURE_PAGE_BOX = { minSide: 100, maxSide: 4000, scales: [0.25, 0.5, 1, 1.5, 2] } as const;
+const CAPTURE_PAGE_BOX = { minSide: 100, maxSide: 4000, scales: [0.25, 0.5, 1, 1.5, 2] } as const;
 const SCALES_TEXT = "0.25, 0.5, 1, 1.5 and 2";
 
 /** Ruling 691: what `capture_page` says it does, on either backend. */

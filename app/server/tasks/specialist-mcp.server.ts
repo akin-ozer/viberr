@@ -20,51 +20,6 @@ import { toError } from "~/shared/errors";
 import { sortedBy } from "~/server/runtimes/prompt-prefix.server";
 import { startMcpWarmup } from "~/server/org/mcp-warmup.server";
 
-/**
- * Resolve a specialist profile's declared MCP names to portable runtime
- * `mcpServers` configs from the org MCP registry (item-1 / FR9). The MCP leg was
- * decorative — a profile's `resources.mcps` reached no run. This turns each
- * declared name into a real server config. The Claude adapter accepts this
- * shape directly; the Codex adapter translates it to `mcp_servers` config:
- *   - HTTP  → `{ type: "http", url: <target> }`
- *   - stdio → `{ command, args }`
- *   - a server with a stored credential, either transport →
- *     `{ type: "http", url: <Viberr's gateway>/mcp/<name> }` (ruling 461)
- *
- * `viberr` and `viberr_agent` are skipped (Viberr's own in-process governance
- * and collaboration servers, built separately and never resolved from the org
- * registry). Unknown names are skipped. Returns `{}` when nothing resolves, so
- * callers can spread it unconditionally — use
- * {@link resolveSpecialistMcpServersDetailed} when the caller can record what
- * failed to resolve.
- *
- * CREDENTIALS (F7-MCP1, ruling 461): a server's credential is stored SEALED in
- * the org registry (secret-box) and never leaves the server process. It used
- * to be decrypted here and attached to the run's own config — an
- * `Authorization: Bearer` header, or `MCP_CREDENTIAL` in a stdio server's env —
- * which the Claude SDK serializes onto the CLI's argv, readable with `ps` from
- * the agent's own shell (F40-2); Codex dropped it for that reason and connected
- * anonymously (F40-3). Now a credentialed server is mounted THROUGH Viberr's
- * loopback MCP gateway (`app/server/mcp-proxy/gateway.server.ts`): the config
- * names the gateway's URL, `startRun` adds the run's own token, and the
- * gateway attaches the credential upstream. Same config on both backends. A
- * server with no credential mounts directly, as before.
- *
- * A9: a server whose credential is CONFIGURED but unopenable (a retired
- * encryption key, a legacy plaintext ref) is NOT mounted. It used to fall
- * through to an anonymous connection — every authenticated server silently
- * downgrading on a key mismatch — while the persona still announced its tools.
- * It now joins the structured `unresolved` list with the reason, so the run
- * reads it in its own prompt instead of discovering it as a wall of 401s.
- */
-export function resolveSpecialistMcpServers(
-  db: DatabaseSync,
-  mcpNames: readonly string[],
-  options: McpResolveOptions = {},
-): Record<string, SpecialistMcpServerConfig> {
-  return resolveSpecialistMcpServersDetailed(db, mcpNames, options).servers;
-}
-
 /** How a run's grants shape what its org servers expose (ruling 176). */
 export interface McpResolveOptions {
   /** The run withholds `execute-code-or-write-repo` (every operator run does):
@@ -279,6 +234,42 @@ export function gatewayMcpSection(
   );
 }
 
+/**
+ * Resolve a specialist profile's declared MCP names to portable runtime
+ * `mcpServers` configs from the org MCP registry (item-1 / FR9). The MCP leg was
+ * decorative — a profile's `resources.mcps` reached no run. This turns each
+ * declared name into a real server config. The Claude adapter accepts this
+ * shape directly; the Codex adapter translates it to `mcp_servers` config:
+ *   - HTTP  → `{ type: "http", url: <target> }`
+ *   - stdio → `{ command, args }`
+ *   - a server with a stored credential, either transport →
+ *     `{ type: "http", url: <Viberr's gateway>/mcp/<name> }` (ruling 461)
+ *
+ * `viberr` and `viberr_agent` are skipped (Viberr's own in-process governance
+ * and collaboration servers, built separately and never resolved from the org
+ * registry). Unknown names are skipped. `servers` is `{}` when nothing
+ * resolves, so callers can spread it unconditionally, and `unresolved` says
+ * what failed to resolve and why.
+ *
+ * CREDENTIALS (F7-MCP1, ruling 461): a server's credential is stored SEALED in
+ * the org registry (secret-box) and never leaves the server process. It used
+ * to be decrypted here and attached to the run's own config — an
+ * `Authorization: Bearer` header, or `MCP_CREDENTIAL` in a stdio server's env —
+ * which the Claude SDK serializes onto the CLI's argv, readable with `ps` from
+ * the agent's own shell (F40-2); Codex dropped it for that reason and connected
+ * anonymously (F40-3). Now a credentialed server is mounted THROUGH Viberr's
+ * loopback MCP gateway (`app/server/mcp-proxy/gateway.server.ts`): the config
+ * names the gateway's URL, `startRun` adds the run's own token, and the
+ * gateway attaches the credential upstream. Same config on both backends. A
+ * server with no credential mounts directly, as before.
+ *
+ * A9: a server whose credential is CONFIGURED but unopenable (a retired
+ * encryption key, a legacy plaintext ref) is NOT mounted. It used to fall
+ * through to an anonymous connection — every authenticated server silently
+ * downgrading on a key mismatch — while the persona still announced its tools.
+ * It now joins the structured `unresolved` list with the reason, so the run
+ * reads it in its own prompt instead of discovering it as a wall of 401s.
+ */
 export function resolveSpecialistMcpServersDetailed(
   db: DatabaseSync,
   mcpNames: readonly string[],

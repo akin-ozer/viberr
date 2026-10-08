@@ -3,11 +3,10 @@ import { createTestDbContext, type TestDbContext } from "../../../test-support/t
 import {
   baseTaskFrontmatter,
   setupTestStore,
-  writeProject,
   writeTask,
   type TestStore,
 } from "../../../test-support/test-store";
-import { readProjectFile } from "~/server/files/project-writer.server";
+import { reconfigureProject } from "../../../test-support/projected-store";
 import { rebuildAll } from "~/server/projections/rebuilder.server";
 import { activeFileLeases, staleFileLeases } from "./file-leases.server";
 
@@ -25,12 +24,9 @@ let ctx: TestDbContext;
 let store: TestStore;
 
 function leaseTo(taskKey: string, paths: string[]): void {
-  const file = readProjectFile({ projectSlug: store.slug, dataRoot: store.dataRoot })!;
-  writeProject(store.dataRoot, {
-    ...file.parsed.frontmatter,
+  reconfigureProject(store, {
     fileLeases: [{ paths, taskKey, reason: "merges first" }],
   });
-  rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
 }
 
 function seedHolder(patch: Parameters<typeof baseTaskFrontmatter>[1]): void {

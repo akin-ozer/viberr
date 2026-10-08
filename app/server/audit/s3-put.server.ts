@@ -7,8 +7,8 @@ import { sha256Hex } from "~/server/files/content-hash.server";
  * transitive deps for one signed request). Virtual-hosted-style by default;
  * `endpoint` overrides for S3-compatible stores (MinIO, R2, …).
  *
- * The signing primitives are pure and exported so the KAT test can pin the
- * HMAC chain against AWS's published signing-key vector.
+ * The signing key is pure and exported so the KAT test can pin the HMAC chain
+ * against AWS's published signing-key vector.
  */
 
 export interface S3Config {
@@ -69,7 +69,7 @@ function encodeSegment(segment: string): string {
  * `basePath` comes off `URL.pathname` (already percent-encoded), so its segments
  * are DECODED before re-encoding, exactly once, to match `encodeSegment`'s rule.
  */
-export function canonicalRequestUri(basePath: string, key: string): string {
+function canonicalRequestUri(basePath: string, key: string): string {
   const baseSegments = basePath
     .split("/")
     .filter(Boolean)
@@ -104,7 +104,7 @@ export interface SignedRequest {
  * `amzDate` is injected (not read from a clock) so the signature is deterministic
  * and testable; callers pass `new Date().toISOString()`.
  */
-export function signS3Put(
+function signS3Put(
   config: S3Config,
   objectKey: string,
   body: Buffer,

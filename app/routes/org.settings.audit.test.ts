@@ -1,6 +1,6 @@
-import { RouterContextProvider } from "react-router";
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 import {
+  routeArgs,
   setupAppTest,
   type AppTestContext,
 } from "../../test-support/test-app";
@@ -46,13 +46,7 @@ async function post(
   for (const [k, v] of Object.entries(fields)) fd.set(k, v);
   fd.set("_csrf", csrf);
   const request = app.request("/org/settings", { method: "POST", body: fd, cookie });
-  const result = await action({
-    request,
-    url: new URL(request.url),
-    pattern: "/org/settings",
-    params: {},
-    context: new RouterContextProvider(),
-  });
+  const result = await action(routeArgs(request, {}, "/org/settings"));
   return "data" in result ? result.data : result;
 }
 

@@ -1,7 +1,6 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { RouterContextProvider } from "react-router";
 import { z } from "zod";
-import { setupAppTest, type AppTestContext } from "../../test-support/test-app";
+import { routeArgs, setupAppTest, type AppTestContext } from "../../test-support/test-app";
 import type { SeedUserIds } from "../../test-support/demo-data";
 
 /**
@@ -62,13 +61,7 @@ async function post(
     cookie,
     body: new URLSearchParams({ _csrf: csrf, ...fields }),
   });
-  return action({
-    request,
-    url: new URL(request.url),
-    params: { slug },
-    pattern: BOARD_PATTERN,
-    context: new RouterContextProvider(),
-  });
+  return action(routeArgs(request, { slug }, BOARD_PATTERN));
 }
 
 /**
@@ -265,13 +258,7 @@ describe("create-task carries the files the task is filed with", () => {
     form.append("files", new File(["vm,cpu\nweb01,4\n"], "inventory.csv"));
     form.append("files", new File([new Uint8Array([0x89, 0x50, 0x4e, 0x47])], "portal.png"));
     const request = app.request("/projects/viberr-core/board", { method: "POST", cookie, body: form });
-    const result = await action({
-      request,
-      url: new URL(request.url),
-      params: { slug: "viberr-core" },
-      pattern: BOARD_PATTERN,
-      context: new RouterContextProvider(),
-    });
+    const result = await action(routeArgs(request, { slug: "viberr-core" }, BOARD_PATTERN));
     const key = z.object({ key: z.string() }).parse(result).key;
     expect(listTaskAttachments("viberr-core", key, app.dataRoot).map((a) => a.name).sort()).toEqual([
       "inventory.csv",

@@ -47,6 +47,7 @@ describe("S3 audit-export target records audit", () => {
     expect(details.accessKeyId).toBe("AKIAEXAMPLE");
     expect(JSON.stringify(details)).not.toContain("s3cret-key-value");
     expect(details.created).toBe(true);
+    expect(details.secretRotated).toBe(true); // a first save seals a new secret
   });
 
   it("a later edit reads as an update, and says whether the key was rotated", () => {

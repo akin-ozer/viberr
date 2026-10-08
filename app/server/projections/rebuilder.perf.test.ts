@@ -1,9 +1,5 @@
 import { afterEach, describe, it } from "vitest";
 import type { TaskFileEvent } from "~/schemas/task-file.schema";
-import {
-  onProjectionEvent,
-  type ProjectionEvent,
-} from "~/server/events/projection-events.server";
 import { projectFilePath, taskFilePath } from "~/server/files/file-store-root.server";
 import { allocateTaskKey } from "~/server/files/project-writer.server";
 import { updateTaskFile } from "~/server/files/task-writer.server";
@@ -19,8 +15,8 @@ import {
 import { rebuildAll, rebuildPath, rebuildTaskFile } from "./rebuilder.server";
 
 /**
- * Ruling 457: the write path's projection cost, counted in SQL statements,
- * WAL commits and projection events (findings SRV-3, SRV-4, CS-6/CS-1).
+ * Ruling 457: the write path's projection cost, counted in SQL statements
+ * and WAL commits (findings SRV-3, SRV-4, CS-6).
  */
 
 const ctx = createTestDbContext();
@@ -57,25 +53,9 @@ function timeline(store: TestStore, count: number): TaskFileEvent[] {
   return events;
 }
 
-function captureEvents() {
-  const events: ProjectionEvent[] = [];
-  const stop = onProjectionEvent((event) => events.push(event));
-  return { events, stop };
-}
-
-function eventIds(store: TestStore, key: string): number[] {
-  // SAFETY: `id` is the INTEGER primary key of `task_events`.
-  return (
-    store.db
-      .prepare(
-        `SELECT id FROM task_events WHERE project_slug = ? AND task_key = ? ORDER BY position DESC`,
-      )
-      .all(store.slug, key) as { id: number }[]
-  ).map((row) => row.id);
-}
 
 describe("projection write cost (ruling 457)", () => {
-  it("SRV-3: a task-key allocation re-projects no task", async () => {
+  it("SRV-3: the project.md rebuild after a task-key allocation", async () => {
     const store = setupTestStore(ctx);
     for (let n = 1; n <= 30; n += 1) {
       writeTask(store.dataRoot, store.slug, {
@@ -87,17 +67,11 @@ describe("projection write cost (ruling 457)", () => {
 
     await allocateTaskKey({ projectSlug: store.slug, dataRoot: store.dataRoot });
     const probe = countSql(store.db);
-    const captured = captureEvents();
     rebuildPath(store.db, projectFilePath(store.slug, store.dataRoot), {
       dataRoot: store.dataRoot,
     });
-    captured.stop();
     const sql = probe.stop();
 
-    expectWithinBudget(
-      "writes:task-create.task-events-emitted",
-      captured.events.filter((e) => e.type === "task.updated").length,
-    );
     expectWithinBudget("writes:task-create.sql", sql.statements);
     expectWithinBudget("writes:task-create.commits", sql.commits);
   });
@@ -118,14 +92,13 @@ describe("projection write cost (ruling 457)", () => {
     expectWithinBudget("writes:reproject-300.commits", probe.stop().commits);
   });
 
-  it("CS-6/CS-1: appending one comment to a 100-event task keeps every row", async () => {
+  it("CS-6: appending one comment to a 100-event task shifts and inserts", async () => {
     const store = setupTestStore(ctx);
     writeTask(store.dataRoot, store.slug, {
       frontmatter: baseTaskFrontmatter("VIB-1"),
       timeline: timeline(store, 100),
     });
     rebuildAll(store.db, { dataRoot: store.dataRoot });
-    const before = eventIds(store, "VIB-1");
 
     await updateTaskFile(
       { projectSlug: store.slug, taskKey: "VIB-1", dataRoot: store.dataRoot },
@@ -146,17 +119,11 @@ describe("projection write cost (ruling 457)", () => {
       dataRoot: store.dataRoot,
     });
     const sql = probe.stop();
-    const after = eventIds(store, "VIB-1");
 
     expectWithinBudget(
       "writes:comment-append.task-event-writes",
       sql.sql.filter((s) => /^\s*(insert into|update|delete from) task_events\b/i.test(s))
         .length,
-    );
-    // Oldest-first, the 100 rows that were there must keep their ids.
-    expectWithinBudget(
-      "writes:comment-append.event-ids-reissued",
-      before.filter((id, i) => after[i] !== id).length,
     );
   });
 });

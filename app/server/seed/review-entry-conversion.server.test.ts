@@ -1,10 +1,10 @@
 import { afterEach, describe, expect, it } from "vitest";
 import { createTestDbContext } from "../../../test-support/test-db";
-import { setupTestStore, writeProject, type TestStore } from "../../../test-support/test-store";
+import { setupTestStore, type TestStore } from "../../../test-support/test-store";
 import { listAuditEvents } from "../../../test-support/audit-log";
+import { reconfigureProject } from "../../../test-support/projected-store";
 import type { WorkflowBoundary } from "~/schemas/project-file.schema";
 import { readProjectFile } from "~/server/files/project-writer.server";
-import { rebuildAll } from "~/server/projections/rebuilder.server";
 import { GOVERNED_TEMPLATE } from "~/shared/workflow/templates";
 import { defaultTransitionBy } from "~/shared/workflow/transitions";
 import { convertTemplateReviewEntry } from "./review-entry-conversion.server";
@@ -34,9 +34,7 @@ const isReviewEntry = (w: WorkflowBoundary) => w.from === "impl" && w.to === "re
 const OLD_STANDARD = GOVERNED_TEMPLATE.workflow.map((w) => (isReviewEntry(w) ? OLD_REVIEW_ENTRY : w));
 
 function boardWith(store: TestStore, workflow: WorkflowBoundary[]): void {
-  const file = readProjectFile({ projectSlug: store.slug, dataRoot: store.dataRoot })!;
-  writeProject(store.dataRoot, { ...file.parsed.frontmatter, workflow });
-  rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
+  reconfigureProject(store, { workflow });
 }
 
 function workflowOf(store: TestStore): WorkflowBoundary[] {

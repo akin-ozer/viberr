@@ -1,6 +1,5 @@
-import { RouterContextProvider } from "react-router";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
-import { setupAppTest, type AppTestContext } from "../../test-support/test-app";
+import { routeArgs, setupAppTest, type AppTestContext } from "../../test-support/test-app";
 import { pinPerfClock } from "../../test-support/perf-clock";
 import { expectWithinBudget } from "../../test-support/perf-ratchet";
 import { DOCK_STATUS_URL } from "~/features/controller/controller-dock-context";
@@ -82,13 +81,7 @@ describe("the dock's working poll (ruling 457, CTL-2)", () => {
     const { loader } = await import("~/routes/resources.controller-unseen");
     const { cookie } = await app.cookieFor(arda);
     const request = app.request(DOCK_STATUS_URL, { cookie });
-    const status = await loader({
-      request,
-      url: new URL(request.url),
-      params: {},
-      pattern: "/resources/controller-unseen",
-      context: new RouterContextProvider(),
-    });
+    const status = await loader(routeArgs(request, {}, "/resources/controller-unseen"));
     // Signed in, the route answers the status itself; only a caller who is not
     // gets the 401 `data()` wraps (ruling 457).
     if (!("working" in status)) throw new Error(`expected the status, got ${JSON.stringify(status)}`);

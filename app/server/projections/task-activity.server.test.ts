@@ -1,5 +1,5 @@
 import type { DatabaseSync } from "node:sqlite";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createTestDbContext } from "../../../test-support/test-db";
 import {
   baseTaskFrontmatter,
@@ -7,15 +7,11 @@ import {
   writeTask,
 } from "../../../test-support/test-store";
 import type { TaskFileEvent } from "~/schemas/task-file.schema";
+import { upsertRun } from "~/server/runtimes/run-store.server";
 import { listProjectTasks } from "./board-query.server";
 import { getTaskDetail } from "./task-query.server";
 import { rebuildAll } from "./rebuilder.server";
-import {
-  isQuiet,
-  QUIET_AFTER_AGENT_MS,
-  QUIET_AFTER_HUMAN_MS,
-  readProjectActivity,
-} from "./task-activity.server";
+import { isQuiet, readProjectActivity } from "./task-activity.server";
 
 /**
  * Pass-19 gap 10 — nothing detected or displayed a task that quietly stopped
@@ -30,6 +26,20 @@ afterEach(ctx.cleanup);
 const NOW = new Date("2026-08-06T12:00:00.000Z");
 const ago = (ms: number) => new Date(NOW.getTime() - ms).toISOString();
 
+/** The two thresholds the module documents: an hour of silence while an agent
+ *  is on the hook, three days while a person is. */
+const AGENT_QUIET_MS = 60 * 60_000;
+const HUMAN_QUIET_MS = 72 * 60 * 60_000;
+
+// The quiet check reads the clock: every case asks it at NOW.
+beforeEach(() => {
+  vi.useFakeTimers({ toFake: ["Date"] });
+  vi.setSystemTime(NOW);
+});
+afterEach(() => {
+  vi.useRealTimers();
+});
+
 function event(occurredAt: string, text = "did a thing"): TaskFileEvent {
   return {
     occurredAt,
@@ -42,35 +52,31 @@ function event(occurredAt: string, text = "did a thing"): TaskFileEvent {
   };
 }
 
-/** A run row is 12 NOT NULL columns of ceremony; only state/task matter here. */
+/** A run of the task in `state`, through the run store's own writer; only
+ *  state and task matter here. */
 function insertRun(
   db: DatabaseSync,
   slug: string,
   taskKey: string,
   state: "queued" | "running" | "finished" | "error",
 ): void {
-  db.prepare(
-    `INSERT INTO agent_runs
-       (id, task_key, project_slug, thread_id, role, kind, backend, model,
-        state, created_at, updated_at, agent_profile_id)
-     VALUES (?, ?, ?, ?, 'developer', 'primary', 'claude', 'opus',
-             ?, ?, ?, 'developer')`,
-  ).run(
-    `run_${taskKey}_${state}`,
+  upsertRun(db, {
+    id: `run_${taskKey}_${state}`,
     taskKey,
-    slug,
-    `thread_${taskKey}_${state}`,
+    projectSlug: slug,
+    threadId: `thread_${taskKey}_${state}`,
+    role: "developer",
+    kind: "primary",
+    backend: "claude",
+    model: "opus",
+    sdk: "sdk",
+    agentProfileId: "developer",
     state,
-    NOW.toISOString(),
-    NOW.toISOString(),
-  );
+  });
 }
 
 function quietByKey(store: { db: DatabaseSync; dataRoot: string; slug: string }) {
-  const tasks = listProjectTasks(store.db, store.slug, {
-    includeArchived: true,
-    now: NOW,
-  });
+  const tasks = listProjectTasks(store.db, store.slug, { includeArchived: true });
   return new Map(tasks.map((t) => [t.key, t]));
 }
 
@@ -120,7 +126,6 @@ describe("isQuiet — the threshold follows who is on the hook", () => {
     terminal: false,
     runInFlight: false,
     held: false,
-    now: NOW,
   };
 
   it("flags an agent-waiting task after an hour of silence", () => {
@@ -128,14 +133,14 @@ describe("isQuiet — the threshold follows who is on the hook", () => {
       isQuiet({
         ...base,
         waiting: "agent",
-        lastActivityAt: ago(QUIET_AFTER_AGENT_MS + 1000),
+        lastActivityAt: ago(AGENT_QUIET_MS + 1000),
       }),
     ).toBe(true);
     expect(
       isQuiet({
         ...base,
         waiting: "agent",
-        lastActivityAt: ago(QUIET_AFTER_AGENT_MS - 1000),
+        lastActivityAt: ago(AGENT_QUIET_MS - 1000),
       }),
     ).toBe(false);
   });
@@ -174,7 +179,7 @@ describe("isQuiet — the threshold follows who is on the hook", () => {
         ...base,
         waiting: "schedule",
         lastActivityAt: ago(6 * 60 * 60_000),
-        resumesAt: ago(QUIET_AFTER_HUMAN_MS + 1000),
+        resumesAt: ago(HUMAN_QUIET_MS + 1000),
       }),
     ).toBe(true);
 
@@ -206,7 +211,7 @@ describe("isQuiet — the threshold follows who is on the hook", () => {
       isQuiet({
         ...base,
         waiting: "human",
-        lastActivityAt: ago(QUIET_AFTER_HUMAN_MS + 1000),
+        lastActivityAt: ago(HUMAN_QUIET_MS + 1000),
       }),
     ).toBe(true);
   });
@@ -358,7 +363,7 @@ describe("getTaskDetail carries the same two fields", () => {
       timeline: [event(ago(3 * 60 * 60_000))],
     });
     rebuildAll(store.db, { dataRoot: store.dataRoot });
-    const detail = getTaskDetail(store.db, store.slug, "VIB-400", { now: NOW })!;
+    const detail = getTaskDetail(store.db, store.slug, "VIB-400")!;
     expect(detail.lastActivityAt).toBe(ago(3 * 60 * 60_000));
     expect(detail.quiet).toBe(true);
   });
@@ -375,7 +380,7 @@ describe("getTaskDetail carries the same two fields", () => {
       timeline: [event(ago(3 * 60 * 60_000))],
     });
     rebuildAll(store.db, { dataRoot: store.dataRoot });
-    const detail = getTaskDetail(store.db, store.slug, "VIB-401", { now: NOW })!;
+    const detail = getTaskDetail(store.db, store.slug, "VIB-401")!;
     expect(detail.quiet).toBe(false);
     expect(detail.blockedBy).toEqual([
       { ref: "VIB-77", label: "VIB-77", state: "missing", taskKey: "VIB-77" },

@@ -15,7 +15,6 @@ import { withServerStage } from "~/server/tasks/repo-mirror.server";
 import {
   serverExec,
   taskWorkspaceGit,
-  workspaceExecWhenIsolationOff,
   workspaceUploadPack,
   type Exec,
   type ExecOutcome,
@@ -250,7 +249,7 @@ function pushFailed(reason: string, detail: string): PushWorkspaceResult {
   return failure;
 }
 
-export type { Exec, ExecOutcome } from "~/server/tasks/workspace-git.server";
+export type { Exec } from "~/server/tasks/workspace-git.server";
 
 /**
  * The two runners a delivery takes: the workspace's own git (as the task's
@@ -271,9 +270,9 @@ export interface DeliveryRunners {
 export function deliveryRunners(
   db: DatabaseSync,
   ref: { projectSlug: string; taskKey: string; dataRoot?: string | undefined },
-  injected: { exec?: Exec | undefined; serverExec?: Exec | undefined },
+  injected: { exec?: Exec | undefined },
 ): DeliveryRunners {
-  const server = injected.serverExec ?? injected.exec ?? serverExec;
+  const server = injected.exec ?? serverExec;
   if (injected.exec) return { workspace: injected.exec, server, launch: null };
   const git = taskWorkspaceGit(db, {
     projectSlug: ref.projectSlug,
@@ -339,7 +338,7 @@ export async function publishFromWorkspace(input: {
  * Ruling 144(c): GitHub's refusal of a workflow-file push for a token without
  * the `workflow` scope ("refusing to allow a Personal Access Token to create
  * or update workflow `.github/workflows/ci.yml` without `workflow` scope").
- * Exported for its unit test.
+ * The base refresh's push reads it too (`update-branch.server.ts`).
  */
 export function isWorkflowScopeRejection(stderr: string): boolean {
   return /refusing to allow .*(create|update) workflow/i.test(stderr) && /workflow.? scope/i.test(stderr);
@@ -477,8 +476,9 @@ export async function storeLayoutFilesInTree(
 /**
  * Non-fast-forward classifier for `git push` stderr (B-GH1). git's rejection
  * text is stable across versions: `! [rejected] ... (non-fast-forward)` or the
- * `(fetch first)` hint when the remote ref moved. Exported for its unit test —
- * misclassifying here re-creates the F15-15 "blame the credential" copy.
+ * `(fetch first)` hint when the remote ref moved. The base refresh's push reads
+ * it too (`update-branch.server.ts`). Misclassifying here re-creates the F15-15
+ * "blame the credential" copy.
  */
 export function isNonFastForwardStderr(stderr: string): boolean {
   return (
@@ -681,15 +681,9 @@ export function findWorkspaceRepoDir(
   taskKey: string,
   repoName: string,
   dataRoot?: string,
-  workdir?: string | null,
 ): string | null {
   const wsRoot = path.join(taskDir(projectSlug, taskKey, dataRoot), "workspace");
-  const candidates = [
-    workdir ?? null,
-    path.join(wsRoot, repoName),
-    path.join(wsRoot, "repo"),
-    wsRoot,
-  ].filter((c): c is string => !!c);
+  const candidates = [path.join(wsRoot, repoName), path.join(wsRoot, "repo"), wsRoot];
   return candidates.find((c) => existsSync(path.join(c, ".git"))) ?? null;
 }
 
@@ -698,7 +692,6 @@ export interface PushWorkspaceBranchInput {
   projectSlug: string;
   taskKey: string;
   dataRoot?: string;
-  workdir?: string | null;
   /**
    * Whether the DELIVERING profile is authorized to write/commit/push the repo
    * (its `execute-code-or-write-repo` / `commit-push-branch` grant, resolved by
@@ -709,11 +702,8 @@ export interface PushWorkspaceBranchInput {
    * denylist and could otherwise write + have its dirty tree auto-committed.
    */
   canCommitPush?: boolean;
-  /** Injected runner (tests): the workspace's git and, unless `serverExec` is
-   *  given too, the server's. */
+  /** Injected runner (tests): the workspace's git and the server's. */
   exec?: Exec;
-  /** Injected runner for the server's own git in its stage (tests). */
-  serverExec?: Exec;
 }
 
 /**
@@ -761,13 +751,7 @@ export async function pushWorkspaceBranch(
       projectFile?.parsed.frontmatter.defaultBranch || "main";
     const repoName = repo.split("/").pop() ?? repo;
 
-    const repoDir = findWorkspaceRepoDir(
-      projectSlug,
-      taskKey,
-      repoName,
-      dataRoot,
-      input.workdir,
-    );
+    const repoDir = findWorkspaceRepoDir(projectSlug, taskKey, repoName, dataRoot);
     if (!repoDir) {
       return { status: "no_workspace", reason: "no workspace git repo" };
     }
@@ -1258,38 +1242,21 @@ export async function discardLocalTaskBranch(input: {
   branch: string;
   defaultBranch: string;
   /** The project's PAT is resolved from here so the ruling-17 remote check can
-   *  actually answer on a PRIVATE repo. Optional only so the existing exec-fake
-   *  tests keep working; a caller without one gets the anonymous check, which
-   *  still refuses when it cannot reach a verdict. */
-  db?: DatabaseSync;
+   *  actually answer on a PRIVATE repo. */
+  db: DatabaseSync;
   dataRoot?: string;
-  workdir?: string | null;
-  /** Injected runner (tests): the workspace's git and, unless `serverExec` is
-   *  given too, the server's. */
+  /** Injected runner (tests): the workspace's git and the server's. */
   exec?: Exec;
-  serverExec?: Exec;
 }): Promise<DiscardBranchOutcome> {
   const { projectSlug, taskKey, branch, defaultBranch, dataRoot } = input;
   try {
     const projectFile = readProjectFile({ projectSlug, dataRoot });
     const repo = projectFile?.parsed.frontmatter.repo ?? null;
     const repoName = repo ? (repo.split("/").pop() ?? repo) : "repo";
-    const repoDir = findWorkspaceRepoDir(
-      projectSlug,
-      taskKey,
-      repoName,
-      dataRoot,
-      input.workdir,
-    );
+    const repoDir = findWorkspaceRepoDir(projectSlug, taskKey, repoName, dataRoot);
     if (!repoDir) return { status: "no_workspace", branch };
-    // R-seams-1: the workspace's git as the task's person; without a db (a
-    // test) only where no agent is launched.
-    const runners = input.db
-      ? deliveryRunners(input.db, { projectSlug, taskKey, dataRoot }, input)
-      : {
-          workspace: input.exec ?? workspaceExecWhenIsolationOff(),
-          server: input.serverExec ?? input.exec ?? serverExec,
-        };
+    // R-seams-1: the workspace's git as the task's person.
+    const runners = deliveryRunners(input.db, { projectSlug, taskKey, dataRoot }, input);
     const exec = runners.workspace;
 
     // Read the branch sha BEFORE any deletion — the outcome must name what it
@@ -1317,9 +1284,8 @@ export async function discardLocalTaskBranch(input: {
     );
     const hasOrigin = originRes.ok && originRes.stdout.trim() !== "";
 
-    const credential = input.db ? getProjectCredential(input.db, projectSlug) : null;
-    const token =
-      (input.db && credential ? getPatToken(input.db, credential.id) : null) ?? "";
+    const credential = getProjectCredential(input.db, projectSlug);
+    const token = (credential ? getPatToken(input.db, credential.id) : null) ?? "";
     const askpassInput: Parameters<typeof createGitHubAskpassEnv>[0] = {};
     if (token) askpassInput.token = token;
     const askpass = createGitHubAskpassEnv(askpassInput);

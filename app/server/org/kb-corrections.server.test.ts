@@ -7,11 +7,8 @@ import { listAuditEvents } from "../../../test-support/audit-log";
 import { withLegacyProposals } from "../../../test-support/kb-legacy-proposals";
 import { resolveStoreTarget, saveKnowledgeBase } from "./resources.server";
 import { writeStoreDoc } from "./store-files.server";
-import { listKbProposals } from "./kb-proposals.server";
+import { parseKbProposals } from "./kb-proposals.server";
 import {
-  KB_CORRECTION_MAX_BYTES,
-  KB_CORRECTION_MERGED_ACTION,
-  KB_CORRECTION_UNDONE_ACTION,
   editKbPassage,
   listKbCorrections,
   mergeKbCorrection,
@@ -101,7 +98,7 @@ describe("mergeKbCorrection", () => {
     // A model's trailing newline is not part of the passage.
     expect(read(kb)).toBe("# Facts\n\n- T-003: wrangler 4.139.0\n- T-013: dist/server/\n");
     expect(c.id).toMatch(/^kc-[0-9a-f]{10}$/);
-    const [row] = listAuditEvents(store.db, { action: KB_CORRECTION_MERGED_ACTION });
+    const [row] = listAuditEvents(store.db, { action: "task.kb_correction.merged" });
     expect(row).toMatchObject({ projectSlug: store.slug, taskKey: "VIB-1", subjectKind: "task" });
     expect(row?.details).toMatchObject({
       id: c.id,
@@ -134,7 +131,7 @@ describe("mergeKbCorrection", () => {
       "# Conventions\n\n- Quote every path.\n\n- Pass `--` before any argument a person supplies.\n\n## Proposed corrections (not binding)\n",
     )).toBe(true);
     // The unmerged proposal still reads back whole.
-    expect(listKbProposals(store.dataRoot).map((p) => p.correction)).toEqual(["Old one."]);
+    expect(parseKbProposals(kb, "conventions.md", body).map((p) => p.correction)).toEqual(["Old one."]);
   });
 
   it("refuses a passage that is not in the document exactly as sent, handing back its closest line, and writes nothing", async () => {
@@ -148,7 +145,7 @@ describe("mergeKbCorrection", () => {
     // The document's own line, fenced, for the agent to copy.
     expect(message).toContain("````\n5. **Non-production branch builds:** on\n````");
     expect(read(kb)).toBe(before);
-    expect(listAuditEvents(store.db, { action: KB_CORRECTION_MERGED_ACTION })).toEqual([]);
+    expect(listAuditEvents(store.db, { action: "task.kb_correction.merged" })).toEqual([]);
   });
 
   it("counts only the settled text: a passage a proposal entry quotes is not in the document", async () => {
@@ -277,7 +274,8 @@ describe("mergeKbCorrection", () => {
 
   it("refuses a side over the cap, since the record carries both", async () => {
     const kb = await seedKb("dossier", "facts.md", "# Facts\n\n- A.\n");
-    const r = await merge(kb, { replaces: "- A.", text: "é".repeat(KB_CORRECTION_MAX_BYTES / 2 + 1) });
+    // 8,194 UTF-8 bytes: one two-byte character past the cap.
+    const r = await merge(kb, { replaces: "- A.", text: "é".repeat(4097) });
     expect(r.ok ? "" : r.message).toContain("at most 8192 bytes");
     expect(read(kb)).toBe("# Facts\n\n- A.\n");
   });
@@ -297,7 +295,7 @@ describe("undoKbCorrection", () => {
     const r = await undo(c.id);
     expect(r.outcome).toBe("done");
     expect(read(kb)).toBe("# Facts\n\n- T-003: wrangler 4.138.0\n- T-013: dist/server/\n");
-    const [row] = listAuditEvents(store.db, { action: KB_CORRECTION_UNDONE_ACTION });
+    const [row] = listAuditEvents(store.db, { action: "task.kb_correction.undone" });
     expect(row).toMatchObject({ actorUserId: store.users.arda.id, projectSlug: store.slug, taskKey: "VIB-1" });
     expect(row?.details).toMatchObject({ id: c.id, reason: "Not what we run.", byName: "Arda Kaya" });
     expect(listKbCorrections(store.db, { projectSlug: store.slug })[0]!.undone).toMatchObject({
@@ -327,7 +325,7 @@ describe("undoKbCorrection", () => {
     expect(r.outcome).toBe("noop");
     expect(r.message).toContain("was edited since");
     expect(read(kb)).toBe(edited);
-    expect(listAuditEvents(store.db, { action: KB_CORRECTION_UNDONE_ACTION })).toEqual([]);
+    expect(listAuditEvents(store.db, { action: "task.kb_correction.undone" })).toEqual([]);
   });
 
   it("finds a correction only on its own board", async () => {

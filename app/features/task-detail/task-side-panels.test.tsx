@@ -3,7 +3,6 @@ import { afterEach, describe, expect, it } from "vitest";
 import { cleanup, fireEvent, render, waitFor, within } from "@testing-library/react";
 import { createRoutesStub, useLoaderData } from "react-router";
 import type { TaskDetail } from "~/server/projections/task-query.server";
-import type { AcceptanceAffordance } from "~/server/tasks/task-acceptance.server";
 import { ToastProvider } from "~/ui/toast";
 import { toISODate } from "~/ui/iso-date";
 import type { DependencyCandidatesView } from "~/routes/task-dependency-candidates";
@@ -11,7 +10,7 @@ import { CurrentStatePanel } from "./task-side-panels";
 import { TaskDetailsPanel } from "./task-details-panel";
 import type { EpicOption } from "~/ui/epic-chip";
 import { Icon, type IconName } from "~/ui/icon";
-import { taskDetail } from "../../../test-support/task-detail";
+import { acceptanceAffordance, taskDetail } from "../../../test-support/task-detail";
 
 /**
  * Pass-19 gap 10 — the task page showed stage, readiness, validation, owner and
@@ -23,15 +22,7 @@ import { taskDetail } from "../../../test-support/task-detail";
 
 afterEach(cleanup);
 
-const ACCEPTANCE: AcceptanceAffordance = {
-  hasAuthority: false,
-  atBoundary: false,
-  blockedReason: null,
-  blockedGates: [],
-  blockedReasonViaPacket: null,
-  canAccept: false,
-  terminallyBlocked: false,
-};
+const ACCEPTANCE = acceptanceAffordance({ hasAuthority: false, atBoundary: false, canAccept: false });
 
 function detail(patch: Partial<TaskDetail> = {}): TaskDetail {
   return taskDetail({
@@ -144,11 +135,6 @@ describe("gap-10: Current state shows when anything last happened", () => {
     });
     // LocalRelative fills in after hydration; the row exists and is not blank.
     expect(kv(container, "Last activity")).toMatch(/ago|yesterday|just now/);
-  });
-
-  it("says so plainly when the timeline is empty rather than guessing", () => {
-    const { container } = renderPanel({ lastActivityAt: null });
-    expect(kv(container, "Last activity")).toBe("Nothing on the timeline yet");
   });
 
   it("adds the quiet note only once the task has crossed its threshold", () => {

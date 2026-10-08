@@ -1,15 +1,14 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { createTestDbContext } from "../../../test-support/test-db";
 import { listAuditEvents } from "../../../test-support/audit-log";
-import { toolLoading } from "../../../test-support/mcp-tool-meta";
+import { connectedClient, toolLoading } from "../../../test-support/mcp-tool-meta";
 import { fakeGithubFetch } from "../../../test-support/fake-github";
 import {
   baseTaskFrontmatter,
   setupTestStore,
-  writeProject,
   writeTask,
 } from "../../../test-support/test-store";
-import { readProjectFile } from "~/server/files/project-writer.server";
+import { reconfigureProject } from "../../../test-support/projected-store";
 import { rebuildAll } from "~/server/projections/rebuilder.server";
 import { createPat, setProjectCredential } from "~/server/secrets/pat-store.server";
 import { insertUser } from "~/server/auth/user-store.server";
@@ -58,7 +57,6 @@ describe("agent-toolkit audit attribution (P11-23)", () => {
     expect(row).toBeTruthy();
     // The actor label is the agent ref, not "operator".
     expect(row.actorLabel).toBe("agent:claude/security-reviewer (Security review)");
-    expect(row.actorLabel).not.toBe("operator");
   });
 
   /**
@@ -169,7 +167,6 @@ describe("agent-toolkit audit attribution (P11-23)", () => {
     // CANARY: drop the `notice.from` and this is { kind: "agent", name:
     // "Operator" } — the default every un-attributed notice falls back to.
     expect(note!.from).toMatchObject({ kind: "agent", name: "Security review" });
-    expect(note!.from).not.toMatchObject({ name: "Operator" });
   });
 
   /**
@@ -426,13 +423,8 @@ describe("report_outcome's evidence field (P13-D-26)", () => {
    * the same run at no cost.
    */
   it("ruling 298: a fifth answer choice is refused by name, not trimmed away", async () => {
-    const { Client } = await import("@modelcontextprotocol/sdk/client/index.js");
-    const { InMemoryTransport } = await import("@modelcontextprotocol/sdk/inMemory.js");
     const server = mountFor({ ...BASE, ask: true });
-    const [clientEnd, serverEnd] = InMemoryTransport.createLinkedPair();
-    await server.instance.connect(serverEnd);
-    const client = new Client({ name: "probe", version: "1" }, { capabilities: {} });
-    await client.connect(clientEnd);
+    const client = await connectedClient(server);
 
     const five = ["a", "b", "c", "d", "e"].map((t) => ({ title: t }));
     const refused = await client.callTool({
@@ -470,14 +462,9 @@ describe("report_outcome's evidence field (P13-D-26)", () => {
    * pipeline to post.
    */
   it("ruling 488: report_outcome stages up to two relay entries and refuses a third by name", async () => {
-    const { Client } = await import("@modelcontextprotocol/sdk/client/index.js");
-    const { InMemoryTransport } = await import("@modelcontextprotocol/sdk/inMemory.js");
     // Evidence only: the WEB-9 Platform Engineer's shape, no verdict grant.
     const server = mountFor({ comment: false, ask: false, verdict: false, evidence: true });
-    const [clientEnd, serverEnd] = InMemoryTransport.createLinkedPair();
-    await server.instance.connect(serverEnd);
-    const client = new Client({ name: "probe", version: "1" }, { capabilities: {} });
-    await client.connect(clientEnd);
+    const client = await connectedClient(server);
     const toolText = z
       .object({ content: z.array(z.object({ text: z.string() })) })
       .transform((r) => r.content.map((c) => c.text).join("\n"));
@@ -507,13 +494,8 @@ describe("report_outcome's evidence field (P13-D-26)", () => {
    * same run.
    */
   it("ruling 526: report_outcome refuses an evidence row with no mark, and stages a marked one", async () => {
-    const { Client } = await import("@modelcontextprotocol/sdk/client/index.js");
-    const { InMemoryTransport } = await import("@modelcontextprotocol/sdk/inMemory.js");
     const server = mountFor({ ...BASE, verdict: true, evidence: true });
-    const [clientEnd, serverEnd] = InMemoryTransport.createLinkedPair();
-    await server.instance.connect(serverEnd);
-    const client = new Client({ name: "probe", version: "1" }, { capabilities: {} });
-    await client.connect(clientEnd);
+    const client = await connectedClient(server);
     const toolText = z
       .object({ content: z.array(z.object({ text: z.string() })) })
       .transform((r) => r.content.map((c) => c.text).join("\n"));
@@ -554,13 +536,8 @@ describe("report_outcome's evidence field (P13-D-26)", () => {
    * `specialist-run.server.test.ts` owns.
    */
   it("ruling 692: both asking channels say a person is asked only what they alone know, in one question", async () => {
-    const { Client } = await import("@modelcontextprotocol/sdk/client/index.js");
-    const { InMemoryTransport } = await import("@modelcontextprotocol/sdk/inMemory.js");
     const server = mountFor({ ...BASE, ask: true });
-    const [clientEnd, serverEnd] = InMemoryTransport.createLinkedPair();
-    await server.instance.connect(serverEnd);
-    const client = new Client({ name: "probe", version: "1" }, { capabilities: {} });
-    await client.connect(clientEnd);
+    const client = await connectedClient(server);
 
     expect(ASK_HUMAN_ONLY_NOTE).toBe(
       "Ask what only a person knows or may decide, and put all of it in one question. " +
@@ -580,13 +557,8 @@ describe("report_outcome's evidence field (P13-D-26)", () => {
    * needs a typed answer, and tells it an unmarked list recommends nothing.
    */
   it("ruling 478(e): a `reply` choice reaches the packet, and an unmarked list recommends nothing", async () => {
-    const { Client } = await import("@modelcontextprotocol/sdk/client/index.js");
-    const { InMemoryTransport } = await import("@modelcontextprotocol/sdk/inMemory.js");
     const server = mountFor({ ...BASE, ask: true });
-    const [clientEnd, serverEnd] = InMemoryTransport.createLinkedPair();
-    await server.instance.connect(serverEnd);
-    const client = new Client({ name: "probe", version: "1" }, { capabilities: {} });
-    await client.connect(clientEnd);
+    const client = await connectedClient(server);
 
     const listed = await client.listTools();
     const ask = listed.tools.find((t) => t.name === "ask_human");
@@ -1602,8 +1574,6 @@ describe("report_outcome's evidence field (P13-D-26)", () => {
     it("rulings 483 and 498: correct_knowledge_doc writes into the agent's own knowledge base, and only its own", async () => {
       const { saveKnowledgeBase, resolveStoreTarget } = await import("~/server/org/resources.server");
       const { writeStoreDoc } = await import("~/server/org/store-files.server");
-      const { Client } = await import("@modelcontextprotocol/sdk/client/index.js");
-      const { InMemoryTransport } = await import("@modelcontextprotocol/sdk/inMemory.js");
       const store = setupTestStore(ctx);
       writeTask(store.dataRoot, store.slug, {
         frontmatter: baseTaskFrontmatter("VIB-3", { stage: "review" }),
@@ -1627,11 +1597,9 @@ describe("report_outcome's evidence field (P13-D-26)", () => {
       );
       // Ruling 648: an agent on the project is not given the dossier, so the
       // correction's entry quotes none of it (ruling 568).
-      const project = readProjectFile({ projectSlug: store.slug, dataRoot: store.dataRoot })!;
-      writeProject(store.dataRoot, {
-        ...project.parsed.frontmatter,
+      reconfigureProject(store, (fm) => ({
         agents: [
-          ...project.parsed.frontmatter.agents,
+          ...fm.agents,
           {
             profileId: "inventory-analyst",
             capabilities: [],
@@ -1639,8 +1607,7 @@ describe("report_outcome's evidence field (P13-D-26)", () => {
             definition: { kind: "specialist", name: "Inventory Analyst", role: "Intake", backends: ["claude"], model: "sonnet" },
           },
         ],
-      });
-      rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
+      }));
       const built = buildAgentToolkit({
         db: store.db,
         ctx: { dataRoot: store.dataRoot },
@@ -1652,10 +1619,7 @@ describe("report_outcome's evidence field (P13-D-26)", () => {
         kb: [kb.dir],
         webEgress: true,
       })!;
-      const [clientEnd, serverEnd] = InMemoryTransport.createLinkedPair();
-      await built.mcpServers.viberr_agent.instance.connect(serverEnd);
-      const client = new Client({ name: "probe", version: "1" }, { capabilities: {} });
-      await client.connect(clientEnd);
+      const client = await connectedClient(built.mcpServers.viberr_agent);
       const textResult = z
         .object({ content: z.array(z.object({ text: z.string() })) })
         .transform((r) => r.content.map((c) => c.text).join("\n"));

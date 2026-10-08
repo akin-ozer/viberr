@@ -186,7 +186,7 @@ export function resolveContainedSkillFile(
  * visible marker; a skill that could not be read at all reports WHY, so the
  * caller can put it in the run's prompt instead of only in a log line.
  */
-export function readSkillBodyDetailed(
+function readSkillBodyDetailed(
   name: string,
   dataRoot?: string,
   budgetChars: number = SKILL_INJECTION_BUDGET,

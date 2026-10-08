@@ -47,9 +47,13 @@ import {
   RUN_INPUTS_TAG,
   type RunInputs,
 } from "~/features/runtime/runtime-types";
-import { resolveDeliveryPermissions } from "./specialist-tool-policy";
+import {
+  resolveDeliveryPermissions,
+  resolveSpecialistDisallowedTools,
+  resolveUndeployedDisallowedTools,
+} from "./specialist-tool-policy";
 import { SKILL_INJECTION_BUDGET } from "~/server/files/skill-body.server";
-import { appendTimelineEvent, readTaskFile } from "~/server/files/task-writer.server";
+import { appendTimelineEvent, readTaskFile, updateTaskFile } from "~/server/files/task-writer.server";
 import { readProjectFile } from "~/server/files/project-writer.server";
 import { rebuildAll } from "~/server/projections/rebuilder.server";
 import { upsertRun } from "~/server/runtimes/run-store.server";
@@ -78,7 +82,8 @@ import {
   connectFakeBackend,
   disconnectFakeBackend,
 } from "../../../test-support/backend-credentials";
-import { MODEL_SUBSTITUTED_TAG } from "~/server/runtimes/run-service.server";
+import { reconfigureProject } from "../../../test-support/projected-store";
+import { interruptRun } from "~/server/runtimes/run-service.server";
 import { startMcpGateway, stopMcpGateway } from "~/server/mcp-proxy/gateway.server";
 import { defaultModelFor } from "~/server/runtimes/model-catalog.server";
 import { assignReviewer, assignSpecialist, removeReviewer } from "./specialist-assignment.server";
@@ -122,20 +127,13 @@ import { promisify } from "node:util";
 let ctx: TestDbContext;
 let store: TestStore;
 
-/** Poll until a run has streamed at least `n` log lines. */
-async function waitForLines(
-  runId: string,
-  n = 1,
-  timeoutMs = 5_000,
-): Promise<number> {
-  const start = Date.now();
-  for (;;) {
-    const count = listRunLines(store.db, runId).length;
-    if (count >= n) return count;
-    if (Date.now() - start > timeoutMs) return count;
-    await new Promise((r) => setTimeout(r, 25));
-  }
-}
+/** End a run on VIB-1 the way a person's Stop does. */
+const stopRun = (runId: string) =>
+  interruptRun(
+    store.db,
+    { projectSlug: store.slug, taskKey: "VIB-1", runId, dataRoot: store.dataRoot },
+    actorOf(store.users.arda),
+  );
 
 /** Re-write the store's project.md with a deployed `dev` specialist (claude
  *  by default; pass ["codex"] to simulate editing the profile to the other
@@ -143,10 +141,7 @@ async function waitForLines(
 function deployDevSpecialist(
   backends: ("codex" | "claude")[] = ["claude"],
 ): void {
-  const file = readProjectFile({ projectSlug: store.slug, dataRoot: store.dataRoot })!;
-  const fm = file.parsed.frontmatter;
-  writeProject(store.dataRoot, {
-    ...fm,
+  reconfigureProject(store, {
     // No repo → the run skips the network clone (kept fast + offline). The
     // clone path itself is best-effort and covered by the "no repo" branch.
     repo: null,
@@ -167,7 +162,6 @@ function deployDevSpecialist(
       },
     ],
   });
-  rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
 }
 
 beforeEach(async () => {
@@ -307,7 +301,7 @@ describe("AP-06 — an empty grant list is WITHHELD, not unlimited", () => {
   // "everything unspecified" = Edit/Write/`git commit` granted and
   // canBranch/canCommitPush/canOpenPr all true — full repo-write power nobody
   // chose, invisible in every UI. It now resolves to an explicit withheld set.
-  it("resolveDeployedSpecialist materializes explicit withheld grants", async () => {
+  it("resolveDeployedSpecialist materializes explicit withheld grants", () => {
     const resolved = resolveDeployedSpecialist(
       { dataRoot: store.dataRoot },
       store.slug,
@@ -321,8 +315,6 @@ describe("AP-06 — an empty grant list is WITHHELD, not unlimited", () => {
     // Structural always-human ids stay `human`, not `off`.
     expect(modeOf("merge-pull-request")).toBe("human");
 
-    const { resolveDeliveryPermissions, resolveSpecialistDisallowedTools } =
-      await import("./specialist-tool-policy");
     expect(resolveDeliveryPermissions(resolved.capabilities)).toEqual({
       canBranch: false,
       canCommitPush: false,
@@ -397,10 +389,7 @@ describe("engagement uniqueness (adversarial-review)", () => {
   /** Deploy a SECOND profile alongside `dev` so a profile can be moved between
    *  the delivering and supporting positions. */
   function deploySecond(id: string): void {
-    const file = readProjectFile({ projectSlug: store.slug, dataRoot: store.dataRoot })!;
-    const fm = file.parsed.frontmatter;
-    writeProject(store.dataRoot, {
-      ...fm,
+    reconfigureProject(store, (fm) => ({
       agents: [
         ...fm.agents,
         {
@@ -410,8 +399,7 @@ describe("engagement uniqueness (adversarial-review)", () => {
           definition: { kind: "specialist", name: id, role: id, backends: ["claude"], model: "sonnet" },
         },
       ],
-    });
-    rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
+    }));
   }
 
   // P14-GV-10: replacing the deliverer used to be silent — the outgoing agent's
@@ -497,7 +485,6 @@ describe("engagement uniqueness (adversarial-review)", () => {
     await assignSpecialist(store.db, { projectSlug: store.slug, taskKey: "VIB-1", profileId: "dev" }, actorOf(store.users.arda), { dataRoot: store.dataRoot });
     await assignReviewer(store.db, { projectSlug: store.slug, taskKey: "VIB-1", profileId: "style" }, actorOf(store.users.arda), { dataRoot: store.dataRoot });
 
-    const { updateTaskFile } = await import("~/server/files/task-writer.server");
     await updateTaskFile(
       { projectSlug: store.slug, taskKey: "VIB-1", dataRoot: store.dataRoot },
       (parsed) => {
@@ -539,7 +526,6 @@ describe("startAgentRun — delivering (specialist) dispatch, and ruling 133's s
 
   it("F7-OP1: refuses a second PRIMARY run while one is already in flight (server single-flight)", async () => {
     await assign();
-    const { upsertRun } = await import("~/server/runtimes/run-store.server");
     // A primary run is already live on this task (e.g. a prior operator turn
     // started it). A second startAgentRun must not spawn a rival agent in
     // the same workspace clone.
@@ -725,13 +711,6 @@ describe("startAgentRun — delivering (specialist) dispatch, and ruling 133's s
     };
     const fm = () =>
       readTaskFile({ projectSlug: store.slug, taskKey: "VIB-1", dataRoot: store.dataRoot })!.parsed;
-    const { interruptRun } = await import("~/server/runtimes/run-service.server");
-    const stop = (runId: string) =>
-      interruptRun(
-        store.db,
-        { projectSlug: store.slug, taskKey: "VIB-1", runId, dataRoot: store.dataRoot },
-        actorOf(store.users.arda),
-      );
     seedHeld();
     const first = await startAgentRun(
       store.db,
@@ -747,7 +726,7 @@ describe("startAgentRun — delivering (specialist) dispatch, and ruling 133's s
     const rows = listAuditEvents(store.db, { action: "task.hold.lifted" });
     expect(rows).toHaveLength(1);
     expect(rows[0]!.details).toMatchObject({ cause: "dispatch", profileId: "dev" });
-    await stop(first.runId);
+    await stopRun(first.runId);
 
     // An open `blocked` packet keeps the success-time withdrawal as the lift.
     seedHeld(
@@ -773,7 +752,7 @@ describe("startAgentRun — delivering (specialist) dispatch, and ruling 133's s
     // re-seed emptied the timeline, so any note here would be a new one).
     expect(fm().timeline.filter((e) => e.title === "Hold lifted")).toHaveLength(0);
     expect(listAuditEvents(store.db, { action: "task.hold.lifted" })).toHaveLength(1);
-    await stop(second.runId);
+    await stopRun(second.runId);
   });
 
   it("ruling 355: a refusal names an entry that can never complete instead of promising a release", async () => {
@@ -929,15 +908,9 @@ describe("startAgentRun — delivering (specialist) dispatch, and ruling 133's s
     expect(run.kind).toBe("primary");
     // Run rows carry the engagement's live role snapshot, not a kind literal.
     expect(run.role).toBe("developer");
-    const lineCount = await waitForLines(result.runId, 1);
-    expect(lineCount).toBeGreaterThan(0);
+    expect(await pollUntil(() => listRunLines(store.db, result.runId).length > 0)).toBe(true);
 
-    const { interruptRun } = await import("~/server/runtimes/run-service.server");
-    await interruptRun(
-      store.db,
-      { projectSlug: store.slug, taskKey: "VIB-1", runId: result.runId, dataRoot: store.dataRoot },
-      actorOf(store.users.arda),
-    );
+    await stopRun(result.runId);
 
     // Typed agent event + task-level audit (runtime.run.started is separate).
     const file = readTaskFile({
@@ -965,12 +938,7 @@ describe("startAgentRun — delivering (specialist) dispatch, and ruling 133's s
     // The run follows the live deployment, not the assign-time snapshot …
     expect(result.backend).toBe("codex");
 
-    const { interruptRun } = await import("~/server/runtimes/run-service.server");
-    await interruptRun(
-      store.db,
-      { projectSlug: store.slug, taskKey: "VIB-1", runId: result.runId, dataRoot: store.dataRoot },
-      actorOf(store.users.arda),
-    );
+    await stopRun(result.runId);
 
     // … and the snapshot is refreshed so every later resolution (operator
     // prompt, @mention, exec-profile label) follows the switch too.
@@ -985,7 +953,6 @@ describe("startAgentRun — delivering (specialist) dispatch, and ruling 133's s
 
   it("F27-B1: a D4 backendOverride pins the engagement so the switch STICKS on later runs", async () => {
     await assign(); // deployed profile + engagement snapshot: claude
-    const { interruptRun } = await import("~/server/runtimes/run-service.server");
     const runOnce = async (over?: "codex" | "claude") => {
       const r = await startAgentRun(
         store.db,
@@ -993,11 +960,7 @@ describe("startAgentRun — delivering (specialist) dispatch, and ruling 133's s
         actorOf(store.users.arda),
         { dataRoot: store.dataRoot },
       );
-      await interruptRun(
-        store.db,
-        { projectSlug: store.slug, taskKey: "VIB-1", runId: r.runId, dataRoot: store.dataRoot },
-        actorOf(store.users.arda),
-      );
+      await stopRun(r.runId);
       return r;
     };
     const read = () =>
@@ -1045,13 +1008,8 @@ describe("startAgentRun — delivering (specialist) dispatch, and ruling 133's s
       actorOf(store.users.arda),
       { dataRoot: store.dataRoot },
     );
-    await waitForLines(retry.runId, 1);
-    const { interruptRun } = await import("~/server/runtimes/run-service.server");
-    await interruptRun(
-      store.db,
-      { projectSlug: store.slug, taskKey: "VIB-1", runId: retry.runId, dataRoot: store.dataRoot },
-      actorOf(store.users.arda),
-    );
+    await pollUntil(() => listRunLines(store.db, retry.runId).length > 0);
+    await stopRun(retry.runId);
 
     // The row names what actually ran …
     expect(retry.backend).toBe("claude");
@@ -1059,7 +1017,7 @@ describe("startAgentRun — delivering (specialist) dispatch, and ruling 133's s
     // … the run log OPENS with the F21-13 notice naming both models (the
     // profile's original id reached run-service, which did the swap) …
     const first = listRunLines(store.db, retry.runId)[0]!;
-    expect(first.display.tag).toBe(MODEL_SUBSTITUTED_TAG);
+    expect(first.display.tag).toBe("run·model_substituted");
     expect(first.display.text).toContain(profileModel);
     expect(first.display.text).toContain(`\`${ranModel}\``);
     // … and the timeline event names the model, the profile's own, and that
@@ -1086,7 +1044,6 @@ describe("startAgentRun — delivering (specialist) dispatch, and ruling 133's s
     // Canary: reorder the resolver to `engagement.pinnedBackend ??
     // input.backendOverride ?? …` and this run comes back on codex.
     await assign(); // live profile + snapshot: claude
-    const { updateTaskFile } = await import("~/server/files/task-writer.server");
     await updateTaskFile(
       { projectSlug: store.slug, taskKey: "VIB-1", dataRoot: store.dataRoot },
       (parsed) => {
@@ -1095,18 +1052,13 @@ describe("startAgentRun — delivering (specialist) dispatch, and ruling 133's s
       },
     );
 
-    const { interruptRun } = await import("~/server/runtimes/run-service.server");
     const run = await startAgentRun(
       store.db,
       { projectSlug: store.slug, taskKey: "VIB-1", backendOverride: "claude" },
       actorOf(store.users.arda),
       { dataRoot: store.dataRoot },
     );
-    await interruptRun(
-      store.db,
-      { projectSlug: store.slug, taskKey: "VIB-1", runId: run.runId, dataRoot: store.dataRoot },
-      actorOf(store.users.arda),
-    );
+    await stopRun(run.runId);
 
     // The override won over the pin …
     expect(run.backend).toBe("claude");
@@ -1128,7 +1080,6 @@ describe("startAgentRun — delivering (specialist) dispatch, and ruling 133's s
     // Canary: replace the `(engagement.backend === "codex" ? "codex" : "claude")`
     // tail with a bare `"claude"` default and this run comes back on claude.
     await assign(); // snapshot: claude
-    const { updateTaskFile } = await import("~/server/files/task-writer.server");
     await updateTaskFile(
       { projectSlug: store.slug, taskKey: "VIB-1", dataRoot: store.dataRoot },
       (parsed) => {
@@ -1138,26 +1089,18 @@ describe("startAgentRun — delivering (specialist) dispatch, and ruling 133's s
       },
     );
     // The profile is deleted from project.md — nothing live to resolve.
-    const project = readProjectFile({ projectSlug: store.slug, dataRoot: store.dataRoot })!;
-    writeProject(store.dataRoot, {
-      ...project.parsed.frontmatter,
+    reconfigureProject(store, {
       repo: null,
       agents: [],
     });
-    rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
 
-    const { interruptRun } = await import("~/server/runtimes/run-service.server");
     const run = await startAgentRun(
       store.db,
       { projectSlug: store.slug, taskKey: "VIB-1" },
       actorOf(store.users.arda),
       { dataRoot: store.dataRoot },
     );
-    await interruptRun(
-      store.db,
-      { projectSlug: store.slug, taskKey: "VIB-1", runId: run.runId, dataRoot: store.dataRoot },
-      actorOf(store.users.arda),
-    );
+    await stopRun(run.runId);
     expect(run.backend).toBe("codex");
   });
 
@@ -1596,9 +1539,7 @@ describe("assignReviewer / removeReviewer", () => {
 
   it("rejects engaging a reviewer whose profile isn't eligible for the current stage (F1)", async () => {
     // Re-deploy `dev` scoped to REVIEW only; VIB-1 is at impl → ineligible.
-    const file = readProjectFile({ projectSlug: store.slug, dataRoot: store.dataRoot })!;
-    writeProject(store.dataRoot, {
-      ...file.parsed.frontmatter,
+    reconfigureProject(store, {
       repo: null,
       agents: [
         {
@@ -1613,7 +1554,6 @@ describe("assignReviewer / removeReviewer", () => {
         },
       ],
     });
-    rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
     await expect(
       assignReviewer(store.db, { projectSlug: store.slug, taskKey: "VIB-1", profileId: "dev" }, actorOf(store.users.arda), { dataRoot: store.dataRoot }),
     ).rejects.toThrow(/not eligible/i);
@@ -1680,7 +1620,6 @@ describe("startAgentRun — no credential principal (ruling 127)", () => {
   });
 
   it("an UNOWNED task: a null principal, and the sentence names the task", async () => {
-    const { updateTaskFile } = await import("~/server/files/task-writer.server");
     await updateTaskFile(
       { projectSlug: store.slug, taskKey: "VIB-1", dataRoot: store.dataRoot },
       (parsed) => {
@@ -1756,12 +1695,7 @@ describe("startAgentRun — supporting (reviewer) dispatch", () => {
       listAuditEvents(store.db, { action: "task.engagement.added" })[0]?.taskKey,
     ).toBe("VIB-1");
 
-    const { interruptRun } = await import("~/server/runtimes/run-service.server");
-    await interruptRun(
-      store.db,
-      { projectSlug: store.slug, taskKey: "VIB-1", runId: result.runId, dataRoot: store.dataRoot },
-      actorOf(store.users.arda),
-    );
+    await stopRun(result.runId);
   });
 
   it("ruling 556: runs the project's required reviewer to review, even when it could deliver", async () => {
@@ -1770,11 +1704,9 @@ describe("startAgentRun — supporting (reviewer) dispatch", () => {
     // the Run control and the controller could not start its review at all.
     // CANARY: drop the required-reviewer term from the derived posture and
     // this dispatch is refused.
-    const file = readProjectFile({ projectSlug: store.slug, dataRoot: store.dataRoot })!;
-    writeProject(store.dataRoot, {
-      ...file.parsed.frontmatter,
+    reconfigureProject(store, (fm) => ({
       requiredReviewers: [{ stageId: "review", profileId: "dev" }],
-      agents: file.parsed.frontmatter.agents.map((a) =>
+      agents: fm.agents.map((a) =>
         a.profileId === "dev"
           ? {
               ...a,
@@ -1785,8 +1717,7 @@ describe("startAgentRun — supporting (reviewer) dispatch", () => {
             }
           : a,
       ),
-    });
-    rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
+    }));
     const result = await startAgentRun(
       store.db,
       { projectSlug: store.slug, taskKey: "VIB-1", profileId: "dev" },
@@ -1800,12 +1731,7 @@ describe("startAgentRun — supporting (reviewer) dispatch", () => {
       { profileId: "dev", backend: "claude", role: "developer", delivers: false, verdictCapable: true },
     ]);
     expect(getRun(store.db, result.runId)!.kind).toBe("reviewer");
-    const { interruptRun } = await import("~/server/runtimes/run-service.server");
-    await interruptRun(
-      store.db,
-      { projectSlug: store.slug, taskKey: "VIB-1", runId: result.runId, dataRoot: store.dataRoot },
-      actorOf(store.users.arda),
-    );
+    await stopRun(result.runId);
   });
 
   it("still REFUSES an undeployed profileId (validation, not auto-engage)", async () => {
@@ -1843,15 +1769,9 @@ describe("startAgentRun — supporting (reviewer) dispatch", () => {
     expect(run.role).toBe("developer");
     expect(run.thread_id.startsWith("r0-")).toBe(true);
     expect(run.agent_profile_id).toBe("dev");
-    const lineCount = await waitForLines(result.runId, 1);
-    expect(lineCount).toBeGreaterThan(0);
+    expect(await pollUntil(() => listRunLines(store.db, result.runId).length > 0)).toBe(true);
 
-    const { interruptRun } = await import("~/server/runtimes/run-service.server");
-    await interruptRun(
-      store.db,
-      { projectSlug: store.slug, taskKey: "VIB-1", runId: result.runId, dataRoot: store.dataRoot },
-      actorOf(store.users.arda),
-    );
+    await stopRun(result.runId);
     expect(
       listAuditEvents(store.db, { action: "task.agent.run_started" })[0]?.taskKey,
     ).toBe("VIB-1");
@@ -1869,13 +1789,8 @@ describe("startAgentRun — supporting (reviewer) dispatch", () => {
     // startAgentRun itself, not an operator/@mention) posts the reviewer's
     // reply as an agent-authored comment. This is the "reviewer didn't comment
     // after a run" fix: the UI "Run" button path now reports back.
-    await waitForLines(result.runId, 2);
-    const { interruptRun } = await import("~/server/runtimes/run-service.server");
-    await interruptRun(
-      store.db,
-      { projectSlug: store.slug, taskKey: "VIB-1", runId: result.runId, dataRoot: store.dataRoot },
-      actorOf(store.users.arda),
-    );
+    await pollUntil(() => listRunLines(store.db, result.runId).length >= 2);
+    await stopRun(result.runId);
     const replied = () =>
       !!readTaskFile({ projectSlug: store.slug, taskKey: "VIB-1", dataRoot: store.dataRoot })?.parsed.timeline.some(
         (e) => e.type === "comment" && e.actor.kind === "agent",
@@ -1916,9 +1831,7 @@ describe("P14-RT-01 — a FRESH run of an UNDEPLOYED profile is confined like a 
   /** Drop every deployment from project.md — the profile a task is still
    *  engaged with vanishes (undeployed / deleted between engage and run). */
   function undeployAll(): void {
-    const file = readProjectFile({ projectSlug: store.slug, dataRoot: store.dataRoot })!;
-    writeProject(store.dataRoot, { ...file.parsed.frontmatter, repo: null, agents: [] });
-    rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
+    reconfigureProject(store, { repo: null, agents: [] });
   }
 
   beforeEach(async () => {
@@ -1950,9 +1863,6 @@ describe("P14-RT-01 — a FRESH run of an UNDEPLOYED profile is confined like a 
     );
 
     const spec = specs.at(-1)!;
-    const { resolveUndeployedDisallowedTools } = await import(
-      "./specialist-tool-policy"
-    );
     expect(new Set(spec.disallowedTools)).toEqual(
       new Set(resolveUndeployedDisallowedTools()),
     );
@@ -1967,10 +1877,8 @@ describe("P14-RT-01 — a FRESH run of an UNDEPLOYED profile is confined like a 
     // that row sits "running" holding the single-flight slot — the task then
     // refuses EVERY further run until a restart. Force the throw at adapter.start
     // (which runs after the reservation), then prove a later run is not refused.
-    const file = readProjectFile({ projectSlug: store.slug, dataRoot: store.dataRoot })!;
     // repo:null → the run reaches adapter.start with no network clone.
-    writeProject(store.dataRoot, { ...file.parsed.frontmatter, repo: null });
-    rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
+    reconfigureProject(store, { repo: null });
 
     const throwingAdapter = (backend: RealBackend): RuntimeAdapter => ({
       backend,
@@ -2092,7 +2000,6 @@ describe("P14-RT-01 — a FRESH run of an UNDEPLOYED profile is confined like a 
     // passages as not fixed that the Estimate Judge's first verdict on AWSC-29
     // said it had corrected: the re-review that stands did not say so.
     // CANARY: drop the note, or give it to a first review.
-    const { updateTaskFile } = await import("~/server/files/task-writer.server");
     const ref = { projectSlug: store.slug, taskKey: "VIB-1", dataRoot: store.dataRoot };
     const review = async () => {
       await startAgentRun(
@@ -2104,9 +2011,7 @@ describe("P14-RT-01 — a FRESH run of an UNDEPLOYED profile is confined like a 
       return specs.at(-1)!.prompt;
     };
     for (const backend of ["claude", "codex"] as const) {
-      const file = readProjectFile({ projectSlug: store.slug, dataRoot: store.dataRoot })!;
-      writeProject(store.dataRoot, {
-        ...file.parsed.frontmatter,
+      reconfigureProject(store, {
         repo: null,
         agents: ["dev", "critic"].map((profileId) => ({
           profileId,
@@ -2121,7 +2026,6 @@ describe("P14-RT-01 — a FRESH run of an UNDEPLOYED profile is confined like a 
           },
         })),
       });
-      rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
       await updateTaskFile(ref, (parsed) => {
         parsed.frontmatter.verdicts = [];
       });
@@ -2354,9 +2258,7 @@ describe("P14-RT-01 — a FRESH run of an UNDEPLOYED profile is confined like a 
   });
 
   it("D4: a mounted collaboration toolkit reaches the run auto-approved", async () => {
-    const file = readProjectFile({ projectSlug: store.slug, dataRoot: store.dataRoot })!;
-    writeProject(store.dataRoot, {
-      ...file.parsed.frontmatter,
+    reconfigureProject(store, {
       repo: null,
       agents: [
         {
@@ -2373,7 +2275,6 @@ describe("P14-RT-01 — a FRESH run of an UNDEPLOYED profile is confined like a 
         },
       ],
     });
-    rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
 
     await startAgentRun(
       store.db,
@@ -2395,9 +2296,7 @@ describe("P14-RT-01 — a FRESH run of an UNDEPLOYED profile is confined like a 
    * question is for, the same sentence the tool and the Codex field carry.
    */
   it("ruling 692: an ask-granted Claude run is told a person is asked only what they alone know", async () => {
-    const file = readProjectFile({ projectSlug: store.slug, dataRoot: store.dataRoot })!;
-    writeProject(store.dataRoot, {
-      ...file.parsed.frontmatter,
+    reconfigureProject(store, {
       repo: null,
       agents: [
         {
@@ -2414,7 +2313,6 @@ describe("P14-RT-01 — a FRESH run of an UNDEPLOYED profile is confined like a 
         },
       ],
     });
-    rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
 
     await startAgentRun(
       store.db,
@@ -2433,7 +2331,9 @@ describe("P14-RT-01 — a FRESH run of an UNDEPLOYED profile is confined like a 
   });
 
   it("its prompt offers no delivery step it cannot perform (XS-4)", async () => {
-    undeployAll();
+    // Undeployed on a project WITH a repository: only a checkout's contract has
+    // delivery steps to offer (the clone fails offline and the contract stays).
+    reconfigureProject(store, { repo: "acme/widgets", agents: [] });
 
     await startAgentRun(
       store.db,
@@ -2445,6 +2345,8 @@ describe("P14-RT-01 — a FRESH run of an UNDEPLOYED profile is confined like a 
     const prompt = specs.at(-1)!.prompt;
     expect(prompt).not.toContain("git checkout -B");
     expect(prompt).not.toContain("Commit your work locally");
+    // The delivery block is there, saying what the run may not do.
+    expect(prompt).toContain("do NOT run `git commit`");
   });
 
   /**
@@ -2482,9 +2384,7 @@ describe("P14-RT-01 — a FRESH run of an UNDEPLOYED profile is confined like a 
    * on, which is how a prose report degrades into a stub.
    */
   it("B-AG3: an evidence-only Codex profile is TOLD about the envelope it is constrained to", async () => {
-    const file = readProjectFile({ projectSlug: store.slug, dataRoot: store.dataRoot })!;
-    writeProject(store.dataRoot, {
-      ...file.parsed.frontmatter,
+    reconfigureProject(store, {
       repo: null,
       agents: [
         {
@@ -2505,7 +2405,6 @@ describe("P14-RT-01 — a FRESH run of an UNDEPLOYED profile is confined like a 
         },
       ],
     });
-    rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
 
     await startAgentRun(
       store.db,
@@ -2542,9 +2441,7 @@ describe("P14-RT-01 — a FRESH run of an UNDEPLOYED profile is confined like a 
     expect(KB_CORRECTION_NOTE_CODEX).toContain("the passage exactly as the document has it");
     expect(`${KB_CORRECTION_NOTE_CLAUDE} ${KB_CORRECTION_NOTE_CODEX}`).not.toContain("not binding");
     for (const backend of ["codex", "claude"] as const) {
-      const file = readProjectFile({ projectSlug: store.slug, dataRoot: store.dataRoot })!;
-      writeProject(store.dataRoot, {
-        ...file.parsed.frontmatter,
+      reconfigureProject(store, {
         repo: null,
         agents: [
           {
@@ -2562,7 +2459,6 @@ describe("P14-RT-01 — a FRESH run of an UNDEPLOYED profile is confined like a 
           },
         ],
       });
-      rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
       await startAgentRun(
         store.db,
         { projectSlug: store.slug, taskKey: "VIB-1" },
@@ -2588,9 +2484,7 @@ describe("P14-RT-01 — a FRESH run of an UNDEPLOYED profile is confined like a 
    */
   it("ruling 488: a run with an outcome channel is told its relay, per backend", async () => {
     for (const backend of ["codex", "claude"] as const) {
-      const file = readProjectFile({ projectSlug: store.slug, dataRoot: store.dataRoot })!;
-      writeProject(store.dataRoot, {
-        ...file.parsed.frontmatter,
+      reconfigureProject(store, {
         repo: null,
         agents: [
           {
@@ -2610,7 +2504,6 @@ describe("P14-RT-01 — a FRESH run of an UNDEPLOYED profile is confined like a 
           },
         ],
       });
-      rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
       await startAgentRun(
         store.db,
         { projectSlug: store.slug, taskKey: "VIB-1" },
@@ -2631,9 +2524,7 @@ describe("P14-RT-01 — a FRESH run of an UNDEPLOYED profile is confined like a 
    * print was created inside the clone and pushed (KNC-9).
    */
   it("ruling 159: a fresh evidence-granted run's persona names the ABSOLUTE attachments dir", async () => {
-    const file = readProjectFile({ projectSlug: store.slug, dataRoot: store.dataRoot })!;
-    writeProject(store.dataRoot, {
-      ...file.parsed.frontmatter,
+    reconfigureProject(store, {
       repo: null,
       agents: [
         {
@@ -2650,7 +2541,6 @@ describe("P14-RT-01 — a FRESH run of an UNDEPLOYED profile is confined like a 
         },
       ],
     });
-    rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
     await startAgentRun(
       store.db,
       { projectSlug: store.slug, taskKey: "VIB-1" },
@@ -2678,9 +2568,7 @@ describe("P14-RT-01 — a FRESH run of an UNDEPLOYED profile is confined like a 
    * away — and must NOT claim ask-human is unavailable.
    */
   it("F20-32: an ask-granted Codex profile is told `question` IS its ask-human channel", async () => {
-    const file = readProjectFile({ projectSlug: store.slug, dataRoot: store.dataRoot })!;
-    writeProject(store.dataRoot, {
-      ...file.parsed.frontmatter,
+    reconfigureProject(store, {
       repo: null,
       agents: [
         {
@@ -2701,7 +2589,6 @@ describe("P14-RT-01 — a FRESH run of an UNDEPLOYED profile is confined like a 
         },
       ],
     });
-    rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
 
     await startAgentRun(
       store.db,
@@ -2723,9 +2610,7 @@ describe("P14-RT-01 — a FRESH run of an UNDEPLOYED profile is confined like a 
   it("a run of a LIVE deployment still follows its own grants", async () => {
     // A GRANTED profile is the control: the withheld fallback must not leak
     // onto a profile that resolves, or every deliverer would lose its tools.
-    const file = readProjectFile({ projectSlug: store.slug, dataRoot: store.dataRoot })!;
-    writeProject(store.dataRoot, {
-      ...file.parsed.frontmatter,
+    reconfigureProject(store, {
       repo: null,
       agents: [
         {
@@ -2747,7 +2632,6 @@ describe("P14-RT-01 — a FRESH run of an UNDEPLOYED profile is confined like a 
         },
       ],
     });
-    rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
 
     await startAgentRun(
       store.db,
@@ -3107,7 +2991,7 @@ describe("buildAnalyzePrompt — server-side delivery contract (both backends)",
   it("ruling 185: no prompt claims an OS sandbox, on either backend", () => {
     // Ruling 184's section existed to explain an `EPERM` the CLI's own sandbox
     // produced; with the sandbox gone (owner Q36-14) the section would describe
-    // a confinement the run does not have. Canary: re-add it.
+    // a confinement the run does not have, in whatever words. Canary: re-add it.
     for (const delivers of [true, false]) {
       const prompt = buildAnalyzePrompt({
         ...base,
@@ -3116,8 +3000,7 @@ describe("buildAnalyzePrompt — server-side delivery contract (both backends)",
           ? { canBranch: true, canCommitPush: true, canOpenPr: true, repoWrite: true }
           : { canBranch: false, canCommitPush: false, canOpenPr: false, repoWrite: false },
       });
-      expect(prompt).not.toContain("This sandbox will not let you");
-      expect(prompt).not.toContain("sandbox denied the child process");
+      expect(prompt).not.toMatch(/sandbox/i);
     }
   });
 
@@ -3307,9 +3190,10 @@ describe("buildAnalyzePrompt — server-side delivery contract (both backends)",
       delivery: { canBranch: false, canCommitPush: false, canOpenPr: false, repoWrite: false },
       delivers: false,
     };
-    expect(buildAnalyzePrompt({ ...base, attachmentsDropDir: dir, taskFileReader: true })).toContain(
-      `(see "Files on the task thread").${OTHER_TASK_FILES_SENTENCE} Everything else`,
-    );
+    const reader = buildAnalyzePrompt({ ...base, attachmentsDropDir: dir, taskFileReader: true });
+    expect(reader).toContain(`(see "Files on the task thread").${OTHER_TASK_FILES_SENTENCE} Everything else`);
+    // The tool by its name, not only through the constant that carries it.
+    expect(reader).toContain("Another task's files are read with `read_task_attachment`");
     expect(buildAnalyzePrompt({ ...base, attachmentsReadDir: dir, taskFileReader: true })).toContain(
       `Never write into it.${OTHER_TASK_FILES_SENTENCE} Everything else`,
     );
@@ -3478,9 +3362,10 @@ describe("buildAnalyzePrompt — server-side delivery contract (both backends)",
       delivers: true,
       kbReadDirs: ["/data/kb/aws-migration-mapping"],
     };
-    expect(buildAnalyzePrompt({ ...base, kbCorrectionTool: true })).toContain(
-      `Never write, create or delete anything in it.${KB_CONTRACT_CORRECTION_SENTENCE}\n`,
-    );
+    const corrector = buildAnalyzePrompt({ ...base, kbCorrectionTool: true });
+    expect(corrector).toContain(`Never write, create or delete anything in it.${KB_CONTRACT_CORRECTION_SENTENCE}\n`);
+    // The tool by its name, not only through the constant that carries it.
+    expect(corrector).toContain("use `correct_knowledge_doc`");
     expect(buildAnalyzePrompt(base)).not.toContain("correct_knowledge_doc");
   });
 
@@ -3830,6 +3715,9 @@ describe("buildSpecialistPromptPrefix — attached resources", () => {
     expect(persona).toContain("Attached resources that did NOT fully reach this run");
     expect(persona).toContain("typo-expertise");
     expect(persona).toContain("no skill folder by that name in the store");
+    // No trusted section: nothing resolved, so nothing is vouched for.
+    // CANARY: let readSkillBodies keep an empty part for a missing skill.
+    expect(persona).not.toContain("Attached resources (trusted");
   });
 
   it("resolvable resources produce NO 'did not reach' section", () => {
@@ -4076,10 +3964,7 @@ describe("R18-1 — a reviewer inherits the delivering engagement's KBs", () => 
       { projectSlug: store.slug, taskKey: "VIB-1", profileId: "critic" },
       actorOf(store.users.arda), { dataRoot: store.dataRoot });
     expect(result.role).toBe("reviewer");
-    const { interruptRun } = await import("~/server/runtimes/run-service.server");
-    await interruptRun(store.db,
-      { projectSlug: store.slug, taskKey: "VIB-1", runId: result.runId, dataRoot: store.dataRoot },
-      actorOf(store.users.arda));
+    await stopRun(result.runId);
     return joinedPrompt(lastRunSpec()?.systemPrompt ?? "");
   }
 
@@ -4094,7 +3979,8 @@ describe("R18-1 — a reviewer inherits the delivering engagement's KBs", () => 
     // critic grants "bar"; dev grants nothing. Running dev (the deliverer) must
     // not gain the reviewer's KB — inheritance is one-directional.
     deployKbPair([], ["bar"]);
-    writeKb("bar", "# Bar\n\nSENTINEL-REVIEWER-ONLY-KB");
+    // In the heading: a knowledge base reaches a prompt as its index, never its body.
+    writeKb("bar", "# SENTINEL-REVIEWER-ONLY-KB\n\nbody");
     await assignSpecialist(store.db,
       { projectSlug: store.slug, taskKey: "VIB-1", profileId: "dev" },
       actorOf(store.users.arda), { dataRoot: store.dataRoot });
@@ -4104,11 +3990,10 @@ describe("R18-1 — a reviewer inherits the delivering engagement's KBs", () => 
     const devRun = await startAgentRun(store.db,
       { projectSlug: store.slug, taskKey: "VIB-1", profileId: "dev" },
       actorOf(store.users.arda), { dataRoot: store.dataRoot });
-    const { interruptRun } = await import("~/server/runtimes/run-service.server");
-    await interruptRun(store.db,
-      { projectSlug: store.slug, taskKey: "VIB-1", runId: devRun.runId, dataRoot: store.dataRoot },
-      actorOf(store.users.arda));
-    expect(joinedPrompt(lastRunSpec()?.systemPrompt ?? "")).not.toContain("SENTINEL-REVIEWER-ONLY-KB");
+    await stopRun(devRun.runId);
+    const sys = joinedPrompt(lastRunSpec()?.systemPrompt ?? "");
+    expect(sys).not.toContain("SENTINEL-REVIEWER-ONLY-KB");
+    expect(sys).not.toContain("bar (knowledge base)");
   });
 });
 
@@ -4172,41 +4057,6 @@ describe("granted skills reach a Claude run NATIVELY (pass-18)", () => {
     await runAndStop("dev");
   }
 
-  /**
-   * Run `work` with git forced OFFLINE, for the two cases below that need the
-   * workspace clone to FAIL.
-   *
-   * They used to depend on github.com answering "Repository not found" — a real
-   * network round trip inside a unit test. Observed on this machine roughly one
-   * run in three: the clone instead spent ~5s reaching the network and the
-   * assertions went red for a reason that had nothing to do with the code.
-   * `cloneRepo`'s child env spreads `process.env` (`createGitHubAskpassEnv`), so
-   * a proxy pointed at a port nothing listens on produces the SAME `git exit
-   * 128` failure instantly, offline, with git's real stderr — which is exactly
-   * what the F19-6 assertion reads.
-   */
-  const PROXY_ENV_KEYS = [
-    "https_proxy", "HTTPS_PROXY", "http_proxy", "HTTP_PROXY",
-    "all_proxy", "ALL_PROXY", "no_proxy", "NO_PROXY",
-  ] as const;
-
-  async function withOfflineGit<T>(work: () => Promise<T>): Promise<T> {
-    const saved = PROXY_ENV_KEYS.map((k) => [k, process.env[k]] as const);
-    for (const key of PROXY_ENV_KEYS) {
-      process.env[key] = key.toLowerCase().startsWith("no_")
-        ? "" // never bypass the dead proxy
-        : "http://127.0.0.1:1";
-    }
-    try {
-      return await work();
-    } finally {
-      for (const [key, value] of saved) {
-        if (value === undefined) delete process.env[key];
-        else process.env[key] = value;
-      }
-    }
-  }
-
   it("mounts the grant as the run's plugin beside the workspace, passes it to the SDK, stops injecting the body, and removes it when the run settles", async () => {
     // End to end on the fresh-run path: store grant → plugin mount → RunSpec.
     // Ruling 180 (F36-9): the plugin sits BESIDE the checkout, named by the
@@ -4245,10 +4095,7 @@ describe("granted skills reach a Claude run NATIVELY (pass-18)", () => {
     expect(sys).toContain("`viberr:<name>`");
     expect(sys).toContain("conventional-commits");
 
-    const { interruptRun } = await import("~/server/runtimes/run-service.server");
-    await interruptRun(store.db,
-      { projectSlug: store.slug, taskKey: "VIB-1", runId: run.runId, dataRoot: store.dataRoot },
-      actorOf(store.users.arda));
+    await stopRun(run.runId);
     expect(existsSync(plugin)).toBe(false);
   });
 
@@ -4277,7 +4124,7 @@ describe("granted skills reach a Claude run NATIVELY (pass-18)", () => {
     deployWithSkills(["conventional-commits"]);
     writeSkill("conventional-commits", "# Commits\n\nSENTINEL-SKILL-BODY");
 
-    await withOfflineGit(runDev);
+    await runDev();
 
     expect(lastRunSpec()?.skills).toBeUndefined();
     expect(joinedPrompt(lastRunSpec()?.systemPrompt ?? "")).toContain("SENTINEL-SKILL-BODY");
@@ -4299,7 +4146,7 @@ describe("granted skills reach a Claude run NATIVELY (pass-18)", () => {
     deployWithSkills(["conventional-commits"]);
     writeSkill("conventional-commits", "# Commits\n\nSENTINEL-SKILL-BODY");
 
-    await withOfflineGit(runDev);
+    await runDev();
 
     const note = readTaskFile({
       projectSlug: store.slug,
@@ -4469,8 +4316,7 @@ describe("granted skills reach a Claude run NATIVELY (pass-18)", () => {
 
     // The project mirror, as GitHub would hold it: main ADVANCED by a merge the
     // delivering checkout never fetched.
-    const { projectRepoMirrorDir } = await import("./repo-mirror.server");
-    const mirror = projectRepoMirrorDir(store.slug, "acme/widgets", store.dataRoot)!;
+    const mirror = path.join(store.dataRoot, "projects", store.slug, ".repo-mirror", "acme__widgets.git");
     mkdirSync(path.dirname(mirror), { recursive: true });
     await exec("git", ["clone", "-q", "--bare", ws, mirror]);
     // Point it at GitHub like a real mirror (the refresh's network fetch fails
@@ -4495,10 +4341,7 @@ describe("granted skills reach a Claude run NATIVELY (pass-18)", () => {
     const run = await startAgentRun(store.db,
       { projectSlug: store.slug, taskKey: "VIB-1", profileId: "dev", delivers: false },
       actorOf(store.users.arda), { dataRoot: store.dataRoot });
-    const { interruptRun } = await import("~/server/runtimes/run-service.server");
-    await interruptRun(store.db,
-      { projectSlug: store.slug, taskKey: "VIB-1", runId: run.runId, dataRoot: store.dataRoot },
-      actorOf(store.users.arda));
+    await stopRun(run.runId);
     const support = path.join(
       store.dataRoot, "projects", store.slug, "tasks", "VIB-1", "workspace", "support", "dev", "widgets",
     );
@@ -4575,10 +4418,7 @@ describe("granted skills reach a Claude run NATIVELY (pass-18)", () => {
         readFileSync(path.join(plugin, "skills", "developer-expertise", "SKILL.md"), "utf8"),
       ).toContain("SENTINEL-DEVELOPER-EXPERTISE");
       expect(existsSync(path.join(ws, ".claude"))).toBe(false);
-      const { interruptRun } = await import("~/server/runtimes/run-service.server");
-      await interruptRun(store.db,
-        { projectSlug: store.slug, taskKey: "VIB-1", runId: run.runId, dataRoot: store.dataRoot },
-        actorOf(store.users.arda));
+      await stopRun(run.runId);
       // (3) NOTHING the run is handed names the decoy or carries its body —
       // system prompt, turn prompt, tool policy, env, MCP config, all of it.
       const assembled = JSON.stringify(spec);
@@ -4873,10 +4713,7 @@ describe("granted skills reach a Claude run NATIVELY (pass-18)", () => {
     const run = await startAgentRun(store.db,
       { projectSlug: store.slug, taskKey: "VIB-1", profileId },
       actorOf(store.users.arda), { dataRoot: store.dataRoot });
-    const { interruptRun } = await import("~/server/runtimes/run-service.server");
-    await interruptRun(store.db,
-      { projectSlug: store.slug, taskKey: "VIB-1", runId: run.runId, dataRoot: store.dataRoot },
-      actorOf(store.users.arda));
+    await stopRun(run.runId);
     return run.runId;
   }
 
@@ -4982,7 +4819,6 @@ describe("granted skills reach a Claude run NATIVELY (pass-18)", () => {
       // Ruling 248 CANARY: drop `noCheckout: !!cloneFailure` from the
       // completion contract and this is 0 — the verdict path stays open for a
       // run that read nothing.
-      const { getRun } = await import("~/server/runtimes/run-store.server");
       expect(getRun(store.db, runId)!.no_checkout).toBe(1);
     });
 
@@ -5015,7 +4851,6 @@ describe("granted skills reach a Claude run NATIVELY (pass-18)", () => {
       // CANARY: put `--local` back on the supporting clone and this checkout is
       // gone and the run is marked checkout-less.
       expect(existsSync(path.join(criticWs, "README.md"))).toBe(true);
-      const { getRun } = await import("~/server/runtimes/run-store.server");
       expect(getRun(store.db, runId)!.no_checkout).toBe(0);
     });
 
@@ -5027,7 +4862,6 @@ describe("granted skills reach a Claude run NATIVELY (pass-18)", () => {
       await assignReviewer(store.db,
         { projectSlug: store.slug, taskKey: "VIB-1", profileId: "critic" },
         actorOf(store.users.arda), { dataRoot: store.dataRoot });
-      const { upsertRun } = await import("~/server/runtimes/run-store.server");
       upsertRun(store.db, {
         id: "run_inflight_critic",
         projectSlug: store.slug, taskKey: "VIB-1",
@@ -5402,12 +5236,7 @@ describe("P19-G0 — a FRESH run re-anchors on the canonical task artifact", () 
     // And it must claim precedence over the model's own memory.
     expect(prompt).toMatch(/not the source of truth/i);
 
-    const { interruptRun } = await import("~/server/runtimes/run-service.server");
-    await interruptRun(
-      store.db,
-      { projectSlug: store.slug, taskKey: "VIB-1", runId: run.runId, dataRoot: store.dataRoot },
-      actorOf(store.users.arda),
-    );
+    await stopRun(run.runId);
   });
 
   it("covers a FIRST @mention, which has no session to resume and falls through to a fresh run", async () => {
@@ -5458,24 +5287,6 @@ describe("P19-G0 — a FRESH run re-anchors on the canonical task artifact", () 
     expect(prompt.indexOf("SENTINEL-ANCHOR")).toBeLessThan(prompt.indexOf("SENTINEL-DIRECTIVE"));
     expect(prompt).toContain("the canonical task state, comments");
   });
-
-  it("still runs — without an anchor block — when the task file cannot be anchored", () => {
-    // The anchor is best-effort by construction: a run must never fail because
-    // its canonical block could not be built.
-    const prompt = buildAnalyzePrompt({
-      role: "Implementation",
-      taskKey: "VIB-42",
-      title: "t",
-      goal: "g",
-      repo: null,
-      branch: "vib-42",
-      cloned: false,
-      delivers: true,
-      delivery: { canBranch: true, canCommitPush: true, canOpenPr: false, repoWrite: true },
-    });
-    expect(prompt).not.toContain("## Canonical task state");
-    expect(prompt).toContain("Trust boundary");
-  });
 });
 
 /**
@@ -5511,12 +5322,7 @@ describe("P19-G11 — the run records what it was given", () => {
       actorOf(store.users.arda),
       { dataRoot: store.dataRoot },
     );
-    const { interruptRun } = await import("~/server/runtimes/run-service.server");
-    await interruptRun(
-      store.db,
-      { projectSlug: store.slug, taskKey: "VIB-1", runId: run.runId, dataRoot: store.dataRoot },
-      actorOf(store.users.arda),
-    );
+    await stopRun(run.runId);
     return run.runId;
   }
 
@@ -5956,8 +5762,7 @@ describe("P19-G11 — the run records what it was given", () => {
           : mounts.viberr_board
             ? await boardTools(mounts.viberr_board)
             : null;
-      const { interruptRun } = await import("~/server/runtimes/run-service.server");
-      await interruptRun(store.db, { projectSlug: store.slug, taskKey: "VIB-1", runId: run.runId, dataRoot: store.dataRoot }, actorOf(store.users.arda));
+      await stopRun(run.runId);
       return { prompt: spec.prompt, offered, keep: offered?.find((tool) => tool.name === "keep_source") ?? null };
     };
     /** The same profile's resumed turn. */
@@ -6363,31 +6168,6 @@ describe("P19-G11 — the run records what it was given", () => {
  * no row to say so, because the row was only minted once the workspace was ready.
  */
 describe("R21-4 — the run row exists while the workspace is prepared", () => {
-  const PROXY_KEYS = [
-    "https_proxy", "HTTPS_PROXY", "http_proxy", "HTTP_PROXY",
-    "all_proxy", "ALL_PROXY", "no_proxy", "NO_PROXY",
-  ] as const;
-
-  /** A clone that fails instantly and offline (a proxy pointed at a dead port),
-   *  while still spawning a real `git` — so the await this test observes is a
-   *  genuine child process, not a resolved promise. */
-  async function withOfflineGit<T>(work: () => Promise<T>): Promise<T> {
-    const saved = PROXY_KEYS.map((k) => [k, process.env[k]] as const);
-    for (const key of PROXY_KEYS) {
-      process.env[key] = key.toLowerCase().startsWith("no_")
-        ? ""
-        : "http://127.0.0.1:1";
-    }
-    try {
-      return await work();
-    } finally {
-      for (const [key, value] of saved) {
-        if (value === undefined) delete process.env[key];
-        else process.env[key] = value;
-      }
-    }
-  }
-
   function deployWithRepo(): void {
     const fm = readProjectFile({ projectSlug: store.slug, dataRoot: store.dataRoot })!
       .parsed.frontmatter;
@@ -6422,33 +6202,28 @@ describe("R21-4 — the run row exists while the workspace is prepared", () => {
     );
 
     const observed: { runId: string; phase: string | null; step: string | null }[] = [];
-    await withOfflineGit(async () => {
-      const pending = startAgentRun(
-        store.db,
-        { projectSlug: store.slug, taskKey: "VIB-1", profileId: "dev" },
-        actorOf(store.users.arda),
-        { dataRoot: store.dataRoot },
-      );
-      // Poll while the clone's child process is in flight. Bounded, and it can
-      // only end early by the run finishing — which would itself be the failure
-      // this asserts against (nothing visible during preparation).
-      for (let i = 0; i < 200; i++) {
-        const row = listRunsForTaskRows(store.db, store.slug, "VIB-1")[0];
-        if (row?.phase === "Preparing workspace") {
-          observed.push({ runId: row.id, phase: row.phase, step: row.step });
-          break;
-        }
-        await new Promise((r) => setTimeout(r, 5));
+    // The clone spawns a real `git`, which setup-env's `GIT_ALLOW_PROTOCOL=file`
+    // refuses at once and offline: the await observed below is a genuine child
+    // process, not a resolved promise.
+    const pending = startAgentRun(
+      store.db,
+      { projectSlug: store.slug, taskKey: "VIB-1", profileId: "dev" },
+      actorOf(store.users.arda),
+      { dataRoot: store.dataRoot },
+    );
+    // Poll while the clone's child process is in flight. Bounded, and it can
+    // only end early by the run finishing — which would itself be the failure
+    // this asserts against (nothing visible during preparation).
+    for (let i = 0; i < 200; i++) {
+      const row = listRunsForTaskRows(store.db, store.slug, "VIB-1")[0];
+      if (row?.phase === "Preparing workspace") {
+        observed.push({ runId: row.id, phase: row.phase, step: row.step });
+        break;
       }
-      const run = await pending;
-      const { interruptRun } = await import("~/server/runtimes/run-service.server");
-      await interruptRun(
-        store.db,
-        { projectSlug: store.slug, taskKey: "VIB-1", runId: run.runId, dataRoot: store.dataRoot },
-        actorOf(store.users.arda),
-      );
-      return run;
-    });
+      await new Promise((r) => setTimeout(r, 5));
+    }
+    const run = await pending;
+    await stopRun(run.runId);
 
     expect(observed).toHaveLength(1);
     // Named: a spinner over a blank line is what the human already had. D1: this
@@ -6557,12 +6332,7 @@ describe("startAgentRun: a known-exhausted backend holds the dispatch (ruling 15
     expect(result.backend).toBe("claude");
     expect(listRunsForTaskRows(store.db, store.slug, "VIB-1")).toHaveLength(1);
     expect(listAuditEvents(store.db, { action: "task.agent.run_held" })).toHaveLength(0);
-    const { interruptRun } = await import("~/server/runtimes/run-service.server");
-    await interruptRun(
-      store.db,
-      { projectSlug: store.slug, taskKey: "VIB-1", runId: result.runId, dataRoot: store.dataRoot },
-      actorOf(store.users.arda),
-    );
+    await stopRun(result.runId);
   });
 
   it("a record with no reset instant holds for thirty minutes and says the reopen time is unknown", async () => {
@@ -6604,12 +6374,7 @@ describe("startAgentRun: a known-exhausted backend holds the dispatch (ruling 15
       { dataRoot: store.dataRoot },
     );
     expect(result.backend).toBe("codex");
-    const { interruptRun } = await import("~/server/runtimes/run-service.server");
-    await interruptRun(
-      store.db,
-      { projectSlug: store.slug, taskKey: "VIB-1", runId: result.runId, dataRoot: store.dataRoot },
-      actorOf(store.users.arda),
-    );
+    await stopRun(result.runId);
   });
 
   it("an operator prompt into a held backend leaves the hold note alone: no 'needs to be re-sent' note, one pending schedule", async () => {
@@ -6919,13 +6684,14 @@ describe("ruling 186: a held task refuses every agent dispatch", () => {
     );
 
     queueFakeRun({ lines: [], backend: "claude" });
-    const runId = await startAgentRun(
+    const result = await startAgentRun(
       store.db,
       { projectSlug: store.slug, taskKey: "VIB-1" },
       actorOf(store.users.arda),
       { dataRoot: store.dataRoot },
     );
-    expect(runId).toBeTruthy();
+    expect(result.outcome).toBe("started");
+    expect(startedRunSpecs()).toHaveLength(1);
   });
 });
 
@@ -6959,10 +6725,7 @@ describe("ruling 422: a dispatched run's contract names the knowledge-base folde
     const run = await startAgentRun(store.db,
       { projectSlug: store.slug, taskKey: "VIB-1", profileId: "critic" },
       actorOf(store.users.arda), { dataRoot: store.dataRoot });
-    const { interruptRun } = await import("~/server/runtimes/run-service.server");
-    await interruptRun(store.db,
-      { projectSlug: store.slug, taskKey: "VIB-1", runId: run.runId, dataRoot: store.dataRoot },
-      actorOf(store.users.arda));
+    await stopRun(run.runId);
     const prompt = lastRunSpec()?.prompt ?? "";
     const house = path.join(store.dataRoot, "kb", "house-rules");
     const rulings = path.join(store.dataRoot, "kb", "project-rulings");

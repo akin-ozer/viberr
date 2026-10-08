@@ -7,7 +7,6 @@ import { recordAudit } from "~/server/audit/audit-recorder.server";
 import { startTemperature } from "~/server/runtimes/context-policy.server";
 import {
   backendRuns,
-  INSIGHTS_NAMED_EXCEPTIONS,
   getInsightsSummary,
   oversightSummary,
   runAnalytics,
@@ -889,7 +888,7 @@ describe("oversight outcomes (pass 29 — the PRD's own success criteria, measur
    * settled the same shape for a knowledge base ("an agent cannot ask for a
    * rule it cannot name"); this is that rule with a person reading it.
    */
-  it("ruling 290: the clarity and long-timeline cards name their exceptions too, and cap honestly", () => {
+  it("ruling 290: the clarity card names the task with no next actor, and a card that names them all leaves no remainder", () => {
     const db = ctx.makeDb();
     insertProject(db, "gp");
     // No owner and nothing waited on → no definite next actor.
@@ -905,18 +904,19 @@ describe("oversight outcomes (pass 29 — the PRD's own success criteria, measur
   });
 
   it("ruling 290: past the cap the names stop and the count does not", () => {
-    // The cap is what stops one card becoming a wall on a drifted instance;
-    // the remainder is what stops the capped list reading as the whole set.
-    // CANARY: drop the `.slice` in `namedKeys` and the first assertion fails;
-    // drop the remainder arithmetic on the card and a reader sees 8 of 12.
+    // The cap is what stops one card becoming a wall on a drifted instance:
+    // eight names. The count goes on past it, so the card can say how many
+    // more there are. CANARY: drop the `.slice` in `namedKeys` and the first
+    // assertion fails.
+    const cap = 8;
     const db = ctx.makeDb();
     insertProject(db, "gp");
-    for (let i = 0; i < INSIGHTS_NAMED_EXCEPTIONS + 4; i += 1) {
+    for (let i = 0; i < cap + 4; i += 1) {
       insertTask(db, { key: `VIB-${100 + i}`, waiting: "none" });
     }
     const g = getInsightsSummary(db, NOW).oversight;
-    expect(g.clarity.unclear).toHaveLength(INSIGHTS_NAMED_EXCEPTIONS);
-    expect(g.clarity.activeTasks).toBe(INSIGHTS_NAMED_EXCEPTIONS + 4);
+    expect(g.clarity.unclear).toHaveLength(cap);
+    expect(g.clarity.activeTasks).toBe(cap + 4);
     expect(g.clarity.clearTasks).toBe(0);
   });
 

@@ -7,6 +7,7 @@ import {
   approveReviewEntry,
   baseTaskFrontmatter,
   MERGE_STAGE_BOARD,
+  REVIEWER_ENGAGEMENT,
   setupTestStore,
   writeProject,
   writeTask,
@@ -32,6 +33,7 @@ import {
   listRunsForTask,
 } from "~/server/runtimes/run-service.server";
 import { getRun, upsertRun } from "~/server/runtimes/run-store.server";
+import { recordProvenance } from "~/server/provenance/provenance-recorder.server";
 import type { runOperator } from "~/server/runtimes/operator-run.server";
 import { listProjectTasks } from "~/server/projections/board-query.server";
 import { drainRunCompletions, installFakeRuntime } from "../../../test-support/fake-runtime";
@@ -53,6 +55,7 @@ import { createTask, updateTaskGoal } from "./task-edits.server";
 import type { TaskActionContext } from "./task-action-core.server";
 import { fakeGithubFetch } from "../../../test-support/fake-github";
 import { createLocalOrigin, withLocalGithub } from "../../../test-support/git-origin";
+import { reconfigureProject } from "../../../test-support/projected-store";
 import { createPat, setProjectCredential } from "~/server/secrets/pat-store.server";
 import type { CapabilityMode } from "~/schemas/project-file.schema";
 import {
@@ -78,7 +81,6 @@ import {
   operatorOpenPacket,
   operatorResolvePacket,
   type OperatorPacketOptionInput,
-  GOAL_DRAFT_MAX_CHARS,
 } from "./operator-packets.server";
 import {
   deliverGate,
@@ -89,14 +91,8 @@ import {
   resolveOperatorAuthority,
   type OperatorAutonomy,
 } from "./operator-authority.server";
-import {
-  KB_CORRECTED_TITLE,
-  KB_CORRECTION_UNDONE_TITLE,
-  RULINGS_CORRECTED_TITLE,
-  undoKbCorrectionOnTask,
-} from "./kb-correction-actions.server";
+import { undoKbCorrectionOnTask } from "./kb-correction-actions.server";
 import { readTimelineEntry } from "./board-read.server";
-import { KB_CORRECTION_MERGED_ACTION } from "~/server/org/kb-corrections.server";
 
 /**
  * The operator's capability-GATED, operator-authorized actions: the RBAC the
@@ -120,9 +116,7 @@ function deployRoster(
   operatorPolicy: { capabilityId: string; mode: CapabilityMode }[],
   configuredAutonomy: OperatorAutonomy = "full",
 ): void {
-  const file = readProjectFile({ projectSlug: store.slug, dataRoot: store.dataRoot })!;
-  writeProject(store.dataRoot, {
-    ...file.parsed.frontmatter,
+  reconfigureProject(store, {
     repo: null,
     agents: [
       {
@@ -154,7 +148,6 @@ function deployRoster(
       },
     ],
   });
-  rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
 }
 
 const DEFAULT_POLICY: { capabilityId: string; mode: CapabilityMode }[] = [
@@ -834,15 +827,12 @@ describe("operatorDispatchAgent", () => {
       authority("full"),
     );
     await interruptRunningRuns("VIB-1");
-    const file = readProjectFile({ projectSlug: store.slug, dataRoot: store.dataRoot })!;
-    writeProject(store.dataRoot, {
-      ...file.parsed.frontmatter,
+    reconfigureProject(store, (fm) => ({
       agents: [
-        ...file.parsed.frontmatter.agents,
+        ...fm.agents,
         { profileId: "developer2", capabilities: [{ capabilityId: "execute-code-or-write-repo", mode: "direct" }], extras: [], definition: { kind: "specialist", name: "Dev Two", role: "Implementation", backends: ["claude"], model: "sonnet" } },
       ],
-    });
-    rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
+    }));
     const r = await operatorDispatchAgent(
       store.db,
       { dataRoot: store.dataRoot },
@@ -893,10 +883,8 @@ describe("operatorDispatchAgent — explicit delivers posture (P11-22 successor)
   /** The reviewer with its file posting withheld too: an agent with no way
    *  to deliver anything. */
   function withholdReviewerFiles(): void {
-    const file = readProjectFile({ projectSlug: store.slug, dataRoot: store.dataRoot })!;
-    writeProject(store.dataRoot, {
-      ...file.parsed.frontmatter,
-      agents: file.parsed.frontmatter.agents.map((a) =>
+    reconfigureProject(store, (fm) => ({
+      agents: fm.agents.map((a) =>
         a.profileId === "reviewer"
           ? {
               ...a,
@@ -907,8 +895,7 @@ describe("operatorDispatchAgent — explicit delivers posture (P11-22 successor)
             }
           : a,
       ),
-    });
-    rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
+    }));
   }
 
   it("refuses an explicit delivery hand-off to a profile that can neither write the repo nor post files", async () => {
@@ -946,12 +933,9 @@ describe("operatorDispatchAgent — explicit delivers posture (P11-22 successor)
     deployRoster(
       DEFAULT_POLICY.map((p) => (p.capabilityId === "dispatch-agents" ? { ...p, mode: "recommend" as const } : p)),
     );
-    const file = readProjectFile({ projectSlug: store.slug, dataRoot: store.dataRoot })!;
-    writeProject(store.dataRoot, {
-      ...file.parsed.frontmatter,
+    reconfigureProject(store, {
       requiredReviewers: [{ stageId: "review", profileId: "reviewer" }],
     });
-    rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
     seedTask("impl");
     const refused = await operatorDispatchAgent(
       store.db,
@@ -971,17 +955,14 @@ describe("operatorDispatchAgent — explicit delivers posture (P11-22 successor)
     deployRoster(
       DEFAULT_POLICY.map((p) => (p.capabilityId === "dispatch-agents" ? { ...p, mode: "recommend" as const } : p)),
     );
-    const file = readProjectFile({ projectSlug: store.slug, dataRoot: store.dataRoot })!;
-    writeProject(store.dataRoot, {
-      ...file.parsed.frontmatter,
+    reconfigureProject(store, (fm) => ({
       requiredReviewers: [{ stageId: "review", profileId: "reviewer" }],
-      agents: file.parsed.frontmatter.agents.map((a) =>
+      agents: fm.agents.map((a) =>
         a.profileId === "reviewer"
           ? { ...a, capabilities: [...a.capabilities, { capabilityId: "execute-code-or-write-repo", mode: "direct" as const }] }
           : a,
       ),
-    });
-    rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
+    }));
     seedTask("impl");
     const offered = await operatorDispatchAgent(
       store.db,
@@ -1034,9 +1015,7 @@ describe("operatorDispatchAgent — explicit delivers posture (P11-22 successor)
     deployRoster(DEFAULT_POLICY);
     const origins = ctx.makeTempDir("viberr-origins-");
     const origin = await createLocalOrigin(origins, { repo: "acme/widgets" });
-    const project = readProjectFile({ projectSlug: store.slug, dataRoot: store.dataRoot })!;
-    writeProject(store.dataRoot, { ...project.parsed.frontmatter, repo: "acme/widgets" });
-    rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
+    reconfigureProject(store, { repo: "acme/widgets" });
     const patActor = { userId: store.users.arda.id, label: store.users.arda.email };
     const pat = createPat(store.db, { ...patActor, label: "bot", token: "ghp_filesdeliverer1" }, patActor);
     setProjectCredential(store.db, { projectSlug: store.slug, patId: pat.id }, patActor);
@@ -1123,7 +1102,7 @@ describe("operatorDispatchAgent — explicit delivers posture (P11-22 successor)
       { projectSlug: store.slug, taskKey: "VIB-1", profileId: "developer", delivers: true },
       authority("full"),
     );
-    expect(r.outcome).not.toBe("denied");
+    expect(r).toEqual({ outcome: "done", message: "Started a Claude run for Dev (the delivering agent)." });
     await interruptRunningRuns("VIB-1");
   });
 });
@@ -2183,9 +2162,7 @@ describe("operatorTransitionStage", () => {
     // operator's own move lands there directly (KNC-30 took two operator
     // turns: one for Review to Merge, a second only to write the card).
     const foldBoard = (): void => {
-      const file = readProjectFile({ projectSlug: store.slug, dataRoot: store.dataRoot })!;
-      writeProject(store.dataRoot, {
-        ...file.parsed.frontmatter,
+      reconfigureProject(store, {
         workflow: [
           { from: "triage", to: "ready", boundary: "auto", by: "Operator", locked: false },
           { from: "ready", to: "impl", boundary: "auto", by: "Operator", locked: false },
@@ -2193,7 +2170,6 @@ describe("operatorTransitionStage", () => {
           { from: "review", to: "done", boundary: "human", by: "Human acceptance", locked: true },
         ],
       });
-      rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
     };
 
     it("a direct move onto the acceptance boundary files the accept_completion card in the same call", async () => {
@@ -2558,9 +2534,7 @@ describe("F37-65 — operatorAcceptsDirectly predicts what an acceptance really 
     // Not a redundant guard: the caption is rendered from a project file that
     // may have had its operator removed since the page last loaded, and the
     // helper must answer for that project rather than throw into the loader.
-    const file = readProjectFile({ projectSlug: store.slug, dataRoot: store.dataRoot })!;
-    writeProject(store.dataRoot, { ...file.parsed.frontmatter, agents: [] });
-    rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
+    reconfigureProject(store, { agents: [] });
     expect(operatorAcceptsDirectly({ dataRoot: store.dataRoot }, store.slug)).toBe(false);
     // And for a project that is not there at all — `resolveOperatorAuthority`
     // throws `notFound`, which must not become a 500 on the task page.
@@ -2625,14 +2599,11 @@ describe("operatorAcceptCompletion", () => {
       ...DEFAULT_POLICY.filter((c) => c.capabilityId !== "completion-for-acceptance"),
       { capabilityId: "completion-for-acceptance", mode: "direct" },
     ]);
-    const project = readProjectFile({ projectSlug: store.slug, dataRoot: store.dataRoot })!;
-    writeProject(store.dataRoot, {
-      ...project.parsed.frontmatter,
-      stages: project.parsed.frontmatter.stages.map((s) =>
+    reconfigureProject(store, (fm) => ({
+      stages: fm.stages.map((s) =>
         s.id === "done" ? { ...s, name: "Shipped" } : s,
       ),
-    });
-    rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
+    }));
     seedTask("review");
     const r = await operatorAcceptCompletion(
       store.db,
@@ -2680,15 +2651,7 @@ describe("operatorAcceptCompletion", () => {
           createdAt: "2026-07-25T09:00:00.000Z",
           sourceProfileId: "dev",
         },
-        engagements: [
-          {
-            profileId: "reviewer",
-            backend: "claude",
-            role: "Review & validation",
-            delivers: false,
-            verdictCapable: true,
-          },
-        ],
+        engagements: [REVIEWER_ENGAGEMENT],
         verdicts: [
           {
             profileId: "reviewer",
@@ -2770,15 +2733,7 @@ describe("operatorAcceptCompletion", () => {
         },
         // R15-1: delivered work needs an approving verdict, or the gate refuses
         // before the write this test is about is ever reached.
-        engagements: [
-          {
-            profileId: "reviewer",
-            backend: "claude",
-            role: "Review & validation",
-            delivers: false,
-            verdictCapable: true,
-          },
-        ],
+        engagements: [REVIEWER_ENGAGEMENT],
         verdicts: [
           {
             profileId: "reviewer",
@@ -4616,9 +4571,7 @@ describe("operatorCorrectKnowledgeDoc (rulings 378, 483 and 498)", () => {
 
   async function seedRulingsKb(docBody: string): Promise<string> {
     const dir = await seedKb("ax-rulings", "environment-and-gates.md", docBody);
-    const file = readProjectFile({ projectSlug: store.slug, dataRoot: store.dataRoot })!;
-    writeProject(store.dataRoot, { ...file.parsed.frontmatter, rulingsKb: dir });
-    rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
+    reconfigureProject(store, { rulingsKb: dir });
     return path.join(store.dataRoot, "kb", dir);
   }
 
@@ -4698,8 +4651,7 @@ describe("operatorCorrectKnowledgeDoc (rulings 378, 483 and 498)", () => {
     // CANARY: file it as a `proposal` again and the owner is asked to approve
     // what already happened.
     expect(top.type).toBe("kb_correction");
-    expect(top.title).toBe(RULINGS_CORRECTED_TITLE);
-    expect(RULINGS_CORRECTED_TITLE).toBe("Rulings corrected");
+    expect(top.title).toBe("Rulings corrected");
     expect(top.text).toMatch(/^Corrected `ax-rulings\/environment-and-gates.md` as `kc-[0-9a-f]{10}`:/);
     expect(top.text).toContain("- **Was:** ~~- Every test must pass under `go test -race ./...`.~~");
     expect(top.text).toContain("- **Now:** - Every test must pass under `go test ./...`");
@@ -4708,7 +4660,7 @@ describe("operatorCorrectKnowledgeDoc (rulings 378, 483 and 498)", () => {
     expect(top.text).toContain("- **Evidence:** `CGO_ENABLED=1 go test -race ./...` exited 127; no cc, gcc or clang on PATH.");
     expect(top.text).not.toContain("binding");
 
-    const [row] = listAuditEvents(store.db, { action: KB_CORRECTION_MERGED_ACTION });
+    const [row] = listAuditEvents(store.db, { action: "task.kb_correction.merged" });
     expect(row).toMatchObject({ taskKey: "VIB-1", actorLabel: "operator" });
     expect(row?.details).toMatchObject({
       filedBy: "Operator",
@@ -4719,7 +4671,7 @@ describe("operatorCorrectKnowledgeDoc (rulings 378, 483 and 498)", () => {
     // the spam the owner asked to end.
     expect(
       listNotifications(store.db, store.users.arda.id).some(
-        (n) => n.title === RULINGS_CORRECTED_TITLE || n.title === KB_CORRECTED_TITLE,
+        (n) => n.title === "Rulings corrected" || n.title === "Knowledge base corrected",
       ),
     ).toBe(false);
   });
@@ -4753,7 +4705,7 @@ describe("operatorCorrectKnowledgeDoc (rulings 378, 483 and 498)", () => {
     expect(body).not.toContain("4.138.0");
     const top = task().timeline[0]!;
     expect(top.type).toBe("kb_correction");
-    expect(top.title).toBe(KB_CORRECTED_TITLE);
+    expect(top.title).toBe("Knowledge base corrected");
     expect(top.text).toContain(`${dossier}/06-platform-facts.md`);
   });
 
@@ -4779,7 +4731,7 @@ describe("operatorCorrectKnowledgeDoc (rulings 378, 483 and 498)", () => {
     expect(r.message).toContain("without quoting it");
     expect(readFileSync(path.join(store.dataRoot, "kb", keys, "sample-01.md"), "utf8")).toContain("5,614.00");
     const top = task().timeline[0]!;
-    expect(top.title).toBe(KB_CORRECTED_TITLE);
+    expect(top.title).toBe("Knowledge base corrected");
     const id = /kc-[0-9a-f]{10}/.exec(top.text)![0];
     expect(top.text).toBe(
       `Corrected \`${keys}/sample-01.md\` as \`${id}\`. The passage is not quoted here: ` +
@@ -4818,7 +4770,7 @@ describe("operatorCorrectKnowledgeDoc (rulings 378, 483 and 498)", () => {
     );
     expect(undone.outcome).toBe("done");
     const undoEntry = task().timeline[0]!;
-    expect(undoEntry.title).toBe(KB_CORRECTION_UNDONE_TITLE);
+    expect(undoEntry.title).toBe("Knowledge-base correction undone");
     expect(undoEntry.text).not.toContain("6,136.19");
     expect(undoEntry.text).not.toContain("5,614.00");
     expect(undoEntry.text).toContain("is not given to Rev");
@@ -4829,16 +4781,13 @@ describe("operatorCorrectKnowledgeDoc (rulings 378, 483 and 498)", () => {
     seedTask("impl");
     const shared = await seedKb("shared-mapping", "mapping.md", "# Mapping\n\n- SAN: FSx for ONTAP.\n");
     engageDeveloperWithKb(shared);
-    const file = readProjectFile({ projectSlug: store.slug, dataRoot: store.dataRoot })!;
-    writeProject(store.dataRoot, {
-      ...file.parsed.frontmatter,
-      agents: file.parsed.frontmatter.agents.map((a) =>
+    reconfigureProject(store, (fm) => ({
+      agents: fm.agents.map((a) =>
         a.profileId === "reviewer"
           ? { ...a, definition: { ...a.definition, resources: { skills: [], mcps: [], kb: [shared] } } }
           : a,
       ),
-    });
-    rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
+    }));
     const r = await correct({
       kb: shared,
       doc: "mapping.md",
@@ -4925,7 +4874,7 @@ describe("operatorCorrectKnowledgeDoc (rulings 378, 483 and 498)", () => {
     const text = "- Yarış kapısı yok: bu makine çalıştıramaz.";
     const r = await correct({ replaces: "- Her kapı çalışır.", text, evidence: "`go test -race` çıkış kodu 127 döndü." });
     expect(r.outcome).toBe("done");
-    const row = listAuditEvents(store.db, { action: KB_CORRECTION_MERGED_ACTION })[0];
+    const row = listAuditEvents(store.db, { action: "task.kb_correction.merged" })[0];
     expect(row?.details).toMatchObject({ bytes: Buffer.byteLength(text, "utf8") });
     expect(Buffer.byteLength(text, "utf8")).toBeGreaterThan(text.length);
   });
@@ -5098,9 +5047,7 @@ describe("operatorPostComment", () => {
 
 /** Deploy a roster with NO operator profile — the A4 shape. */
 function deployWithoutOperator(): void {
-  const file = readProjectFile({ projectSlug: store.slug, dataRoot: store.dataRoot })!;
-  writeProject(store.dataRoot, {
-    ...file.parsed.frontmatter,
+  reconfigureProject(store, {
     repo: null,
     agents: [
       {
@@ -5117,7 +5064,6 @@ function deployWithoutOperator(): void {
       },
     ],
   });
-  rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
 }
 
 describe("A4 — an UNDEPLOYED operator has no authority at all", () => {
@@ -5440,12 +5386,9 @@ describe("operatorPostComment honest outcome (G1/B-FD8)", () => {
   /** Deploy the operator roster, then turn the named anti-noise guardrails ON. */
   function deployWithGuardrails(ids: string[]): void {
     deployRoster(DEFAULT_POLICY);
-    const file = readProjectFile({ projectSlug: store.slug, dataRoot: store.dataRoot })!;
-    writeProject(store.dataRoot, {
-      ...file.parsed.frontmatter,
+    reconfigureProject(store, {
       guardrails: ids.map((id) => ({ id, desc: `${id} on`, on: true })),
     });
-    rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
   }
 
   const base = (text: string) => ({ projectSlug: store.slug, taskKey: "VIB-1", text });
@@ -5523,7 +5466,7 @@ describe("operatorPostComment honest outcome (G1/B-FD8)", () => {
     seedTask("triage");
     const long =
       "Acceptance caveat the human must read in full. " +
-      "detail ".repeat(500) +
+      "detail ".repeat(2000) +
       "end.";
     const result = await operatorPostComment(
       store.db,
@@ -5585,9 +5528,7 @@ describe("operatorSnapshot — two capability scopes, both labelled (F21-16)", (
   /** Deploy an operator whose own egress is WITHHELD alongside a specialist
    *  whose egress and browser are GRANTED — the exact live configuration. */
   function deployScopedRoster(): void {
-    const file = readProjectFile({ projectSlug: store.slug, dataRoot: store.dataRoot })!;
-    writeProject(store.dataRoot, {
-      ...file.parsed.frontmatter,
+    reconfigureProject(store, {
       repo: null,
       agents: [
         {
@@ -5638,7 +5579,6 @@ describe("operatorSnapshot — two capability scopes, both labelled (F21-16)", (
         },
       ],
     });
-    rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
   }
 
   it("labels the operator's own policy and carries the note that stops the misread", () => {
@@ -5814,9 +5754,7 @@ describe("operatorSnapshot — two capability scopes, both labelled (F21-16)", (
  */
 describe("supporting-dispatch copy branches on verdict authority (F21-6)", () => {
   function deployVerdictRoster(): void {
-    const file = readProjectFile({ projectSlug: store.slug, dataRoot: store.dataRoot })!;
-    writeProject(store.dataRoot, {
-      ...file.parsed.frontmatter,
+    reconfigureProject(store, {
       repo: null,
       agents: [
         {
@@ -5857,7 +5795,6 @@ describe("supporting-dispatch copy branches on verdict authority (F21-6)", () =>
         },
       ],
     });
-    rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
   }
 
   const dispatch = (profileId: string) =>
@@ -6506,7 +6443,7 @@ describe("ruling 138: edit_goal options carry an explicit goalDraft", () => {
         taskKey: "VIB-1",
         packetType: "input",
         title: "Scope needed",
-        options: [{ kind: "edit_goal", title: "Ship it", recommended: true, goalDraft: "x".repeat(GOAL_DRAFT_MAX_CHARS + 500) }],
+        options: [{ kind: "edit_goal", title: "Ship it", recommended: true, goalDraft: "x".repeat(4_500) }],
       },
       authority("full"),
     );
@@ -6540,7 +6477,7 @@ describe("ruling 138: edit_goal options carry an explicit goalDraft", () => {
             recommended: true,
             newTask: {
               title: "The new task",
-              goal: "y".repeat(GOAL_DRAFT_MAX_CHARS + 1),
+              goal: "y".repeat(4_001),
             },
           },
         ],
@@ -6557,7 +6494,7 @@ describe("ruling 138: edit_goal options carry an explicit goalDraft", () => {
     // refuses a legitimate goal or lets one character through the guard.
     packetsRoster();
     seedTask("impl");
-    const exact = "z".repeat(GOAL_DRAFT_MAX_CHARS);
+    const exact = "z".repeat(4_000);
     const r = await operatorOpenPacket(
       store.db,
       { dataRoot: store.dataRoot },
@@ -6872,7 +6809,7 @@ describe("ruling 138: edit_goal options carry an explicit goalDraft", () => {
    * SHOP-26 the operator wrote, verbatim: "You create the task — no option
    * here can."
    */
-  it("authors a create_task option, and refuses one with no task on it", async () => {
+  it("authors a create_task option carrying the task it creates", async () => {
     packetsRoster();
     seedTask("impl");
     const authored = await operatorOpenPacket(
@@ -6912,7 +6849,6 @@ describe("ruling 138: edit_goal options carry an explicit goalDraft", () => {
         labels: ["service"],
       },
     });
-
   });
 
   /**
@@ -7163,19 +7099,16 @@ describe("pass 35 S15: the acceptance gate read by the operator (ruling 162) and
   }
 
   function withMergeBoard(): void {
-    const file = readProjectFile({ projectSlug: store.slug, dataRoot: store.dataRoot })!;
-    writeProject(store.dataRoot, {
-      ...file.parsed.frontmatter,
+    reconfigureProject(store, (fm) => ({
       ...MERGE_STAGE_BOARD,
       // The reviewer is eligible at Review only (the k9s board's shape): no
       // verdict can be given at Merge.
-      agents: file.parsed.frontmatter.agents.map((a) =>
+      agents: fm.agents.map((a) =>
         a.profileId === "reviewer"
           ? { ...a, definition: { ...a.definition, stages: ["review"] } }
           : a,
       ),
-    });
-    rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
+    }));
   }
 
   it("ruling 162 (a): the snapshot carries `pr.mergeable` and the gate's `notAcceptableReason`; a clean PR carries null", () => {
@@ -7310,12 +7243,9 @@ describe("ruling 178: the snapshot carries the project's required reviewers", ()
         .requiredReviewers,
     ).toEqual([]);
 
-    const file = readProjectFile({ projectSlug: store.slug, dataRoot: store.dataRoot })!;
-    writeProject(store.dataRoot, {
-      ...file.parsed.frontmatter,
+    reconfigureProject(store, {
       requiredReviewers: [{ stageId: "review", profileId: "reviewer" }],
     });
-    rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
     const snap = operatorSnapshot(store.db, { dataRoot: store.dataRoot }, store.slug, "VIB-1", authority("full"));
     expect(snap.requiredReviewers).toEqual([
       { stageId: "review", stageName: "Review", profileId: "reviewer", agentName: "Rev" },
@@ -7336,28 +7266,18 @@ describe("ruling 178: the snapshot carries the project's required reviewers", ()
  * never a reason to skip the call.
  */
 describe("F37-11: the operator snapshot carries the base compare", () => {
-  /** One `github.reconcile` observation row as the reconciler writes it, cut
-   *  down to three of its fields. The snapshot reads it back through
-   *  `createBaseCompareLookup`: `behindBy` becomes `baseBehindBy`, and the
-   *  absent `headSha` makes it a compare that named no head. `branch` and
+  /** One `github.reconcile` observation row, written through the recorder the
+   *  reconciler uses and cut down to three of its fields. The snapshot reads it
+   *  back through `createBaseCompareLookup`: `behindBy` becomes `baseBehindBy`,
+   *  and the absent `headSha` makes it a compare that named no head. `branch` and
    *  `sync` ride along unread here (`sync` is what the reconciler's own
    *  `latestReconcileObservation` reads). */
   function seedCompare(behindBy: number): void {
-    const details = {
-      branch: "vib-1",
-      sync: behindBy > 0 ? "behind_main" : "synced",
-      behindBy,
-    };
-    store.db
-      .prepare(
-        `INSERT INTO provenance (source_path, content_hash, observed_at, action, details_json)
-         VALUES (?, NULL, ?, 'github.reconcile', ?)`,
-      )
-      .run(
-        `projects/${store.slug}/tasks/VIB-1/task.md`,
-        new Date().toISOString(),
-        JSON.stringify(details),
-      );
+    recordProvenance(store.db, {
+      sourcePath: `projects/${store.slug}/tasks/VIB-1/task.md`,
+      action: "github.reconcile",
+      details: { branch: "vib-1", sync: behindBy > 0 ? "behind_main" : "synced", behindBy },
+    });
   }
 
   it("reports null when no pass has compared this task", () => {
@@ -7583,15 +7503,7 @@ describe("ruling 193: the snapshot counts a reviewer's successive request_change
           createdAt: "2026-09-13T09:00:00.000Z",
           sourceProfileId: "dev",
         },
-        engagements: [
-          {
-            profileId: "reviewer",
-            backend: "claude",
-            role: "Review & validation",
-            delivers: false,
-            verdictCapable: true,
-          },
-        ],
+        engagements: [REVIEWER_ENGAGEMENT],
         verdicts: verdicts.map((v) => ({
           profileId: "reviewer",
           revisionId: v.revisionId,

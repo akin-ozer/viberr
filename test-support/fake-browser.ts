@@ -45,8 +45,8 @@ import { z } from "zod";
  * dismissed), and `hold` finishes the load only once the suite calls
  * {@link FakeBrowser.release}, so a test can act while a render is in flight.
  */
-export const FAKE_BROWSER_MODE_ENV = "VIBERR_FAKE_BROWSER_MODE";
-export const FAKE_BROWSER_EVIDENCE_ENV = "VIBERR_FAKE_BROWSER_EVIDENCE_DIR";
+const FAKE_BROWSER_MODE_ENV = "VIBERR_FAKE_BROWSER_MODE";
+const FAKE_BROWSER_EVIDENCE_ENV = "VIBERR_FAKE_BROWSER_EVIDENCE_DIR";
 
 const SCRIPT = `const fs = require("node:fs");
 const http = require("node:http");

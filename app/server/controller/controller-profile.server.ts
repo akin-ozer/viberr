@@ -6,7 +6,7 @@ import {
   recordAudit,
   type AuditActor,
 } from "~/server/audit/audit-recorder.server";
-import { getEnv, type Env } from "~/server/config/env.server";
+import { getEnv } from "~/server/config/env.server";
 import { AppError } from "~/server/errors/app-error.server";
 import {
   readAgentProfileFile,
@@ -60,15 +60,8 @@ function unlockFlag(raw: string | undefined): boolean {
 
 /** Resolve the live lock state from the deployment environment. Absent flag =
  *  locked; there is no in-app override anywhere, which is the point. */
-export function controllerSectionLocks(
-  env: Pick<
-    Env,
-    | "VIBERR_UNLOCK_CONTROLLER_SKILLS"
-    | "VIBERR_UNLOCK_CONTROLLER_KB"
-    | "VIBERR_UNLOCK_CONTROLLER_MCPS"
-    | "VIBERR_UNLOCK_CONTROLLER_INSTRUCTIONS"
-  > = getEnv(),
-): ControllerSectionLocks {
+export function controllerSectionLocks(): ControllerSectionLocks {
+  const env = getEnv();
   return {
     skills: !unlockFlag(env.VIBERR_UNLOCK_CONTROLLER_SKILLS),
     kb: !unlockFlag(env.VIBERR_UNLOCK_CONTROLLER_KB),

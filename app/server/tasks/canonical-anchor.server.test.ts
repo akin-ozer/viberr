@@ -3,7 +3,6 @@ import { createTestDbContext, type TestDbContext } from "../../../test-support/t
 import {
   baseTaskFrontmatter,
   setupTestStore,
-  writeProject,
   writeTask,
   type TestStore,
 } from "../../../test-support/test-store";
@@ -12,18 +11,8 @@ import type {
   TaskFileEvent,
   TaskPacket,
 } from "~/schemas/task-file.schema";
-import type {
-  RunCallbacks,
-  RunHandle,
-  RunSpec,
-  RuntimeAdapter,
-} from "~/server/runtimes/adapter.server";
-import { readProjectFile } from "~/server/files/project-writer.server";
 import { rebuildAll } from "~/server/projections/rebuilder.server";
-import {
-  configureRunServiceForTests,
-  interruptRun,
-} from "~/server/runtimes/run-service.server";
+import { interruptRun } from "~/server/runtimes/run-service.server";
 import {
   listRunLines,
   listRunsForTaskRows,
@@ -31,6 +20,12 @@ import {
 } from "~/server/runtimes/run-store.server";
 import { RUN_INPUTS_TAG } from "~/features/runtime/runtime-types";
 import { connectFakeBackend } from "../../../test-support/backend-credentials";
+import {
+  drainRunCompletions,
+  installFakeRuntime,
+  startedRunSpecs,
+} from "../../../test-support/fake-runtime";
+import { reconfigureProject } from "../../../test-support/projected-store";
 import { canonicalTaskAnchor, specialistReplyDirective } from "./task-replies.server";
 import { commentToAgent } from "./task-comments.server";
 import { updateTaskGoal } from "./task-edits.server";
@@ -49,44 +44,8 @@ import { updateTaskGoal } from "./task-edits.server";
 let ctx: TestDbContext;
 let store: TestStore;
 
-/** Every RunSpec the fake adapter was handed, newest last. */
-const specs: RunSpec[] = [];
-
-function recordingAdapter(backend: "claude" | "codex"): RuntimeAdapter {
-  return {
-    backend,
-    start(spec: RunSpec, callbacks: RunCallbacks): RunHandle {
-      specs.push(spec);
-      let stopped = false;
-      queueMicrotask(() => {
-        if (stopped) return;
-        stopped = true;
-        callbacks.onExit({
-          outcome: "finished",
-          effectiveBackend: spec.backend,
-          sessionId: spec.resumeSessionId ?? `fake-${spec.runId}`,
-        });
-      });
-      return {
-        runId: spec.runId,
-        interrupt() {
-          if (stopped) return;
-          stopped = true;
-          callbacks.onExit({
-            outcome: "interrupted",
-            effectiveBackend: spec.backend,
-            sessionId: spec.resumeSessionId ?? `fake-${spec.runId}`,
-          });
-        },
-      };
-    },
-  };
-}
-
 function deployDev(): void {
-  const file = readProjectFile({ projectSlug: store.slug, dataRoot: store.dataRoot })!;
-  writeProject(store.dataRoot, {
-    ...file.parsed.frontmatter,
+  reconfigureProject(store, {
     repo: null,
     agents: [
       {
@@ -103,7 +62,6 @@ function deployDev(): void {
       },
     ],
   });
-  rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
 }
 
 function parsed(overrides: Partial<ParsedTaskFile> = {}): ParsedTaskFile {
@@ -129,11 +87,7 @@ function parsed(overrides: Partial<ParsedTaskFile> = {}): ParsedTaskFile {
 beforeEach(async () => {
   ctx = createTestDbContext();
   store = setupTestStore(ctx);
-  specs.length = 0;
-  configureRunServiceForTests({
-    claude: recordingAdapter("claude"),
-    codex: recordingAdapter("codex"),
-  });
+  installFakeRuntime();
   // Ruling 127: a resumed specialist bills the TASK OWNER's own account, so
   // the resume only reaches an adapter when the owner (arda, who owns VIB-1
   // here) has the backend connected. Without it the reply is refused before a
@@ -155,6 +109,9 @@ afterEach(async () => {
       }
     }
   }
+  // The resumed run's completion still writes after the assertions; the store
+  // must outlive it.
+  await drainRunCompletions();
   ctx.cleanup();
 });
 
@@ -481,7 +438,7 @@ describe("a RESUMED specialist re-anchors on the EDITED goal (UC-30)", () => {
     // `resumeSessionId`, because a dead provider transcript legitimately
     // downgrades the resume to a fresh continuity-reset run (D-2). Either way
     // the directive is what the agent is handed, and it must re-anchor.
-    const resumeSpec = specs.find((s) => s.prompt.includes("@dev continue"));
+    const resumeSpec = startedRunSpecs().find((s) => s.prompt.includes("@dev continue"));
     expect(resumeSpec).toBeTruthy();
     // The whole point of D-3: the canonical goal rides with the resume.
     expect(resumeSpec!.prompt).toContain("FRESH: build it the new way.");

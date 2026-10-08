@@ -1,12 +1,9 @@
 import { existsSync, readFileSync } from "node:fs";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { resetEnvCacheForTests } from "~/server/config/env.server";
 import { createTestDbContext } from "../../../test-support/test-db";
 import { lockPath } from "../../../test-support/data-root-lock";
-import {
-  runWithDataRootWriterLock,
-  type CliRefusalIo,
-} from "./cli-lock.server";
+import { withEnv } from "../../../test-support/env";
+import { runWithDataRootWriterLock } from "./cli-lock.server";
 import {
   acquireDataRootLock,
   type LockHolder,
@@ -21,17 +18,9 @@ import {
 
 const ctx = createTestDbContext();
 afterEach(() => {
-  vi.unstubAllEnvs();
-  resetEnvCacheForTests();
+  vi.restoreAllMocks();
   ctx.cleanup();
 });
-
-/** Sets `VIBERR_FORCE_DATA_ROOT_LOCK` the way an operator does: in the env
- *  that the CLI reads, not as an argument. */
-function forceLockEnv(value: string): void {
-  vi.stubEnv("VIBERR_FORCE_DATA_ROOT_LOCK", value);
-  resetEnvCacheForTests();
-}
 
 const SERVER: LockHolder = {
   pid: 4242,
@@ -39,21 +28,6 @@ const SERVER: LockHolder = {
   startedAt: "2026-08-08T09:00:00.000Z",
   bootId: "boot-server",
 };
-
-function collectingIo(): CliRefusalIo & { output: string[]; exitCode: number | null } {
-  const output: string[] = [];
-  return {
-    output,
-    exitCode: null,
-    write(message: string) {
-      output.push(message);
-    },
-    exit(code: number) {
-      this.exitCode = code;
-      throw new Error(`__exit:${code}`);
-    },
-  };
-}
 
 describe("runWithDataRootWriterLock", () => {
   it("holds the writer lock for the duration of the command and releases it after", async () => {
@@ -91,28 +65,33 @@ describe("runWithDataRootWriterLock", () => {
       isAlive: () => true,
       releaseOnExit: false,
     });
-    const io = collectingIo();
+    // `process.exit` ends the worker, so the spy throws where the CLI would
+    // have died: nothing after the call runs, and the test reads the code.
+    const exit = vi.spyOn(process, "exit").mockImplementation((code) => {
+      throw new Error(`__exit:${code}`);
+    });
+    const stderr = vi.spyOn(process.stderr, "write").mockImplementation(() => true);
     let bodyRan = false;
-    // Off, so a takeover left in the shell cannot let this one through.
-    forceLockEnv("");
 
-    await expect(
-      runWithDataRootWriterLock(
-        "`npm run seed`",
-        () => {
-          bodyRan = true;
-        },
-        {
-          dataRoot,
-          io,
-          alternative: "Stop the app first (`docker compose stop app`).",
-        },
-      ),
-    ).rejects.toThrow("__exit:1");
+    // Off, so a takeover left in the shell cannot let this one through.
+    await withEnv({ VIBERR_FORCE_DATA_ROOT_LOCK: "" }, () =>
+      expect(
+        runWithDataRootWriterLock(
+          "`npm run seed`",
+          () => {
+            bodyRan = true;
+          },
+          {
+            dataRoot,
+            alternative: "Stop the app first (`docker compose stop app`).",
+          },
+        ),
+      ).rejects.toThrow("__exit:1"),
+    );
 
     expect(bodyRan).toBe(false);
-    expect(io.exitCode).toBe(1);
-    const message = io.output.join("");
+    expect(exit).toHaveBeenCalledWith(1);
+    const message = stderr.mock.calls.map(([chunk]) => String(chunk)).join("");
     // Leads with the command (the lock's own message says "boot"), then names
     // the holder and both remedies.
     expect(message.startsWith("`npm run seed` refused to run")).toBe(true);
@@ -135,14 +114,15 @@ describe("runWithDataRootWriterLock", () => {
       releaseOnExit: false,
     });
     let bodyRan = false;
-    forceLockEnv("1");
 
-    await runWithDataRootWriterLock(
-      "`npm run rescan`",
-      () => {
-        bodyRan = true;
-      },
-      { dataRoot },
+    await withEnv({ VIBERR_FORCE_DATA_ROOT_LOCK: "1" }, () =>
+      runWithDataRootWriterLock(
+        "`npm run rescan`",
+        () => {
+          bodyRan = true;
+        },
+        { dataRoot },
+      ),
     );
 
     expect(bodyRan).toBe(true);

@@ -287,7 +287,7 @@ export function getBackendAccount(
 
 /** Every account the person holds, both backends, each backend's active one
  *  first. */
-export function listBackendCredentials(
+function listBackendCredentials(
   db: DatabaseSync,
   userId: string,
 ): BackendCredentialRow[] {
@@ -406,7 +406,7 @@ const HOME_ENV_KEY = {
  * cannot reach any credential but the one it is signing in or revoking — not
  * even the person's other accounts on the same backend.
  */
-export function vendorSpawnEnv(
+function vendorSpawnEnv(
   backend: RealBackend,
   accountHome: string,
 ): Record<string, string> {

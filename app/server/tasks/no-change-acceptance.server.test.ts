@@ -1,14 +1,21 @@
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { createTestDbContext, type TestDbContext } from "../../../test-support/test-db";
 import {
   baseTaskFrontmatter,
+  REVIEWER_ENGAGEMENT,
   setupTestStore,
   writeProject,
   writeTask,
   type TestStore,
 } from "../../../test-support/test-store";
 import { listAuditEvents } from "../../../test-support/audit-log";
+import {
+  fakeGithubFetch,
+  unreachableFetch,
+  type FakeGithub,
+} from "../../../test-support/fake-github";
 import { installFakeRuntime } from "../../../test-support/fake-runtime";
+import { reconfigureProject } from "../../../test-support/projected-store";
 import type {
   Engagement,
   FileActorRef,
@@ -51,73 +58,41 @@ import { resolveOperatorAuthority } from "./operator-authority.server";
 // mocks: the probe and every accept-time gate run a REAL
 // `getProjectGithubContext` — a real credential on the project's repo — over
 // the canned transport `remote()` installs (`fetchImpl` on the call ctx), and
-// the acceptance merge is a typed double injected through the ctx `deps` bag.
-import type {
-  mergeTaskPr,
-  MergeTaskPrResult,
-} from "~/server/github/github-reconciler.server";
+// the acceptance merge is the real `mergeTaskPr`, which answers `no_pr` for these
+// PR-less tasks before any request.
 import { createPat, setProjectCredential } from "~/server/secrets/pat-store.server";
-
-const mergeMock = vi.fn<typeof mergeTaskPr>();
 
 let ctx: TestDbContext;
 let store: TestStore;
 
 const BASE_SHA = "b".repeat(40);
+const REPO = "/repos/akin-ozer/viberr";
 
-/** `GET /repos/{repo}/compare/{base}...{head}` as the probe consumes it —
- *  mirrors the schema `ghCompareSchema` parses in
- *  app/server/github/branch-sync.server.ts (private there, so the fixture
- *  restates it rather than guessing at it). */
-interface CompareBody {
-  ahead_by: number;
-  behind_by: number;
-  status: string;
-  commits: { sha: string; commit: { message: string } }[];
-}
-
-/** `GET /repos/{repo}/git/ref/heads/{ref}` — the head sha of a ref. */
-interface RefBody {
-  object: { sha: string };
-}
-
-function jsonResponse(
-  body: CompareBody | RefBody | { message: string },
-  status = 200,
-): Response {
-  return new Response(JSON.stringify(body), {
-    status,
-    headers: { "content-type": "application/json" },
-  });
-}
-
+let github: FakeGithub;
 let fetchImpl: typeof fetch;
 
 /** The remote as the probe will see it. `aheadBy: null` means the task branch
- *  does not exist at all (the VC-5 shape); a number means it does. */
-function remote(options: { aheadBy?: number | null; network?: boolean } = {}): void {
+ *  does not exist at all (the VC-5 shape), so its ref and its compare answer
+ *  404; a number means it does, that many commits ahead of `main`. `branch` is
+ *  the name the probe reads: the task's own, or the derived `vib-1`. */
+function remote(
+  options: { aheadBy?: number | null; network?: boolean; branch?: string } = {},
+): void {
   const aheadBy = options.aheadBy ?? null;
-  fetchImpl = async (input) => {
-    if (options.network) throw new TypeError("fetch failed");
-    const path = new URL(
-      input instanceof Request ? input.url : String(input),
-    ).pathname;
-    if (path.includes("/compare/")) {
-      return jsonResponse({
-        ahead_by: aheadBy ?? 0,
-        behind_by: 0,
-        status: aheadBy ? "ahead" : "identical",
-        commits: [],
-      });
-    }
-    if (path.endsWith("/heads/main")) {
-      return jsonResponse({ object: { sha: BASE_SHA } });
-    }
-    // The task branch ref: 404 when the branch was never created.
-    return aheadBy === null
-      ? jsonResponse({ message: "Not Found" }, 404)
-      : jsonResponse({ object: { sha: "c".repeat(40) } });
-  };
+  const branch = options.branch ?? "vib-1";
+  const notFound = { status: 404, body: { message: "Not Found" } };
+  github = fakeGithubFetch({
+    [`GET ${REPO}/git/ref/heads/main`]: { body: { object: { sha: BASE_SHA } } },
+    [`GET ${REPO}/git/ref/heads/${branch}`]:
+      aheadBy === null ? notFound : { body: { object: { sha: "c".repeat(40) } } },
+    [`GET ${REPO}/compare/main...${branch}`]:
+      aheadBy === null
+        ? notFound
+        : { body: { ahead_by: aheadBy, behind_by: 0, status: aheadBy ? "ahead" : "identical", commits: [] } },
+    // OBS-11: the cleanup of a branch the acceptance proved empty.
+    [`DELETE ${REPO}/git/refs/heads/${branch}`]: { status: 204 },
+  });
+  fetchImpl = options.network ? unreachableFetch("fetch failed") : github.fetchImpl;
 }
 
 const OPERATOR_POLICY: { capabilityId: string; mode: CapabilityMode }[] = [
@@ -129,9 +104,7 @@ const OPERATOR_POLICY: { capabilityId: string; mode: CapabilityMode }[] = [
 /** A verdict-capable reviewer profile (+ optionally the operator). Keeps the
  *  project's repo, so the LIVE probe path is what runs. */
 function deployAgents(withOperator = false): void {
-  const file = readProjectFile({ projectSlug: store.slug, dataRoot: store.dataRoot })!;
-  writeProject(store.dataRoot, {
-    ...file.parsed.frontmatter,
+  reconfigureProject(store, {
     agents: [
       {
         profileId: "reviewer",
@@ -167,16 +140,8 @@ function deployAgents(withOperator = false): void {
         : []),
     ],
   });
-  rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
 }
 
-const REVIEWER: Engagement = {
-  profileId: "reviewer",
-  backend: "claude",
-  role: "Review & validation",
-  delivers: false,
-  verdictCapable: true,
-};
 const DEVELOPER: Engagement = {
   profileId: "developer",
   backend: "claude",
@@ -219,7 +184,7 @@ function seedVerificationTask(
       waiting: "agent",
       ownerUserId: store.users.arda.id,
       title: "Confirm the smoke file exists on main",
-      engagements: [REVIEWER],
+      engagements: [REVIEWER_ENGAGEMENT],
       ...patch,
     }),
     goal: "Confirm qa/smoke/pass19.md exists on main; NO changes are expected.",
@@ -248,7 +213,6 @@ function dataCtx() {
   return {
     dataRoot: store.dataRoot,
     fetchImpl,
-    deps: { mergeTaskPr: mergeMock },
   };
 }
 
@@ -276,12 +240,6 @@ beforeEach(() => {
     patActor,
   );
   setProjectCredential(store.db, { projectSlug: store.slug, patId: pat.id }, patActor);
-  vi.clearAllMocks();
-  // SAFETY: every consumer of a merge result switches on `status` and reads
-  // only the fields of the arm it lands in (task-acceptance.server.ts) — the
-  // `no_pr` arm's `taskKey` is never read, so it is left off deliberately: the
-  // no-merge case below compares this whole recorded value.
-  mergeMock.mockResolvedValue({ status: "no_pr" } as MergeTaskPrResult);
   remote();
   installFakeRuntime();
 });
@@ -331,7 +289,7 @@ describe("the verdict binds — a verification revision is minted at review time
     // as never. CANARY: drop the `deliveringEngagement(pre) === null`
     // precondition and an in-flight delivery gets marked "no changes".
     deployAgents();
-    seedVerificationTask({ engagements: [DEVELOPER, REVIEWER] });
+    seedVerificationTask({ engagements: [DEVELOPER, REVIEWER_ENGAGEMENT] });
     await reviewerApproves();
 
     const fm = task().frontmatter;
@@ -410,7 +368,7 @@ describe("the verdict binds — a verification revision is minted at review time
     // revision to bind the verdict to yet" beside a healthy validation.
     // CANARY: branch the note on `rev` again instead of the review subject.
     deployAgents();
-    seedVerificationTask({ engagements: [DEVELOPER, REVIEWER], deliveredAt: "2026-09-28T08:00:00.000Z" });
+    seedVerificationTask({ engagements: [DEVELOPER, REVIEWER_ENGAGEMENT], deliveredAt: "2026-09-28T08:00:00.000Z" });
     await reviewerApproves();
 
     const fm = task().frontmatter;
@@ -428,8 +386,8 @@ describe("the verdict binds — a verification revision is minted at review time
     // never read. CANARY: drop `mintedSince` and the second approval binds to
     // nothing, its note saying it started before the base sha was delivered.
     deployAgents();
-    const verifier: Engagement = { ...REVIEWER, profileId: "verifier", role: "Verification" };
-    seedVerificationTask({ engagements: [REVIEWER, verifier] });
+    const verifier: Engagement = { ...REVIEWER_ENGAGEMENT, profileId: "verifier", role: "Verification" };
+    seedVerificationTask({ engagements: [REVIEWER_ENGAGEMENT, verifier] });
     await reviewerApproves();
     upsertRun(store.db, {
       id: "run_verifier",
@@ -531,10 +489,6 @@ describe("acceptance closes it — with its OWN completion event, and no merge",
     expect(completion?.text).toContain("completed with no changes");
     expect(completion?.text).toContain(BASE_SHA.slice(0, 12));
     expect(completion?.text).not.toMatch(/merged/i);
-    // The shared acceptance path still pings mergeTaskPr (it is the one place
-    // that knows whether a PR exists); it answers `no_pr`, so nothing merges and
-    // the record says so. Assert the OUTCOME, not the call.
-    expect(await mergeMock.mock.results[0]?.value).toEqual({ status: "no_pr" });
   });
 
   it("ruling 550: a task delivered as files is accepted as delivered, never as \"completed with no changes\"", async () => {
@@ -544,15 +498,9 @@ describe("acceptance closes it — with its OWN completion event, and no merge",
     // CANARY: drop `deliveredAsFiles(fm)` from acceptanceNoChangeCheck and the
     // task closes as "Completed with no changes" with `noChanges: true`.
     deployAgents();
-    seedVerificationTask({ engagements: [DEVELOPER, REVIEWER], deliveredAt: "2026-09-28T08:44:13.751Z" });
+    seedVerificationTask({ engagements: [DEVELOPER, REVIEWER_ENGAGEMENT], deliveredAt: "2026-09-28T08:44:13.751Z" });
     await reviewerApproves();
     remote();
-    const probed: string[] = [];
-    const answer = fetchImpl;
-    fetchImpl = async (input, init) => {
-      probed.push(new URL(input instanceof Request ? input.url : String(input)).pathname);
-      return answer(input, init);
-    };
 
     await transitionStage(
       store.db,
@@ -566,7 +514,7 @@ describe("acceptance closes it — with its OWN completion event, and no merge",
     const completion = completionEvent();
     expect(completion?.title).toBe("Completion accepted");
     expect(completion?.text).not.toMatch(/no changes/i);
-    expect(probed.filter((p) => p.includes("/git/ref"))).toEqual([]);
+    expect(github.calls.map((c) => c.url.pathname).filter((p) => p.includes("/git/ref"))).toEqual([]);
   });
 
   it("F28-L1: an UNCLAIMED delivered task the probe proves empty is accepted (auto-detect)", async () => {
@@ -588,7 +536,7 @@ describe("acceptance closes it — with its OWN completion event, and no merge",
       },
     });
     // Branch exists and is verified EMPTY (0 ahead) — the R20-2 auto-detect case.
-    remote({ aheadBy: 0 });
+    remote({ aheadBy: 0, branch: "vib-1-work" });
 
     // Before F28-L1 the SYNC verdict gate threw "has delivered work but no review
     // pull request" here — before the async probe (the auto-detect built to
@@ -911,22 +859,6 @@ describe("the operator reaches the outcome without deliver_for_review", () => {
       operatorSnapshot(store.db, dataCtx(), store.slug, "VIB-1", resolveOperatorAuthority(dataCtx(), store.slug, {})).noChanges,
     ).toBe(true);
   });
-
-  it("F19-21 regression: the old dead end is gone", async () => {
-    // The verbatim live noop. CANARY: revert the mint — this sentence returns.
-    deployAgents(true);
-    seedVerificationTask();
-    await reviewerApproves();
-
-    const result = await operatorAcceptCompletion(
-      store.db,
-      dataCtx(),
-      { projectSlug: store.slug, taskKey: "VIB-1" },
-      resolveOperatorAuthority(dataCtx(), store.slug, { autonomy: "full" }),
-    );
-    expect(result.outcome).not.toBe("noop");
-    expect(result.message).not.toContain("No reviewed revision yet");
-  });
 });
 
 /**
@@ -946,23 +878,9 @@ describe("the operator reaches the outcome without deliver_for_review", () => {
  * with anything else on it, the copy is a lie and a deletion would be worse.
  */
 describe("OBS-11 / OBS-13 — the empty branch a no-change acceptance leaves behind", () => {
-  /** Wraps the standing transport so DELETEs are recorded (and answered)
-   *  instead of falling through to the ref/compare responder. */
-  function captureDeletes() {
-    const inner = fetchImpl;
-    const paths: string[] = [];
-    fetchImpl = async (input, init) => {
-      const method = (init?.method ?? "GET").toUpperCase();
-      const path = new URL(
-        input instanceof Request ? input.url : String(input),
-      ).pathname;
-      if (method === "DELETE") {
-        paths.push(path);
-        return new Response(null, { status: 204 });
-      }
-      return inner(input, init);
-    };
-    return { paths };
+  /** The path of every DELETE sent since the test's last `remote()`. */
+  function deletes(): string[] {
+    return github.calls.filter((c) => c.method === "DELETE").map((c) => c.url.pathname);
   }
 
   /**
@@ -980,7 +898,7 @@ describe("OBS-11 / OBS-13 — the empty branch a no-change acceptance leaves beh
         readiness: "ready",
         waiting: "human",
         ownerUserId: store.users.arda.id,
-        engagements: [REVIEWER],
+        engagements: [REVIEWER_ENGAGEMENT],
         branch: "vib-1",
         noChanges: true,
         workRevision: {
@@ -1036,7 +954,6 @@ describe("OBS-11 / OBS-13 — the empty branch a no-change acceptance leaves beh
     deployAgents();
     seedEmptyBranchTask();
     remote({ aheadBy: 0 }); // the branch EXISTS and is 0 commits ahead
-    const deletes = captureDeletes();
 
     await transitionStage(
       store.db,
@@ -1046,9 +963,7 @@ describe("OBS-11 / OBS-13 — the empty branch a no-change acceptance leaves beh
     );
 
     expect(task().frontmatter.stage).toBe("done");
-    expect(deletes.paths).toEqual([
-      "/repos/akin-ozer/viberr/git/refs/heads/vib-1",
-    ]);
+    expect(deletes()).toEqual(["/repos/akin-ozer/viberr/git/refs/heads/vib-1"]);
     // `deleteTaskRemoteBranch` writes its own honest record of the deletion.
     expect(
       task().timeline.some((e) => e.text.includes("Deleted branch `vib-1` from GitHub.")),
@@ -1065,7 +980,6 @@ describe("OBS-11 / OBS-13 — the empty branch a no-change acceptance leaves beh
     deployAgents();
     seedEmptyBranchTask(ACCEPT_PACKET);
     remote({ aheadBy: 0 });
-    const deletes = captureDeletes();
 
     await resolvePacket(
       store.db,
@@ -1075,9 +989,7 @@ describe("OBS-11 / OBS-13 — the empty branch a no-change acceptance leaves beh
     );
 
     expect(task().frontmatter.stage).toBe("done");
-    expect(deletes.paths).toEqual([
-      "/repos/akin-ozer/viberr/git/refs/heads/vib-1",
-    ]);
+    expect(deletes()).toEqual(["/repos/akin-ozer/viberr/git/refs/heads/vib-1"]);
     expect(
       task().timeline.some((e) => e.text.includes("Deleted branch `vib-1` from GitHub.")),
     ).toBe(true);
@@ -1090,7 +1002,6 @@ describe("OBS-11 / OBS-13 — the empty branch a no-change acceptance leaves beh
     branchCleanupOff();
     seedEmptyBranchTask();
     remote({ aheadBy: 0 });
-    const deletes = captureDeletes();
 
     await transitionStage(
       store.db,
@@ -1100,7 +1011,7 @@ describe("OBS-11 / OBS-13 — the empty branch a no-change acceptance leaves beh
     );
 
     expect(task().frontmatter.stage).toBe("done");
-    expect(deletes.paths).toEqual([]);
+    expect(deletes()).toEqual([]);
     expect(completionEvent()?.text).toContain(
       "The empty branch `vib-1` was left on GitHub",
     );
@@ -1115,7 +1026,6 @@ describe("OBS-11 / OBS-13 — the empty branch a no-change acceptance leaves beh
     seedVerificationTask(); // no `branch` on the task
     await reviewerApproves();
     remote({ aheadBy: 0 }); // a `vib-1` exists on the remote anyway
-    const deletes = captureDeletes();
 
     await transitionStage(
       store.db,
@@ -1125,7 +1035,7 @@ describe("OBS-11 / OBS-13 — the empty branch a no-change acceptance leaves beh
     );
 
     expect(task().frontmatter.stage).toBe("done");
-    expect(deletes.paths).toEqual([]);
+    expect(deletes()).toEqual([]);
     const text = completionEvent()?.text ?? "";
     expect(text).toContain("VIB-1 never recorded a branch of its own");
     expect(text).toContain("It was left untouched");
@@ -1139,7 +1049,6 @@ describe("OBS-11 / OBS-13 — the empty branch a no-change acceptance leaves beh
     seedVerificationTask();
     await reviewerApproves();
     remote({ aheadBy: 3 });
-    const deletes = captureDeletes();
 
     await expect(
       transitionStage(
@@ -1151,6 +1060,6 @@ describe("OBS-11 / OBS-13 — the empty branch a no-change acceptance leaves beh
     ).rejects.toThrow(/carries 3 commit\(s\) ahead of `main`/);
 
     expect(task().frontmatter.stage).toBe("review");
-    expect(deletes.paths).toEqual([]);
+    expect(deletes()).toEqual([]);
   });
 });

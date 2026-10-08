@@ -142,7 +142,7 @@ import { isRelayComment } from "./task-relay.server";
 /** How long a completion waits for its delivery's pictures before the
  *  operator reacts; the render then finishes in the background. Measured in
  *  the image (Debian Chromium 154): 1.6 s for a page at both widths. */
-export const PAGE_CAPTURE_WAIT_MS = 45_000;
+const PAGE_CAPTURE_WAIT_MS = 45_000;
 /** One page's limit for both widths in one browser, as the child is told. */
 const PAGE_TIMEOUT_MS = 25_000;
 /** The job's own limit: this, plus the page limit for each page. */

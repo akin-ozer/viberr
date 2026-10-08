@@ -1,9 +1,9 @@
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
-import { pollUntil, settle } from "../../../test-support/polling";
+import { pollUntil } from "../../../test-support/polling";
 import type { LogLine } from "~/features/runtime/runtime-types";
 import type { RuntimeAdapter } from "~/server/runtimes/adapter.server";
 import type { ControllerTurnInput } from "./controller-run.server";
-import type { FakeRun } from "../../../test-support/fake-runtime";
+import { untilRunSettled, type FakeRun } from "../../../test-support/fake-runtime";
 import {
   setupAppTest,
   type AppTestContext,
@@ -281,11 +281,7 @@ describe("conversation access", () => {
         messages.some((m) => m.text.includes("Profile → Agent accounts")),
       ).toBe(false);
       // Let the fake run finish so nothing writes after the suite closes the DB.
-      for (let i = 0; i < 200; i += 1) {
-        const state = getRun(app.db, runId)?.state;
-        if (state && state !== "running" && state !== "queued") break;
-        await new Promise((resolve) => setTimeout(resolve, 5));
-      }
+      await untilRunSettled(app.db, runId);
     } finally {
       await connectFakeBackend(app.db, ownerId, "claude");
     }
@@ -445,17 +441,6 @@ describe("stopping a turn", () => {
     return { conversationId: conversation.id, runId: result.runId };
   }
 
-  async function settled(runId: string): Promise<void> {
-    const { getRun } = await import("~/server/runtimes/run-store.server");
-    for (let i = 0; i < 200; i += 1) {
-      const state = getRun(app.db, runId)?.state;
-      if (state && state !== "running" && state !== "queued") break;
-      await new Promise((resolve) => setTimeout(resolve, 5));
-    }
-    // The settle runs from the completion callback on a later tick.
-    for (let i = 0; i < 20; i += 1) await new Promise((resolve) => setTimeout(resolve, 0));
-  }
-
   it("the owner stops it: the run is interrupted, the transcript says so, the lease is released", async () => {
     // Canary: make interruptRun's controller branch throw for everyone and
     // this rejects; drop the branch entirely and the empty member map refuses
@@ -477,7 +462,7 @@ describe("stopping a turn", () => {
       { userId: ownerId, label: "selin@viberr.dev" },
     );
     expect(result.outcome).toBe("interrupted");
-    await settled(runId);
+    await untilRunSettled(app.db, runId);
 
     const run = getRun(app.db, runId)!;
     expect(run.state).toBe("interrupted");
@@ -533,7 +518,7 @@ describe("stopping a turn", () => {
       { conversationId, runId, dataRoot: app.dataRoot },
       { userId: ownerId, label: "selin@viberr.dev" },
     );
-    await settled(runId);
+    await untilRunSettled(app.db, runId);
     // A finished turn reports nothing to show, not a stale step. (The lease is
     // released with the turn, so the run id goes with it.)
     expect(conversationTurnState(app.db, conversationId)).toEqual({
@@ -563,7 +548,7 @@ describe("stopping a turn", () => {
       { userId: orgAdminId, label: "arda@viberr.dev" },
     );
     expect(result.outcome).toBe("interrupted");
-    await settled(runId);
+    await untilRunSettled(app.db, runId);
   });
 
   it("a run id from another thread is not found on this conversation", async () => {
@@ -588,7 +573,7 @@ describe("stopping a turn", () => {
       { conversationId, runId, dataRoot: app.dataRoot },
       { userId: ownerId, label: "selin@viberr.dev" },
     );
-    await settled(runId);
+    await untilRunSettled(app.db, runId);
   });
 });
 
@@ -602,11 +587,10 @@ describe("a working turn streams to its owner", () => {
   it("publishes controller.log-appended per line and controller.updated for the lifecycle", async () => {
     // Canary: drop `controller` from the sink's line publish and the owner
     // receives the lifecycle references but never a line.
-    const { connectSseClient } = await import("~/server/events/sse-broker.server");
+    const { recordSse } = await import("../../../test-support/sse-client");
     const { createConversation } = await import("./controller-conversations.server");
     const { runControllerTurn } = await import("./controller-run.server");
     const { queueFakeRun } = await import("../../../test-support/fake-runtime");
-    const { getRun } = await import("~/server/runtimes/run-store.server");
     const { sseEventSchema } = await import("~/schemas/sse-event.schema");
 
     const conversation = createConversation(app.db, {
@@ -615,13 +599,8 @@ describe("a working turn streams to its owner", () => {
       projectSlug: null,
     });
     const listen = (userId: string) => {
-      const writes: string[] = [];
-      connectSseClient({ userId, scopes: [{ kind: "user" }], lastEventId: null, write: (c) => { writes.push(c); } });
-      return () =>
-        writes
-          .flatMap((chunk) => chunk.split("\n"))
-          .filter((line) => line.startsWith("data: "))
-          .map((line) => sseEventSchema.parse(JSON.parse(line.slice("data: ".length))));
+      const sse = recordSse(userId);
+      return () => sse.data().map((data) => sseEventSchema.parse(JSON.parse(data)));
     };
     const owner = listen(ownerId);
     const other = listen(otherMemberId);
@@ -640,11 +619,7 @@ describe("a working turn streams to its owner", () => {
       dataRoot: app.dataRoot,
     });
     if (result.state !== "started") throw new Error(`turn ${result.state}`);
-    await pollUntil(() => {
-      const state = getRun(app.db, result.runId)?.state;
-      return !!state && state !== "running" && state !== "queued";
-    }, 1_000);
-    await settle();
+    await untilRunSettled(app.db, result.runId);
 
     const lines = owner().filter((e) => e.type === "controller.log-appended");
     expect(lines.map((e) => e.data)).toEqual([
@@ -1171,7 +1146,9 @@ describe("U39-30: the answer does not wait for the compaction", () => {
     // check and the reply is posted twice.
     const { createConversation, listMessages } = await import("./controller-conversations.server");
     const { runControllerTurn } = await import("./controller-run.server");
-    const { queueFakeRun, queueFakeCompaction } = await import("../../../test-support/fake-runtime");
+    const { queueFakeRun, queueFakeCompaction, drainRunCompletions } = await import(
+      "../../../test-support/fake-runtime"
+    );
     const { getRun } = await import("~/server/runtimes/run-store.server");
     const conversation = createConversation(app.db, {
       userId: ownerId,
@@ -1222,7 +1199,7 @@ describe("U39-30: the answer does not wait for the compaction", () => {
       await new Promise((resolve) => setTimeout(resolve, 5));
     }
     // Let the settle that follows the compaction run.
-    for (let i = 0; i < 20; i += 1) await new Promise((resolve) => setTimeout(resolve, 5));
+    await drainRunCompletions();
     expect(duringCompaction).toEqual([answer]);
     const replies = listMessages(app.db, conversation.id).filter((m) => m.author === "controller");
     expect(replies.map((m) => [m.text, m.runId])).toEqual([[answer, result.runId]]);
@@ -1274,7 +1251,7 @@ describe("U39-30: the answer does not wait for the compaction", () => {
       if (state && state !== "running" && state !== "queued" && duringSecond) break;
       await new Promise((resolve) => setTimeout(resolve, 5));
     }
-    for (let i = 0; i < 20; i += 1) await new Promise((resolve) => setTimeout(resolve, 5));
+    await drainRunCompletions();
     expect(duringSecond).toEqual([answer, second]);
   });
 });
@@ -1470,12 +1447,13 @@ describe("ruling 527: a message sent while a turn works steers it", () => {
       userLabel: "selin@viberr.dev",
       projectSlug: null,
     });
-    const send = async (text: string, mode?: "queue") => {
+    const send = async (text: string, mode?: "queue", files?: ControllerTurnInput["files"]) => {
       const result = await runControllerTurn(app.db, {
         conversationId: conversation.id,
         text,
         user: { ...user, id: ownerId },
         mode,
+        files,
         dataRoot: app.dataRoot,
       });
       if (result.state === "refused") throw new Error(`refused: ${result.reason}`);
@@ -1494,7 +1472,9 @@ describe("ruling 527: a message sent while a turn works steers it", () => {
     const first = await send("Clean up the calculator agent.");
     if (first.state !== "started") throw new Error(`turn ${first.state}`);
     const queued = await send("QUEUED: then list what is left.", "queue");
-    const steering = await send("STEER: I deleted its KB already.");
+    const steering = await send("STEER: I deleted its KB already.", undefined, [
+      { name: "rvtools.xlsx", data: new Uint8Array(40_000) },
+    ]);
     expect([queued.state, steering.state]).toEqual(["queued", "steering"]);
     expect(conversationTurnState(app.db, conversation.id)).toMatchObject({
       answering: first.messageId,
@@ -1507,12 +1487,16 @@ describe("ruling 527: a message sent while a turn works steers it", () => {
     // next boot notes it as a restart).
     const channel = lastRunSpec()!.steering!;
     const delivery = channel.take();
+    // Ruling 573: its file is named after its words. CANARY: drop
+    // `withFilesNote` from `steeringText` and a file sent while a turn worked
+    // reaches it as words alone.
     expect(delivery).toEqual({
       count: 1,
       text:
         "selin@viberr.dev sent this while you were working on this turn. It is part of this turn: take it " +
         "into account from here, and answer it in the reply you write for this turn.\n\n" +
-        "STEER: I deleted its KB already.",
+        "STEER: I deleted its KB already.\n\n" +
+        "A file came with this message: `rvtools.xlsx` (39 KB). Read it with `read_message_file` before you say what it holds.",
     });
     expect(channel.take()).toBeNull();
     const byId = () => new Map(listMessages(app.db, conversation.id).map((m) => [m.id, m]));

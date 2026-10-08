@@ -47,13 +47,8 @@ import { assertPathSafeRunId } from "./user-homes.server";
  */
 
 /** The directory each run's own temporary directory is made in. */
-export function runTmpRoot(): string {
+function runTmpRoot(): string {
   return getEnv().VIBERR_RUN_TMP_ROOT ?? path.join(tmpdir(), "viberr-runs");
-}
-
-/** `<root>/<runId>`: one run's temporary directory. */
-export function runTmpDir(runId: string, root: string = runTmpRoot()): string {
-  return path.join(root, assertPathSafeRunId(runId));
 }
 
 /** The names a run's processes look their temporary directory up under:
@@ -71,13 +66,11 @@ export function runTmpEnv(dir: string) {
  * directory or the directory cannot be made; the caller starts the run without
  * one and says so.
  */
-export function prepareRunTmp(
-  runId: string,
-  person: AgentLaunch | null,
-  root: string = runTmpRoot(),
-): string {
+export function prepareRunTmp(runId: string, person: AgentLaunch | null): string {
+  const root = runTmpRoot();
   passThroughDirForAgents(root);
-  const dir = runTmpDir(runId, root);
+  // `<root>/<runId>`: one run's temporary directory.
+  const dir = path.join(root, assertPathSafeRunId(runId));
   removeAgentTreeSync(dir, person);
   mkdirSync(dir);
   shareDirWithAgents(dir);
@@ -90,7 +83,7 @@ export function prepareRunTmp(
  * carrying the run's marker its grace between SIGTERM and SIGKILL; a process
  * still writing the directory while it is removed would leave it half there.
  */
-export const RUN_TMP_REMOVE_DELAY_MS = 2 * RUN_REAP_GRACE_MS + 2_000;
+const RUN_TMP_REMOVE_DELAY_MS = 2 * RUN_REAP_GRACE_MS + 2_000;
 
 /** Remove a run's temporary directory as its person. Never throws: a directory
  *  left behind is logged, and boot's sweep removes it. */
@@ -129,11 +122,8 @@ export function scheduleRunTmpRemoval(
  * left and logged, never removed as the server's own user. Returns how many
  * went. Never throws.
  */
-export function sweepRunTmp(
-  db: DatabaseSync,
-  opts: { root?: string; dataRoot?: string } = {},
-): number {
-  const root = opts.root ?? runTmpRoot();
+export function sweepRunTmp(db: DatabaseSync): number {
+  const root = runTmpRoot();
   let names: string[];
   try {
     names = readdirSync(root);
@@ -150,8 +140,7 @@ export function sweepRunTmp(
       // run has this id.
       const row = billed.get(name) as { credential_user_id: string | null } | undefined;
       const userId = row?.credential_user_id ?? null;
-      const person =
-        launchesAgents() && userId ? agentGitLaunchFor(db, userId, opts.dataRoot) : null;
+      const person = launchesAgents() && userId ? agentGitLaunchFor(db, userId) : null;
       removeAgentTreeSync(dir, person);
       removed++;
     } catch (error) {

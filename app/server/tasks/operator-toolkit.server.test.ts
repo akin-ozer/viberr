@@ -3,11 +3,17 @@ import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { z } from "zod";
 import { createTestDbContext } from "../../../test-support/test-db";
-import { callToolText, publishedSchemas, toolLoading } from "../../../test-support/mcp-tool-meta";
+import {
+  callToolText,
+  publishedInstructions,
+  publishedSchemas,
+  toolLoading,
+} from "../../../test-support/mcp-tool-meta";
 import {
   baseTaskFrontmatter,
   setupTestStore,
   writeTask,
+  type TestStore,
 } from "../../../test-support/test-store";
 import { settle } from "../../../test-support/polling";
 import { rebuildAll } from "~/server/projections/rebuilder.server";
@@ -25,71 +31,73 @@ import { saveMcpServer } from "~/server/org/resources.server";
 import { buildOperatorToolkit } from "./operator-toolkit.server";
 import { CREATE_TASK_BASE_NOTE } from "./operator-packets.server";
 import type { OperatorAuthority } from "./operator-authority.server";
+import type { SpecialistMcpServerConfig } from "./specialist-mcp.server";
 import { DONE_SIGNAL_RULE } from "./done-signal.server";
 import {
   operatorPlanSchemaFor,
   operatorPlanToolsFor,
 } from "~/server/runtimes/operator-codex-plan.server";
+import { operatorAuthority } from "../../../test-support/operator-snapshot";
 
 const ctxDb = createTestDbContext();
 afterEach(() => ctxDb.cleanup());
 
 const ACTOR = { userId: "u_t", label: "t@test" };
 
-/** The instructions string as the MOUNTED server carries it: `createSdkMcpServer`
- *  hands back the live `McpServer` under `instance`, and `instance.server` is its
- *  `Server` handle, which keeps the instructions in `_instructions`. A run reads
- *  the server's instructions, not the module's constant. The field is `private`
- *  on the MCP SDK's `Server`, so it is read by parsing the shape we expect; if
- *  the SDK renames it, the read falls through to `""` and every positive
- *  assertion on it fails instead of passing on `undefined`. */
-const wiredInstructions = z
-  .object({ instance: z.object({ server: z.object({ _instructions: z.string() }) }) })
-  .transform((mounted) => mounted.instance.server._instructions)
-  .catch("");
-
 function authority(mcps: string[]): OperatorAuthority {
-  return {
-    policy: new Map([
-      ["assign-primary-specialist", "direct"],
-      ["summon-reviewers", "direct"],
-      ["generate-packets", "direct"],
-      ["append-typed-events", "direct"],
-      ["stage-transitions", "recommend"],
-      ["completion-for-acceptance", "recommend"],
-    ]),
-    autonomy: "supervised",
-    backend: "claude",
-    model: "sonnet",
-    effort: "",
-    name: "Operator",
-    skills: [],
-    kb: [],
-    mcps,
-    persona: null,
-    deployed: true,
-    humanGatedBeforeWork: false,
+  return operatorAuthority(
+    {
+      "assign-primary-specialist": "direct",
+      "summon-reviewers": "direct",
+      "generate-packets": "direct",
+      "append-typed-events": "direct",
+      "stage-transitions": "recommend",
+      "completion-for-acceptance": "recommend",
+    },
+    { mcps },
+  );
+}
+
+/** The toolkit for task P-1 of a project `p` that holds nothing: what the
+ *  gate, schema and description tests read. */
+function bareToolkit(auth: OperatorAuthority, workspace?: { dir: string; defaultBranch: string }) {
+  const deps: Parameters<typeof buildOperatorToolkit>[0] = {
+    db: ctxDb.makeDb(),
+    ctx: { dataRoot: ctxDb.makeTempDir() },
+    projectSlug: "p",
+    taskKey: "P-1",
+    authority: auth,
   };
+  if (workspace) deps.workspace = workspace;
+  return buildOperatorToolkit(deps);
+}
+
+/** The toolkit for VIB-1 of a test store, whose files the read tools open. */
+function storeToolkit(store: TestStore, auth: OperatorAuthority = authority([])) {
+  return buildOperatorToolkit({
+    db: store.db,
+    ctx: { dataRoot: store.dataRoot },
+    projectSlug: store.slug,
+    taskKey: "VIB-1",
+    authority: auth,
+  });
 }
 
 /**
- * P13-KM-03 — the operator's DECLARED org MCP servers now actually mount.
- * Live evidence for the bug: a project granted the operator `everything-mcp`
- * and the operator reported "MCP servers/tools I can call: none … No
- * `everything-mcp` tools are registered for me", while the grant UI showed it
- * attached. `OperatorAuthority` carried skills + kb only.
+ * P13-KM-03 — the operator's DECLARED org MCP servers mount. Live evidence for
+ * the bug: a project granted the operator `everything-mcp` and the operator
+ * reported "MCP servers/tools I can call: none … No `everything-mcp` tools are
+ * registered for me", while the grant UI showed it attached.
+ *
+ * F21-3 — what mounts is the run's own pre-flighted resolution
+ * (`operatorMcpResolution`). A second resolve inside the toolkit would
+ * re-mount a server the pre-flight had just dropped, so the prompt would
+ * announce one set and the run would mount another.
  */
-describe("buildOperatorToolkit — org MCP grants", () => {
-  const build = (db: ReturnType<typeof ctxDb.makeDb>, mcps: string[]) =>
-    buildOperatorToolkit({
-      db,
-      ctx: { dataRoot: ctxDb.makeTempDir() },
-      projectSlug: "p",
-      taskKey: "P-1",
-      authority: authority(mcps),
-    });
-
-  it("mounts a granted org MCP server alongside the in-process viberr toolkit", async () => {
+describe("buildOperatorToolkit — the org MCP servers the run resolved", () => {
+  it("mounts exactly those beside the in-process viberr toolkit, and approves each", async () => {
+    // `everything-mcp` IS registered and granted, so a second resolve inside
+    // the toolkit would mount it: what makes the dropped case a real pin.
     const db = ctxDb.makeDb();
     await saveMcpServer(
       db,
@@ -97,61 +105,41 @@ describe("buildOperatorToolkit — org MCP grants", () => {
       ACTOR,
       { spawnImpl: () => { throw new Error("no spawn in test"); } },
     );
+    const build = (orgMcpServers: Record<string, SpecialistMcpServerConfig>) =>
+      buildOperatorToolkit({
+        db,
+        ctx: { dataRoot: ctxDb.makeTempDir() },
+        projectSlug: "p",
+        taskKey: "P-1",
+        authority: authority(["everything-mcp"]),
+        orgMcpServers,
+      });
 
-    const toolkit = build(db, ["everything-mcp"]);
-    expect(Object.keys(toolkit.mcpServers).sort()).toEqual([
-      "everything-mcp",
-      "viberr",
-    ]);
-    // `allowedTools` CONFINES an operator run, so mounting without allowing
-    // would leave the grant decorative in a different way.
-    expect(toolkit.allowedTools).toContain("mcp__everything-mcp");
-    expect(toolkit.allowedTools).toContain("mcp__viberr__get_task");
-  });
+    // CANARY: resolve again in the toolkit and the server the pre-flight
+    // dropped re-appears.
+    const dropped = build({});
+    expect(Object.keys(dropped.mcpServers)).toEqual(["viberr"]);
+    expect(dropped.allowedTools).not.toContain("mcp__everything-mcp");
 
-  it("mounts nothing extra when the operator declares no MCP servers", () => {
-    const db = ctxDb.makeDb();
-    const toolkit = build(db, []);
-    expect(Object.keys(toolkit.mcpServers)).toEqual(["viberr"]);
-  });
-
-  it("never lets a declared name shadow the reserved in-process viberr server", async () => {
-    const db = ctxDb.makeDb();
-    const toolkit = build(db, ["viberr"]);
-    expect(Object.keys(toolkit.mcpServers)).toEqual(["viberr"]);
-    // The reserved name resolves to the in-process governance server, not to a
-    // row a user could add under the same name.
-    expect(toolkit.allowedTools).toContain("mcp__viberr__get_task");
-    expect(toolkit.allowedTools).not.toContain("mcp__viberr");
+    // CANARY: drop the server or its approval and the grant is decorative:
+    // `allowedTools` is what lets an operator run call it unattended.
+    const mounted = build({ "everything-mcp": { command: "/bin/echo", args: ["hi"] } });
+    expect(Object.keys(mounted.mcpServers).sort()).toEqual(["everything-mcp", "viberr"]);
+    expect(mounted.allowedTools).toContain("mcp__everything-mcp");
+    expect(mounted.allowedTools).toContain("mcp__viberr__get_task");
   });
 });
 
 describe("buildOperatorToolkit — deliver_for_review (R15-2)", () => {
   it("builds the tool with the grant ABSENT (absent = granted — pre-R15-2 deployments keep delivering)", () => {
     // Fails on main: the tool did not exist.
-    const db = ctxDb.makeDb();
-    const toolkit = buildOperatorToolkit({
-      db,
-      ctx: { dataRoot: ctxDb.makeTempDir() },
-      projectSlug: "p",
-      taskKey: "P-1",
-      authority: authority([]),
-    });
-    expect(toolkit.allowedTools).toContain("mcp__viberr__deliver_for_review");
+    expect(bareToolkit(authority([])).allowedTools).toContain("mcp__viberr__deliver_for_review");
   });
 
   it("withholds the tool when deliver-review-pr is explicitly off", () => {
-    const db = ctxDb.makeDb();
     const auth = authority([]);
     auth.policy.set("deliver-review-pr", "off");
-    const toolkit = buildOperatorToolkit({
-      db,
-      ctx: { dataRoot: ctxDb.makeTempDir() },
-      projectSlug: "p",
-      taskKey: "P-1",
-      authority: auth,
-    });
-    expect(toolkit.allowedTools).not.toContain("mcp__viberr__deliver_for_review");
+    expect(bareToolkit(auth).allowedTools).not.toContain("mcp__viberr__deliver_for_review");
   });
 });
 
@@ -198,12 +186,7 @@ describe("buildOperatorToolkit ↔ operatorPlanToolsFor governed-action parity (
         .map((t) => RENAME.get(t) ?? t),
     );
 
-  const withPolicy = (
-    policy: Record<string, "direct" | "recommend" | "off">,
-  ): OperatorAuthority => ({
-    ...authority([]),
-    policy: new Map(Object.entries(policy)),
-  });
+  const withPolicy = (policy: Record<string, "direct" | "recommend" | "off">) => operatorAuthority(policy);
 
   const ALL_CAPS = [
     "append-typed-events",
@@ -220,15 +203,6 @@ describe("buildOperatorToolkit ↔ operatorPlanToolsFor governed-action parity (
   ] as const;
   const uniform = (mode: "direct" | "off") =>
     Object.fromEntries(ALL_CAPS.map((c) => [c, mode]));
-
-  const build = (auth: OperatorAuthority) =>
-    buildOperatorToolkit({
-      db: ctxDb.makeDb(),
-      ctx: { dataRoot: ctxDb.makeTempDir() },
-      projectSlug: "p",
-      taskKey: "P-1",
-      authority: auth,
-    });
 
   // For any policy that grants SOMETHING, the two toolkits expose exactly the
   // same governed vocabulary. This is the drift guard.
@@ -250,7 +224,7 @@ describe("buildOperatorToolkit ↔ operatorPlanToolsFor governed-action parity (
   ])(
     "the two toolkits expose the same governed actions — %s",
     (_label, auth) => {
-      const claude = [...claudeGovernedTools(build(auth).allowedTools)].sort();
+      const claude = [...claudeGovernedTools(bareToolkit(auth).allowedTools)].sort();
       const plan = [...operatorPlanToolsFor(auth)].sort();
       expect(claude).toEqual(plan);
     },
@@ -266,22 +240,22 @@ describe("buildOperatorToolkit ↔ operatorPlanToolsFor governed-action parity (
     // Canary: gate the Claude tool under `append-typed-events` instead (the
     // withheld case still builds it; the parity cases above also go red).
     const granted = withPolicy(uniform("direct"));
-    expect(build(granted).allowedTools).toContain("mcp__viberr__set_dependencies");
+    expect(bareToolkit(granted).allowedTools).toContain("mcp__viberr__set_dependencies");
     expect(operatorPlanToolsFor(granted)).toContain("set_dependencies");
     // Every grant direct EXCEPT packets: append-typed-events stays granted, so
     // only the packet gate can explain the tool's absence.
     const withheld = withPolicy({ ...uniform("direct"), "generate-packets": "off" });
-    expect(build(withheld).allowedTools).not.toContain("mcp__viberr__set_dependencies");
-    expect(build(withheld).allowedTools).toContain("mcp__viberr__post_comment");
+    expect(bareToolkit(withheld).allowedTools).not.toContain("mcp__viberr__set_dependencies");
+    expect(bareToolkit(withheld).allowedTools).toContain("mcp__viberr__post_comment");
     expect(operatorPlanToolsFor(withheld)).not.toContain("set_dependencies");
   });
 
   it("ruling 488: relay_to_task is built with the comment grant and carries the no-hand-copy doctrine", () => {
     // Canaries: build it outside the `append-typed-events` block (the withheld
     // case still builds it); drop the no-hand-copy sentence.
-    const granted = build(withPolicy(uniform("direct")));
+    const granted = bareToolkit(withPolicy(uniform("direct")));
     expect(granted.allowedTools).toContain("mcp__viberr__relay_to_task");
-    const withheld = build(withPolicy({ ...uniform("direct"), "append-typed-events": "off" }));
+    const withheld = bareToolkit(withPolicy({ ...uniform("direct"), "append-typed-events": "off" }));
     expect(withheld.allowedTools).not.toContain("mcp__viberr__relay_to_task");
     expect(granted.tools.find((t) => t.name === "relay_to_task")!.description).toContain(
       "never ask anyone to copy, paste or post text between tasks, and never ask a person to confirm a relay landed",
@@ -292,11 +266,11 @@ describe("buildOperatorToolkit ↔ operatorPlanToolsFor governed-action parity (
     // Canaries: build them on `dispatchGate !== "deny"` (the recommend
     // operator is handed a run that starts with nobody present); drop the
     // no-packet sentence from the description.
-    const direct = build(withPolicy(uniform("direct")));
+    const direct = bareToolkit(withPolicy(uniform("direct")));
     expect(direct.allowedTools).toContain("mcp__viberr__schedule_task_action");
     expect(direct.allowedTools).toContain("mcp__viberr__cancel_task_schedule");
     for (const mode of ["recommend", "off"] as const) {
-      const withheld = build(withPolicy({ ...uniform("direct"), "dispatch-agents": mode }));
+      const withheld = bareToolkit(withPolicy({ ...uniform("direct"), "dispatch-agents": mode }));
       expect(withheld.allowedTools, mode).not.toContain("mcp__viberr__schedule_task_action");
       expect(withheld.allowedTools, mode).not.toContain("mcp__viberr__cancel_task_schedule");
     }
@@ -311,7 +285,7 @@ describe("buildOperatorToolkit ↔ operatorPlanToolsFor governed-action parity (
 
   it("ruling 494: get_task and update_branch_from_base say which head a behind count describes, to check it against the pushed head, and never to quote an older head's", () => {
     // Canaries: drop the `baseComparedHead` sentence from either description.
-    const defs = build(withPolicy(uniform("direct"))).tools;
+    const defs = bareToolkit(withPolicy(uniform("direct"))).tools;
     const desc = (name: string) => defs.find((t) => t.name === name)!.description;
     expect(desc("get_task")).toContain(
       "`baseComparedHead` (ruling 494) names the head `baseBehindBy` was counted on (`sha`, `observedAt`): `current: false` means the count was not read on the head Viberr last pushed (`pushedSince` names it), because that push came after the compare or GitHub had not shown it yet when it compared",
@@ -327,7 +301,7 @@ describe("buildOperatorToolkit ↔ operatorPlanToolsFor governed-action parity (
 
   it("ruling 133 (A19): get_task, run_agent and transition_stage say the engaged deliverer runs at every stage and a hand-off is never a stage workaround", () => {
     // Canary: restore any one of the three original sentences.
-    const defs = build(withPolicy(uniform("direct"))).tools;
+    const defs = bareToolkit(withPolicy(uniform("direct"))).tools;
     const desc = (name: string) => defs.find((t) => t.name === name)!.description;
     expect(desc("get_task")).toContain("it is the engaged deliverer (`engagedAsDeliverer`), which runs at EVERY stage (ruling 133)");
     expect(desc("run_agent")).toContain("A hand-off is a choice about WHO should build, never a way around a stage");
@@ -338,7 +312,7 @@ describe("buildOperatorToolkit ↔ operatorPlanToolsFor governed-action parity (
 
   it("ruling 160 (pass 35, F35-11): deliver_for_review says a closed-unmerged PR is a person's decision and names the packet", () => {
     // Canary: restore the description from before S14.
-    const defs = build(withPolicy(uniform("direct"))).tools;
+    const defs = bareToolkit(withPolicy(uniform("direct"))).tools;
     const desc = (name: string) => defs.find((t) => t.name === name)!.description;
     expect(desc("deliver_for_review")).toContain("A pull request a person closed WITHOUT merging is that person's decision about the task (ruling 160)");
     expect(desc("deliver_for_review")).toContain("the tool answers `closed_by_human`, opens no new PR for the branch");
@@ -348,7 +322,7 @@ describe("buildOperatorToolkit ↔ operatorPlanToolsFor governed-action parity (
 
   it("pass 35 S15 (rulings 162 and 163): the tool text names the gate's verdict, the acceptance-stage refusal, the rework route and the acceptance-time refresh", () => {
     // Canary: restore any of the four descriptions from before S15.
-    const defs = build(withPolicy(uniform("direct"))).tools;
+    const defs = bareToolkit(withPolicy(uniform("direct"))).tools;
     const desc = (name: string) => defs.find((t) => t.name === name)!.description;
     expect(desc("get_task")).toContain("a PR the gate would refuse cannot be recommended for acceptance");
     expect(desc("accept_completion")).toContain("A pull request the acceptance gate would refuse cannot be recommended for acceptance");
@@ -362,7 +336,7 @@ describe("buildOperatorToolkit ↔ operatorPlanToolsFor governed-action parity (
     // Canary: restore the description from before ruling 702. The operator on
     // BLOG-8 read "populated only while validation is failing" and asked a
     // person for the move.
-    const tool = build(withPolicy(uniform("direct"))).tools.find((t) => t.name === "transition_stage")!;
+    const tool = bareToolkit(withPolicy(uniform("direct"))).tools.find((t) => t.name === "transition_stage")!;
     const desc = tool.description;
     expect(desc).toContain("Backwards is also allowed on a task that has NO delivering agent you can run (one whose profile is no longer deployed counts as none) and has delivered nothing, when the agent its remaining work needs cannot be engaged where the task stands");
     expect(desc).toContain("each with `engage` naming the agents (`id` and `name`)");
@@ -388,7 +362,7 @@ describe("buildOperatorToolkit ↔ operatorPlanToolsFor governed-action parity (
     // The tool refuses while the open decision offers a create_task whose new
     // task waits on this one, because accepting would withdraw it unanswered.
     // Canary: drop the sentence from the accept_completion description.
-    const defs = build(withPolicy(uniform("direct"))).tools;
+    const defs = bareToolkit(withPolicy(uniform("direct"))).tools;
     const desc = (name: string) => defs.find((t) => t.name === name)!.description;
     expect(desc("accept_completion")).toContain(
       "It also refuses while your open decision offers a `create_task` whose new task waits on this one (ruling 492)",
@@ -397,7 +371,7 @@ describe("buildOperatorToolkit ↔ operatorPlanToolsFor governed-action parity (
 
   it("nothing granted: Claude builds no governed tool; the Codex plan enum falls back and never advertises delivery", () => {
     const auth = withPolicy(uniform("off"));
-    expect([...claudeGovernedTools(build(auth).allowedTools)]).toEqual([]);
+    expect([...claudeGovernedTools(bareToolkit(auth).allowedTools)]).toEqual([]);
     const plan = operatorPlanToolsFor(auth);
     expect(plan.length).toBeGreaterThan(0); // enum can't be empty
     expect(plan).not.toContain("deliver_for_review");
@@ -411,17 +385,8 @@ describe("buildOperatorToolkit ↔ operatorPlanToolsFor governed-action parity (
  * gates the tool, the server does the git, a conflict goes to a human.
  */
 describe("buildOperatorToolkit — update_branch_from_base (N19-9)", () => {
-  const build = (auth: OperatorAuthority) =>
-    buildOperatorToolkit({
-      db: ctxDb.makeDb(),
-      ctx: { dataRoot: ctxDb.makeTempDir() },
-      projectSlug: "p",
-      taskKey: "P-1",
-      authority: auth,
-    });
-
   it("builds the tool with the grant ABSENT (it postdates every deployment; it follows the delivery gate)", () => {
-    expect(build(authority([])).allowedTools).toContain(
+    expect(bareToolkit(authority([])).allowedTools).toContain(
       "mcp__viberr__update_branch_from_base",
     );
   });
@@ -429,7 +394,7 @@ describe("buildOperatorToolkit — update_branch_from_base (N19-9)", () => {
   it("withholds the tool when update-task-branch is explicitly off", () => {
     const auth = authority([]);
     auth.policy.set("update-task-branch", "off");
-    expect(build(auth).allowedTools).not.toContain(
+    expect(bareToolkit(auth).allowedTools).not.toContain(
       "mcp__viberr__update_branch_from_base",
     );
   });
@@ -437,70 +402,27 @@ describe("buildOperatorToolkit — update_branch_from_base (N19-9)", () => {
   it("withholds it when DELIVERY is withheld — it is the smaller act on the same branch", () => {
     const auth = authority([]);
     auth.policy.set("deliver-review-pr", "off");
-    expect(build(auth).allowedTools).not.toContain(
+    expect(bareToolkit(auth).allowedTools).not.toContain(
       "mcp__viberr__update_branch_from_base",
     );
   });
 });
 
-/**
- * A4 — with NO operator deployed, `resolveOperatorAuthority` returns an empty
- * policy and `deployed: false`. Every gate then denies, so the toolkit is
- * read-only. The bug: `deliverGate`'s absent-means-granted polarity fired for
- * the empty policy too, so this authority built `get_task` +
- * `deliver_for_review` — a run that could push a branch and open a PR with no
- * operator configured anywhere in the project.
- */
-describe("buildOperatorToolkit — no operator deployed (A4)", () => {
-  const undeployed = (): OperatorAuthority => ({
-    ...authority([]),
-    policy: new Map(),
-    deployed: false,
-    // A non-strict board: the shape whose absent grant resolved to `direct`.
-    humanGatedBeforeWork: false,
-  });
-
-  it("builds a READ-ONLY toolkit — no delivery, no packets, no transitions", () => {
-    const db = ctxDb.makeDb();
-    const toolkit = buildOperatorToolkit({
-      db,
-      ctx: { dataRoot: ctxDb.makeTempDir() },
-      projectSlug: "p",
-      taskKey: "P-1",
-      authority: undeployed(),
-    });
-    // R19-1: the operator reads the repository from the full read-only checkout
-    // under its cwd (Read/Grep/Glob), not from an MCP tool — so the in-process
-    // toolkit floor is the READS. What "read-only" excludes is every WRITE, and
-    // that is what this asserts: the floor is exactly the reads, and nothing
-    // that changes state is reachable.
-    //
-    // Ruling 282: `read_board` joins that floor. An undeployed operator holds
-    // no authority, and being able to SEE the board it holds no authority over
-    // takes nothing: the whole point of the floor is that reading is never the
-    // thing being withheld. Ruling 285's `read_timeline_entry` joins it for the
-    // same reason — and more sharply, because the task page shows a person the
-    // whole comment this returns, so withholding it from the coordinator
-    // withholds nothing from anyone. (`read_knowledge_doc` is NOT here: it is
-    // gated on the run's own KB grants, and this authority holds none.)
-    // Ruling 690: `read_task_source` joins the floor as `read_task_attachment`
-    // did: what a task keeps is on its page for every member to open.
-    expect(toolkit.allowedTools).toEqual([
-      "mcp__viberr__get_task",
-      "mcp__viberr__read_board",
-      "mcp__viberr__read_task_attachment",
-      "mcp__viberr__read_task_source",
-      "mcp__viberr__read_timeline_entry",
-    ]);
-    for (const write of [
-      "mcp__viberr__deliver_for_review",
-      "mcp__viberr__transition_stage",
-      "mcp__viberr__open_decision_packet",
-      "mcp__viberr__prompt_agent",
-      "mcp__viberr__post_comment",
-    ]) {
-      expect(toolkit.allowedTools).not.toContain(write);
-    }
+describe("buildOperatorToolkit — the knowledge tools name the document alike (ruling 588)", () => {
+  it("correct_knowledge_doc takes the document as `path`, the field read_knowledge_doc takes", async () => {
+    // Live on AWSC-29 the Estimate Judge read mapping.md with `path` and sent
+    // its two corrections with `path` too; the tool took `doc`, and both came
+    // back refused. CANARY: name the operator's field `doc` again.
+    const auth = authority([]);
+    auth.kb = ["rulings"];
+    const toolkit = bareToolkit(auth);
+    const schemas = await publishedSchemas(toolkit.mcpServers.viberr);
+    const fields = z.object({ properties: z.record(z.string(), z.unknown()) });
+    const read = Object.keys(fields.parse(schemas.get("read_knowledge_doc")).properties);
+    const correct = Object.keys(fields.parse(schemas.get("correct_knowledge_doc")).properties);
+    expect(read).toContain("path");
+    expect(correct).toContain("path");
+    expect(correct).not.toContain("doc");
   });
 });
 
@@ -516,46 +438,17 @@ describe("buildOperatorToolkit — no operator deployed (A4)", () => {
  * to touch it by another can resolve that either way, and the way that loses is
  * exactly F19-4: describing the empty task folder as "the repo".
  */
-describe("buildOperatorToolkit — the knowledge tools name the document alike (ruling 588)", () => {
-  it("correct_knowledge_doc takes the document as `path`, the field read_knowledge_doc takes", async () => {
-    // Live on AWSC-29 the Estimate Judge read mapping.md with `path` and sent
-    // its two corrections with `path` too; the tool took `doc`, and both came
-    // back refused. CANARY: name the operator's field `doc` again.
-    const auth = authority([]);
-    auth.kb = ["rulings"];
-    const toolkit = buildOperatorToolkit({
-      db: ctxDb.makeDb(),
-      ctx: { dataRoot: ctxDb.makeTempDir() },
-      projectSlug: "p",
-      taskKey: "P-1",
-      authority: auth,
-    });
-    const schemas = await publishedSchemas(toolkit.mcpServers.viberr);
-    const fields = z.object({ properties: z.record(z.string(), z.unknown()) });
-    const read = Object.keys(fields.parse(schemas.get("read_knowledge_doc")).properties);
-    const correct = Object.keys(fields.parse(schemas.get("correct_knowledge_doc")).properties);
-    expect(read).toContain("path");
-    expect(correct).toContain("path");
-    expect(correct).not.toContain("doc");
-  });
-});
-
 describe("the viberr server's instructions — reading is expected, writing is not (R19-1)", () => {
+  /** The instructions as a run receives them: through `initialize` (ruling 297). */
   const wired = () =>
-    wiredInstructions.parse(
-      buildOperatorToolkit({
-        db: ctxDb.makeDb(),
-        ctx: { dataRoot: ctxDb.makeTempDir() },
-        projectSlug: "p",
-        taskKey: "P-1",
-        authority: authority([]),
-      }).mcpServers.viberr,
+    publishedInstructions(
+      bareToolkit(authority([])).mcpServers.viberr,
     );
 
-  it("states the write prohibition precisely and stops forbidding reads", () => {
+  it("states the write prohibition precisely and stops forbidding reads", async () => {
     // Canary: restore the "never write code or touch the repository" sentence
     // and every half fails.
-    const text = wired();
+    const text = await wired();
     expect(text).toContain("never write code");
     expect(text).toMatch(/cannot edit, create or commit files/);
     expect(text).toContain("READING the task's repository checkout");
@@ -565,7 +458,7 @@ describe("the viberr server's instructions — reading is expected, writing is n
     expect(text).toMatch(/claim you make about the repository must come from reading it/);
   });
 
-  it("does NOT claim the operator cannot push — delivery is its decision (R15-2)", () => {
+  it("does NOT claim the operator cannot push — delivery is its decision (R15-2)", async () => {
     // The over-correction that would break the product: `deliver_for_review`
     // pushes the deliverer's committed branch, and both the operator definition
     // and the tool description tell the model delivery is its call. A blanket
@@ -573,7 +466,7 @@ describe("the viberr server's instructions — reading is expected, writing is n
     // them, and the careful resolution is an operator that stops delivering.
     // Canary: put "or push the repository" back into the constant and this
     // fails.
-    const text = wired();
+    const text = await wired();
     expect(text).not.toMatch(/or push the repository/);
     expect(text).toMatch(/delivery is a decision you make and the server executes/);
   });
@@ -581,13 +474,7 @@ describe("the viberr server's instructions — reading is expected, writing is n
   it("loads every viberr tool up front, so the run's first call is not a ToolSearch (Option D PR 4(a))", () => {
     // Canary: drop `alwaysLoad: true` from the viberr server and every tool
     // lands in `deferred`.
-    const toolkit = buildOperatorToolkit({
-      db: ctxDb.makeDb(),
-      ctx: { dataRoot: ctxDb.makeTempDir() },
-      projectSlug: "p",
-      taskKey: "P-1",
-      authority: authority([]),
-    });
+    const toolkit = bareToolkit(authority([]));
     const loading = toolLoading(toolkit.mcpServers.viberr);
     expect(loading.deferred).toEqual([]);
     expect(loading.loaded).toContain("get_task");
@@ -605,89 +492,12 @@ describe("the viberr server's instructions — reading is expected, writing is n
  */
 describe("buildOperatorToolkit — read_default_branch_file (F21-21)", () => {
   it("is offered when the run holds a checkout, and names the anchoring in its description", () => {
-    const db = ctxDb.makeDb();
-    const toolkit = buildOperatorToolkit({
-      db,
-      ctx: { dataRoot: ctxDb.makeTempDir() },
-      projectSlug: "p",
-      taskKey: "P-1",
-      authority: authority([]),
-      workspace: { dir: "/tmp/nowhere", defaultBranch: "main" },
-    });
+    const toolkit = bareToolkit(authority([]), { dir: "/tmp/nowhere", defaultBranch: "main" });
     expect(toolkit.allowedTools).toContain("mcp__viberr__read_default_branch_file");
     const def = toolkit.tools.find((t) => t.name === "read_default_branch_file")!;
     expect(def.description).toContain("origin/main");
     expect(def.description).toContain("DELIVERING AGENT'S workspace");
     expect(def.description).toContain("never conclude from it that work landed out-of-band");
-  });
-
-  it("is withheld when the run has no checkout — a read that could only fail", () => {
-    const db = ctxDb.makeDb();
-    const toolkit = buildOperatorToolkit({
-      db,
-      ctx: { dataRoot: ctxDb.makeTempDir() },
-      projectSlug: "p",
-      taskKey: "P-1",
-      authority: authority([]),
-    });
-    expect(toolkit.allowedTools).not.toContain("mcp__viberr__read_default_branch_file");
-    expect(toolkit.tools.some((t) => t.name === "read_default_branch_file")).toBe(false);
-  });
-});
-
-/**
- * F21-3 — the operator run pre-flights its stdio MCP mounts now
- * (`operatorMcpResolution`), and hands the VERIFIED set here. A second resolve
- * inside the toolkit would silently re-mount a server the pre-flight had just
- * dropped, so the prompt would announce one set and the run would mount another.
- */
-describe("buildOperatorToolkit — mounts the caller's pre-flighted resolution (F21-3)", () => {
-  /** A db where `everything-mcp` IS registered and healthy — so a second
-   *  resolve inside the toolkit would happily mount it. That is what makes the
-   *  assertion below a real pin rather than an empty-registry tautology. */
-  async function dbWithRegisteredServer() {
-    const db = ctxDb.makeDb();
-    await saveMcpServer(
-      db,
-      { name: "everything-mcp", transport: "stdio", target: "/bin/echo hi", cred: "" },
-      ACTOR,
-      { spawnImpl: () => { throw new Error("no spawn in test"); } },
-    );
-    return db;
-  }
-
-  it("mounts exactly what the caller verified — a dropped server is NOT re-resolved", async () => {
-    // Canary: ignore `deps.orgMcpServers` and resolve again here; the grant
-    // re-appears and this fails.
-    const toolkit = buildOperatorToolkit({
-      db: await dbWithRegisteredServer(),
-      ctx: { dataRoot: ctxDb.makeTempDir() },
-      projectSlug: "p",
-      taskKey: "P-1",
-      authority: authority(["everything-mcp"]),
-      // What the run's pre-flight produced: the dead stdio mount was dropped.
-      orgMcpServers: {},
-    });
-    expect(Object.keys(toolkit.mcpServers)).toEqual(["viberr"]);
-    expect(toolkit.allowedTools).not.toContain("mcp__everything-mcp");
-  });
-
-  it("still resolves for a caller with no resolution of its own", async () => {
-    const db = ctxDb.makeDb();
-    await saveMcpServer(
-      db,
-      { name: "everything-mcp", transport: "stdio", target: "/bin/echo hi", cred: "" },
-      ACTOR,
-      { spawnImpl: () => { throw new Error("no spawn in test"); } },
-    );
-    const toolkit = buildOperatorToolkit({
-      db,
-      ctx: { dataRoot: ctxDb.makeTempDir() },
-      projectSlug: "p",
-      taskKey: "P-1",
-      authority: authority(["everything-mcp"]),
-    });
-    expect(Object.keys(toolkit.mcpServers).sort()).toEqual(["everything-mcp", "viberr"]);
   });
 });
 
@@ -696,17 +506,7 @@ describe("buildOperatorToolkit — mounts the caller's pre-flighted resolution (
 describe("buildOperatorToolkit — open_decision_packet declares goalDraft (ruling 138)", () => {
   it("the option schema carries goalDraft and says what it is", async () => {
     // Canary: remove the field from the option schema.
-    const toolkit = buildOperatorToolkit({
-      db: ctxDb.makeDb(),
-      ctx: { dataRoot: ctxDb.makeTempDir() },
-      projectSlug: "p",
-      taskKey: "P-1",
-      authority: (() => {
-        const auth = authority([]);
-        auth.policy.set("generate-packets", "direct");
-        return auth;
-      })(),
-    });
+    const toolkit = bareToolkit(authority([]));
     expect(toolkit.tools.some((t) => t.name === "open_decision_packet")).toBe(true);
     // Ruling 296 made the schema a whole strict object, so the field texts are
     // read off the JSON Schema of the whole tool -- which is the copy the model
@@ -722,17 +522,7 @@ describe("buildOperatorToolkit — open_decision_packet declares goalDraft (ruli
   it("ruling 421: run_agent publishes `completeness`, and get_task names it with the round-two question", async () => {
     // CANARY: drop the `completeness` field from run_agent's schema, and the
     // Claude operator has no way to say the question was put.
-    const toolkit = buildOperatorToolkit({
-      db: ctxDb.makeDb(),
-      ctx: { dataRoot: ctxDb.makeTempDir() },
-      projectSlug: "p",
-      taskKey: "P-1",
-      authority: (() => {
-        const auth = authority([]);
-        auth.policy.set("dispatch-agents", "direct");
-        return auth;
-      })(),
-    });
+    const toolkit = bareToolkit(authority([]));
     const declared = JSON.stringify(
       (await publishedSchemas(toolkit.mcpServers.viberr)).get("run_agent"),
     );
@@ -750,17 +540,7 @@ describe("buildOperatorToolkit — open_decision_packet declares goalDraft (ruli
    */
   it("ruling 164: the tool text names the promise, force_accept, move_stage and toStage", async () => {
     // Canary: restore the description and the option schema from before S18.
-    const toolkit = buildOperatorToolkit({
-      db: ctxDb.makeDb(),
-      ctx: { dataRoot: ctxDb.makeTempDir() },
-      projectSlug: "p",
-      taskKey: "P-1",
-      authority: (() => {
-        const auth = authority([]);
-        auth.policy.set("generate-packets", "direct");
-        return auth;
-      })(),
-    });
+    const toolkit = bareToolkit(authority([]));
     const def = toolkit.tools.find((t) => t.name === "open_decision_packet")!;
     const published = await publishedSchemas(toolkit.mcpServers.viberr);
     expect(def.description).toContain("An option TITLE is a promise the resolution keeps");
@@ -772,17 +552,7 @@ describe("buildOperatorToolkit — open_decision_packet declares goalDraft (ruli
   });
 
   it("F39-68: the option kinds say a created task starts from the base branch", async () => {
-    const toolkit = buildOperatorToolkit({
-      db: ctxDb.makeDb(),
-      ctx: { dataRoot: ctxDb.makeTempDir() },
-      projectSlug: "p",
-      taskKey: "P-1",
-      authority: (() => {
-        const auth = authority([]);
-        auth.policy.set("generate-packets", "direct");
-        return auth;
-      })(),
-    });
+    const toolkit = bareToolkit(authority([]));
     const published = await publishedSchemas(toolkit.mcpServers.viberr);
     // CANARY: drop the sentence and Claude's operator is told only to use
     // `create_task` for "another service", the guidance AX-5's operator
@@ -816,22 +586,8 @@ describe("buildOperatorToolkit — open_decision_packet declares goalDraft (ruli
       goal: "Short and whole.",
     });
     rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
-    const toolkit = buildOperatorToolkit({
-      db: store.db,
-      ctx: { dataRoot: store.dataRoot },
-      projectSlug: store.slug,
-      taskKey: "VIB-1",
-      authority: authority([]),
-    });
-    const read = toolkit.tools.find((t) => t.name === "read_board")!;
-    const call = async (taskKey?: string) => {
-      // SAFETY: every tool here answers `{ content: [{ type: "text", text }] }`;
-      // a shape change fails the assertions below rather than reading undefined.
-      const answer = (await read.handler({ taskKey } as never, {} as never)) as {
-        content: { text: string }[];
-      };
-      return answer.content[0]!.text;
-    };
+    const { tools } = storeToolkit(store);
+    const call = (taskKey?: string) => callToolText(tools, "read_board", taskKey ? { taskKey } : {});
 
     // Canary: put the bare `.slice` back and the excerpt reads as the contract.
     const clipped = await call("VIB-2");
@@ -875,20 +631,9 @@ describe("buildOperatorToolkit — open_decision_packet declares goalDraft (ruli
       goal: `${text}${older}${newer}`,
     });
     rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
-    const toolkit = buildOperatorToolkit({
-      db: store.db,
-      ctx: { dataRoot: store.dataRoot },
-      projectSlug: store.slug,
-      taskKey: "VIB-1",
-      authority: authority([]),
-    });
-    const read = toolkit.tools.find((t) => t.name === "read_board")!;
-    // SAFETY: every tool here answers `{ content: [{ type: "text", text }] }`.
-    const answer = (await read.handler({ taskKey: "VIB-2" } as never, {} as never)) as {
-      content: { text: string }[];
-    };
+    const answer = await callToolText(storeToolkit(store).tools, "read_board", { taskKey: "VIB-2" });
     // SAFETY: readBoardTask answers one task's JSON; only `goal` is read here.
-    const goal = (JSON.parse(answer.content[0]!.text) as { goal: string }).goal;
+    const goal = (JSON.parse(answer) as { goal: string }).goal;
     expect(goal).toContain("Deliverable: the estimate.");
     expect(goal).not.toContain("END-OF-TEXT");
     expect(goal).toContain("every decision recorded on it follows, whole");
@@ -952,22 +697,10 @@ describe("buildOperatorToolkit — open_decision_packet declares goalDraft (ruli
       frontmatter: baseTaskFrontmatter("VIB-3", { stage: "triage" }),
     });
     rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
-    const toolkit = buildOperatorToolkit({
-      db: store.db,
-      ctx: { dataRoot: store.dataRoot },
-      projectSlug: store.slug,
-      taskKey: "VIB-1",
-      authority: authority([]),
-    });
-    const read = toolkit.tools.find((t) => t.name === "read_board")!;
-    const call = async (taskKey: string) => {
-      // SAFETY: every tool here answers `{ content: [{ type: "text", text }] }`.
-      const answer = (await read.handler({ taskKey } as never, {} as never)) as {
-        content: { text: string }[];
-      };
+    const { tools } = storeToolkit(store);
+    const call = async (taskKey: string) =>
       // SAFETY: readBoardTask answers one task's JSON; only `outcome` is read here.
-      return JSON.parse(answer.content[0]!.text) as { outcome?: unknown };
-    };
+      JSON.parse(await callToolText(tools, "read_board", { taskKey })) as { outcome?: unknown };
     expect((await call("VIB-2")).outcome).toEqual({
       completion:
         "The Judge approved the files and scored them 90/100.\n\n" +
@@ -1004,18 +737,8 @@ describe("buildOperatorToolkit — open_decision_packet declares goalDraft (ruli
     writeTask(store.dataRoot, store.slug, { frontmatter: baseTaskFrontmatter("VIB-1", { stage: "impl" }) });
     writeTask(store.dataRoot, store.slug, { frontmatter: baseTaskFrontmatter("VIB-2", { stage: "review" }), timeline });
     rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
-    const toolkit = buildOperatorToolkit({
-      db: store.db,
-      ctx: { dataRoot: store.dataRoot },
-      projectSlug: store.slug,
-      taskKey: "VIB-1",
-      authority: authority([]),
-    });
-    // SAFETY: every tool here answers `{ content: [{ type: "text", text }] }`.
-    const text = async (name: string, args: Record<string, string>) =>
-      ((await toolkit.tools.find((t) => t.name === name)!.handler(args as never, {} as never)) as {
-        content: { text: string }[];
-      }).content[0]!.text;
+    const { tools } = storeToolkit(store);
+    const text = (name: string, args: Record<string, string>) => callToolText(tools, name, args);
     const index = z.object({ timeline: z.array(z.string()) }).parse(JSON.parse(await text("read_board", { taskKey: "VIB-2" }))).timeline;
     expect(index).toHaveLength(201);
     expect(index[0]).toBe("2026-09-30T02:00:00.000Z · comment · operator");
@@ -1038,18 +761,8 @@ describe("buildOperatorToolkit — open_decision_packet declares goalDraft (ruli
     writeFileSync(path.join(dir, "summary.md"), "Score of record: 75/100");
     keepDelivery(store.slug, "VIB-1", "2026-09-29T23:35:25.588Z", ["summary.md"], store.dataRoot);
     writeFileSync(path.join(dir, "summary.md"), "Rework: 79/100");
-    const toolkit = buildOperatorToolkit({
-      db: store.db,
-      ctx: { dataRoot: store.dataRoot },
-      projectSlug: store.slug,
-      taskKey: "VIB-1",
-      authority: authority([]),
-    });
-    // SAFETY: every answer here is `{ content: [{ type: "text", text }] }`.
-    const text = async (args: Record<string, string>) =>
-      ((await toolkit.tools.find((t) => t.name === "read_task_attachment")!.handler(args as never, {} as never)) as {
-        content: { text: string }[];
-      }).content[0]!.text;
+    const { tools } = storeToolkit(store);
+    const text = (args: Record<string, string>) => callToolText(tools, "read_task_attachment", args);
     expect(await text({ name: "summary.md", delivery: "2026-09-29T23:35:25.588Z" })).toContain("Score of record: 75/100");
     expect(await text({ name: "summary.md" })).toContain("Rework: 79/100");
     expect(await text({ name: "summary.md", delivery: "2026-09-30T01:55:33.089Z" })).toContain(
@@ -1084,22 +797,9 @@ describe("buildOperatorToolkit — open_decision_packet declares goalDraft (ruli
       );
     keepOn("VIB-1", "ec2-pricing.html", "t3.medium $0.0416 per hour");
     keepOn("VIB-2", "rds-pricing.html", "db.t3.medium $0.068 per hour");
-    const toolkit = buildOperatorToolkit({
-      db: store.db,
-      ctx: { dataRoot: store.dataRoot },
-      projectSlug: store.slug,
-      taskKey: "VIB-1",
-      authority: authority([]),
-    });
-    // SAFETY: every answer here is `{ content: [{ type: "text", text }] }`.
+    const { tools } = storeToolkit(store);
     const read = async (args: Record<string, string>) =>
-      z.record(z.string(), z.unknown()).parse(
-        JSON.parse(
-          ((await toolkit.tools.find((t) => t.name === "read_task_source")!.handler(args as never, {} as never)) as {
-            content: { text: string }[];
-          }).content[0]!.text,
-        ),
-      );
+      z.record(z.string(), z.unknown()).parse(JSON.parse(await callToolText(tools, "read_task_source", args)));
     const own = await read({});
     expect(own).toMatchObject({ task: "VIB-1", kept: 1 });
     expect(own.text).toContain("S1 · ec2-pricing.html · 26 bytes");
@@ -1170,21 +870,10 @@ describe("buildOperatorToolkit — open_decision_packet declares goalDraft (ruli
       ],
     });
     rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
-    const toolkit = buildOperatorToolkit({
-      db: store.db,
-      ctx: { dataRoot: store.dataRoot },
-      projectSlug: store.slug,
-      taskKey: "VIB-1",
-      authority: authority([]),
-    });
-    const read = toolkit.tools.find((t) => t.name === "read_board")!;
-    // SAFETY: every tool here answers `{ content: [{ type: "text", text }] }`,
-    // and readBoardTask's outcome carries `verdicts[].report` (asserted below).
-    const answer = (await read.handler({ taskKey: "VIB-2" } as never, {} as never)) as {
-      content: { text: string }[];
-    };
-    // SAFETY: one task's JSON, whose `outcome.verdicts` this test wrote.
-    const parsed = JSON.parse(answer.content[0]!.text) as {
+    const { tools } = storeToolkit(store);
+    // SAFETY: one task's JSON, whose `outcome.verdicts` this test wrote;
+    // readBoardTask's outcome carries `verdicts[].report` (asserted below).
+    const parsed = JSON.parse(await callToolText(tools, "read_board", { taskKey: "VIB-2" })) as {
       outcome: { verdicts: { report: string }[] };
     };
     expect(parsed.outcome.verdicts[0]!.report).toBe(report);
@@ -1220,11 +909,7 @@ describe("buildOperatorToolkit — open_decision_packet declares goalDraft (ruli
     });
     rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
     // SAFETY: as above.
-    const other = (await read.handler({ taskKey: "VIB-3" } as never, {} as never)) as {
-      content: { text: string }[];
-    };
-    // SAFETY: as above.
-    const otherParsed = JSON.parse(other.content[0]!.text) as {
+    const otherParsed = JSON.parse(await callToolText(tools, "read_board", { taskKey: "VIB-3" })) as {
       outcome: { verdicts: { report: string }[] };
     };
     expect(otherParsed.outcome.verdicts[0]!.report).toBe(stored);
@@ -1265,25 +950,8 @@ describe("buildOperatorToolkit — open_decision_packet declares goalDraft (ruli
       ],
     });
     rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
-    const toolkit = buildOperatorToolkit({
-      db: store.db,
-      ctx: { dataRoot: store.dataRoot },
-      projectSlug: store.slug,
-      taskKey: "VIB-1",
-      authority: authority([]),
-    });
-    const textOf = async (
-      name: string,
-      args: { occurredAt?: string },
-    ): Promise<string> => {
-      const tool = toolkit.tools.find((t) => t.name === name)!;
-      // SAFETY: every tool here answers `{ content: [{ type: "text", text }] }`;
-      // a shape change fails the assertions below rather than reading undefined.
-      const answer = (await tool.handler(args as never, {} as never)) as {
-        content: { text: string }[];
-      };
-      return answer.content[0]!.text;
-    };
+    const { tools } = storeToolkit(store);
+    const textOf = (name: string, args: Record<string, string>) => callToolText(tools, name, args);
 
     // What `get_task` shows: the entry CLIPPED, and its address beside the cut.
     const snapshot = await textOf("get_task", {});
@@ -1324,23 +992,9 @@ describe("buildOperatorToolkit — open_decision_packet declares goalDraft (ruli
       frontmatter: baseTaskFrontmatter("VIB-9", { stage: "triage" }),
     });
     rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
-    const toolkit = buildOperatorToolkit({
-      db: store.db,
-      ctx: { dataRoot: store.dataRoot },
-      projectSlug: store.slug,
-      taskKey: "VIB-1",
-      authority: (() => {
-        const auth = authority([]);
-        auth.policy.set("generate-packets", "direct");
-        return auth;
-      })(),
-    });
-    const open = toolkit.tools.find((t) => t.name === "open_decision_packet")!;
-    // SAFETY: the SDK types a tool handler's argument as its own generic; this
-    // object is the shape the zod schema above declares, and a field the schema
-    // rejects fails the call rather than reaching the handler — which is the
-    // assertion this test makes.
-    const answer = await open.handler(
+    const answer = await callToolText(
+      storeToolkit(store).tools,
+      "open_decision_packet",
       {
         title: "The shapes this needs are not published",
         detail: "Three exports are missing and no task opens them.",
@@ -1355,10 +1009,9 @@ describe("buildOperatorToolkit — open_decision_packet declares goalDraft (ruli
             },
           },
         ],
-      } as never,
-      {} as never,
+      },
     );
-    expect(JSON.stringify(answer)).toContain("[done]");
+    expect(answer).toContain("[done]");
     // Read the FILE, which is the canonical record the resolver later reads —
     // not a projection, and not the tool's own reply about itself.
     const { readFileSync } = await import("node:fs");
@@ -1383,17 +1036,7 @@ describe("buildOperatorToolkit — open_decision_packet declares goalDraft (ruli
   it("ruling 270: the option schema carries blockedBy and dueAt, the payloads two kinds are refused without", async () => {
     // Canary: remove either field from the option schema and its kind becomes
     // unauthorable again — named, refused, and impossible to satisfy.
-    const toolkit = buildOperatorToolkit({
-      db: ctxDb.makeDb(),
-      ctx: { dataRoot: ctxDb.makeTempDir() },
-      projectSlug: "p",
-      taskKey: "P-1",
-      authority: (() => {
-        const auth = authority([]);
-        auth.policy.set("generate-packets", "direct");
-        return auth;
-      })(),
-    });
+    const toolkit = bareToolkit(authority([]));
     const published = await publishedSchemas(toolkit.mcpServers.viberr);
     const declared = JSON.stringify(published.get("open_decision_packet"));
     expect(declared).toContain('"blockedBy"');
@@ -1418,14 +1061,7 @@ describe("buildOperatorToolkit — open_decision_packet declares goalDraft (ruli
   it("ruling 433: the Codex plan's option carries every field the Claude tool's option does", async () => {
     // CANARY: drop any option field from the Codex plan schema.
     const auth = authority([]);
-    auth.policy.set("generate-packets", "direct");
-    const toolkit = buildOperatorToolkit({
-      db: ctxDb.makeDb(),
-      ctx: { dataRoot: ctxDb.makeTempDir() },
-      projectSlug: "p",
-      taskKey: "P-1",
-      authority: auth,
-    });
+    const toolkit = bareToolkit(auth);
     const published = await publishedSchemas(toolkit.mcpServers.viberr);
     const claudeOption = z
       .object({
@@ -1453,13 +1089,7 @@ describe("buildOperatorToolkit — open_decision_packet declares goalDraft (ruli
     // CANARY: drop `DONE_SIGNAL_RULE` from any one door and its assertion
     // fails naming it.
     const auth = authority([]);
-    const toolkit = buildOperatorToolkit({
-      db: ctxDb.makeDb(),
-      ctx: { dataRoot: ctxDb.makeTempDir() },
-      projectSlug: "p",
-      taskKey: "P-1",
-      authority: auth,
-    });
+    const toolkit = bareToolkit(auth);
     const published = await publishedSchemas(toolkit.mcpServers.viberr);
     // Each door's published description, "" when it has none, so a door that
     // lost its text fails by name instead of in the parse.
@@ -1524,17 +1154,7 @@ describe("buildOperatorToolkit — open_decision_packet declares goalDraft (ruli
    */
   it("ruling 85 and ruling 164 agree in one string: the remedy is named, never offered as an option", () => {
     // Canary: restore "and offer it as an option beside any workaround".
-    const toolkit = buildOperatorToolkit({
-      db: ctxDb.makeDb(),
-      ctx: { dataRoot: ctxDb.makeTempDir() },
-      projectSlug: "p",
-      taskKey: "P-1",
-      authority: (() => {
-        const auth = authority([]);
-        auth.policy.set("generate-packets", "direct");
-        return auth;
-      })(),
-    });
+    const toolkit = bareToolkit(authority([]));
     const def = toolkit.tools.find((t) => t.name === "open_decision_packet")!;
     // Ruling 85 still stands: the capability and where a human grants it.
     expect(def.description).toContain("grantable on an agent profile");
@@ -1561,22 +1181,9 @@ describe("buildOperatorToolkit — open_decision_packet declares goalDraft (ruli
  * was wrong.
  */
 describe("buildOperatorToolkit — the acceptance-stage move reads the pull request, not the whole gate", () => {
-  const toolkitFor = () =>
-    buildOperatorToolkit({
-      db: ctxDb.makeDb(),
-      ctx: { dataRoot: ctxDb.makeTempDir() },
-      projectSlug: "p",
-      taskKey: "P-1",
-      authority: (() => {
-        const auth = authority([]);
-        auth.policy.set("stage-transitions", "direct");
-        return auth;
-      })(),
-    });
-
   it("transition_stage names the pull request facts and does not key the move on notAcceptableReason", () => {
     // Canary: restore "refused while get_task shows `notAcceptableReason`".
-    const def = toolkitFor().tools.find((t) => t.name === "transition_stage")!;
+    const def = bareToolkit(authority([])).tools.find((t) => t.name === "transition_stage")!;
     expect(def.description).toContain("Merge means mergeable");
     expect(def.description).toContain("`pr.unpushedRevision`");
     expect(def.description).not.toMatch(
@@ -1588,7 +1195,7 @@ describe("buildOperatorToolkit — the acceptance-stage move reads the pull requ
 
   it("get_task keeps notAcceptableReason for the acceptance verbs and says what else it covers", () => {
     // Canary: restore "the task cannot be moved into the acceptance stage".
-    const def = toolkitFor().tools.find((t) => t.name === "get_task")!;
+    const def = bareToolkit(authority([])).tools.find((t) => t.name === "get_task")!;
     expect(def.description).toContain("`notAcceptableReason`");
     expect(def.description).not.toMatch(/cannot be moved into the\s+acceptance stage/);
     expect(def.description).toContain("has simply not reached the boundary yet");
@@ -1634,14 +1241,8 @@ describe("buildOperatorToolkit — the completion packet goes with the acceptanc
       new Uint8Array([0x89, 0x50, 0x4e, 0x47]),
       store.dataRoot,
     );
-    const toolkit = buildOperatorToolkit({
-      db: store.db,
-      ctx: { dataRoot: store.dataRoot },
-      projectSlug: store.slug,
-      taskKey: "VIB-1",
-      authority: authority([]),
-    });
-    const decision = {
+    const { tools } = storeToolkit(store);
+    const decision: Parameters<typeof callToolText>[2] = {
       packetType: "input",
       title: "Accept the attach flow",
       body: "The work is delivered and reviewed.",
@@ -1650,17 +1251,12 @@ describe("buildOperatorToolkit — the completion packet goes with the acceptanc
         { kind: "request_edit", title: "Ask for one more fix" },
       ],
     };
-    const summary = {
+    const summary: Parameters<typeof callToolText>[2] = {
       summary: "One repository per task.",
       gaps: "Detaching a repository is not covered.",
       screenshots: [{ name: "after.png", caption: "The attach dialog" }],
     };
-    // SAFETY: the SDK types a handler's argument as its own generic; each
-    // object here is the shape the tool's zod schema declares.
-    const call = async (name: string, args: typeof decision | typeof summary) =>
-      JSON.stringify(
-        await toolkit.tools.find((t) => t.name === name)!.handler(args as never, {} as never),
-      );
+    const call = (name: string, args: Parameters<typeof callToolText>[2]) => callToolText(tools, name, args);
     const packet = () =>
       readTaskFile({ projectSlug: store.slug, taskKey: "VIB-1", dataRoot: store.dataRoot })!
         .parsed.packet;
@@ -1721,15 +1317,8 @@ describe("ruling 693: the operator's read of what a task took", () => {
         totalCostUsd,
       });
     }
-    const toolkit = buildOperatorToolkit({
-      db: store.db,
-      ctx: { dataRoot: store.dataRoot },
-      projectSlug: store.slug,
-      taskKey: "VIB-1",
-      authority: authority([]),
-    });
-    const call = (name: string, args: Parameters<typeof callToolText>[2]) =>
-      callToolText(toolkit.tools, name, args);
+    const { tools } = storeToolkit(store);
+    const call = (name: string, args: Parameters<typeof callToolText>[2]) => callToolText(tools, name, args);
 
     // One decision, put by the operator's own tool and answered by a person.
     expect(

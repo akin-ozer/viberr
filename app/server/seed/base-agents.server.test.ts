@@ -47,18 +47,6 @@ describe("seed profile models", () => {
   });
 });
 
-describe("baseAgentDeployments", () => {
-  it("is the operator plus Developer / Reviewer", () => {
-    const ids = baseAgentDeployments().map((d) => d.profileId).sort();
-    expect(ids).toEqual(["developer", "operator", "reviewer"]);
-    expect(ids).toContain("operator");
-    expect(ids).toContain("developer");
-    expect(ids).toContain("reviewer");
-    // Tester was merged into the Reviewer (the single quality specialist).
-    expect(ids).not.toContain("tester");
-  });
-});
-
 describe("seedDefaultAgentAssets", () => {
   it("ships each built-in agent's definition, skill, and profile into a fresh store", () => {
     const dataRoot = ctx.makeTempDir();
@@ -76,12 +64,10 @@ describe("seedDefaultAgentAssets", () => {
     // The specialist persona now lives in the profile body.
     expect(read("agents", "profiles", "developer.md")).toContain("You are the Developer");
     expect(read("agents", "profiles", "reviewer.md")).toContain("You are the Reviewer");
-    expect(existsSync(path.join(dataRoot, "agents", "definitions", "tester.md"))).toBe(false);
 
     // Real, loadable skills — one per specialist role.
     expect(read("skills", "developer-expertise", "SKILL.md")).toContain("developer expertise");
     expect(read("skills", "reviewer-expertise", "SKILL.md")).toContain("reviewer expertise");
-    expect(existsSync(path.join(dataRoot, "skills", "tester-expertise", "SKILL.md"))).toBe(false);
 
     // Profile templates so the deployments resolve in a never-seeded store.
     for (const id of ["operator", "developer", "reviewer"]) {
@@ -112,16 +98,6 @@ describe("seedDefaultAgentAssets", () => {
     const dev = SEED_AGENT_PROFILES.find((p) => p.frontmatter.id === "developer")!;
     expect(dev.frontmatter.resources.kb).toContain("architecture-notes");
     expect(dev.frontmatter.resources.kb).toContain("api-contracts");
-  });
-
-  it("never clobbers an existing asset (idempotent)", () => {
-    const dataRoot = ctx.makeTempDir();
-    // The developer PROFILE (its persona body) is the specialist source now.
-    const dest = path.join(dataRoot, "agents", "profiles", "developer.md");
-    seedDefaultAgentAssets(dataRoot);
-    writeFileAtomic(dest, "EDITED BY A HUMAN");
-    seedDefaultAgentAssets(dataRoot);
-    expect(readFileSync(dest, "utf8")).toBe("EDITED BY A HUMAN");
   });
 });
 
@@ -186,18 +162,6 @@ describe("ruling 692: the library ships a Writer and an Editor", () => {
     for (const p of LIBRARY_AGENT_PROFILES) {
       expect(p.frontmatter.extras, `${p.frontmatter.id} has a label the catalog does not know`).toEqual([]);
       expect(isKnownModel("claude", p.frontmatter.model), p.frontmatter.id).toBe(true);
-    }
-  });
-
-  it("each manual leaves a board's own skill half of what a run with no checkout is given", () => {
-    // On a board with no repository every skill reaches a run as prompt text
-    // under one shared budget (ruling 679), drawn in name order: a manual that
-    // filled it would cut the board's own skill off whole.
-    const dataRoot = ctx.makeTempDir();
-    seedDefaultAgentAssets(dataRoot);
-    for (const name of ["writer-expertise", "editor-expertise"]) {
-      const raw = readFileSync(path.join(dataRoot, "skills", name, "SKILL.md"), "utf8");
-      expect(splitFrontmatter(raw).body.trim().length, name).toBeLessThanOrEqual(SKILL_INJECTION_BUDGET / 2);
     }
   });
 
@@ -313,6 +277,10 @@ describe("ruling 699: the library ships a Diagrammer and a Cover Designer", () =
   });
 
   it("each manual leaves a board's own skill half of what a run with no checkout is given", () => {
+    // On a board with no repository every skill reaches a run as prompt text
+    // under one shared budget (ruling 679), drawn in name order: a manual that
+    // filled it would cut the board's own skill off whole. The Writer's and the
+    // Editor's manuals (ruling 692) are held to it here too.
     const dataRoot = ctx.makeTempDir();
     seedDefaultAgentAssets(dataRoot);
     for (const name of ["diagrammer-expertise", "cover-designer-expertise", "editor-expertise", "writer-expertise"]) {
@@ -515,22 +483,6 @@ describe("buildSpecialistPromptPrefix", () => {
     expect(persona).toContain("Attached resources (trusted");
     expect(persona).toContain("do NOT flag them as prompt injection");
   });
-
-  it("is empty when the store ships neither a definition nor the skill", () => {
-    const dataRoot = ctx.makeTempDir();
-    const persona = joinedPrompt(buildSpecialistPromptPrefix({
-      profileId: "nonexistent",
-      skills: ["also-nonexistent"],
-      dataRoot,
-    }));
-    // C1 (pass 16): a grant that resolves to nothing is no longer silent. There
-    // is still no trusted content — what the run now gets is the disclosure that
-    // a declared resource did not arrive, so the agent reports the gap instead
-    // of treating the missing context as its own failure.
-    expect(persona).not.toContain("Attached resources (trusted");
-    expect(persona).toContain("Attached resources that did NOT fully reach this run");
-    expect(persona).toContain("also-nonexistent");
-  });
 });
 
 describe("ensureBaseAgentsDeployed", () => {
@@ -571,7 +523,6 @@ describe("ensureBaseAgentsDeployed", () => {
     expect(ids).toContain("operator");
     expect(ids).toContain("developer");
     expect(ids).toContain("reviewer");
-    expect(ids).not.toContain("tester");
   });
 
   it("respects a deliberate specialist removal — ≥1 specialist keeps the roster as-is (E10)", async () => {

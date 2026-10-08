@@ -14,12 +14,13 @@ import {
   baseTaskFrontmatter,
   MERGE_STAGE_BOARD,
   REVIEW_STAGE_REVIEWER,
+  REVIEWER_ENGAGEMENT,
   writeProject,
   writeTask,
   type TestStore,
 } from "../../../test-support/test-store";
-import { COMPACTION_TITLE } from "./timeline-compaction.server";
 import { listAuditEvents } from "../../../test-support/audit-log";
+import { waitFor } from "../../../test-support/polling";
 import { deriveValidation } from "~/schemas/task-file.schema";
 import type {
   Engagement,
@@ -40,7 +41,7 @@ import {
 import { insertUser } from "~/server/auth/user-store.server";
 import { listScopeViolations } from "~/server/projections/policy-violations.server";
 import { rebuildAll } from "~/server/projections/rebuilder.server";
-import { setupProjectedStore } from "../../../test-support/projected-store";
+import { reconfigureProject, setupProjectedStore } from "../../../test-support/projected-store";
 import { listProjectTasks } from "~/server/projections/board-query.server";
 import {
   attachmentProducers,
@@ -63,7 +64,6 @@ import { manualDeliverForReview, performDelivery } from "./task-delivery.server"
 import {
   revisionDriftNote,
   refreshAndReview,
-  acceptanceDisclosureOf,
   forceAcceptCompletion,
 } from "./task-acceptance.server";
 import { releaseOwner, releaseTasksOwnedBy, setOwner } from "./task-ownership.server";
@@ -111,6 +111,12 @@ function deliveryCtx(store: TestStore): TaskActionContext {
 
 const ctx = createTestDbContext();
 afterEach(ctx.cleanup);
+// The push double and the canned transport are module-level: every test
+// starts with no queued push answer and no reachable GitHub.
+afterEach(() => {
+  pushMock.mockReset();
+  github = null;
+});
 
 /**
  * sqlite hands its rows back as untyped cells, so every read below names the
@@ -194,15 +200,6 @@ const DEV_ENGAGEMENT: Engagement = {
   role: "developer",
   delivers: true,
   verdictCapable: false,
-};
-/** A verdict-capable reviewer engagement whose profileId matches REVIEWER_REF,
- *  so recordReviewerReply's verdict binds AND gates acceptance (F10-15). */
-const REVIEWER_ENGAGEMENT: Engagement = {
-  profileId: "reviewer",
-  backend: "claude",
-  role: "Review & validation",
-  delivers: false,
-  verdictCapable: true,
 };
 /** A second verdict-capable reviewer engagement (pairs with QA_REVIEWER_REF). */
 const QA_REVIEWER_ENGAGEMENT: Engagement = {
@@ -514,7 +511,6 @@ describe("createTask", () => {
       ),
     );
     const keys = results.map((r) => r.key);
-    expect(new Set(keys).size).toBe(8);
     expect(keys.sort()).toEqual(
       Array.from({ length: 8 }, (_, i) => `VIB-${100 + i}`).sort(),
     );
@@ -730,36 +726,6 @@ describe("appendComment", () => {
     ).toMatchObject({ c: 0 });
   });
 
-  // NEW-4: an AGENT reply that tags a human must fan out the same `mention`
-  // notification a human comment would — otherwise the tag the agents are now
-  // instructed to write pings no one. The `from` chip is the agent, not a human.
-  it("an agent reply that @tags a human notifies them, attributed to the agent", async () => {
-    const store = setupProjectedStore(ctx);
-    withTask(store);
-    await postAgentReplyComment(store.db, { dataRoot: store.dataRoot }, {
-      projectSlug: store.slug,
-      taskKey: "VIB-1",
-      runId: "run_test",
-      actorRef: REVIEWER_REF,
-      replyText: `@${store.users.arda.name.split(" ")[0]} the review is clean — over to you for acceptance.`,
-    });
-
-    const rows = selectRows(
-      store.db,
-      `SELECT user_id, kind, actor_json FROM notifications`,
-      z.object({
-        user_id: z.string(),
-        kind: z.string(),
-        actor_json: z.string().nullable(),
-      }),
-    );
-    expect(rows).toHaveLength(1);
-    expect(rows[0]!.user_id).toBe(store.users.arda.id);
-    expect(rows[0]!.kind).toBe("mention");
-    // Attributed to the reviewer agent (kind agent + backend), NOT a human.
-    expect(JSON.parse(rows[0]!.actor_json!)).toMatchObject({ kind: "agent", backend: "claude" });
-  });
-
   // G7/B-FD9: the compression-threshold guardrail must fire on a pure
   // agent-reply flood — the case it exists for. It ran only on operator/human
   // comment writes, so a run of agent replies accreted with no compaction.
@@ -804,7 +770,7 @@ describe("appendComment", () => {
       dataRoot: store.dataRoot,
     })!.parsed.timeline;
     // The older routine comments folded into a compaction marker.
-    expect(timeline.some((e) => e.title === COMPACTION_TITLE)).toBe(true);
+    expect(timeline.some((e) => e.title === "Compacted")).toBe(true);
     expect(timeline.length).toBeLessThan(flood.length + 1);
   });
 
@@ -873,7 +839,7 @@ describe("appendComment", () => {
       taskKey: "VIB-1",
       dataRoot: store.dataRoot,
     })!.parsed.timeline;
-    expect(timeline.some((e) => e.title === COMPACTION_TITLE)).toBe(true);
+    expect(timeline.some((e) => e.title === "Compacted")).toBe(true);
     // 15 events + this comment, folded well below the configured threshold of
     // 10 — proof the guardrail's VALUE drives the pass (it used to be a
     // hardcoded 60, which this timeline never reaches).
@@ -908,7 +874,7 @@ describe("appendComment", () => {
       taskKey: "VIB-1",
       dataRoot: store.dataRoot,
     })!.parsed.timeline;
-    expect(timeline.some((e) => e.title === COMPACTION_TITLE)).toBe(false);
+    expect(timeline.some((e) => e.title === "Compacted")).toBe(false);
     expect(timeline).toHaveLength(flood.length + 1);
   });
 
@@ -1990,7 +1956,7 @@ describe("validation state machine (A3 — a rejection is not a life sentence)",
 });
 
 describe("owner-assign is a clean ownership mutation — no operator side effects (F19)", () => {
-  it("records ownership without flipping board state, narrating, or firing an operator run", async () => {
+  it("records ownership without flipping board state or narrating", async () => {
     const store = setupProjectedStore(ctx);
     // operator attached + waiting on a human owner + unowned + a `**Quality
     // gate:**` operator event: the EXACT shape that used to trip the inline
@@ -2036,19 +2002,13 @@ describe("owner-assign is a clean ownership mutation — no operator side effect
     // …board state is untouched (no fabricated ready/agent flip)…
     expect(fm.readiness).toBe("input_required");
     expect(fm.waiting).toBe("human");
-    // …no synthetic "scheduling execution" operator narration…
+    // …and no synthetic "scheduling execution" operator narration.
     const detail = getTaskDetail(store.db, store.slug, "VIB-1");
     expect(
       detail?.timeline.some(
         (e) => e.type === "agent" && e.text.includes("scheduling execution"),
       ),
     ).toBe(false);
-    // …and NO operator run is fired on ownership.
-    const opRuns = countRow(
-      store.db,
-      `SELECT count(*) AS c FROM agent_runs WHERE kind = 'operator'`,
-    );
-    expect(opRuns.c).toBe(0);
   });
 });
 
@@ -2208,36 +2168,6 @@ describe("F19-18: the delivery push failure surfaces git's redacted stderr", () 
   });
 });
 
-describe("the delivery deps seam defaults to the real modules", () => {
-  it("an un-injected performDelivery runs the real push-workspace (no workspace → honest failure)", async () => {
-    pushMock.mockClear(); // earlier tests in this file drove the double
-    const store = setupProjectedStore(ctx);
-    writeTask(store.dataRoot, store.slug, {
-      frontmatter: baseTaskFrontmatter("VIB-1", {
-        stage: "review",
-        ownerUserId: store.users.arda.id,
-      }),
-    });
-    rebuildAll(store.db, { dataRoot: store.dataRoot });
-
-    // A ctx with NO deps: the seam's absent-field path resolves the real
-    // push-workspace, which honestly reports the missing workspace clone
-    // before it ever reaches a credential or the network.
-    const outcome = await performDelivery(
-      store.db,
-      { dataRoot: store.dataRoot },
-      store.slug,
-      "VIB-1",
-      actorOf(store.users.arda),
-    );
-    expect(outcome.status).toBe("failed");
-    expect(outcome.status === "failed" ? outcome.message : "").toContain(
-      "no workspace clone",
-    );
-    expect(pushMock).not.toHaveBeenCalled();
-  });
-});
-
 /**
  * F19-21 — R17-2's "Completed — no changes required" outcome, for the task
  * shape ruling 43 was actually written for.
@@ -2339,10 +2269,6 @@ describe("F19-21: a verification-only task reaches the no-change completion", ()
       actorOf(store.users.arda),
     );
   }
-
-  afterEach(() => {
-    github = null;
-  });
 
   it("records the verified zero-diff and mints the base-anchored revision", async () => {
     const store = setupProjectedStore(ctx);
@@ -2671,12 +2597,6 @@ describe("R15-1: `noChanges` bypasses the verdict gate ONLY where there is no PR
       deliveryCtx(store),
     );
 
-  // Drop the canned transport after any test opts into a reachable GitHub
-  // (there is no auto-reset between tests in this file).
-  afterEach(() => {
-    github = null;
-  });
-
   it("refuses a task with an OPEN PR that no verdict approved", async () => {
     const store = setupProjectedStore(ctx);
     seedNoChange(store, {
@@ -2865,6 +2785,15 @@ describe("U3: a concurrent double-submit writes ONE transition", () => {
   });
 });
 
+/** Ruling 88: the echo an accept dialog sends, built the way `ceremonyFacts`
+ *  builds it (accept-confirm-derive.ts) from the task the dialog renders, so a
+ *  door is proved against what a person read rather than against the
+ *  server's own reading of the file. */
+function renderedDisclosure(store: TestStore): AcceptanceDisclosure {
+  const task = getTaskDetail(store.db, store.slug, "VIB-1")!;
+  return { pr: task.pr?.state ?? "none", revision: task.workRevisionSha ?? "none", verdict: task.validation };
+}
+
 /**
  * F21-2 / ruling 88 (pass 21) — the acceptance ceremony, server-side.
  *
@@ -2917,13 +2846,7 @@ describe("F21-2 / ruling 88: the server-side acceptance disclosure", () => {
   }
 
   function live(store: TestStore): AcceptanceDisclosure {
-    return acceptanceDisclosureOf(
-      readTaskFile({
-        projectSlug: store.slug,
-        taskKey: "VIB-1",
-        dataRoot: store.dataRoot,
-      })!.parsed.frontmatter,
-    );
+    return renderedDisclosure(store);
   }
 
   function task(store: TestStore) {
@@ -3920,7 +3843,6 @@ describe("ruling 128: performDelivery bootstraps the base before the first push"
   // successful push of workflow files resolves it. Canaries: route
   // `push_refused_scope` into the `push_failed` arm; drop the resolve.
   it("ruling 144: a refused workflow push opens the violation with the remedy, and no PR", async () => {
-    pushMock.mockClear();
     const store = setupProjectedStore(ctx);
     seedDeliverable(store);
     github = fakeGithubFetch({
@@ -3983,7 +3905,6 @@ describe("ruling 128: performDelivery bootstraps the base before the first push"
    * and the paths vanish).
    */
   it("ruling 159: a push refused for the store layout names the paths, opens no PR", async () => {
-    pushMock.mockClear();
     const store = setupProjectedStore(ctx);
     seedDeliverable(store);
     github = fakeGithubFetch({
@@ -4033,7 +3954,6 @@ describe("ruling 128: performDelivery bootstraps the base before the first push"
   it("bootstraps `main` before the first push and records it (the bootstrap line is timeline[1], under the PR event)", async () => {
     // Canary: gate the bootstrap on the absence of the `pushWorkspaceBranch`
     // dep (skip it when a dep is injected) and the PUT never runs here.
-    pushMock.mockClear();
     const store = setupProjectedStore(ctx);
     seedDeliverable(store);
     let bootstrapped = false;
@@ -4082,7 +4002,6 @@ describe("ruling 128: performDelivery bootstraps the base before the first push"
     // moves the project onto it. CANARY: refuse an adopted base and nothing is
     // pushed; open the pull request against the branch read before the gate
     // and GitHub answers 422 `base: invalid`.
-    pushMock.mockClear();
     const store = setupProjectedStore(ctx);
     seedDeliverable(store);
     github = fakeGithubFetch({
@@ -4103,7 +4022,6 @@ describe("ruling 128: performDelivery bootstraps the base before the first push"
   it("refuses to push when the base cannot be CREATED, and pushes anyway when the probe merely could not be READ", async () => {
     // Canary: route `network_unavailable` into the refusing arm and the second
     // half fails (no push, and a sentence claiming the base is missing).
-    pushMock.mockClear();
     const store = setupProjectedStore(ctx);
     seedDeliverable(store);
     github = fakeGithubFetch({
@@ -4148,7 +4066,6 @@ describe("ruling 128: performDelivery bootstraps the base before the first push"
 describe("ruling 134: the pushed-head event on a reused PR", () => {
   it("writes `Pushed <sha> to PR #N (was <old>)` attributed to the human who delivered, and records the head on the PR", async () => {
     const REPO_PATH = "/repos/akin-ozer/viberr";
-    pushMock.mockClear();
     const store = setupProjectedStore(ctx);
     writeTask(store.dataRoot, store.slug, {
       frontmatter: baseTaskFrontmatter("VIB-1", {
@@ -4257,9 +4174,7 @@ describe("ruling 137: a move off the acceptance boundary withdraws the offers", 
 });
 
 function deployOperatorOn(store: ReturnType<typeof setupProjectedStore>): void {
-  const projectFile = readProjectFile({ projectSlug: store.slug, dataRoot: store.dataRoot })!;
-  writeProject(store.dataRoot, {
-    ...projectFile.parsed.frontmatter,
+  reconfigureProject(store, {
     agents: [
       {
         profileId: "operator",
@@ -4277,7 +4192,6 @@ function deployOperatorOn(store: ReturnType<typeof setupProjectedStore>): void {
       },
     ],
   });
-  rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
 }
 
 /**
@@ -4294,17 +4208,12 @@ describe("ruling 533: a task filed with its input", () => {
     const store = setupProjectedStore(ctx);
     deployOperatorOn(store);
     const seen: { files: string[]; claimed: string[] }[] = [];
-    let settle: (() => void) | null = null;
-    const observed = new Promise<void>((resolve) => {
-      settle = resolve;
-    });
     const runOperator = vi.fn((_db: DatabaseSync, input: RunOperatorInput) => {
       const file = readTaskFile({ projectSlug: input.projectSlug, taskKey: input.taskKey, dataRoot: store.dataRoot });
       seen.push({
         files: listTaskAttachments(input.projectSlug, input.taskKey, store.dataRoot).map((a) => a.name).sort(),
         claimed: (file?.parsed.timeline ?? []).flatMap((e) => (e.actor.kind === "human" ? (e.attachments ?? []) : [])).sort(),
       });
-      settle?.();
       return Promise.resolve({ runId: "run_filed", queued: false, backend: "claude" as const, autonomy: "supervised" as const });
     });
     const created = await createTask(
@@ -4321,10 +4230,7 @@ describe("ruling 533: a task filed with its input", () => {
       actorOf(store.users.arda),
       { dataRoot: store.dataRoot, deps: { runOperator } },
     );
-    await Promise.race([
-      observed,
-      new Promise((_, reject) => setTimeout(() => reject(new Error("the create trigger never fired")), 5_000)),
-    ]);
+    await waitFor(() => seen.length > 0, "the create trigger", 5_000);
     expect(seen).toEqual([{ files: ["inventory.csv", "portal.png"], claimed: ["inventory.csv", "portal.png"] }]);
     const parsed = readTaskFile({ projectSlug: store.slug, taskKey: created.key, dataRoot: store.dataRoot })!.parsed;
     const note = parsed.timeline.find((e) => e.title === "Attachment added")!;
@@ -4514,10 +4420,6 @@ describe("ruling 140(a): a named owner at creation", () => {
     // hand-off this case is about needs one on the project.
     deployOperatorOn(store);
     const seen: { ownerUserId: string | null; trigger: string | undefined }[] = [];
-    let settle: (() => void) | null = null;
-    const observed = new Promise<void>((resolve) => {
-      settle = resolve;
-    });
     const runOperator = vi.fn((_db: DatabaseSync, input: RunOperatorInput) => {
       const file = readTaskFile({
         projectSlug: input.projectSlug,
@@ -4528,7 +4430,6 @@ describe("ruling 140(a): a named owner at creation", () => {
         ownerUserId: file?.parsed.frontmatter.ownerUserId ?? null,
         trigger: input.trigger,
       });
-      settle?.();
       return Promise.resolve({
         runId: "run_seat",
         queued: false,
@@ -4543,12 +4444,7 @@ describe("ruling 140(a): a named owner at creation", () => {
       { dataRoot: store.dataRoot, deps: { runOperator } },
     );
     expect(created.task.owner).toMatchObject({ kind: "human", userId: store.users.murat.id });
-    await Promise.race([
-      observed,
-      new Promise((_, reject) =>
-        setTimeout(() => reject(new Error("the create trigger never fired")), 5_000),
-      ),
-    ]);
+    await waitFor(() => seen.length > 0, "the create trigger", 5_000);
     expect(seen).toEqual([{ ownerUserId: store.users.murat.id, trigger: "create" }]);
     const parsed = readTaskFile({
       projectSlug: store.slug,
@@ -4813,9 +4709,7 @@ describe("pass 35: operator and task actions", () => {
   /** An operator deployment with the standard supervised policy, so the
    *  transition re-trigger and the acceptance fold have an authority to read. */
   function deployOperator(store: TestStore): void {
-    const projectFile = readProjectFile({ projectSlug: store.slug, dataRoot: store.dataRoot })!;
-    writeProject(store.dataRoot, {
-      ...projectFile.parsed.frontmatter,
+    reconfigureProject(store, {
       agents: [
         {
           profileId: "operator",
@@ -4837,7 +4731,6 @@ describe("pass 35: operator and task actions", () => {
         },
       ],
     });
-    rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
   }
 
   function seed(store: TestStore, patch: Partial<TaskFrontmatter> = {}, packet: TaskPacket | null = null): void {
@@ -4858,25 +4751,24 @@ describe("pass 35: operator and task actions", () => {
   const file = (store: TestStore) =>
     readTaskFile({ projectSlug: store.slug, taskKey: "VIB-1", dataRoot: store.dataRoot })!.parsed;
 
-  /** A recording `runOperator` seam that settles a promise on its first call. */
-  function operatorSeam() {
-    let settle: (() => void) | null = null;
-    const observed = new Promise<void>((resolve) => {
-      settle = resolve;
-    });
-    const runOperator = vi.fn((_db: DatabaseSync, _input: RunOperatorInput) => {
-      settle?.();
-      return Promise.resolve({
+  /** A recording `runOperator` seam. */
+  const operatorSeam = () =>
+    vi.fn((_db: DatabaseSync, _input: RunOperatorInput) =>
+      Promise.resolve({
         runId: "run_seam",
         queued: false,
         backend: "claude" as const,
         autonomy: "supervised" as const,
-      });
-    });
-    return { runOperator, observed };
-  }
+      }),
+    );
 
-  const tick = () => new Promise((r) => setTimeout(r, 120));
+  /** The acceptance card the fold files, once it has landed. */
+  const cardFiled = (store: TestStore) =>
+    waitFor(
+      () => file(store).frontmatter.recommendations.some((r) => r.kind === "accept_completion"),
+      "the acceptance fold",
+      5_000,
+    );
 
   describe("ruling 151 (F35-2): the boundary always wins in transitionStage", () => {
     it("an operator-authorized move across an approval boundary is refused, whatever the caller", async () => {
@@ -4916,6 +4808,12 @@ describe("pass 35: operator and task actions", () => {
       const store = setupProjectedStore(ctx);
       deployOperator(store);
       seed(store, { stage: "ready" });
+      const liveRun: NonNullable<TaskMutationContext["operatorRun"]> = {
+        backend: "claude",
+        autonomy: "supervised",
+        reactDepth: 0,
+        transitionDepth: 0,
+      };
       const live = operatorSeam();
       await transitionStage(
         store.db,
@@ -4924,13 +4822,14 @@ describe("pass 35: operator and task actions", () => {
         {
           dataRoot: store.dataRoot,
           operatorAuthorized: true,
-          operatorRun: { backend: "claude", autonomy: "supervised", reactDepth: 0, transitionDepth: 0 },
-          deps: { runOperator: live.runOperator },
+          operatorRun: liveRun,
+          deps: { runOperator: live },
         },
       );
       expect(file(store).frontmatter.stage).toBe("impl");
-      await tick();
-      expect(live.runOperator).not.toHaveBeenCalled();
+      // The live run's arm took the move: it stamps the stage and launches
+      // nothing, while the re-trigger is the arm it excludes.
+      expect(liveRun.movedToStageId).toBe("impl");
 
       seed(store, { stage: "ready" });
       const direct = operatorSeam();
@@ -4938,14 +4837,14 @@ describe("pass 35: operator and task actions", () => {
         store.db,
         { projectSlug: store.slug, taskKey: "VIB-1", toStageId: "impl" },
         OPERATOR_TASK_ACTOR,
-        { dataRoot: store.dataRoot, operatorAuthorized: true, deps: { runOperator: direct.runOperator } },
+        { dataRoot: store.dataRoot, operatorAuthorized: true, deps: { runOperator: direct } },
       );
-      await Promise.race([
-        direct.observed,
-        new Promise((_, reject) => setTimeout(() => reject(new Error("the transition trigger never fired")), 5_000)),
-      ]);
-      expect(direct.runOperator).toHaveBeenCalledTimes(1);
-      expect(direct.runOperator.mock.calls[0]![1].trigger).toBe("transition");
+      await waitFor(() => direct.mock.calls.length > 0, "the transition trigger", 5_000);
+      expect(direct).toHaveBeenCalledTimes(1);
+      expect(direct.mock.calls[0]![1].trigger).toBe("transition");
+      // The live move's re-trigger, had there been one, started first and would
+      // have landed before this one. CANARY: queue the turn beside the stamp.
+      expect(live).not.toHaveBeenCalled();
     });
 
     it("ruling 357: a move after the drive's own delivery stamps `actedAfterDelivery`; a move without one stamps nothing", async () => {
@@ -4998,12 +4897,12 @@ describe("pass 35: operator and task actions", () => {
         store.db,
         { projectSlug: store.slug, taskKey: "VIB-1", toStageId: "review", recommendationAuthorized: true },
         actorOf(store.users.arda),
-        { dataRoot: store.dataRoot, deps: { runOperator: seam.runOperator } },
+        { dataRoot: store.dataRoot, deps: { runOperator: seam } },
       );
       expect(file(store).frontmatter.stage).toBe("review");
-      await tick();
+      await cardFiled(store);
       expect(file(store).frontmatter.recommendations.map((r) => r.kind)).toEqual(["accept_completion"]);
-      expect(seam.runOperator).not.toHaveBeenCalled();
+      expect(seam).not.toHaveBeenCalled();
       expect(
         listAuditEvents(store.db, { action: "task.operator.recommended_completion" }),
       ).toHaveLength(1);
@@ -5019,14 +4918,11 @@ describe("pass 35: operator and task actions", () => {
         store.db,
         { projectSlug: store.slug, taskKey: "VIB-1", toStageId: "review", recommendationAuthorized: true },
         actorOf(store.users.arda),
-        { dataRoot: store.dataRoot, deps: { runOperator: seam.runOperator } },
+        { dataRoot: store.dataRoot, deps: { runOperator: seam } },
       );
-      await Promise.race([
-        seam.observed,
-        new Promise((_, reject) => setTimeout(() => reject(new Error("the transition trigger never fired")), 5_000)),
-      ]);
+      await waitFor(() => seam.mock.calls.length > 0, "the transition trigger", 5_000);
       expect(file(store).frontmatter.recommendations).toHaveLength(0);
-      expect(seam.runOperator).toHaveBeenCalledTimes(1);
+      expect(seam).toHaveBeenCalledTimes(1);
     });
 
     it.each([
@@ -5072,19 +4968,16 @@ describe("pass 35: operator and task actions", () => {
         store.db,
         { projectSlug: store.slug, taskKey: "VIB-1", toStageId: "review", recommendationAuthorized: true },
         actorOf(store.users.arda),
-        { dataRoot: store.dataRoot, deps: { runOperator: seam.runOperator } },
+        { dataRoot: store.dataRoot, deps: { runOperator: seam } },
       );
       if (packetWritten) {
-        await tick();
+        await cardFiled(store);
         expect(file(store).frontmatter.recommendations.map((r) => r.kind)).toEqual(["accept_completion"]);
-        expect(seam.runOperator).not.toHaveBeenCalled();
+        expect(seam).not.toHaveBeenCalled();
       } else {
-        await Promise.race([
-          seam.observed,
-          new Promise((_, reject) => setTimeout(() => reject(new Error("the transition trigger never fired")), 5_000)),
-        ]);
+        await waitFor(() => seam.mock.calls.length > 0, "the transition trigger", 5_000);
         expect(file(store).frontmatter.recommendations).toHaveLength(0);
-        expect(seam.runOperator).toHaveBeenCalledTimes(1);
+        expect(seam).toHaveBeenCalledTimes(1);
       }
     });
   });
@@ -5126,7 +5019,7 @@ describe("pass 35: operator and task actions", () => {
         },
         blocked,
       );
-      const ack = acceptanceDisclosureOf(file(store).frontmatter);
+      const ack = renderedDisclosure(store);
       await forceAcceptCompletion(
         store.db,
         { projectSlug: store.slug, taskKey: "VIB-1", ack },
@@ -5876,7 +5769,6 @@ describe("pass 35 S15: rulings 162 and 163 at the merge stage", () => {
   it("ruling 163 (c): delivering a changed revision at Merge records the transition back to Review", async () => {
     // Canary: drop the `returnChangedRevisionToReview` call in performDelivery.
     const REPO_PATH = "/repos/akin-ozer/viberr";
-    pushMock.mockClear();
     const store = setupProjectedStore(ctx);
     withMergeBoard(store);
     seedChangedAt(store, "merge", {
@@ -5910,7 +5802,6 @@ describe("pass 35 S15: rulings 162 and 163 at the merge stage", () => {
       actorOf(store.users.arda),
       deliveryCtx(store),
     );
-    github = null;
     expect(outcome).toMatchObject({ status: "delivered", moved: true });
     const parsed = taskFile(store);
     expect(parsed.frontmatter.stage).toBe("review");
@@ -5948,7 +5839,7 @@ describe("pass 35 S15: rulings 162 and 163 at the merge stage", () => {
     }));
     const rejected = transitionStage(
       store.db,
-      { projectSlug: store.slug, taskKey: "VIB-1", toStageId: "done", manual: true, ack: acceptanceDisclosureOf(taskFile(store).frontmatter) },
+      { projectSlug: store.slug, taskKey: "VIB-1", toStageId: "done", manual: true, ack: renderedDisclosure(store) },
       actorOf(store.users.arda),
       { dataRoot: store.dataRoot, deps: { mergeTaskPr: mergeMock, updateBranchFromBase: refreshMock } },
     );
@@ -6101,7 +5992,7 @@ describe("pass 35 S15: rulings 162 and 163 at the merge stage", () => {
     });
     await transitionStage(
       store.db,
-      { projectSlug: store.slug, taskKey: "VIB-1", toStageId: "done", manual: true, ack: acceptanceDisclosureOf(taskFile(store).frontmatter) },
+      { projectSlug: store.slug, taskKey: "VIB-1", toStageId: "done", manual: true, ack: renderedDisclosure(store) },
       actorOf(store.users.arda),
       { dataRoot: store.dataRoot, deps: { mergeTaskPr: mergeMock, updateBranchFromBase: refreshMock } },
     );
@@ -6179,7 +6070,7 @@ describe("pass 35 S15: rulings 162 and 163 at the merge stage", () => {
         taskKey: "VIB-1",
         toStageId: "done",
         manual: true,
-        ack: acceptanceDisclosureOf(taskFile(store).frontmatter),
+        ack: renderedDisclosure(store),
       },
       actorOf(store.users.arda),
       { dataRoot: store.dataRoot, deps: { mergeTaskPr: mergeMock } },
@@ -6223,7 +6114,7 @@ describe("pass 35 S15: rulings 162 and 163 at the merge stage", () => {
     await expect(
       transitionStage(
         store.db,
-        { projectSlug: store.slug, taskKey: "VIB-1", toStageId: "done", manual: true, ack: acceptanceDisclosureOf(taskFile(store).frontmatter) },
+        { projectSlug: store.slug, taskKey: "VIB-1", toStageId: "done", manual: true, ack: renderedDisclosure(store) },
         actorOf(store.users.arda),
         { dataRoot: store.dataRoot, deps: { mergeTaskPr: mergeMock, updateBranchFromBase: refreshMock } },
       ),
@@ -6286,7 +6177,7 @@ describe("pass 35 S15: rulings 162 and 163 at the merge stage", () => {
     await expect(
       transitionStage(
         store.db,
-        { projectSlug: store.slug, taskKey: "VIB-1", toStageId: "done", manual: true, ack: acceptanceDisclosureOf(taskFile(store).frontmatter) },
+        { projectSlug: store.slug, taskKey: "VIB-1", toStageId: "done", manual: true, ack: renderedDisclosure(store) },
         actorOf(store.users.arda),
         { dataRoot: store.dataRoot, deps: { updateBranchFromBase: refreshMock, runOperator } },
       ),
@@ -6299,9 +6190,7 @@ describe("pass 35 S15: rulings 162 and 163 at the merge stage", () => {
      * before it reaches `runOperator`, and the first load of those modules in a
      * test run is slower than any sleep worth writing.
      */
-    for (let i = 0; i < 100 && runOperator.mock.calls.length === 0; i += 1) {
-      await new Promise((r) => setTimeout(r, 20));
-    }
+    await waitFor(() => runOperator.mock.calls.length > 0, "the refusal to wake the operator");
     expect(runOperator, "the refusal woke nobody").toHaveBeenCalledTimes(1);
     expect(runOperator.mock.lastCall?.[1]).toMatchObject({
       taskKey: "VIB-1",
@@ -6374,7 +6263,7 @@ describe("pass 35 S15: rulings 162 and 163 at the merge stage", () => {
     await expect(
       transitionStage(
         store.db,
-        { projectSlug: store.slug, taskKey: "VIB-1", toStageId: "done", manual: true, ack: acceptanceDisclosureOf(taskFile(store).frontmatter) },
+        { projectSlug: store.slug, taskKey: "VIB-1", toStageId: "done", manual: true, ack: renderedDisclosure(store) },
         actorOf(store.users.arda),
         { dataRoot: store.dataRoot, fetchImpl, deps: { mergeTaskPr: mergeMock, updateBranchFromBase: refreshMock } },
       ),

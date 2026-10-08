@@ -40,7 +40,7 @@ import type { McpFetch } from "./upstream.server";
  */
 
 /** How long one request to an authorization server may take. */
-export const OAUTH_REQUEST_TIMEOUT_MS = 15_000;
+const OAUTH_REQUEST_TIMEOUT_MS = 15_000;
 
 /** What Viberr keeps of an authorization server's metadata: the endpoints it
  *  calls and the capabilities it checked. */
@@ -92,7 +92,7 @@ export interface McpOAuthDiscovery {
 }
 
 /** A sign-in refused or failed, with the reason in words an admin can act on. */
-export class McpOAuthError extends Error {
+class McpOAuthError extends Error {
   readonly reason: string;
   /** False for a failure worth retrying as is: the authorization server was
    *  unreachable, slow or answered 5xx, so a refresh token may still be good. */
@@ -124,10 +124,9 @@ export function isClientRefusal(cause: unknown): boolean {
 }
 
 /** `fetch` with a deadline, since the SDK's OAuth helpers set none. */
-function timed(fetchImpl: McpFetch | undefined): McpFetch {
-  const base = fetchImpl ?? fetch;
+function timed(): McpFetch {
   return (url, init) =>
-    base(url, { ...init, signal: init?.signal ?? AbortSignal.timeout(OAUTH_REQUEST_TIMEOUT_MS) });
+    fetch(url, { ...init, signal: init?.signal ?? AbortSignal.timeout(OAUTH_REQUEST_TIMEOUT_MS) });
 }
 
 /**
@@ -205,9 +204,9 @@ export function scrubSecrets(text: string, secrets: readonly (string | null | un
  */
 export async function discoverMcpOAuth(
   target: string,
-  options: { resourceMetadataUrl?: string | null; fetchImpl?: McpFetch } = {},
+  options: { resourceMetadataUrl?: string | null } = {},
 ): Promise<McpOAuthDiscovery> {
-  const fetchFn = timed(options.fetchImpl);
+  const fetchFn = timed();
   let resourceMetadata: Awaited<ReturnType<typeof discoverOAuthProtectedResourceMetadata>> | null = null;
   try {
     resourceMetadata = await discoverOAuthProtectedResourceMetadata(
@@ -281,7 +280,6 @@ export async function discoverMcpOAuth(
 export async function registerMcpOAuthClient(
   discovery: McpOAuthDiscovery,
   redirectUri: string,
-  fetchImpl?: McpFetch,
 ): Promise<McpOAuthClient> {
   if (!discovery.endpoints.registration_endpoint) {
     throw new McpOAuthError(
@@ -298,7 +296,7 @@ export async function registerMcpOAuthClient(
         response_types: ["code"],
       },
       scope: discovery.scope ?? undefined,
-      fetchFn: timed(fetchImpl),
+      fetchFn: timed(),
     });
     const client: McpOAuthClient = { client_id: full.client_id, redirect_uri: redirectUri };
     if (full.client_secret) client.client_secret = full.client_secret;
@@ -333,7 +331,6 @@ export async function exchangeMcpOAuthCode(
   client: McpOAuthClient,
   code: string,
   codeVerifier: string,
-  fetchImpl?: McpFetch,
 ): Promise<OAuthTokens> {
   try {
     return await exchangeAuthorization(discovery.authorizationServer, {
@@ -343,7 +340,7 @@ export async function exchangeMcpOAuthCode(
       codeVerifier,
       redirectUri: client.redirect_uri,
       resource: discovery.resource ? new URL(discovery.resource) : undefined,
-      fetchFn: timed(fetchImpl),
+      fetchFn: timed(),
     });
   } catch (error) {
     throw new McpOAuthError(`the code exchange failed: ${oauthFailureReason(error)}`, {
@@ -359,7 +356,6 @@ export async function refreshMcpOAuthTokens(
   discovery: McpOAuthDiscovery,
   client: McpOAuthClient,
   refreshToken: string,
-  fetchImpl?: McpFetch,
 ): Promise<OAuthTokens> {
   try {
     return await refreshAuthorization(discovery.authorizationServer, {
@@ -367,7 +363,7 @@ export async function refreshMcpOAuthTokens(
       clientInformation: client,
       refreshToken,
       resource: discovery.resource ? new URL(discovery.resource) : undefined,
-      fetchFn: timed(fetchImpl),
+      fetchFn: timed(),
     });
   } catch (error) {
     throw new McpOAuthError(oauthFailureReason(error), {
@@ -387,7 +383,6 @@ export async function revokeMcpOAuthToken(
   client: McpOAuthClient,
   token: string,
   hint: "refresh_token" | "access_token",
-  fetchImpl?: McpFetch,
 ): Promise<boolean> {
   const endpoint = discovery.endpoints.revocation_endpoint;
   if (!endpoint) return false;
@@ -403,7 +398,7 @@ export async function revokeMcpOAuthToken(
   }
   let res: Response;
   try {
-    res = await timed(fetchImpl)(endpoint, { method: "POST", headers, body });
+    res = await timed()(endpoint, { method: "POST", headers, body });
   } catch (error) {
     throw new McpOAuthError(`revocation failed: ${oauthFailureReason(error)}`, { cause: error });
   }

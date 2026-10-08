@@ -1,6 +1,5 @@
-import { RouterContextProvider } from "react-router";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { setupAppTest, type AppTestContext } from "../../test-support/test-app";
+import { routeArgs, setupAppTest, type AppTestContext } from "../../test-support/test-app";
 import { ERROR_CODES } from "~/server/errors/error-codes";
 
 /**
@@ -31,13 +30,7 @@ async function search(q: string, cookie?: string) {
     `/resources/search?q=${encodeURIComponent(q)}`,
     cookie ? { cookie } : {},
   );
-  const response = await loader({
-    request,
-    url: new URL(request.url),
-    params: {},
-    pattern: "/resources/search",
-    context: new RouterContextProvider(),
-  });
+  const response = await loader(routeArgs(request, {}, "/resources/search"));
   return { status: response.status, body: await response.json() };
 }
 

@@ -1162,7 +1162,7 @@ describe("RepoPanel", () => {
     expect(field()?.value).toBe("akin-ozer/right");
   });
 
-  it("a configured credential offers Rotate + a confirmed Remove (finding #13)", () => {
+  it("a configured credential offers Re-attach + a confirmed Remove (finding #13)", () => {
     const onSet = vi.fn();
     const onClear = vi.fn();
     const bound = {

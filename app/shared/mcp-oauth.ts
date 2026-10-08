@@ -123,7 +123,7 @@ export function parseRequestedScopes(raw: string): RequestedScopes {
 }
 
 /** "in 52 minutes", "in 3 hours"; "" for a date that does not parse. */
-export function expiresInWords(expiresAt: string, now: number = Date.now()): string {
+function expiresInWords(expiresAt: string, now: number = Date.now()): string {
   const ms = Date.parse(expiresAt) - now;
   if (Number.isNaN(ms)) return "";
   const minutes = Math.round(ms / 60_000);

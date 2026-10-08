@@ -233,7 +233,6 @@ describe("ruling 503(f): the epic tools replace the goal tools", () => {
   it("registers list_epics, get_epic, create_epic and update_epic, no goal tool, and no way to delete an epic", async () => {
     // CANARY: register `create_goal` again.
     const names = (await toolkitFor(ids.orgAdmin)).tools.map((t) => t.name);
-    for (const retired of RETIRED_GOAL_TOOLS) expect(names).not.toContain(retired);
     expect(names.filter((n) => n.includes("goal"))).toEqual([]);
     // Exactly the four: an epic is closed by its status, never deleted.
     expect(names.filter((n) => n.includes("epic")).sort()).toEqual(

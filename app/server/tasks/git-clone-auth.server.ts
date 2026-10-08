@@ -108,11 +108,8 @@ export function createGitHubAskpassEnv(input: {
    *  helper-free environment with no askpass program at all (a public-repo
    *  fetch must not carry an empty credential). */
   token?: string;
-  /** Test seam; production callers build on `filteredSpawnEnv()` (pass 40
-   *  review R-seams-1: never `process.env`, which holds the server's secrets). */
-  baseEnv?: NodeJS.ProcessEnv;
 }): GitHubAskpassEnv {
-  const env: NodeJS.ProcessEnv = credentialedGitEnv(input.baseEnv);
+  const env: NodeJS.ProcessEnv = credentialedGitEnv();
   // Never reuse an ambient askpass program.
   delete env.GIT_ASKPASS;
   delete env.SSH_ASKPASS;
@@ -144,14 +141,16 @@ export function createGitHubAskpassEnv(input: {
 }
 
 /**
- * The base of a git that may carry a credential: no prompt, the ambient
- * credential helper list reset (an empty `credential.helper` at command-line
- * precedence clears every helper a config file names, so no helper can be
- * handed the password or store it), and {@link SERVER_GIT_CONFIG}.
+ * The base of a git that may carry a credential: the credential-free spawn
+ * base (`filteredSpawnEnv`, never `process.env`, which holds the server's
+ * secrets: pass 40 review R-seams-1), no prompt, the ambient credential helper
+ * list reset (an empty `credential.helper` at command-line precedence clears
+ * every helper a config file names, so no helper can be handed the password or
+ * store it), and {@link SERVER_GIT_CONFIG}.
  */
-function credentialedGitEnv(baseEnv: NodeJS.ProcessEnv | undefined): NodeJS.ProcessEnv {
+function credentialedGitEnv(): NodeJS.ProcessEnv {
   return withGitConfig(
-    { ...(baseEnv ?? filteredSpawnEnv()), GIT_TERMINAL_PROMPT: "0" },
+    { ...filteredSpawnEnv(), GIT_TERMINAL_PROMPT: "0" },
     [["credential.helper", ""], ...SERVER_GIT_CONFIG],
   );
 }
@@ -203,8 +202,6 @@ export function createGitHubClonePlan(input: {
   repo: string;
   destination: string;
   token?: string;
-  /** Test seam; production callers build on `filteredSpawnEnv()`. */
-  baseEnv?: NodeJS.ProcessEnv;
 }): GitHubClonePlan {
   return {
     args: ["clone", "--depth", "1", githubRepositoryUrl(input.repo), input.destination],

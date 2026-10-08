@@ -1,16 +1,12 @@
 import { describe, expect, it } from "vitest";
 import { fakeGithubFetch, unreachableFetch } from "../../../test-support/fake-github";
-import { checksPill } from "~/features/github/github-pills";
-import { mapPrChecks } from "~/shared/mapping/task.server";
+import type { PrReviewState } from "~/schemas/task-file.schema";
 import { createGithubClient } from "./github-client.server";
 import {
   deriveMergeable,
-  deriveApprovals,
-  deriveReviewState,
   findPrForBranch,
   mapPrToCacheState,
-  summarizeCheckRuns,
-  type GhReview,
+  type PrApproval,
 } from "./pr-linker.server";
 
 /** The mergeability half of a PR detail payload — the only part these cases
@@ -238,69 +234,16 @@ describe("findPrForBranch", () => {
 
 // ------------------------------------------------ F21-7 check-runs accounting
 
-describe("summarizeCheckRuns (F21-7)", () => {
-  it("counts every run GitHub reported into exactly one bucket", () => {
-    expect(
-      summarizeCheckRuns({
-        totalCount: 4,
-        runs: [
-          { conclusion: "success" },
-          { conclusion: "skipped" },
-          { conclusion: "failure" },
-          { conclusion: null },
-        ],
-      }),
-    ).toEqual({ total: 4, passing: 2, failing: 1, pending: 1 });
-  });
-
-  it("undecodable entries, absent and unrecognized conclusions are UNKNOWN", () => {
-    // A conclusion GitHub added later ("stale") is not a pass, an entry with no
-    // conclusion at all is not a pass, and an entry that did not decode (null)
-    // is not a pass.
-    expect(
-      summarizeCheckRuns({
-        totalCount: 3,
-        runs: [null, {}, { conclusion: "stale" }],
-      }),
-    ).toEqual({ total: 3, passing: 0, failing: 0, pending: 0, unknown: 3 });
-  });
-
-  it("a total GitHub reported but did not carry is unaccounted, not passing", () => {
-    // The whole array drifted away (`check_runs` non-array → undefined) while
-    // total_count survived: three runs exist and none of them were read.
-    expect(summarizeCheckRuns({ totalCount: 3, runs: undefined })).toEqual({
-      total: 3,
-      passing: 0,
-      failing: 0,
-      pending: 0,
-      unknown: 3,
-    });
-    // Entries beyond the reported total raise the total instead of going
-    // missing — the counters can never exceed what they are shown against.
-    expect(
-      summarizeCheckRuns({
-        totalCount: 1,
-        runs: [{ conclusion: "success" }, { conclusion: "success" }],
-      }),
-    ).toEqual({ total: 2, passing: 2, failing: 0, pending: 0 });
-  });
-
-  it("omits the key entirely on a clean read", () => {
-    const summary = summarizeCheckRuns({
-      totalCount: 2,
-      runs: [{ conclusion: "success" }, { conclusion: "neutral" }],
-    });
-    expect(summary.unknown).toBeUndefined();
-    expect(Object.keys(summary).sort()).toEqual([
-      "failing",
-      "passing",
-      "pending",
-      "total",
-    ]);
-  });
-});
-
-describe("findPrForBranch check-runs drift (F21-7)", () => {
+/**
+ * F21-7: every run GitHub reported is accounted for by exactly one counter. A
+ * `null` conclusion is pending (still running, a real answer); an entry that
+ * did not decode, an absent or unrecognized conclusion (GitHub's `stale`) and
+ * the shortfall against `total_count` are `unknown`, never passing. The old
+ * rollup summed `{ total_count: 3, check_runs: [null, "x"] }` to three runs
+ * with nothing counted, which the pill mapper read as "3 checks passing" and
+ * the reconciler persisted into task.md.
+ */
+describe("findPrForBranch check-runs accounting (F21-7)", () => {
   /** A check-runs answer as these cases send it: GitHub's two fields, with the
    *  drift each case injects into the entries. */
   interface CheckRunsBody {
@@ -338,130 +281,83 @@ describe("findPrForBranch check-runs drift (F21-7)", () => {
     });
   }
 
-  it("a null / non-object entry can never inflate 'passing'", async () => {
-    // The reported failure: `{ total_count: 3, check_runs: [null, "x"] }` used
-    // to summarize as 3 total with nothing counted, which the pill mapper reads
-    // as "3 checks passing" and the reconciler then persists into task.md.
-    const { client: c } = driftedChecks({
-      total_count: 3,
-      check_runs: [null, "x"],
-    });
+  it.each<[string, CheckRunsBody, Record<string, number>]>([
+    [
+      "counts every run GitHub reported into exactly one bucket",
+      {
+        total_count: 4,
+        check_runs: [
+          { conclusion: "success" },
+          { conclusion: "skipped" },
+          { conclusion: "failure" },
+          { conclusion: null },
+        ],
+      },
+      { total: 4, passing: 2, failing: 1, pending: 1 },
+    ],
+    [
+      "reads undecodable entries and absent or unrecognized conclusions as unknown",
+      { total_count: 3, check_runs: [null, {}, { conclusion: "stale" }] },
+      { total: 3, passing: 0, failing: 0, pending: 0, unknown: 3 },
+    ],
+    [
+      "never lets a null or non-object entry inflate passing",
+      { total_count: 3, check_runs: [null, "x"] },
+      { total: 3, passing: 0, failing: 0, pending: 0, unknown: 3 },
+    ],
+    [
+      // Per-ENTRY tolerance: one bad entry used to void the whole array, which
+      // discarded the runs GitHub reported perfectly well next to it.
+      "still counts the readable siblings of an undecodable or conclusion-less run",
+      {
+        total_count: 4,
+        check_runs: [
+          { status: "completed", conclusion: "success" },
+          null,
+          { status: "completed" },
+          { status: "completed", conclusion: "failure" },
+        ],
+      },
+      { total: 4, passing: 1, failing: 1, pending: 0, unknown: 2 },
+    ],
+    [
+      "leaves a reported total unaccounted when no runs are carried",
+      { total_count: 3 },
+      { total: 3, passing: 0, failing: 0, pending: 0, unknown: 3 },
+    ],
+    [
+      "leaves a reported total unaccounted when check_runs is not an array",
+      { total_count: 2, check_runs: {} },
+      { total: 2, passing: 0, failing: 0, pending: 0, unknown: 2 },
+    ],
+    [
+      // The counters can never exceed the total they are shown against.
+      "raises the total to the runs carried beyond it",
+      { total_count: 1, check_runs: [{ conclusion: "success" }, { conclusion: "success" }] },
+      { total: 2, passing: 2, failing: 0, pending: 0 },
+    ],
+    [
+      "omits the unknown key on a clean read",
+      { total_count: 2, check_runs: [{ conclusion: "success" }, { conclusion: "neutral" }] },
+      { total: 2, passing: 2, failing: 0, pending: 0 },
+    ],
+  ])("%s", async (_label, checkRunsBody, checks) => {
+    // CANARY: count an absent conclusion as passing and three rows fail.
+    const { client: c } = driftedChecks(checkRunsBody);
     const result = await findPrForBranch(c, REPO, "vib-142-attach-workspace");
     expect(result.status).toBe("found");
     if (result.status !== "found") return;
-    expect(result.pr.checks).toEqual({
-      total: 3,
-      passing: 0,
-      failing: 0,
-      pending: 0,
-      unknown: 3,
-    });
-    expect(mapPrChecks({ number: 318, state: "review", title: "t", checks: result.pr.checks })).toMatchObject({
-      state: "unknown",
-    });
-    expect(
-      checksPill(
-        mapPrChecks({ number: 318, state: "review", title: "t", checks: result.pr.checks })!,
-      ).kind,
-    ).not.toBe("ready");
-  });
-
-  it("an undecodable or conclusion-less run is unknown, and its readable siblings still count", async () => {
-    // Per-ENTRY tolerance: one bad entry used to void the whole array, which
-    // discarded the runs GitHub reported perfectly well next to it.
-    const { client: c } = driftedChecks({
-      total_count: 4,
-      check_runs: [
-        { status: "completed", conclusion: "success" },
-        null,
-        { status: "completed" },
-        { status: "completed", conclusion: "failure" },
-      ],
-    });
-    const result = await findPrForBranch(c, REPO, "vib-142-attach-workspace");
-    expect(result.status).toBe("found");
-    if (result.status !== "found") return;
-    expect(result.pr.checks).toEqual({
-      total: 4,
-      passing: 1,
-      failing: 1,
-      pending: 0,
-      unknown: 2,
-    });
-    // A real failure still outranks the drift.
-    expect(mapPrChecks({ number: 318, state: "review", title: "t", checks: result.pr.checks })).toMatchObject({
-      state: "failing",
-    });
-  });
-
-  it("a non-array check_runs leaves the reported total unaccounted", async () => {
-    const { client: c } = driftedChecks({ total_count: 2, check_runs: {} });
-    const result = await findPrForBranch(c, REPO, "vib-142-attach-workspace");
-    expect(result.status).toBe("found");
-    if (result.status !== "found") return;
-    expect(result.pr.checks).toMatchObject({ total: 2, unknown: 2 });
-    expect(mapPrChecks({ number: 318, state: "review", title: "t", checks: result.pr.checks })).toMatchObject({
-      state: "unknown",
-    });
+    // Strict, so an `unknown` key on a clean read fails even when undefined.
+    expect(result.pr.checks).toStrictEqual(checks);
   });
 });
 
 // ------------------------------------------------------- P13-D-28 review state
 
-describe("deriveReviewState (P13-D-28)", () => {
-  const by = (login: string, state: string) => ({ user: { login }, state });
-
-  it("uses each reviewer's LATEST verdict, not every review event", () => {
-    // `/pulls/{n}/reviews` is an append-only EVENT log, oldest first. Ayse asked
-    // for changes and then approved the fix — counting events would leave the PR
-    // permanently "changes_requested".
-    expect(
-      deriveReviewState(
-        [by("ayse", "CHANGES_REQUESTED"), by("ayse", "APPROVED")],
-        0,
-      ),
-    ).toBe("approved");
-  });
-
-  it("changes_requested OUTRANKS approved when both are outstanding", () => {
-    expect(
-      deriveReviewState([by("ayse", "APPROVED"), by("mert", "CHANGES_REQUESTED")], 0),
-    ).toBe("changes_requested");
-    // Order-independent.
-    expect(
-      deriveReviewState([by("mert", "CHANGES_REQUESTED"), by("ayse", "APPROVED")], 0),
-    ).toBe("changes_requested");
-  });
-
-  it("COMMENTED / PENDING are not verdicts and never displace a standing one", () => {
-    expect(
-      deriveReviewState(
-        [by("ayse", "APPROVED"), by("ayse", "COMMENTED"), by("mert", "PENDING")],
-        0,
-      ),
-    ).toBe("approved");
-    // Comments alone say nothing about the review verdict.
-    expect(deriveReviewState([by("ayse", "COMMENTED")], 0)).toBeNull();
-  });
-
-  it("a DISMISSED review withdraws that reviewer's verdict", () => {
-    expect(
-      deriveReviewState([by("ayse", "APPROVED"), by("ayse", "DISMISSED")], 0),
-    ).toBeNull();
-    expect(
-      deriveReviewState([by("ayse", "APPROVED"), by("ayse", "DISMISSED")], 1),
-    ).toBe("review_required");
-  });
-
-  it("no verdict + a requested reviewer → review_required; nobody asked → null", () => {
-    expect(deriveReviewState([], 2)).toBe("review_required");
-    expect(deriveReviewState([], 0)).toBeNull();
-  });
-});
-
 describe("findPrForBranch review-state fetch (P13-D-28)", () => {
   const openRoutes = (
     extra: Parameters<typeof fakeGithubFetch>[0] = {},
+    requested = 1,
   ): Parameters<typeof fakeGithubFetch>[0] => ({
     [`GET ${REPO_PATH}/pulls`]: {
       body: [
@@ -482,7 +378,7 @@ describe("findPrForBranch review-state fetch (P13-D-28)", () => {
         merged: false,
         merged_at: null,
         head: { sha: "headsha318" },
-        requested_reviewers: [{ login: "mert" }],
+        requested_reviewers: Array.from({ length: requested }, (_, i) => ({ login: `r${i}` })),
       },
     },
     ...extra,
@@ -557,6 +453,110 @@ describe("findPrForBranch review-state fetch (P13-D-28)", () => {
     expect(result.status).toBe("found");
     if (result.status === "found") expect("review" in result.pr).toBe(false);
     expect(gh.callsTo(`GET ${REPO_PATH}/pulls/298/reviews`)).toHaveLength(0);
+  });
+
+  /** One `/reviews` entry as GitHub sends it. An omitted `commit_id` or
+   *  `submitted_at` is what an older entry looks like on the wire. */
+  const entry = (
+    login: string,
+    state: string,
+    more: { commit_id?: string; submitted_at?: string } = {},
+  ) => ({ user: { login }, state, ...more });
+
+  // `/pulls/{n}/reviews` is an append-only EVENT log, oldest first, so each
+  // reviewer's state is their LATEST verdict: COMMENTED and PENDING are not
+  // verdicts, DISMISSED withdraws one, and changes_requested outranks approved
+  // (P13-D-28). The approvals keep WHO approved and on WHICH commit, off the
+  // same payload, since GitHub keeps an approval standing after new pushes
+  // (R19-B).
+  it.each<[string, object[], number, PrReviewState | null, PrApproval[]]>([
+    [
+      // Ayse asked for changes and then approved the fix; counting events would
+      // leave the PR changes_requested forever.
+      "uses each reviewer's LATEST verdict, not every review event",
+      [entry("ayse", "CHANGES_REQUESTED"), entry("ayse", "APPROVED")],
+      0,
+      "approved",
+      [{ login: "ayse", commitSha: null, at: null }],
+    ],
+    [
+      "ranks changes_requested over approved when both are outstanding",
+      [entry("ayse", "APPROVED"), entry("mert", "CHANGES_REQUESTED")],
+      0,
+      "changes_requested",
+      [{ login: "ayse", commitSha: null, at: null }],
+    ],
+    [
+      "ranks them the same whichever came first",
+      [entry("mert", "CHANGES_REQUESTED"), entry("ayse", "APPROVED")],
+      0,
+      "changes_requested",
+      [{ login: "ayse", commitSha: null, at: null }],
+    ],
+    [
+      "never lets COMMENTED or PENDING displace a standing verdict",
+      [
+        entry("ayse", "APPROVED", { commit_id: "abc" }),
+        entry("ayse", "COMMENTED"),
+        entry("mert", "PENDING"),
+      ],
+      0,
+      "approved",
+      [{ login: "ayse", commitSha: "abc", at: null }],
+    ],
+    ["reads comments alone as no verdict", [entry("ayse", "COMMENTED")], 0, null, []],
+    [
+      "withdraws a verdict its reviewer DISMISSED",
+      [entry("ayse", "APPROVED", { commit_id: "abc" }), entry("ayse", "DISMISSED")],
+      0,
+      null,
+      [],
+    ],
+    [
+      "waits on a requested reviewer once the verdict is dismissed",
+      [entry("ayse", "APPROVED"), entry("ayse", "DISMISSED")],
+      1,
+      "review_required",
+      [],
+    ],
+    ["reads no verdict and a requested reviewer as review_required", [], 2, "review_required", []],
+    ["reads no verdict and nobody requested as null", [], 0, null, []],
+    [
+      "carries a standing approver with the commit and time they approved",
+      [entry("ayse", "APPROVED", { commit_id: "abc123", submitted_at: "2026-08-08T09:00:00Z" })],
+      0,
+      "approved",
+      [{ login: "ayse", commitSha: "abc123", at: "2026-08-08T09:00:00Z" }],
+    ],
+    [
+      "carries the commit of a re-approval, not the first one",
+      [
+        entry("ayse", "APPROVED", { commit_id: "old111" }),
+        entry("ayse", "APPROVED", { commit_id: "new222" }),
+      ],
+      0,
+      "approved",
+      [{ login: "ayse", commitSha: "new222", at: null }],
+    ],
+    [
+      "drops an approver whose latest state is CHANGES_REQUESTED",
+      [
+        entry("ayse", "APPROVED", { commit_id: "abc" }),
+        entry("ayse", "CHANGES_REQUESTED", { commit_id: "abc" }),
+      ],
+      0,
+      "changes_requested",
+      [],
+    ],
+  ])("%s", async (_label, reviews, requested, review, approvals) => {
+    const { client: c } = client(
+      openRoutes({ [`GET ${REPO_PATH}/pulls/318/reviews`]: { body: reviews } }, requested),
+    );
+    const result = await findPrForBranch(c, REPO, "vib-301-workspace");
+    expect(result.status).toBe("found");
+    if (result.status !== "found") return;
+    expect(result.pr.review).toBe(review);
+    expect(result.pr.approvals).toEqual(approvals);
   });
 });
 
@@ -666,50 +666,7 @@ describe("findPrForBranch mergeability (P14-LV-07)", () => {
  * they approved. Without the commit, "approved" says nothing about the
  * delivered revision — GitHub keeps an approval standing after new pushes.
  */
-describe("deriveApprovals (R19-B)", () => {
-  // Key PRESENCE is the fixture's point: an omitted `commit_id`/`submitted_at`
-  // is what an older review entry looks like on the wire, and the reducer must
-  // tell that apart from an explicit null.
-  const review = (login: string, state: string, commit?: string, at?: string) => {
-    const entry: GhReview = { user: { login }, state };
-    if (commit !== undefined) entry.commit_id = commit;
-    if (at !== undefined) entry.submitted_at = at;
-    return entry;
-  };
-
-  it("returns each standing approver with the commit they approved", () => {
-    expect(
-      deriveApprovals([review("ayse", "APPROVED", "abc123", "2026-08-08T09:00:00Z")]),
-    ).toEqual([{ login: "ayse", commitSha: "abc123", at: "2026-08-08T09:00:00Z" }]);
-  });
-
-  it("uses the reviewer's LATEST entry — a re-approval on a newer commit wins", () => {
-    expect(
-      deriveApprovals([
-        review("ayse", "APPROVED", "old111"),
-        review("ayse", "APPROVED", "new222"),
-      ]),
-    ).toEqual([{ login: "ayse", commitSha: "new222", at: null }]);
-  });
-
-  it("drops a reviewer whose latest state is CHANGES_REQUESTED or DISMISSED", () => {
-    expect(
-      deriveApprovals([review("ayse", "APPROVED", "abc"), review("ayse", "DISMISSED")]),
-    ).toEqual([]);
-    expect(
-      deriveApprovals([
-        review("ayse", "APPROVED", "abc"),
-        review("ayse", "CHANGES_REQUESTED", "abc"),
-      ]),
-    ).toEqual([]);
-  });
-
-  it("ignores COMMENTED / PENDING entries — they are not verdicts", () => {
-    expect(
-      deriveApprovals([review("ayse", "APPROVED", "abc"), review("ayse", "COMMENTED")]),
-    ).toEqual([{ login: "ayse", commitSha: "abc", at: null }]);
-  });
-
+describe("findPrForBranch approvals (R19-B)", () => {
   it("carries the approvals onto PrFacts from the reviews call already made", async () => {
     const { client: c } = client({
       [`GET ${REPO_PATH}/pulls`]: {

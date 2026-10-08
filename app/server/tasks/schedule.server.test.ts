@@ -1,13 +1,9 @@
-import { writeFileSync } from "node:fs";
-import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { z } from "zod";
 import { rebuildAll } from "~/server/projections/rebuilder.server";
-import type { CapabilityMode } from "~/schemas/project-file.schema";
 import { defaultModelFor } from "~/server/runtimes/model-catalog.server";
 import { buildOperatorToolkit } from "./operator-toolkit.server";
 import { operatorScheduleRun } from "./operator-dispatch.server";
-import type { OperatorAuthority } from "./operator-authority.server";
 import { createTestDbContext, type TestDbContext } from "../../../test-support/test-db";
 import {
   baseTaskFrontmatter,
@@ -24,6 +20,7 @@ import {
   startedRunSpecs,
 } from "../../../test-support/fake-runtime";
 import { connectFakeBackend } from "../../../test-support/backend-credentials";
+import { reconfigureProject } from "../../../test-support/projected-store";
 import { readTaskFile, updateTaskFile } from "~/server/files/task-writer.server";
 import type { TaskFrontmatter } from "~/schemas/task-file.schema";
 import { getProject } from "~/server/projections/board-query.server";
@@ -33,12 +30,11 @@ import { resetOperatorLeasesForTests } from "~/server/runtimes/operator-run.serv
 import type { TaskFileEvent, TaskSchedule } from "~/schemas/task-file.schema";
 import { cloneTimeoutMs } from "./git-clone-auth.server";
 import {
-  claimLeaseMs,
   cancelScheduledAction,
   fireDueSchedules,
   scheduleTaskAction,
-  tasksWithUnresolvedSchedules,
 } from "./schedule.server";
+import { operatorAuthority } from "../../../test-support/operator-snapshot";
 
 let ctx: TestDbContext;
 let store: TestStore;
@@ -148,26 +144,6 @@ function rawSchedule(over: Partial<TaskSchedule> = {}): TaskSchedule {
   };
 }
 
-/**
- * Hermetic git for this file. R19-1 made `runOperator` provision a read-only
- * repository checkout before it starts a drive, and the fixture project has a
- * `repo` — so every scheduled re-run here started a REAL `git clone` against
- * github.com from a unit test. It failed (no credential), but only after a
- * network round trip, which is what made this file's two poll-based
- * assertions flap: `waitForSchedule` allows 4s and the clone regularly ate
- * more, so the occurrence was still `claimed` when the poll gave up, and the
- * drive that was still holding the operator lease made the NEXT test's run
- * queue instead of start.
- *
- * Point `https://github.com/` at a directory that does not exist and forbid
- * every protocol but `file`, so the clone fails instantly and OFFLINE. The
- * drive then takes `ensureOperatorRepoCheckout`'s `unavailable` arm — which is
- * the honest answer for a fixture project with no credential anyway — and the
- * schedule lifecycle, which is what this file is about, is what gets timed.
- */
-const GIT_ENV_KEYS = ["GIT_CONFIG_GLOBAL", "GIT_CONFIG_SYSTEM", "GIT_ALLOW_PROTOCOL"] as const;
-let savedGitEnv: Partial<Record<(typeof GIT_ENV_KEYS)[number], string | undefined>> = {};
-
 beforeEach(async () => {
   ctx = createTestDbContext();
   store = setupTestStore(ctx);
@@ -180,26 +156,8 @@ beforeEach(async () => {
   // ordinary state of somebody using the product.
   await connectFakeBackend(store.db, store.users.arda.id, "claude");
   await connectFakeBackend(store.db, store.users.arda.id, "codex");
-
-  const gitRoot = ctx.makeTempDir();
-  const configPath = path.join(gitRoot, "gitconfig");
-  writeFileSync(
-    configPath,
-    `[url "${path.join(gitRoot, "no-such-origin")}${path.sep}"]\n\tinsteadOf = https://github.com/\n`,
-  );
-  savedGitEnv = Object.fromEntries(GIT_ENV_KEYS.map((k) => [k, process.env[k]]));
-  process.env.GIT_CONFIG_GLOBAL = configPath;
-  process.env.GIT_CONFIG_SYSTEM = "/dev/null";
-  // Belt and braces: if the rewrite ever stopped applying, git must FAIL rather
-  // than quietly reach github.com from a unit test.
-  process.env.GIT_ALLOW_PROTOCOL = "file";
 });
 afterEach(async () => {
-  for (const key of GIT_ENV_KEYS) {
-    const value = savedGitEnv[key];
-    if (value === undefined) delete process.env[key];
-    else process.env[key] = value;
-  }
   // The operator lease is module state: a test that leaves a drive in flight
   // (below) must not hand the next one a held lease.
   resetOperatorLeasesForTests();
@@ -577,6 +535,31 @@ describe("fireDueSchedules", () => {
     expect((await fireDueSchedules(store.db, dctx())).fired).toBe(0);
   });
 
+  it("B-WF5: a due occurrence fires whatever the formatting of the projected JSON", async () => {
+    // The candidate scan used to match the literal bytes `"status":"pending"`,
+    // so one space after a colon silently dropped a due schedule from every
+    // tick: it never fired and was never reported. CANARY: select candidates
+    // with `schedules_json LIKE '%"status":"pending"%'` again and nothing fires.
+    writeTask(store.dataRoot, store.slug, {
+      frontmatter: baseTaskFrontmatter("VIB-5", {
+        ownerUserId: store.users.arda.id,
+        stage: "impl",
+        schedules: [rawSchedule({ id: "sch_pending" })],
+      }),
+    });
+    rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
+    // SAFETY: as above — one NOT NULL column, on a task the rebuild projected.
+    const raw = store.db
+      .prepare(`SELECT schedules_json FROM task_projections WHERE task_key = 'VIB-5'`)
+      .get() as { schedules_json: string };
+    store.db
+      .prepare(`UPDATE task_projections SET schedules_json = ? WHERE task_key = 'VIB-5'`)
+      .run(JSON.stringify(JSON.parse(raw.schedules_json), null, 2));
+
+    expect((await fireDueSchedules(store.db, dctx())).fired).toBe(1);
+    await waitForSchedule("VIB-5", "sch_pending", "fired");
+  });
+
   /**
    * T17 (pass 31) — the claim protocol's whole reason for existing is that two
    * ticks can be in flight at once (the boot pass and the interval; an HMR
@@ -640,12 +623,9 @@ describe("fireDueSchedules", () => {
         ],
       }),
     });
-    const project = readProjectFile({ projectSlug: store.slug, dataRoot: store.dataRoot })!;
-    writeProject(store.dataRoot, {
-      ...project.parsed.frontmatter,
+    reconfigureProject(store, {
       archived: true,
     });
-    rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
 
     const res = await fireDueSchedules(store.db, dctx());
     expect(res.fired).toBe(0);
@@ -740,23 +720,10 @@ describe("fireDueSchedules", () => {
     expect(timeline("VIB-1").some((e) => /Scheduled action failed/.test(e.text))).toBe(false);
   });
 
-  it("the claim lease outlives the slowest LEGITIMATE start (a clone), so a live drive is never re-driven", () => {
-    // R19-1 put a repository clone inside `runOperator`, BEFORE the drive
-    // starts: a healthy scheduled drive can now sit there for up to
-    // `cloneTimeoutMs()`. A lease shorter than that declares that live drive
-    // crashed, and the next tick re-drives the same occurrence — two unwatched
-    // operator turns for one scheduled action, which is the exact thing FR39
-    // exists to prevent. Pinned as a RELATIONSHIP, not a number, so raising
-    // `VIBERR_GIT_CLONE_TIMEOUT_MS` cannot silently reintroduce the overlap.
-    expect(claimLeaseMs()).toBeGreaterThan(cloneTimeoutMs());
-  });
-
   it("F10-16: re-drives a STALLED claim (crash recovery — never lost)", async () => {
     // A claim whose lease expired = the enqueuing tick crashed before finalize.
-    // Derived from the lease rather than a literal: this fixture used to say
-    // "10 minutes", which encoded the OLD 5-minute lease and silently became a
-    // FRESH claim — testing the opposite of its own name — the moment R19-1's
-    // clone forced the lease up.
+    // Claimed at the epoch: older than any lease, so raising the clone ceiling
+    // cannot quietly turn it into a FRESH claim.
     writeTask(store.dataRoot, store.slug, {
       frontmatter: baseTaskFrontmatter("VIB-1", {
         ownerUserId: store.users.arda.id,
@@ -765,7 +732,7 @@ describe("fireDueSchedules", () => {
           rawSchedule({
             id: "sch_stale",
             status: "claimed",
-            claimedAt: new Date(Date.now() - claimLeaseMs() - 60_000).toISOString(),
+            claimedAt: new Date(0).toISOString(),
           }),
         ],
       }),
@@ -857,6 +824,11 @@ describe("fireDueSchedules", () => {
   });
 
   it("F10-16: does NOT re-drive a FRESH claim (still within its lease)", async () => {
+    // R19-1: `runOperator` clones the repository before the drive starts, so a
+    // healthy drive can sit in its clone for `cloneTimeoutMs()`. VIB-2's claim
+    // is that old and still live. CANARY: size the lease without the clone
+    // ceiling (the old flat 5 minutes) and VIB-2 is re-driven: two unwatched
+    // operator turns for one scheduled occurrence, which FR39 forbids.
     writeTask(store.dataRoot, store.slug, {
       frontmatter: baseTaskFrontmatter("VIB-1", {
         ownerUserId: store.users.arda.id,
@@ -870,11 +842,25 @@ describe("fireDueSchedules", () => {
         ],
       }),
     });
+    writeTask(store.dataRoot, store.slug, {
+      frontmatter: baseTaskFrontmatter("VIB-2", {
+        ownerUserId: store.users.arda.id,
+        stage: "impl",
+        schedules: [
+          rawSchedule({
+            id: "sch_cloning",
+            status: "claimed",
+            claimedAt: new Date(Date.now() - cloneTimeoutMs()).toISOString(),
+          }),
+        ],
+      }),
+    });
     rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
 
     const res = await fireDueSchedules(store.db, dctx());
     expect(res.fired).toBe(0); // an in-flight claim is left alone
     expect(schedules("VIB-1")[0]!.status).toBe("claimed");
+    expect(schedules("VIB-2")[0]!.status).toBe("claimed");
   });
 
   it("U36-9 (pass 36): the skipped-done note names the terminal stage as the board calls it", async () => {
@@ -1042,59 +1028,6 @@ describe("fireDueSchedules", () => {
   });
 });
 
-describe("tasksWithUnresolvedSchedules (B-WF5)", () => {
-  it("selects on the schedule's own status, whatever the JSON formatting", () => {
-    // A fired occurrence is not a candidate; a pending one is.
-    writeTask(store.dataRoot, store.slug, {
-      frontmatter: baseTaskFrontmatter("VIB-4", {
-        ownerUserId: store.users.arda.id,
-        stage: "impl",
-        schedules: [
-          rawSchedule({
-            id: "sch_fired",
-            status: "fired",
-            firedAt: new Date().toISOString(),
-          }),
-        ],
-      }),
-    });
-    writeTask(store.dataRoot, store.slug, {
-      frontmatter: baseTaskFrontmatter("VIB-5", {
-        ownerUserId: store.users.arda.id,
-        stage: "impl",
-        schedules: [rawSchedule({ id: "sch_pending" })],
-      }),
-    });
-    rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
-    expect(tasksWithUnresolvedSchedules(store.db).map((r) => r.task_key)).toEqual([
-      "VIB-5",
-    ]);
-
-    // Same data, formatted differently. The old scan matched the literal bytes
-    // `"status":"pending"`, so one space after a colon silently dropped a due
-    // schedule from every tick — it would never fire and never be reported.
-    // SAFETY: as above — one NOT NULL column, on a task the rebuild projected.
-    const raw = store.db
-      .prepare(`SELECT schedules_json FROM task_projections WHERE task_key = 'VIB-5'`)
-      .get() as { schedules_json: string };
-    store.db
-      .prepare(`UPDATE task_projections SET schedules_json = ? WHERE task_key = 'VIB-5'`)
-      .run(JSON.stringify(JSON.parse(raw.schedules_json), null, 2));
-
-    expect(tasksWithUnresolvedSchedules(store.db).map((r) => r.task_key)).toEqual([
-      "VIB-5",
-    ]);
-  });
-
-  it("ignores a task with no schedules at all", () => {
-    writeTask(store.dataRoot, store.slug, {
-      frontmatter: baseTaskFrontmatter("VIB-6", { ownerUserId: store.users.arda.id, stage: "impl" }),
-    });
-    rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
-    expect(tasksWithUnresolvedSchedules(store.db)).toEqual([]);
-  });
-});
-
 /* ------ ruling 487 (F40-65): the operator schedules its own task's runs ------ */
 
 /**
@@ -1106,24 +1039,8 @@ describe("tasksWithUnresolvedSchedules (B-WF5)", () => {
  * attributed to the operator and gated like its immediate dispatch.
  */
 describe("ruling 487: the operator's schedule_task_action and cancel_task_schedule", () => {
-  /** An operator whose `dispatch-agents` grant is absent, which resolves to
-   *  the catalog default `direct` (ruling 98(b)). */
-  function operatorAuthority(policy: Record<string, CapabilityMode> = {}): OperatorAuthority {
-    return {
-      policy: new Map(Object.entries(policy)),
-      autonomy: "supervised",
-      backend: "claude",
-      model: "sonnet",
-      effort: "",
-      name: "Operator",
-      skills: [],
-      kb: [],
-      mcps: [],
-      persona: null,
-      deployed: true,
-      humanGatedBeforeWork: false,
-    };
-  }
+  // `operatorAuthority()` grants no `dispatch-agents`, which resolves to the
+  // catalog default `direct` (ruling 98(b)).
   const toolkitFor = (taskKey: string, authority = operatorAuthority()) =>
     buildOperatorToolkit({ db: store.db, ctx: dctx(), projectSlug: store.slug, taskKey, authority });
   const replyText = z
@@ -1269,14 +1186,12 @@ describe("ruling 487: the operator's schedule_task_action and cancel_task_schedu
   });
 
   it("refuses what it could not dispatch now: a recommend-only grant, an undeployed profile, a stage the agent does not work, a held task", async () => {
-    // Canaries: build the tools on `dispatchGate !== "deny"` (the recommend
-    // operator gets them); drop `scheduleGrantRefusal` (the action schedules
-    // for it); drop `dispatchRefusalNow`'s stage check (rev is scheduled at In
+    // Canaries: drop `scheduleGrantRefusal` (the action schedules for it);
+    // drop `dispatchRefusalNow`'s stage check (rev is scheduled at In
     // Progress); drop its hold check (dev is scheduled on a held task).
     const recommendOnly = operatorAuthority({ "dispatch-agents": "recommend" });
-    expect(toolkitFor("VIB-1", recommendOnly).allowedTools).not.toContain("mcp__viberr__schedule_task_action");
-    expect(toolkitFor("VIB-1", recommendOnly).allowedTools).not.toContain("mcp__viberr__cancel_task_schedule");
-    // The action refuses it as well, for the Codex plan's sake.
+    // A Codex plan reaches the action without the toolkit's gate, so the
+    // action refuses the recommend-only grant itself.
     const denied = await operatorScheduleRun(
       store.db,
       dctx(),

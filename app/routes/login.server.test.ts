@@ -1,8 +1,8 @@
-import { RouterContextProvider } from "react-router";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import {
-  setupAppTest,
   APP_TEST_PASSWORD,
+  routeArgs,
+  setupAppTest,
   type AppTestContext,
 } from "../../test-support/test-app";
 
@@ -25,23 +25,10 @@ beforeAll(async () => {
 });
 afterAll(() => app.cleanup());
 
-/** The full framework-mode handler argument set. These routes take no dynamic
- *  segments and read only `request`, but building the whole contract keeps the
- *  call sites honest instead of asserting one into place. */
-function handlerArgs(request: Request, pattern: string) {
-  return {
-    request,
-    url: new URL(request.url),
-    params: {},
-    pattern,
-    context: new RouterContextProvider(),
-  };
-}
-
 async function loginLoader(url: string, cookie?: string) {
   const { loader } = await import("~/routes/login");
   return loader(
-    handlerArgs(app.request(url, cookie ? { cookie } : {}), "/login"),
+    routeArgs(app.request(url, cookie ? { cookie } : {}), {}, "/login"),
   );
 }
 
@@ -53,7 +40,7 @@ async function loginAction(fields: Record<string, string>, cookie?: string) {
   };
   // Only carry the key when there is a session cookie to attach.
   if (cookie) init.cookie = cookie;
-  return action(handlerArgs(app.request("/login", init), "/login"));
+  return action(routeArgs(app.request("/login", init), {}, "/login"));
 }
 
 /** A refusal comes back as `data(payload, init)`; a success is a redirect. */
@@ -168,6 +155,21 @@ describe("/login action — credentials", () => {
     // not become an account-enumeration oracle.
     expect(unknown.data.error).toContain("No local account for that email");
     expect(unknown.data.field).toBe("email");
+
+    // An OAuth-only account (a users row with no local credential) is refused
+    // in the same words, on the same field. CANARY: give `no_password` its own
+    // sentence in the action and the two refusals tell the accounts apart.
+    const { insertTestUser } = await import("../../test-support/test-store");
+    insertTestUser(app.db, "oauth-only");
+    const oauthOnly = refused(
+      await loginAction({
+        intent: "login",
+        email: "oauth-only@viberr.test",
+        password: "whatever",
+      }),
+    );
+    expect(oauthOnly.init?.status).toBe(400);
+    expect(oauthOnly.data).toEqual(unknown.data);
   });
 
   it("a correct password issues a session cookie and honors returnTo", async () => {
@@ -183,7 +185,12 @@ describe("/login action — credentials", () => {
     );
     expect(res.status).toBe(302);
     expect(res.headers.get("Location")).toBe("/projects/viberr-core/board");
-    expect(res.headers.getSetCookie().length).toBeGreaterThan(0);
+    // The theme cookie rides every sign-in, so a count of Set-Cookie headers
+    // says nothing about the session. CANARY: drop the loop that forwards
+    // better-auth's Set-Cookie and the person lands signed out.
+    expect(
+      res.headers.getSetCookie().some((c) => c.includes("viberr.session_token=")),
+    ).toBe(true);
   });
 
   it("an unknown intent is a 400, not a crash", async () => {
@@ -199,7 +206,7 @@ describe("/logout", () => {
   it("GET redirects home — logout is a POST", async () => {
     const { loader } = await import("~/routes/logout");
     const res = await caught(async () =>
-      loader(handlerArgs(app.request("/logout"), "/logout")),
+      loader(routeArgs(app.request("/logout"), {}, "/logout")),
     );
     expect(res.status).toBe(302);
     expect(res.headers.get("Location")).toBe("/");
@@ -209,7 +216,7 @@ describe("/logout", () => {
     const { action } = await import("~/routes/logout");
     const res = await caught(async () =>
       action(
-        handlerArgs(app.request("/logout", { method: "POST" }), "/logout"),
+        routeArgs(app.request("/logout", { method: "POST" }), {}, "/logout"),
       ),
     );
     expect(res.status).toBe(302);
@@ -222,12 +229,13 @@ describe("/logout", () => {
     const { action } = await import("~/routes/logout");
     const res = await caught(async () =>
       action(
-        handlerArgs(
+        routeArgs(
           app.request("/logout", {
             method: "POST",
             cookie,
             body: new URLSearchParams({ _csrf: csrf }),
           }),
+          {},
           "/logout",
         ),
       ),

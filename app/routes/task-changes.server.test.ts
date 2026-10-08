@@ -1,8 +1,7 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { RouterContextProvider } from "react-router";
 import { z } from "zod";
 import type { SeedUserIds } from "../../test-support/demo-data";
-import { setupAppTest, type AppTestContext } from "../../test-support/test-app";
+import { routeArgs, setupAppTest, type AppTestContext } from "../../test-support/test-app";
 
 /**
  * Ruling 484 (pass 40, F40-54): the two doors the Changes panel uses, as real
@@ -32,13 +31,7 @@ async function readChanges(key: string, userId: string | null) {
   const { loader } = await import("~/routes/task-changes");
   const cookie = userId ? (await app.cookieFor(userId)).cookie : undefined;
   const request = app.request(`/projects/viberr-core/tasks/${key}/changes`, cookie ? { cookie } : {});
-  return loader({
-    request,
-    url: new URL(request.url),
-    params: { slug: "viberr-core", key },
-    pattern: "/projects/:slug/tasks/:key/changes",
-    context: new RouterContextProvider(),
-  });
+  return loader(routeArgs(request, { slug: "viberr-core", key }, "/projects/:slug/tasks/:key/changes"));
 }
 
 async function refusedStatus(read: Promise<unknown>): Promise<number | null> {
@@ -59,13 +52,7 @@ async function postNotes(userId: string, fields: Record<string, string>) {
     cookie,
     body: new URLSearchParams({ _csrf: csrf, intent: "review-notes", ...fields }),
   });
-  return action({
-    request,
-    url: new URL(request.url),
-    params: { slug: "viberr-core", key: "VIB-142" },
-    pattern: "/projects/:slug/tasks/:key",
-    context: new RouterContextProvider(),
-  });
+  return action(routeArgs(request, { slug: "viberr-core", key: "VIB-142" }, "/projects/:slug/tasks/:key"));
 }
 
 const actionResult = z.union([
@@ -120,7 +107,7 @@ describe("ruling 484: the review-notes intent", () => {
     );
   });
 
-  it("refuses notes written on another revision, and malformed notes, with the reason", async () => {
+  it("answers notes written on another revision 409 and malformed notes 400", async () => {
     const stale = actionResult.parse(await postNotes(ids.selin, { headSha: "0".repeat(40), notes }));
     expect(stale).toMatchObject({ init: { status: 409 } });
     const malformed = actionResult.parse(

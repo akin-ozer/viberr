@@ -5,7 +5,7 @@ import { useState, type ComponentProps } from "react";
 import { createRoutesStub } from "react-router";
 import { ToastProvider } from "~/ui/toast";
 import type { NotificationView } from "~/features/notifications/notification-item";
-import { BELL_LIST_CAP, BELL_LIST_URL, TopBell } from "./top-bell";
+import { BELL_LIST_CAP, TopBell } from "./top-bell";
 import { UserMenu } from "./user-menu";
 import { PageTopbar } from "./page-topbar";
 import { LivePausedStrip, Topbar, WORKSPACE_PAUSED_SENTENCE } from "./topbar";
@@ -18,6 +18,9 @@ import { Rail } from "./rail";
  */
 
 afterEach(cleanup);
+
+/** The bell list's resource route, as `routes.ts` mounts it. */
+const LIST_ROUTE = "/resources/notifications";
 
 function notification(i: number): NotificationView {
   return {
@@ -45,7 +48,7 @@ function renderIn(node: React.ReactNode, list: NotificationView[] = []) {
     { path: "/prefs/theme", action: () => ({ ok: true, theme: "light" }) },
     // Ruling 457: the bell's own list (`routes/resources.notifications.ts`).
     {
-      path: BELL_LIST_URL,
+      path: LIST_ROUTE,
       loader: ({ request }) => {
         listLoads.push(request.url);
         return { notifications: list };
@@ -708,7 +711,7 @@ describe("ruling 145: the standalone-page header", () => {
       },
       { path: "/", Component: () => <p>home</p> },
       // Ruling 457: the bell loads its own list.
-      { path: BELL_LIST_URL, loader: () => ({ notifications: [notification(1)] }) },
+      { path: LIST_ROUTE, loader: () => ({ notifications: [notification(1)] }) },
     ]);
     return {
       ...render(<Stub initialEntries={["/org/settings"]} />),

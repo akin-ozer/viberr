@@ -3,22 +3,16 @@ import type { PerfBudgetTable } from "../perf-verdict";
 /** Ruling 457 ratchet ceilings: write path and projection (reprojection, comments, run sink). */
 export const WRITES_BUDGETS: PerfBudgetTable = {
   // SRV-3: the watcher's project.md rebuild after allocateTaskKey bumped only
-  // nextTaskNumber force-re-projected every task, one task.updated each
-  // (30 before); a cascade now needs a field tasks derive from to change.
-  "writes:task-create.task-events-emitted": {
-    ceiling: 0,
-    unit: "count",
-    journey: "server",
-    fixture:
-      "test store viberr-core with 30 tasks of 4 events each, projected; allocateTaskKey, then rebuildPath(project.md); task.updated events emitted",
-  },
-  // SRV-3: statements in that same rebuildPath(project.md) (430 before).
+  // nextTaskNumber force-re-projected every task, one task.updated each (30
+  // events and 430 statements before); a cascade now needs a field tasks
+  // derive from to change. That no task is re-projected is pinned exactly in
+  // rebuilder.server.test.ts ("a nextTaskNumber bump ... re-projects no task").
   "writes:task-create.sql": {
     ceiling: 14,
     unit: "count",
     journey: "server",
     fixture:
-      "same 30-task fixture; SQL statement executions in rebuildPath(project.md) after allocateTaskKey",
+      "test store viberr-core with 30 tasks of 4 events each, projected; allocateTaskKey, then rebuildPath(project.md); SQL statement executions",
   },
   // SRV-3 + SRV-4: WAL commits in that same rebuildPath(project.md) (279
   // before: autocommit writes of the project row and of every task).
@@ -47,15 +41,9 @@ export const WRITES_BUDGETS: PerfBudgetTable = {
       "test store task with 100 timeline events, projected; one comment unshifted into task.md, then rebuildPath(task.md); INSERT/UPDATE/DELETE statements on task_events",
   },
   // CS-1: ...so every pre-existing row came back with a new id and the
-  // timeline (keyed by id) remounted every item (100 before).
-  "writes:comment-append.event-ids-reissued": {
-    ceiling: 0,
-    unit: "count",
-    journey: "compose-send",
-    fixture:
-      "same 100-event task; pre-existing task_events rows whose id changed after the append's reprojection",
-  },
-  // CS-1: what the reader sees of that churn (31 before: every item remounted).
+  // timeline (keyed by id) remounted every item (31 before). That an append
+  // keeps every id is pinned exactly in rebuilder.server.test.ts ("an append
+  // keeps every existing row").
   "writes:timeline-append.items-rewritten": {
     ceiling: 1,
     unit: "count",

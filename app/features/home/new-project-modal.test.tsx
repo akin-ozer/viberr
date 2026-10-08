@@ -49,6 +49,7 @@ function renderModal(
             connections={[]}
             connectionHealth={{}}
             storeRoot={null}
+            isAdmin={false}
             onClose={() => {}}
             {...props}
           />
@@ -66,6 +67,30 @@ const deliversChip = (container: HTMLElement, word: "Software" | "Results") =>
   [...container.querySelectorAll<HTMLButtonElement>("button.pick-chip")].find((b) =>
     b.textContent!.trim().startsWith(word),
   )!;
+
+/** One GitHub connection whose token passed its last check. */
+const withConnection = {
+  connections: ["akin-ozer"],
+  connectionHealth: { "akin-ozer": "valid" as const },
+};
+
+/** Name the project "Estimates", apply `pick`, press Create; resolves with the
+ *  posted form and the view. */
+async function submitWith(
+  props: Parameters<typeof renderModal>[0],
+  pick: (container: HTMLElement) => void,
+) {
+  let posted: FormData | null = null;
+  const view = renderModal(props, async ({ request }) => {
+    posted = await request.formData();
+    return { ok: false, error: "held for the test" };
+  });
+  fireEvent.change(view.container.querySelector("#np-name")!, { target: { value: "Estimates" } });
+  pick(view.container);
+  fireEvent.click(view.getByText("Create project"));
+  await waitFor(() => expect(posted).not.toBeNull());
+  return { form: posted!, view };
+}
 
 describe("#14: the zero-connections note never hands a member a 403", () => {
   const orgSettingsLink = (container: HTMLElement) =>
@@ -93,17 +118,6 @@ describe("#14: the zero-connections note never hands a member a 403", () => {
     expect(text).toContain("An org admin adds the PAT");
     expect(text).toContain("Ask an admin");
   });
-
-  it("falls back to the loader's own admin fact when `isAdmin` is not passed", () => {
-    // `storeRoot` is `user.role === "admin" ? VIBERR_DATA_ROOT : null`
-    // (routes/_index.tsx), so a null store root IS a non-admin reader. The gate
-    // must never default to "admin" for someone who is not one.
-    expect(orgSettingsLink(renderSoftware({ storeRoot: null }).container)).toBeNull();
-    cleanup();
-    expect(
-      orgSettingsLink(renderSoftware({ storeRoot: "/data" }).container),
-    ).not.toBeNull();
-  });
 });
 
 /**
@@ -112,31 +126,11 @@ describe("#14: the zero-connections note never hands a member a 403", () => {
  * when the person attaches it for the agents to read.
  */
 describe("ruling 667: a board that delivers results needs no repository", () => {
-  const withConnection = {
-    connections: ["akin-ozer"],
-    connectionHealth: { "akin-ozer": "valid" as const },
-  };
   const repoField = (container: HTMLElement) => container.querySelector("#np-repo");
   const attachBox = (container: HTMLElement) =>
     [...container.querySelectorAll("label")]
       .find((l) => l.textContent!.includes("Attach a repository for the agents to read"))
       ?.querySelector<HTMLInputElement>('input[type="checkbox"]') ?? null;
-  /** Name the project, apply `pick`, press Create; resolves with the posted form. */
-  async function submitWith(
-    props: Parameters<typeof renderModal>[0],
-    pick: (container: HTMLElement) => void,
-  ) {
-    let posted: FormData | null = null;
-    const view = renderModal(props, async ({ request }) => {
-      posted = await request.formData();
-      return { ok: false, error: "held for the test" };
-    });
-    fireEvent.change(view.container.querySelector("#np-name")!, { target: { value: "Estimates" } });
-    pick(view.container);
-    fireEvent.click(view.getByText("Create project"));
-    await waitFor(() => expect(posted).not.toBeNull());
-    return posted!;
-  }
 
   it("opens on results where no connection exists, asks for no repository, and posts none", async () => {
     // CANARY: keep `effOwner.length > 0` in `ok` whatever the board delivers
@@ -147,7 +141,7 @@ describe("ruling 667: a board that delivers results needs no repository", () => 
     expect(view.container.textContent).not.toContain("No GitHub connections yet");
     cleanup();
 
-    const form = await submitWith({}, () => {});
+    const { form } = await submitWith({}, () => {});
     expect(form.get("delivers")).toBe("results");
     expect(form.get("owner")).toBe("");
     expect(form.get("repoName")).toBe("");
@@ -170,13 +164,13 @@ describe("ruling 667: a board that delivers results needs no repository", () => 
   it("drops the repository when results is chosen, and takes one back when the person attaches it", async () => {
     // CANARY: post `effOwner` and `effRepo` whatever `needsRepo` says and a
     // results board is bound to the repository its name happened to spell.
-    const none = await submitWith(withConnection, (c) => fireEvent.click(deliversChip(c, "Results")));
+    const { form: none } = await submitWith(withConnection, (c) => fireEvent.click(deliversChip(c, "Results")));
     expect(none.get("delivers")).toBe("results");
     expect(none.get("owner")).toBe("");
     expect(none.get("repoName")).toBe("");
     cleanup();
 
-    const attached = await submitWith(withConnection, (c) => {
+    const { form: attached } = await submitWith(withConnection, (c) => {
       fireEvent.click(deliversChip(c, "Results"));
       expect(repoField(c)).toBeNull();
       fireEvent.click(attachBox(c)!);
@@ -203,7 +197,7 @@ describe("ruling 667: a board that delivers results needs no repository", () => 
     // changes nothing, so a person with no repository yet cannot create one;
     // post the derived repository anyway and the board is bound to a name
     // nobody chose.
-    const form = await submitWith(withConnection, (c) => {
+    const { form } = await submitWith(withConnection, (c) => {
       expect(c.textContent).toContain("Agents change a repository and each task ships as a pull request.");
       fireEvent.click(laterBox(c)!);
       expect(repoField(c)).toBeNull();
@@ -220,7 +214,7 @@ describe("ruling 667: a board that delivers results needs no repository", () => 
   it("ruling 672: with no GitHub connection a software board is still creatable, once it says it connects later", async () => {
     // CANARY: block a software board on a connection whatever the box says
     // and an instance with no connection can only make a no-code board.
-    const form = await submitWith({}, (c) => {
+    const { form } = await submitWith({}, (c) => {
       fireEvent.click(deliversChip(c, "Software"));
       expect(c.textContent).toContain("No GitHub connections yet");
       fireEvent.click(laterBox(c)!);
@@ -262,10 +256,7 @@ describe("Q26-3: a task key already used by another project is flagged (not bloc
 
 describe("N20-11: the repo field says the owner is fixed by the connection", () => {
   it("names the connection owner and tells the typist to enter just the repo name", () => {
-    const { container } = renderModal({
-      connections: ["akin-ozer"],
-      connectionHealth: { "akin-ozer": "valid" },
-    });
+    const { container } = renderModal(withConnection);
     const text = container.textContent ?? "";
     expect(text).toContain("Owner is fixed by the");
     expect(text).toContain("Enter just the");
@@ -281,25 +272,6 @@ describe("N20-11: the repo field says the owner is fixed by the connection", () 
  * toast says what became of the repository.
  */
 describe("ruling 462: the modal can ask for the repository to be created", () => {
-  const withConnection = {
-    connections: ["akin-ozer"],
-    connectionHealth: { "akin-ozer": "valid" as const },
-  };
-  /** Fill the name, apply `pick`, press Create; resolves with the posted form. */
-  async function submitWith(pick: (container: HTMLElement) => void) {
-    let posted: FormData | null = null;
-    const view = renderModal(withConnection, async ({ request }) => {
-      posted = await request.formData();
-      return { ok: false, error: "held for the test" };
-    });
-    fireEvent.change(view.container.querySelector("#np-name")!, {
-      target: { value: "Website" },
-    });
-    pick(view.container);
-    fireEvent.click(view.getByText("Create project"));
-    await waitFor(() => expect(posted).not.toBeNull());
-    return { form: posted!, view };
-  }
   const box = (container: HTMLElement, label: string) =>
     [...container.querySelectorAll("label")]
       .find((l) => l.textContent!.includes(label))!
@@ -307,7 +279,7 @@ describe("ruling 462: the modal can ask for the repository to be created", () =>
 
   it("is off by default and sends nothing", async () => {
     // CANARY: default `createRepo` to true and a typo becomes a repository.
-    const { form, view } = await submitWith(() => {});
+    const { form, view } = await submitWith(withConnection, () => {});
     expect(box(view.container, "Create this repository on GitHub").checked).toBe(false);
     expect(view.container.textContent).not.toContain("Create it as a private repository");
     expect(form.get("createRepository")).toBeNull();
@@ -315,14 +287,14 @@ describe("ruling 462: the modal can ask for the repository to be created", () =>
 
   it("checked, it asks for a private repository unless the private box is cleared", async () => {
     // CANARY: drop the `fd.set("createRepository", …)` line and both reads are null.
-    const privateRun = await submitWith((c) =>
+    const privateRun = await submitWith(withConnection, (c) =>
       fireEvent.click(box(c, "Create this repository on GitHub")),
     );
     expect(box(privateRun.view.container, "Create it as a private repository").checked).toBe(true);
     expect(privateRun.form.get("createRepository")).toBe("private");
     cleanup();
 
-    const publicRun = await submitWith((c) => {
+    const publicRun = await submitWith(withConnection, (c) => {
       fireEvent.click(box(c, "Create this repository on GitHub"));
       fireEvent.click(box(c, "Create it as a private repository"));
     });
@@ -354,7 +326,7 @@ describe("F15-04: creating a project lands you in it", () => {
     // CANARY: drop the success effect's `navigate(…/board)` and the stub never
     // leaves the modal's route.
     const { container, getByText, findByText } = renderModal(
-      { connections: ["akin-ozer"], connectionHealth: { "akin-ozer": "valid" } },
+      withConnection,
       async () => ({ ok: true, key: "NEW", slug: "new-project", storePath: "projects/new-project" }),
     );
     fireEvent.change(container.querySelector("#np-name")!, { target: { value: "New Project" } });
@@ -366,7 +338,7 @@ describe("F15-04: creating a project lands you in it", () => {
 describe("#20: the server's refusal is announced, not just drawn", () => {
   it("renders the create failure in a live region", async () => {
     const { container, getByPlaceholderText, getByText } = renderModal(
-      { connections: ["akin-ozer"], connectionHealth: { "akin-ozer": "valid" } },
+      withConnection,
       async () => ({ ok: false, error: "projects/payments already exists." }),
     );
     fireEvent.change(getByPlaceholderText("e.g. Payments Gateway"), {
@@ -392,10 +364,6 @@ describe("#20: the server's refusal is announced, not just drawn", () => {
  * field it names and moves focus there.
  */
 describe("Create project stays enabled and refuses with the field named", () => {
-  const withConnection = {
-    connections: ["akin-ozer"],
-    connectionHealth: { "akin-ozer": "valid" as const },
-  };
   const createButton = (container: HTMLElement) =>
     [...container.querySelectorAll("button")].find(
       (b) => b.textContent!.trim() === "Create project",
@@ -511,10 +479,6 @@ describe("the Workflow field states the starting board, it does not pretend to p
  * answers.
  */
 describe("the create request in flight", () => {
-  const withConnection = {
-    connections: ["akin-ozer"],
-    connectionHealth: { "akin-ozer": "valid" as const },
-  };
   /** A create action the TEST answers, when it decides to. */
   function heldAction() {
     let answer: (reply: CreateProjectReply) => void = () => {};
@@ -555,6 +519,7 @@ describe("the create request in flight", () => {
           <NewProjectModal
             {...withConnection}
             storeRoot={null}
+            isAdmin={false}
             existingKeys={keys}
             onClose={() => {}}
           />

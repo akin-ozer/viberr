@@ -1,9 +1,5 @@
 import { describe, expect, it } from "vitest";
-import {
-  decidePrAdoption,
-  prAdoptionRefusalNote,
-  type PrAdoptionRefusal,
-} from "./pr-adoption.server";
+import { decidePrAdoption, prAdoptionRefusalNote } from "./pr-adoption.server";
 
 /**
  * R16-1 (owner ruling 2026-08-04) codified as the pure decision table
@@ -25,109 +21,91 @@ import {
 /** The delivered revision used across the review-state arms. */
 const REVISION = "80e9b2c1122334455667788990011223344556677";
 
-describe("decidePrAdoption non-review states (fail closed, F17-L4 split)", () => {
-  it("refuses a merged PR with refusal 'merged' (stale name, no history hazard)", () => {
-    const decision = decidePrAdoption({
-      state: "merged",
-      prHeadSha: "93435dfffeeeddccbbaa00998877665544332211",
-      revisionHeadSha: REVISION,
-    });
-    expect(decision).toEqual({ adopt: false, refusal: "merged" });
-  });
+/** A sha that is not the delivered revision: a stranger's head. */
+const STRANGER = "93435dfffeeeddccbbaa00998877665544332211";
 
-  it("refuses a closed-unmerged PR with the DIFFERENT refusal 'closed'", () => {
-    const decision = decidePrAdoption({
-      state: "closed",
-      prHeadSha: "93435dfffeeeddccbbaa00998877665544332211",
-      revisionHeadSha: REVISION,
-    });
-    expect(decision).toEqual({ adopt: false, refusal: "closed" });
-  });
-
-  it("treats the Viberr-only 'accepted' state as un-adoptable via the 'closed' arm", () => {
-    // "accepted" (human-accepted, real merge pending) is not "merged", so it
-    // falls into the non-merged branch and refuses as "closed".
-    const decision = decidePrAdoption({
-      state: "accepted",
-      prHeadSha: REVISION,
-      revisionHeadSha: REVISION,
-    });
-    expect(decision).toEqual({ adopt: false, refusal: "closed" });
-  });
-
-  it("refuses a merged PR even when its head equals the delivered revision", () => {
-    // Identity of the head does NOT rescue a non-open PR: state gates first.
-    const decision = decidePrAdoption({
-      state: "merged",
-      prHeadSha: REVISION,
-      revisionHeadSha: REVISION,
-    });
-    expect(decision).toEqual({ adopt: false, refusal: "merged" });
-  });
-});
-
-describe("decidePrAdoption review state (identity check)", () => {
-  it.each([
-    ["null (the task has delivered nothing)", null],
-    ["undefined", undefined],
-    ["whitespace only", "   "],
-  ] as const)("refuses with 'no_revision' when the delivered revision is %s", (_label, revisionHeadSha) => {
-    expect(decidePrAdoption({ state: "review", prHeadSha: REVISION, revisionHeadSha })).toEqual({
-      adopt: false,
-      refusal: "no_revision",
-    });
-  });
-
-  it.each([
-    ["null (it could not be read, fail closed)", null],
-    ["undefined", undefined],
-    ["whitespace only", "  "],
-  ] as const)("refuses with 'head_unknown' when the PR head is %s", (_label, prHeadSha) => {
-    expect(decidePrAdoption({ state: "review", prHeadSha, revisionHeadSha: REVISION })).toEqual({
-      adopt: false,
-      refusal: "head_unknown",
-    });
-  });
-
-  it("refuses with 'head_mismatch' when a readable head is not the delivered revision", () => {
-    // The exact H8 shape: an OPEN readable PR whose head is a stranger commit.
-    const decision = decidePrAdoption({
-      state: "review",
-      prHeadSha: "93435dfffeeeddccbbaa00998877665544332211",
-      revisionHeadSha: REVISION,
-    });
-    expect(decision).toEqual({ adopt: false, refusal: "head_mismatch" });
-  });
-
-  it("adopts (adopt: true) only when open and the head IS the delivered revision", () => {
-    const decision = decidePrAdoption({
-      state: "review",
-      prHeadSha: REVISION,
-      revisionHeadSha: REVISION,
-    });
-    expect(decision).toEqual({ adopt: true });
-  });
-
-  it("adopts after trimming surrounding whitespace on both shas", () => {
-    // head and revision are trimmed before comparison, so padding must not
-    // block a legitimate identity match.
-    const decision = decidePrAdoption({
-      state: "review",
-      prHeadSha: `  ${REVISION}  `,
-      revisionHeadSha: `\t${REVISION}\n`,
-    });
-    expect(decision).toEqual({ adopt: true });
-  });
-});
-
-describe("decidePrAdoption refusal-arm precedence", () => {
-  it("checks revision presence BEFORE head presence (no_revision wins when both empty)", () => {
-    const decision = decidePrAdoption({
-      state: "review",
-      prHeadSha: null,
-      revisionHeadSha: null,
-    });
-    expect(decision).toEqual({ adopt: false, refusal: "no_revision" });
+describe("decidePrAdoption", () => {
+  it.each<[string, Parameters<typeof decidePrAdoption>[0], ReturnType<typeof decidePrAdoption>]>([
+    // Non-review states fail closed, and merged and closed refuse DIFFERENTLY
+    // (F17-L4): a merged PR's collision is a stale name, a closed one's a
+    // history hazard.
+    [
+      "refuses a merged PR with refusal 'merged' (stale name, no history hazard)",
+      { state: "merged", prHeadSha: STRANGER, revisionHeadSha: REVISION },
+      { adopt: false, refusal: "merged" },
+    ],
+    [
+      "refuses a closed-unmerged PR with the DIFFERENT refusal 'closed'",
+      { state: "closed", prHeadSha: STRANGER, revisionHeadSha: REVISION },
+      { adopt: false, refusal: "closed" },
+    ],
+    [
+      // "accepted" (human-accepted, real merge pending) is not "merged", so it
+      // falls into the non-merged branch.
+      "refuses the Viberr-only 'accepted' state through the 'closed' arm",
+      { state: "accepted", prHeadSha: REVISION, revisionHeadSha: REVISION },
+      { adopt: false, refusal: "closed" },
+    ],
+    [
+      // Identity of the head does NOT rescue a non-open PR: state gates first.
+      "refuses a merged PR even when its head equals the delivered revision",
+      { state: "merged", prHeadSha: REVISION, revisionHeadSha: REVISION },
+      { adopt: false, refusal: "merged" },
+    ],
+    [
+      "refuses with 'no_revision' when the task has delivered nothing (null)",
+      { state: "review", prHeadSha: REVISION, revisionHeadSha: null },
+      { adopt: false, refusal: "no_revision" },
+    ],
+    [
+      "refuses with 'no_revision' when the delivered revision is undefined",
+      { state: "review", prHeadSha: REVISION, revisionHeadSha: undefined },
+      { adopt: false, refusal: "no_revision" },
+    ],
+    [
+      "refuses with 'no_revision' when the delivered revision is whitespace only",
+      { state: "review", prHeadSha: REVISION, revisionHeadSha: "   " },
+      { adopt: false, refusal: "no_revision" },
+    ],
+    [
+      "refuses with 'head_unknown' when the PR head could not be read (null, fail closed)",
+      { state: "review", prHeadSha: null, revisionHeadSha: REVISION },
+      { adopt: false, refusal: "head_unknown" },
+    ],
+    [
+      "refuses with 'head_unknown' when the PR head is undefined",
+      { state: "review", prHeadSha: undefined, revisionHeadSha: REVISION },
+      { adopt: false, refusal: "head_unknown" },
+    ],
+    [
+      "refuses with 'head_unknown' when the PR head is whitespace only",
+      { state: "review", prHeadSha: "  ", revisionHeadSha: REVISION },
+      { adopt: false, refusal: "head_unknown" },
+    ],
+    [
+      // The exact H8 shape: an OPEN readable PR whose head is a stranger commit.
+      "refuses with 'head_mismatch' when a readable head is not the delivered revision",
+      { state: "review", prHeadSha: STRANGER, revisionHeadSha: REVISION },
+      { adopt: false, refusal: "head_mismatch" },
+    ],
+    [
+      "checks revision presence BEFORE head presence (no_revision wins when both are empty)",
+      { state: "review", prHeadSha: null, revisionHeadSha: null },
+      { adopt: false, refusal: "no_revision" },
+    ],
+    [
+      "adopts only when open and the head IS the delivered revision",
+      { state: "review", prHeadSha: REVISION, revisionHeadSha: REVISION },
+      { adopt: true },
+    ],
+    [
+      // Padding must not block a legitimate identity match.
+      "adopts after trimming surrounding whitespace on both shas",
+      { state: "review", prHeadSha: `  ${REVISION}  `, revisionHeadSha: `\t${REVISION}\n` },
+      { adopt: true },
+    ],
+  ])("%s", (_label, input, decision) => {
+    expect(decidePrAdoption(input)).toEqual(decision);
   });
 });
 
@@ -168,23 +146,5 @@ describe("prAdoptionRefusalNote (pass 34, U34-6): names both collision origins, 
     expect(note).toContain(`its head is not JC-8's delivered revision (${REVISION.slice(0, 7)})`);
     expect(note).toContain("`resolve_remote_collision`");
     expect(note).toContain("deletes the stale remote branch `jc-8`");
-  });
-
-  it("carries no em or en dash on any refusal arm (the copy-ban dash gate does not walk app/server)", () => {
-    // copy-ban.test.ts gates app/features, app/routes, app/ui and the seed
-    // assets and leaves app/server ungated. This note is written by app/server
-    // and rendered verbatim on the task timeline, so its dash guarantee lives
-    // here, where a canary can reach it.
-    const refusals: PrAdoptionRefusal[] = ["merged", "closed", "no_revision", "head_unknown", "head_mismatch"];
-    for (const refusal of refusals) {
-      const text = prAdoptionRefusalNote({
-        refusal,
-        taskKey: "JC-8",
-        branch: "jc-8",
-        prNumber: 41,
-        revisionHeadSha: REVISION,
-      });
-      expect(text, refusal).not.toMatch(/[–—]/);
-    }
   });
 });

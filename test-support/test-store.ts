@@ -16,8 +16,10 @@ import type {
   WorkflowBoundary,
 } from "~/schemas/project-file.schema";
 import type {
+  Engagement,
   ParsedTaskFile,
   TaskFrontmatter,
+  TaskPacket,
 } from "~/schemas/task-file.schema";
 import { GOVERNED_TEMPLATE } from "~/shared/workflow/templates";
 import { defaultTransitionBy } from "~/shared/workflow/transitions";
@@ -99,7 +101,7 @@ export function setupTestStore(ctx: TestDbContext): TestStore {
     credentialPolicy: null,
     guardrails: [],
     requiredReviewers: [],
-  fileLeases: [],
+    fileLeases: [],
   });
 
   return { db, dataRoot, slug, users };
@@ -185,6 +187,28 @@ export const REVIEW_STAGE_REVIEWER = {
   extras: [],
   definition: { kind: "specialist", name: "Rev", role: "Code review", backends: ["claude"], model: "sonnet", stages: ["review"] },
 } satisfies AgentDeployment;
+
+/** The seeded Reviewer engaged on a task: verdict-capable and delivering
+ *  nothing, under its seed role, so its verdict binds and gates acceptance. */
+export const REVIEWER_ENGAGEMENT: Engagement = {
+  profileId: "reviewer",
+  backend: "claude",
+  role: "Review & validation",
+  delivers: false,
+  verdictCapable: true,
+};
+
+/** An open decision a person can act on: the operator's input packet with
+ *  one `request_edit` option, the shape `decisions.server` counts. */
+export const OPEN_DECISION: TaskPacket = {
+  type: "input",
+  kind: "Decision required",
+  from: "operator",
+  title: "Pick one",
+  body: "",
+  observations: [],
+  options: [{ kind: "request_edit", t: "Send back", d: "", rec: true }],
+};
 
 export function baseTaskFrontmatter(
   key: string,

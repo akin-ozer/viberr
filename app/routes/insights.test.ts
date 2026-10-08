@@ -1,6 +1,6 @@
-import { RouterContextProvider } from "react-router";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import {
+  routeArgs,
   setupAppTest,
   type AppTestContext,
 } from "../../test-support/test-app";
@@ -27,13 +27,7 @@ async function loadInsights(userId: string) {
   const { loader } = await import("~/routes/insights");
   const { cookie } = await app.cookieFor(userId);
   const request = app.request("/insights", { cookie });
-  return loader({
-    request,
-    url: new URL(request.url),
-    pattern: "/insights",
-    params: {},
-    context: new RouterContextProvider(),
-  });
+  return loader(routeArgs(request, {}, "/insights"));
 }
 
 describe("/insights loader", () => {

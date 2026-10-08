@@ -1,6 +1,5 @@
-import { RouterContextProvider } from "react-router";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { setupAppTest, type AppTestContext } from "../../test-support/test-app";
+import { routeArgs, setupAppTest, type AppTestContext } from "../../test-support/test-app";
 
 /**
  * O39-d: the dock's button asks this route, on every page, whether the viewer
@@ -27,13 +26,7 @@ afterAll(() => app.cleanup());
 async function load(cookie?: string) {
   const { loader } = await import("~/routes/resources.controller-unseen");
   const request = app.request("/resources/controller-unseen", cookie ? { cookie } : {});
-  return loader({
-    request,
-    url: new URL(request.url),
-    params: {},
-    pattern: "/resources/controller-unseen",
-    context: new RouterContextProvider(),
-  });
+  return loader(routeArgs(request, {}, "/resources/controller-unseen"));
 }
 
 async function unseenFor(userId: string) {

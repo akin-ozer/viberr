@@ -5,7 +5,6 @@ import path from "node:path";
 import { afterAll, afterEach, describe, expect, it, vi } from "vitest";
 import { readdirSync } from "node:fs";
 import { z } from "zod";
-import type { CapabilityMode } from "~/schemas/project-file.schema";
 import { sha256Hex } from "~/server/files/content-hash.server";
 import { logger } from "~/server/logging/logger.server";
 import { getBuildInfo } from "~/server/ops/build-info.server";
@@ -13,6 +12,7 @@ import { DONE_SIGNAL_RULE } from "~/server/tasks/done-signal.server";
 import { listAuditEvents } from "../../../test-support/audit-log";
 import { createTestDbContext } from "../../../test-support/test-db";
 import { SEED_AGENT_PROFILES } from "./agent-catalog.server";
+import { operatorAuthority } from "../../../test-support/operator-snapshot";
 
 /**
  * P13 regression: the shipped agent assets must load under EVERY runtime, not
@@ -52,9 +52,7 @@ const dbCtx = createTestDbContext();
 afterEach(dbCtx.cleanup);
 
 describe("shipped default assets", () => {
-  it("exposes every persona/skill body with real content", async () => {
-    const mod = await import("./default-assets.server");
-    expect(mod.seedDefaultAgentAssets).toBeTypeOf("function");
+  it("exposes every persona/skill body with real content", () => {
     // The operator profile template is built from the assets; an empty asset
     // would silently ship an agent with no instructions.
     const assetDir = path.join(REPO_ROOT, "app/server/seed/assets");
@@ -266,7 +264,7 @@ describe("shipped-asset refresh (B-OP1)", () => {
     // doctrine's wait for the answer; restore "Never hold this task back for
     // that proof". Ruling 503 moved the guide's bullet from "Chained goals"
     // to "Epics" and the doctrine's check from `goalChain` to the task's epic.
-    const { PRIOR_SHIPPED_HASHES, shippedCopyIsUnedited } = await import("./default-assets.server");
+    const { shippedCopyIsUnedited } = await import("./default-assets.server");
     const guideRel = path.join("skills", "controller-guide", "SKILL.md");
     expect(
       shippedCopyIsUnedited(guideRel, "ce538f0db704167a768cdab3848110ad5c46ff7843919330927bf59efda22a57", {}),
@@ -281,8 +279,8 @@ describe("shipped-asset refresh (B-OP1)", () => {
       "utf8",
     );
     const doctrine = shipped();
-    expect(PRIOR_SHIPPED_HASHES[guideRel]).not.toContain(sha256Hex(guide));
-    expect(PRIOR_SHIPPED_HASHES[OPERATOR_REL]).not.toContain(sha256Hex(doctrine));
+    expect(shippedCopyIsUnedited(guideRel, sha256Hex(guide), {})).toBe(false);
+    expect(shippedCopyIsUnedited(OPERATOR_REL, sha256Hex(doctrine), {})).toBe(false);
     const section = (heading: string): string => markdownSection(guide, heading);
     const creating = section("Creating a task");
     expect(creating, "the guide's Creating a task section").toContain(DONE_SIGNAL_RULE);
@@ -351,7 +349,7 @@ describe("shipped-asset refresh (B-OP1)", () => {
   it("ruling 531: the operator doctrine quotes the result rules word for word, and its outgoing hash is recorded", async () => {
     // CANARY: drop either rule from the doctrine, or reword one side only; or
     // remove the outgoing hash.
-    const { PRIOR_SHIPPED_HASHES, shippedCopyIsUnedited } = await import("./default-assets.server");
+    const { shippedCopyIsUnedited } = await import("./default-assets.server");
     const { RESULT_DELIVERY_RULE, RESULT_GOAL_RULE } = await import(
       "~/server/tasks/result-delivery.server"
     );
@@ -360,7 +358,7 @@ describe("shipped-asset refresh (B-OP1)", () => {
       "the doctrine's outgoing hash is not recorded",
     ).toBe(true);
     const doctrine = shipped();
-    expect(PRIOR_SHIPPED_HASHES[OPERATOR_REL]).not.toContain(sha256Hex(doctrine));
+    expect(shippedCopyIsUnedited(OPERATOR_REL, sha256Hex(doctrine), {})).toBe(false);
     expect(doctrine, "the triage gate").toContain(RESULT_GOAL_RULE);
     expect(doctrine, "the delivery paragraph").toContain(RESULT_DELIVERY_RULE);
   });
@@ -441,28 +439,28 @@ describe("shipped-asset refresh (B-OP1)", () => {
   it("ruling 526: the reviewer skill asks for each row's result and mark, and its outgoing hash is recorded", async () => {
     // Canaries: drop the mark from the skill's evidence-rows bullet; remove
     // the outgoing hash.
-    const { PRIOR_SHIPPED_HASHES, shippedCopyIsUnedited } = await import("./default-assets.server");
+    const { shippedCopyIsUnedited } = await import("./default-assets.server");
     const rel = path.join("skills", "reviewer-expertise", "SKILL.md");
     expect(
       shippedCopyIsUnedited(rel, "0fea5d36f4a35643d4352cccfc35183018a76907bc9387c4c2b34bb9abbbb57a", {}),
       "the skill's outgoing hash is not recorded",
     ).toBe(true);
     const skill = readFileSync(path.join(REPO_ROOT, "app/server/seed/assets/reviewer-expertise.skill.md"), "utf8");
-    expect(PRIOR_SHIPPED_HASHES[rel]).not.toContain(sha256Hex(skill));
+    expect(shippedCopyIsUnedited(rel, sha256Hex(skill), {})).toBe(false);
     expect(skill).toContain("and marks it `pass`, `fail`, or `info`");
     expect(skill).toContain("so mark a row that blocks as `fail`");
   });
 
   it("ruling 619: the operator skill carries an earlier stage's fix through a later stage's file, and its outgoing hash is recorded", async () => {
     // Canaries: drop the bullet; remove the outgoing hash.
-    const { PRIOR_SHIPPED_HASHES, shippedCopyIsUnedited } = await import("./default-assets.server");
+    const { shippedCopyIsUnedited } = await import("./default-assets.server");
     const rel = path.join("skills", "viberr-app-expertise", "SKILL.md");
     expect(
       shippedCopyIsUnedited(rel, "c58c22c5e04de01ae5ccd0114869c560e1a16376a4be2420b6ce5cb618dfa3d4", {}),
       "the skill's outgoing hash is not recorded",
     ).toBe(true);
     const skill = readFileSync(path.join(REPO_ROOT, "app/server/seed/assets/viberr-app-expertise.skill.md"), "utf8");
-    expect(PRIOR_SHIPPED_HASHES[rel]).not.toContain(sha256Hex(skill));
+    expect(shippedCopyIsUnedited(rel, sha256Hex(skill), {})).toBe(false);
     const prose = skill.replace(/\s+/g, " ");
     expect(prose).toContain("A fix at one stage can leave a later stage's file stale.");
     expect(prose).toContain(
@@ -603,16 +601,16 @@ describe("shipped-asset refresh (B-OP1)", () => {
   });
 
   it("recognizes the versions shipped before the manifest existed", async () => {
-    const { PRIOR_SHIPPED_HASHES, shippedCopyIsUnedited } = await import(
-      "./default-assets.server"
-    );
-    const known = PRIOR_SHIPPED_HASHES[OPERATOR_REL] ?? [];
+    const { shippedCopyIsUnedited } = await import("./default-assets.server");
     // The pre-pass-15 doctrine is in the list, so a store seeded from it — the
     // docker-data copy this finding was raised against — converges on boot.
-    expect(known).toContain(
-      "849d977503fe2a3b04776379b4017d40e50d95ed394770f28ef825e8513085d6",
-    );
-    expect(shippedCopyIsUnedited(OPERATOR_REL, known[0]!, {})).toBe(true);
+    expect(
+      shippedCopyIsUnedited(
+        OPERATOR_REL,
+        "849d977503fe2a3b04776379b4017d40e50d95ed394770f28ef825e8513085d6",
+        {},
+      ),
+    ).toBe(true);
     expect(shippedCopyIsUnedited(OPERATOR_REL, "f".repeat(64), {})).toBe(false);
     // The manifest is the other half: whatever this app last wrote counts.
     expect(shippedCopyIsUnedited(OPERATOR_REL, "a".repeat(64), {
@@ -627,28 +625,20 @@ describe("the controller doctrine and skill upgrade in place (ruling 121)", () =
   const assetsDir = path.join(import.meta.dirname, "assets");
 
   it("lists the outgoing versions of both files, so an unedited store copy is refreshed at boot", async () => {
-    const { PRIOR_SHIPPED_HASHES, shippedCopyIsUnedited } = await import(
-      "./default-assets.server"
-    );
+    const { shippedCopyIsUnedited } = await import("./default-assets.server");
     const definitionRel = path.join("agents", "definitions", "controller.md");
     const skillRel = path.join("skills", "controller-guide", "SKILL.md");
-    expect(PRIOR_SHIPPED_HASHES[definitionRel]).toContain(
-      "8dcb2d1bb8f3668bcc9337af2d07be196ed704b66d70b699b2ac55e39ebf258c",
-    );
-    expect(PRIOR_SHIPPED_HASHES[skillRel]).toContain(
-      "a2defe42d6fb6a5eed063a1e7b9bb9b5636c1619c1f5ea0f6e56838b9628fecd",
-    );
-    for (const [rel, hashes] of [
-      [definitionRel, PRIOR_SHIPPED_HASHES[definitionRel]!],
-      [skillRel, PRIOR_SHIPPED_HASHES[skillRel]!],
-    ] as const) {
-      for (const hash of hashes) expect(shippedCopyIsUnedited(rel, hash, {})).toBe(true);
-    }
+    expect(
+      shippedCopyIsUnedited(definitionRel, "8dcb2d1bb8f3668bcc9337af2d07be196ed704b66d70b699b2ac55e39ebf258c", {}),
+    ).toBe(true);
+    expect(
+      shippedCopyIsUnedited(skillRel, "a2defe42d6fb6a5eed063a1e7b9bb9b5636c1619c1f5ea0f6e56838b9628fecd", {}),
+    ).toBe(true);
     // The shipped text is NEW: neither outgoing hash is the current one.
     const definition = readFileSync(path.join(assetsDir, "controller.definition.md"), "utf8");
     const skill = readFileSync(path.join(assetsDir, "controller-guide.skill.md"), "utf8");
-    expect(PRIOR_SHIPPED_HASHES[definitionRel]).not.toContain(sha256Hex(definition));
-    expect(PRIOR_SHIPPED_HASHES[skillRel]).not.toContain(sha256Hex(skill));
+    expect(shippedCopyIsUnedited(definitionRel, sha256Hex(definition), {})).toBe(false);
+    expect(shippedCopyIsUnedited(skillRel, sha256Hex(skill), {})).toBe(false);
   });
 
   /**
@@ -723,9 +713,7 @@ describe("the controller doctrine and skill upgrade in place (ruling 121)", () =
 describe("the controller playbook learns createRepository (ruling 462)", () => {
   const assetsDir = path.join(import.meta.dirname, "assets");
   it("names the flag and lists its outgoing version", async () => {
-    const { PRIOR_SHIPPED_HASHES, shippedCopyIsUnedited } = await import(
-      "./default-assets.server"
-    );
+    const { shippedCopyIsUnedited } = await import("./default-assets.server");
     const skill = readFileSync(path.join(assetsDir, "controller-guide.skill.md"), "utf8");
     expect(skill).toContain("The repository does not have to exist first.");
     expect(skill).toContain("pass `createRepository` to `create_project`");
@@ -733,7 +721,7 @@ describe("the controller playbook learns createRepository (ruling 462)", () => {
     const rel = path.join("skills", "controller-guide", "SKILL.md");
     const outgoing = "f58275ca76e09a6d149e8fa3b7e8bec73cd9a7f34627e642ced603fdb1dcfd91";
     expect(shippedCopyIsUnedited(rel, outgoing, {})).toBe(true);
-    expect(PRIOR_SHIPPED_HASHES[rel]).not.toContain(sha256Hex(skill));
+    expect(shippedCopyIsUnedited(rel, sha256Hex(skill), {})).toBe(false);
   });
 });
 
@@ -748,9 +736,7 @@ describe("the controller playbook learns createRepository (ruling 462)", () => {
 describe("the controller playbook learns list_github_connections (ruling 463)", () => {
   const assetsDir = path.join(import.meta.dirname, "assets");
   it("names the read and lists its outgoing version", async () => {
-    const { PRIOR_SHIPPED_HASHES, shippedCopyIsUnedited } = await import(
-      "./default-assets.server"
-    );
+    const { shippedCopyIsUnedited } = await import("./default-assets.server");
     const skill = readFileSync(path.join(assetsDir, "controller-guide.skill.md"), "utf8");
     // Ruling 667 scoped the bullet to the board that needs a connection.
     expect(skill).toContain("For a software board, read the GitHub connections before you create anything.");
@@ -759,7 +745,7 @@ describe("the controller playbook learns list_github_connections (ruling 463)", 
     const rel = path.join("skills", "controller-guide", "SKILL.md");
     const outgoing = "26672ee429c9089c9c676bc178b5afaf401927f90596c6cb2f36660da185c762";
     expect(shippedCopyIsUnedited(rel, outgoing, {})).toBe(true);
-    expect(PRIOR_SHIPPED_HASHES[rel]).not.toContain(sha256Hex(skill));
+    expect(shippedCopyIsUnedited(rel, sha256Hex(skill), {})).toBe(false);
   });
 });
 
@@ -774,9 +760,7 @@ describe("the controller playbook learns list_github_connections (ruling 463)", 
 describe("the controller playbook learns `agents` and remove_agent_deployment (ruling 464)", () => {
   const assetsDir = path.join(import.meta.dirname, "assets");
   it("names both and lists its outgoing version", async () => {
-    const { PRIOR_SHIPPED_HASHES, shippedCopyIsUnedited } = await import(
-      "./default-assets.server"
-    );
+    const { shippedCopyIsUnedited } = await import("./default-assets.server");
     const skill = readFileSync(path.join(assetsDir, "controller-guide.skill.md"), "utf8");
     expect(skill).toContain("Pass the roster you designed as `agents` to `create_project`");
     expect(skill).toContain("The one removal you hold is `remove_agent_deployment`");
@@ -784,7 +768,7 @@ describe("the controller playbook learns `agents` and remove_agent_deployment (r
     const rel = path.join("skills", "controller-guide", "SKILL.md");
     const outgoing = "df3a250cbd5fbbaccdd7843199a1d9e23e836250119db2f87a7693e57b6a17d8";
     expect(shippedCopyIsUnedited(rel, outgoing, {})).toBe(true);
-    expect(PRIOR_SHIPPED_HASHES[rel]).not.toContain(sha256Hex(skill));
+    expect(shippedCopyIsUnedited(rel, sha256Hex(skill), {})).toBe(false);
   });
 });
 
@@ -800,16 +784,16 @@ describe("the controller playbook learns `agents` and remove_agent_deployment (r
 describe("the operator doctrine upgrade in place (ruling 134)", () => {
   const assetsDir = path.join(import.meta.dirname, "assets");
   it("carries the rework-delivery sentence and lists its outgoing version", async () => {
-    const { PRIOR_SHIPPED_HASHES } = await import("./default-assets.server");
+    const { shippedCopyIsUnedited } = await import("./default-assets.server");
     const definition = readFileSync(path.join(assetsDir, "operator.definition.md"), "utf8");
     expect(definition).toContain("shows `pr.unpushedRevision`, call `deliver_for_review`");
     expect(definition).toContain("Pushing is never a person's job and never an agent's.");
     expect(definition).not.toMatch(/[–—]/);
     const rel = path.join("agents", "definitions", "operator.md");
-    expect(PRIOR_SHIPPED_HASHES[rel]).toContain(
-      "9462381afd6c87b991f5653610252ac2e7a4815b039709d818bbecec1db7532e",
-    );
-    expect(PRIOR_SHIPPED_HASHES[rel]).not.toContain(sha256Hex(definition));
+    expect(
+      shippedCopyIsUnedited(rel, "9462381afd6c87b991f5653610252ac2e7a4815b039709d818bbecec1db7532e", {}),
+    ).toBe(true);
+    expect(shippedCopyIsUnedited(rel, sha256Hex(definition), {})).toBe(false);
   });
 });
 
@@ -999,7 +983,7 @@ describe("the seeded-prompt sweep: the shipped prompts say what the code does", 
     // CANARY: restore the guide's "still needs a repository" sentence, drop
     // the `delivers` bullet or the doctrine's sentence, drop the operator's
     // no-repository clause or its notes, or drop an outgoing hash.
-    const { PRIOR_SHIPPED_HASHES, seedDefaultAgentAssets, shippedCopyIsUnedited } = await import(
+    const { seedDefaultAgentAssets, shippedCopyIsUnedited } = await import(
       "./default-assets.server"
     );
     const dataRoot = seededStore();
@@ -1034,7 +1018,7 @@ describe("the seeded-prompt sweep: the shipped prompts say what the code does", 
     ];
     for (const [rel, hash, shipped] of outgoing) {
       expect(shippedCopyIsUnedited(rel, hash, {}), `${rel}'s outgoing hash is not recorded`).toBe(true);
-      expect(PRIOR_SHIPPED_HASHES[rel], rel).not.toContain(sha256Hex(shipped));
+      expect(shippedCopyIsUnedited(rel, sha256Hex(shipped), {}), rel).toBe(false);
     }
   });
 
@@ -1043,7 +1027,7 @@ describe("the seeded-prompt sweep: the shipped prompts say what the code does", 
     // from its skill, the doctrine's or the guide's "can start without", the
     // guide's switching section, a grant id it names or its step that starts
     // the operators that waited, or an outgoing hash.
-    const { PRIOR_SHIPPED_HASHES, seedDefaultAgentAssets, shippedCopyIsUnedited } = await import(
+    const { seedDefaultAgentAssets, shippedCopyIsUnedited } = await import(
       "./default-assets.server"
     );
     const dataRoot = seededStore();
@@ -1093,7 +1077,7 @@ describe("the seeded-prompt sweep: the shipped prompts say what the code does", 
     ];
     for (const [rel, hash, shipped] of outgoing) {
       expect(shippedCopyIsUnedited(rel, hash, {}), `${rel}'s outgoing hash is not recorded`).toBe(true);
-      expect(PRIOR_SHIPPED_HASHES[rel], rel).not.toContain(sha256Hex(shipped));
+      expect(shippedCopyIsUnedited(rel, sha256Hex(shipped), {}), rel).toBe(false);
     }
   });
 
@@ -1105,7 +1089,7 @@ describe("the seeded-prompt sweep: the shipped prompts say what the code does", 
   it("rulings 677 to 679: the guide keeps a board's template in a knowledge base, a skill within what a run is given, and names the reader of one correction", async () => {
     // CANARY: drop the guide's template bullet or the tool it names, its
     // sentence on a skill's size, `read_kb_correction`, or the outgoing hash.
-    const { PRIOR_SHIPPED_HASHES, shippedCopyIsUnedited } = await import("./default-assets.server");
+    const { shippedCopyIsUnedited } = await import("./default-assets.server");
     const { SKILL_INJECTION_BUDGET } = await import("~/server/files/skill-body.server");
     const guide = read("controller-guide.skill.md");
     const results = markdownSection(guide, "A board that delivers results");
@@ -1125,7 +1109,7 @@ describe("the seeded-prompt sweep: the shipped prompts say what the code does", 
       shippedCopyIsUnedited(rel, "a79f832fe1ac95d577e0a8a6915126558a5ff5516347fb87c16afacb03cb70fd", {}),
       "the guide's outgoing hash is not recorded",
     ).toBe(true);
-    expect(PRIOR_SHIPPED_HASHES[rel]).not.toContain(sha256Hex(guide));
+    expect(shippedCopyIsUnedited(rel, sha256Hex(guide), {})).toBe(false);
   });
 
   /**
@@ -1139,7 +1123,7 @@ describe("the seeded-prompt sweep: the shipped prompts say what the code does", 
     // CANARY: put back "copy it out of the task that holds it" as the whole
     // of the rule, or drop the flow bullet, the continuation bullet, either
     // tool's name or the outgoing hash.
-    const { PRIOR_SHIPPED_HASHES, shippedCopyIsUnedited } = await import("./default-assets.server");
+    const { shippedCopyIsUnedited } = await import("./default-assets.server");
     const guide = read("controller-guide.skill.md");
     // Read as sentences: where a line wraps is not what the guide says.
     const said = (section: string) => markdownSection(guide, section).replace(/\s+/g, " ");
@@ -1167,13 +1151,13 @@ describe("the seeded-prompt sweep: the shipped prompts say what the code does", 
       shippedCopyIsUnedited(rel, "e0635450d0c8c60a1a1086a3eb1d46a4ef5df8c64ecb80730daf857d13f03ca9", {}),
       "the guide's outgoing hash is not recorded",
     ).toBe(true);
-    expect(PRIOR_SHIPPED_HASHES[rel]).not.toContain(sha256Hex(guide));
+    expect(shippedCopyIsUnedited(rel, sha256Hex(guide), {})).toBe(false);
   });
 
   it("rulings 690 to 692: the guide starts a prose board from the shipped Writer and Editor, keeps a result's sources and has a page pictured", async () => {
     // CANARY: drop any of the five bullets, either tool's name or the
     // outgoing hash.
-    const { PRIOR_SHIPPED_HASHES, shippedCopyIsUnedited } = await import("./default-assets.server");
+    const { shippedCopyIsUnedited } = await import("./default-assets.server");
     const guide = read("controller-guide.skill.md");
     const results = markdownSection(guide, "A board that delivers results").replace(/\s+/g, " ");
     expect(results).toContain("**A person is asked only what they alone know, once.**");
@@ -1196,7 +1180,7 @@ describe("the seeded-prompt sweep: the shipped prompts say what the code does", 
       shippedCopyIsUnedited(rel, "f7adbea417510f20ea5c6e52aeea0fe47df4248beafe8f65d26d59b38d02a53d", {}),
       "the guide's outgoing hash is not recorded",
     ).toBe(true);
-    expect(PRIOR_SHIPPED_HASHES[rel]).not.toContain(sha256Hex(guide));
+    expect(shippedCopyIsUnedited(rel, sha256Hex(guide), {})).toBe(false);
   });
 
   it("a GitHub read needs membership, not maintainer", () => {
@@ -1212,23 +1196,7 @@ describe("the seeded-prompt sweep: the shipped prompts say what the code does", 
     const { buildOperatorSystemPrompt } = await import("~/server/runtimes/operator-prompt.server");
     const dataRoot = seededStore();
     seedDefaultAgentAssets(dataRoot);
-    const { prompt } = buildOperatorSystemPrompt(
-      {
-        policy: new Map<string, CapabilityMode>([["transition-to-done", "human"]]),
-        autonomy: "supervised",
-        backend: "claude",
-        model: "sonnet",
-        effort: "",
-        name: "Operator",
-        skills: [],
-        kb: [],
-        mcps: [],
-        persona: null,
-        deployed: true,
-        humanGatedBeforeWork: false,
-      },
-      dataRoot,
-    );
+    const { prompt } = buildOperatorSystemPrompt(operatorAuthority({ "transition-to-done": "human" }), dataRoot);
     // The store copy was read, not the baked fallback.
     expect(prompt).toContain("triage quality gate");
     expect(prompt).not.toContain("advancing a single `auto` boundary");
@@ -1237,7 +1205,7 @@ describe("the seeded-prompt sweep: the shipped prompts say what the code does", 
   });
 
   it("every rewritten asset's outgoing version is a recorded prior hash, and the shipped version is not", async () => {
-    const { PRIOR_SHIPPED_HASHES, seedDefaultAgentAssets, shippedCopyIsUnedited } = await import(
+    const { seedDefaultAgentAssets, shippedCopyIsUnedited } = await import(
       "./default-assets.server"
     );
     // Two versions where PR #321 ("Instance settings") shipped in between.
@@ -1331,7 +1299,7 @@ describe("the seeded-prompt sweep: the shipped prompts say what the code does", 
         expect(shippedCopyIsUnedited(rel, hash, {}), rel).toBe(true);
         expect(shipped[rel], `${rel} still ships its outgoing version`).not.toBe(hash);
       }
-      expect(PRIOR_SHIPPED_HASHES[rel], rel).not.toContain(shipped[rel]);
+      expect(shippedCopyIsUnedited(rel, shipped[rel]!, {}), rel).toBe(false);
     }
   });
 });

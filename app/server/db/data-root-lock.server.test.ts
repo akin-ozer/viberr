@@ -15,9 +15,7 @@ import {
   releaseDataRootLock,
   startDataRootLockGuard,
   stopDataRootLockGuard,
-  type DataRootLock,
   type LockHolder,
-  type LockOwnership,
 } from "./data-root-lock.server";
 
 /**
@@ -386,72 +384,60 @@ describe("verifyOwnership: the checks behind the inode match", () => {
 });
 
 describe("startDataRootLockGuard (F18-5)", () => {
-  afterEach(() => stopDataRootLockGuard());
+  afterEach(() => {
+    stopDataRootLockGuard();
+    releaseDataRootLock();
+    vi.useRealTimers();
+    vi.restoreAllMocks();
+  });
 
-  // SAFETY: the guard reads a lock's `path` and hands the whole object to the
-  // injected `verify`/`onStolen` below — it never touches `fd`, `release()`,
-  // `abandon()` or `verifyOwnership()`, so a two-field stand-in drives every
-  // branch these three tests exercise.
-  const fakeLock = (path = "/x/writer.lock") =>
-    ({ path, holder: HOST_A }) as DataRootLock;
+  /** The lock this process holds, taken the way boot takes it: the one the
+   *  guard reads on every tick. */
+  const holdLock = () =>
+    acquireDataRootLock({ dataRoot: ctx.makeTempDir(), self: BOOT_A, isAlive: alive });
+
+  /** `process.exit` ends the worker, so the spy throws where the process would
+   *  have died: nothing after the call runs, and the test reads the code. */
+  const stubProcessExit = () =>
+    vi.spyOn(process, "exit").mockImplementation((code) => {
+      throw new Error(`__exit:${code}`);
+    });
 
   it("loudly shuts down and stops itself when a tick sees a stolen lock", () => {
     vi.useFakeTimers();
-    const stolen: Array<[string, LockOwnership]> = [];
-    startDataRootLockGuard({
-      intervalMs: 1000,
-      lock: fakeLock(),
-      verify: () => "stolen",
-      onStolen: (l, v) => stolen.push([l.path, v]),
-    });
-    vi.advanceTimersByTime(1000);
-    expect(stolen).toEqual([["/x/writer.lock", "stolen"]]);
-    // guard stopped itself → later ticks do not re-fire onStolen:
-    vi.advanceTimersByTime(5000);
-    expect(stolen).toHaveLength(1);
-    vi.useRealTimers();
+    const lock = holdLock();
+    stubProcessExit();
+    startDataRootLockGuard();
+    // Another boot takes the freed path: a new file, a new inode.
+    rmSync(lock.path, { force: true });
+    writeFileSync(lock.path, JSON.stringify({ ...HOST_A_OTHER, bootId: "boot-2" }));
+
+    // The FATAL line goes straight to fd 2 (F20-8(a)), so it shows in the
+    // run's output.
+    expect(() => vi.advanceTimersByTime(20_000)).toThrow("__exit:1");
+    // Abandoned, not released: the file at the path is the other boot's now.
+    expect(existsSync(lock.path)).toBe(true);
+    expect(heldDataRootLock()).toBeNull();
+    // It stopped itself first, so no later tick fires the shutdown again.
+    expect(vi.getTimerCount()).toBe(0);
   });
 
   it("does not shut down on healthy or unverifiable ticks", () => {
     vi.useFakeTimers();
-    const stolen: string[] = [];
-    let verdict: LockOwnership = "held";
-    startDataRootLockGuard({
-      intervalMs: 1000,
-      lock: fakeLock(),
-      verify: () => verdict,
-      onStolen: () => stolen.push("x"),
-    });
-    vi.advanceTimersByTime(1000);
-    verdict = "unverifiable";
-    vi.advanceTimersByTime(1000);
-    expect(stolen).toEqual([]);
-    vi.useRealTimers();
+    const lock = holdLock();
+    const exit = stubProcessExit();
+    startDataRootLockGuard();
+    vi.advanceTimersByTime(20_000);
+    // A torn read: our inode, its content not readable yet.
+    writeFileSync(lock.path, "");
+    vi.advanceTimersByTime(20_000);
+    expect(exit).not.toHaveBeenCalled();
   });
 
   it("is idempotent — a second start does not stack a second interval", () => {
     vi.useFakeTimers();
-    const ticks: number[] = [];
-    startDataRootLockGuard({
-      intervalMs: 1000,
-      lock: fakeLock(),
-      verify: () => {
-        ticks.push(1);
-        return "held";
-      },
-      onStolen: () => {},
-    });
-    startDataRootLockGuard({
-      intervalMs: 1000,
-      lock: fakeLock(),
-      verify: () => {
-        ticks.push(2);
-        return "held";
-      },
-      onStolen: () => {},
-    });
-    vi.advanceTimersByTime(1000);
-    expect(ticks).toEqual([1]); // only the first guard's verify ran
-    vi.useRealTimers();
+    startDataRootLockGuard();
+    startDataRootLockGuard();
+    expect(vi.getTimerCount()).toBe(1);
   });
 });

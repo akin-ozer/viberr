@@ -13,7 +13,6 @@ import type {
 import {
   assertEffortForBackend,
   assertModelForBackend,
-  curatedCatalog,
   effortsFor,
   defaultEffortFor,
   defaultModelFor,
@@ -27,7 +26,7 @@ import {
 } from "./model-catalog.server";
 import {
   clearModelMark,
-  markModelUnavailable,
+  noteModelAvailabilityFromFailure,
 } from "./model-availability.server";
 
 /**
@@ -101,8 +100,8 @@ describe("resolveRunModel — the SDK-safety sanitizer", () => {
 });
 
 describe("curated catalog", () => {
-  it("claude curated: sonnet/opus/haiku aliases, effort levels, defaults", () => {
-    const cat = curatedCatalog("claude");
+  it("claude curated: sonnet/opus/haiku aliases, effort levels, defaults", async () => {
+    const cat = await getModelCatalog("claude");
     expect(cat.models.map((m) => m.value)).toEqual(["sonnet", "opus", "haiku"]);
     expect(cat.models.every((m) => m.supportsEffort)).toBe(true);
     expect(cat.efforts).toEqual(["low", "medium", "high", "xhigh", "max"]);
@@ -110,17 +109,13 @@ describe("curated catalog", () => {
     expect(cat.defaultEffort).toBe("high");
   });
 
-  it("the shared always-valid alias list matches the curated values (ruling 106 D1)", async () => {
-    // The client pickers use CLAUDE_MODEL_ALIASES + DATED_CLAUDE_ID_RE to
-    // decide whether a stored model would run verbatim; if the curated values
-    // and the shared list drift, the pickers start rewriting valid models (or
-    // preserving invalid ones).
-    const { CLAUDE_MODEL_ALIASES, claudeModelRunsVerbatim } = await import(
-      "~/shared/model-ids"
-    );
-    expect(curatedCatalog("claude").models.map((m) => m.value)).toEqual([
-      ...CLAUDE_MODEL_ALIASES,
-    ]);
+  it("every curated Claude value runs verbatim by the pickers' shared rule (ruling 106 D1)", async () => {
+    // The client pickers ask `claudeModelRunsVerbatim` whether a stored model
+    // would run verbatim; a curated value it does not accept would be
+    // rewritten to the default by every picker that shows it.
+    const { claudeModelRunsVerbatim } = await import("~/shared/model-ids");
+    const curated = (await getModelCatalog("claude")).models.map((m) => m.value);
+    expect(curated.filter((value) => !claudeModelRunsVerbatim(value))).toEqual([]);
     // And the shared predicate agrees with isKnownModel on its static half.
     expect(claudeModelRunsVerbatim("claude-opus-4-1-20250805")).toBe(true);
     expect(isKnownModel("claude", "claude-opus-4-1-20250805")).toBe(true);
@@ -128,8 +123,8 @@ describe("curated catalog", () => {
     expect(claudeModelRunsVerbatim("gpt-5-codex")).toBe(false);
   });
 
-  it("codex curated: the pinned CLI's bundled models + low…max efforts, per model", () => {
-    const cat = curatedCatalog("codex");
+  it("codex curated: the pinned CLI's bundled models + low…max efforts, per model", async () => {
+    const cat = await getModelCatalog("codex");
     // Ruling 687: GPT-6.1 Sol is listed FIRST, so it is the fallback a
     // model-less operator or profile runs on (it replaced F20-33's Terra).
     // The rest follow the 0.160.1 bundled catalog's priority order, its
@@ -160,15 +155,15 @@ describe("curated catalog", () => {
     expect(cat.defaultEffort).toBe("medium");
   });
 
-  it("returns fresh copies (callers cannot mutate the shared constant)", () => {
-    const a = curatedCatalog("claude");
+  it("returns fresh copies (callers cannot mutate the shared constant)", async () => {
+    const a = await getModelCatalog("claude");
     a.models[0]!.value = "mutated";
-    expect(curatedCatalog("claude").models[0]!.value).toBe("sonnet");
+    expect((await getModelCatalog("claude")).models[0]!.value).toBe("sonnet");
   });
 
-  it("defaultModel is the FIRST available model (not a separate hardcoded id)", () => {
+  it("defaultModel is the FIRST available model (not a separate hardcoded id)", async () => {
     for (const backend of ["claude", "codex"] as const) {
-      const cat = curatedCatalog(backend);
+      const cat = await getModelCatalog(backend);
       expect(cat.defaultModel).toBe(cat.models[0]!.value);
       // defaultModelFor mirrors the catalog default (what run/reply fall back to).
       expect(defaultModelFor(backend)).toBe(cat.models[0]!.value);
@@ -575,10 +570,12 @@ describe("R20-3 (F20-4): the catalog stamps provider-refused models unavailable"
 
   it("stamps a marked model in the curated (codex) catalog", async () => {
     const db = dbCtx.makeDb();
-    markModelUnavailable(db, {
+    noteModelAvailabilityFromFailure(db, {
+      runId: "run_1",
       backend: "codex",
       model: "gpt-5.6-sol",
-      reason: "not supported on this account",
+      providerText:
+        "The 'gpt-5.6-sol' model is not supported when using Codex with a ChatGPT account.",
     });
     const cat = await getModelCatalog("codex", { db });
     const sol = cat.models.find((m) => m.value === "gpt-5.6-sol");
@@ -589,12 +586,13 @@ describe("R20-3 (F20-4): the catalog stamps provider-refused models unavailable"
     ).toBeUndefined();
   });
 
-  it("stamps the LIVE-enhanced claude catalog too", async () => {
+  it("stamps the curated Claude catalog served to a viewer with no credential", async () => {
     const db = dbCtx.makeDb();
-    markModelUnavailable(db, {
+    noteModelAvailabilityFromFailure(db, {
+      runId: "run_1",
       backend: "claude",
       model: "opus",
-      reason: "model unavailable for this deployment",
+      providerText: "model unavailable for this deployment",
     });
     const cat = await getModelCatalog("claude", {
       db,
@@ -617,13 +615,20 @@ describe("R20-3 (F20-4): the catalog stamps provider-refused models unavailable"
     });
     expect(before.models[0]!.unavailable).toBeUndefined();
     // Mark it — no cache reset — the very next call reflects it.
-    markModelUnavailable(db, { backend: "claude", model: "sonnet", reason: "gone" });
+    noteModelAvailabilityFromFailure(db, {
+      runId: "run_1",
+      backend: "claude",
+      model: "sonnet",
+      providerText: "The 'sonnet' model is not supported for this account",
+    });
     const after = await getModelCatalog("claude", {
       db,
       claudeQueryFn: queryFn,
       credential: VIEWER_CREDENTIAL,
     });
-    expect(after.models[0]!.unavailable?.reason).toBe("gone");
+    expect(after.models[0]!.unavailable?.reason).toBe(
+      "The 'sonnet' model is not supported for this account",
+    );
     // And clearing it takes effect the next call with no reset either.
     clearModelMark(db, "claude", "sonnet");
     const cleared = await getModelCatalog("claude", {

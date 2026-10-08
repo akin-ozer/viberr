@@ -873,7 +873,7 @@ export async function setTaskMetadata(
  * so this bounds only what a RENAME may set: a task that arrived with a longer
  * title keeps it until someone edits it, and is then held to this.
  */
-export const TASK_TITLE_MAX_CHARS = 200;
+const TASK_TITLE_MAX_CHARS = 200;
 
 /**
  * Ruling 295 (pass 37, F37-130): a task's TITLE can be corrected.

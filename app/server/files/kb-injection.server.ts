@@ -199,7 +199,7 @@ export function collectKbDocs(dir: string): KbDoc[] {
  * run opens them from its shell. Walked by the rules {@link collectKbDocs}
  * walks by.
  */
-export function collectKbOtherFiles(dir: string): KbDoc[] {
+function collectKbOtherFiles(dir: string): KbDoc[] {
   return walkKbFiles(dir, (name) => !isInjectableKbDoc(name));
 }
 
@@ -312,7 +312,7 @@ export interface KbInjection {
  * prompt instead of living in a server log nobody reads while every UI still
  * shows the grant attached.
  */
-export function readKbIndexDetailed(
+function readKbIndexDetailed(
   name: string,
   dataRoot?: string,
   reader: KbIndexReader = {},
@@ -557,7 +557,7 @@ export function resolveKbDocPath(
  *  document. The caller decides WHICH knowledge bases may be asked for — this
  *  reader does not know a run's grants and must never be handed an
  *  unfiltered name (ruling 283). */
-export function readKbDoc(
+function readKbDoc(
   kb: string,
   docPath: string,
   dataRoot?: string,
@@ -627,7 +627,7 @@ const KB_INDEX_NOTE =
  * so a run with no knowledge base never carries a rule about a resource it does
  * not have.
  */
-export const KB_PRECEDENCE_NOTE =
+const KB_PRECEDENCE_NOTE =
   "\n\n---\n# Which source wins (knowledge bases vs the repository)\n\n" +
   "The repository's OWN documented conventions outrank the knowledge bases " +
   "below. Where a repo file states a convention (its README, CONTRIBUTING, " +

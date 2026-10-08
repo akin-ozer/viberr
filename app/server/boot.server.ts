@@ -17,7 +17,6 @@ import {
   DataRootLockedError,
   forceDataRootTakeover,
   startDataRootLockGuard,
-  type AcquireDataRootLockOptions,
 } from "./db/data-root-lock.server";
 import { getDb, getProjectionDbPath } from "./db/sqlite.server";
 import { selfHealProjectionDbIfCorrupt } from "./db/self-heal.server";
@@ -275,7 +274,7 @@ export function widenNotificationKindCheck(db: DatabaseSync): string[] {
  * land. Generalised from the validation-only read (F21-1) in pass 34 — a value
  * the code declares that the live root's CHECK does not admit.
  */
-export function projectionCheckGaps(db: DatabaseSync): string[] {
+function projectionCheckGaps(db: DatabaseSync): string[] {
   return [
     ...projectionValidationGaps(db).map((value) => `task_projections.validation: ${value}`),
     // Ruling 225 (F37-45): the THIRD instance of this drift, and the one that
@@ -344,10 +343,8 @@ function checkListGaps(
  * migrations run against a throwaway in-memory database, so this can never
  * drift from the shipped baseline; the cost is one schema-only migration run
  * at boot.
- *
- * Exported for the drift test beside `logBootIntegrity`.
  */
-export function projectionMissingColumns(db: DatabaseSync): string[] {
+function projectionMissingColumns(db: DatabaseSync): string[] {
   // The tables the rebuilder INSERTs into by explicit column list — a column
   // added to the (squashed, forward-only) baseline never reaches an existing
   // root, and the first reprojection then fails with 'no such column'.
@@ -654,18 +651,6 @@ export async function reconcileRestartedWork(
   }
 }
 
-/** Where the boot refusal is printed and how the process ends. Injected by the
- *  test, which cannot let a real `process.exit` take the worker with it. */
-export interface BootRefusalIo {
-  write: (message: string) => void;
-  exit: (code: number) => void;
-}
-
-const PROCESS_REFUSAL_IO: BootRefusalIo = {
-  write: (message) => void process.stderr.write(message),
-  exit: (code) => void process.exit(code),
-};
-
 /**
  * Take the data root's single-writer lock, or END the boot with the refusal on
  * stderr (B-FD1/G1).
@@ -679,25 +664,13 @@ const PROCESS_REFUSAL_IO: BootRefusalIo = {
  */
 export function takeDataRootWriterLock(
   env: Pick<Env, "VIBERR_FORCE_DATA_ROOT_LOCK">,
-  opts: {
-    io?: BootRefusalIo;
-    /** Test override; production takes the configured data root. */
-    dataRoot?: string;
-  } = {},
 ): void {
-  const io = opts.io ?? PROCESS_REFUSAL_IO;
-  const lockOptions: AcquireDataRootLockOptions = {
-    force: forceDataRootTakeover(env),
-  };
-  // Only the test override names a root; production leaves the key off so the
-  // lock resolves the configured one itself.
-  if (opts.dataRoot) lockOptions.dataRoot = opts.dataRoot;
   try {
-    acquireDataRootLock(lockOptions);
+    acquireDataRootLock({ force: forceDataRootTakeover(env) });
   } catch (error) {
     if (!(error instanceof DataRootLockedError)) throw error;
-    io.write(`${error.message}\n`);
-    io.exit(1);
+    process.stderr.write(`${error.message}\n`);
+    process.exit(1);
   }
 }
 

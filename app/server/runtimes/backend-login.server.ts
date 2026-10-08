@@ -838,8 +838,6 @@ export interface StartBackendLoginDeps {
    *  be installed for the flow to start. */
   binaries?: BackendBinaries;
   dataRoot?: string;
-  /** Clock for `startedAt` / `expiresAt`. */
-  now?: () => Date;
   /** Overrides the vendor default so a test can drive the timeout path without
    *  waiting a quarter of an hour. */
   timeoutMs?: number;
@@ -877,7 +875,7 @@ export function startBackendLogin(
   // is killed or spawned, so a refusal (the account ceiling, an account that
   // is not a sign-in) leaves a running sign-in exactly as it was.
   const target = loginTargetFor(db, actor.userId, backend, deps.accountId);
-  const nowDate = deps.now ? deps.now() : new Date();
+  const nowDate = new Date();
   pruneEndedSessions(nowDate.getTime());
 
   // Replacing a live sign-in kills the process behind it: two `claude auth

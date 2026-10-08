@@ -1,11 +1,5 @@
 import { describe, expect, it } from "vitest";
-import {
-  canonicalRequestUri,
-  putObjectToS3,
-  signS3Put,
-  signingKey,
-  type S3Config,
-} from "./s3-put.server";
+import { putObjectToS3, signingKey, type S3Config } from "./s3-put.server";
 
 describe("SigV4 signing key (AWS published KAT)", () => {
   it("derives the SigV4 signing key matching an independent openssl HMAC chain", () => {
@@ -24,34 +18,6 @@ describe("SigV4 signing key (AWS published KAT)", () => {
   });
 });
 
-// F26-7: the canonical URI must include any base path the endpoint carries, or a
-// path-style S3-compatible store (MinIO/Ceph) signs a different path than it
-// receives and rejects every push with SignatureDoesNotMatch.
-describe("canonicalRequestUri", () => {
-  it("keeps the key's slashes as separators and percent-encodes its segments", () => {
-    expect(canonicalRequestUri("", "audit/2026/exports/log 1.csv")).toBe(
-      "/audit/2026/exports/log%201.csv",
-    );
-    expect(canonicalRequestUri("", "a+b/c&d")).toBe("/a%2Bb/c%26d");
-  });
-  it("is just the key path for a root (virtual-hosted) endpoint", () => {
-    expect(canonicalRequestUri("/", "exports/log.csv")).toBe(
-      "/exports/log.csv",
-    );
-    expect(canonicalRequestUri("", "exports/log.csv")).toBe("/exports/log.csv");
-  });
-  it("folds a path-style bucket prefix into the signed path", () => {
-    expect(canonicalRequestUri("/viberr-audit", "team/log.json")).toBe(
-      "/viberr-audit/team/log.json",
-    );
-  });
-  it("re-encodes a base path exactly once (no double-encoding)", () => {
-    expect(canonicalRequestUri("/my%20bucket", "k.csv")).toBe(
-      "/my%20bucket/k.csv",
-    );
-  });
-});
-
 const CONFIG: S3Config = {
   bucket: "viberr-audit",
   region: "eu-central-1",
@@ -59,46 +25,118 @@ const CONFIG: S3Config = {
   secretAccessKey: "secretExampleKey",
 };
 
-describe("signS3Put", () => {
-  it("produces a deterministic, well-formed signed request", () => {
+/** The URL and signed headers putObjectToS3 hands the network for one PUT. */
+async function sent(
+  config: S3Config,
+  key: string,
+  body: Buffer,
+  contentType: string,
+  isoNow: string,
+): Promise<{ url: string; headers: Headers }> {
+  const requests: { url: string; headers: Headers }[] = [];
+  const fetchImpl: typeof fetch = async (url, init) => {
+    requests.push({ url: String(url), headers: new Headers(init?.headers) });
+    return new Response("", { status: 200 });
+  };
+  await putObjectToS3(config, key, body, { contentType, isoNow, fetchImpl });
+  const [request] = requests;
+  if (!request) throw new Error("putObjectToS3 sent no request");
+  return request;
+}
+
+// F26-7: the canonical URI must include any base path the endpoint carries, or a
+// path-style S3-compatible store (MinIO/Ceph) signs a different path than it
+// receives and rejects every push with SignatureDoesNotMatch. The request URL is
+// built from the same canonical URI the signature covers.
+describe("the canonical URI a PUT goes to", () => {
+  it.each<[string, string | undefined, string, string]>([
+    [
+      "keeps the key's slashes as separators and percent-encodes its segments",
+      undefined,
+      "audit/2026/exports/log 1.csv",
+      "https://viberr-audit.s3.eu-central-1.amazonaws.com/audit/2026/exports/log%201.csv",
+    ],
+    [
+      "percent-encodes the reserved characters in a segment",
+      undefined,
+      "a+b/c&d",
+      "https://viberr-audit.s3.eu-central-1.amazonaws.com/a%2Bb/c%26d",
+    ],
+    [
+      "is just the key path for a root endpoint",
+      "https://minio.internal:9000/",
+      "exports/log.csv",
+      "https://minio.internal:9000/exports/log.csv",
+    ],
+    [
+      "folds a path-style bucket prefix into the path",
+      "https://minio.internal:9000/viberr-audit",
+      "team/log.json",
+      "https://minio.internal:9000/viberr-audit/team/log.json",
+    ],
+    [
+      "re-encodes a base path exactly once (no double-encoding)",
+      "https://minio.internal:9000/my%20bucket",
+      "k.csv",
+      "https://minio.internal:9000/my%20bucket/k.csv",
+    ],
+  ])("%s", async (_name, endpoint, key, url) => {
+    const config = endpoint ? { ...CONFIG, endpoint } : CONFIG;
+    const request = await sent(config, key, Buffer.from("x"), "text/csv", "2026-08-23T00:00:00.000Z");
+    expect(request.url).toBe(url);
+  });
+});
+
+describe("the signed request putObjectToS3 sends", () => {
+  it("produces a deterministic, well-formed signed request", async () => {
     const body = Buffer.from("id,action\r\n1,task.created\r\n");
-    const signed = signS3Put(CONFIG, "exports/log.csv", body, {
-      contentType: "text/csv; charset=utf-8",
-      isoNow: "2026-08-23T00:00:00.000Z",
-    });
+    const signed = await sent(
+      CONFIG,
+      "exports/log.csv",
+      body,
+      "text/csv; charset=utf-8",
+      "2026-08-23T00:00:00.000Z",
+    );
     expect(signed.url).toBe(
       "https://viberr-audit.s3.eu-central-1.amazonaws.com/exports/log.csv",
     );
     // The Authorization header carries the algorithm, the scoped credential, the
     // exact signed-header set, and a 64-hex signature.
-    expect(signed.headers.Authorization).toMatch(
+    expect(signed.headers.get("Authorization")).toMatch(
       /^AWS4-HMAC-SHA256 Credential=AKIAEXAMPLE\/20260823\/eu-central-1\/s3\/aws4_request, SignedHeaders=content-type;host;x-amz-content-sha256;x-amz-date, Signature=[0-9a-f]{64}$/,
     );
     // x-amz-content-sha256 is the real hash of the body, not UNSIGNED-PAYLOAD.
-    expect(signed.headers["x-amz-content-sha256"]).toMatch(/^[0-9a-f]{64}$/);
-    expect(signed.headers["x-amz-date"]).toBe("20260823T000000Z");
+    expect(signed.headers.get("x-amz-content-sha256")).toMatch(/^[0-9a-f]{64}$/);
+    expect(signed.headers.get("x-amz-date")).toBe("20260823T000000Z");
     // A real clock is not midnight: its time of day reaches x-amz-date, its
     // milliseconds do not.
-    const later = signS3Put(CONFIG, "exports/log.csv", body, {
-      contentType: "text/csv; charset=utf-8",
-      isoNow: "2026-08-23T11:22:33.444Z",
-    });
-    expect(later.headers["x-amz-date"]).toBe("20260823T112233Z");
+    const later = await sent(
+      CONFIG,
+      "exports/log.csv",
+      body,
+      "text/csv; charset=utf-8",
+      "2026-08-23T11:22:33.444Z",
+    );
+    expect(later.headers.get("x-amz-date")).toBe("20260823T112233Z");
 
     // Signing the same inputs again is byte-identical (no clock/nonce inside).
-    const again = signS3Put(CONFIG, "exports/log.csv", body, {
-      contentType: "text/csv; charset=utf-8",
-      isoNow: "2026-08-23T00:00:00.000Z",
-    });
-    expect(again.headers.Authorization).toBe(signed.headers.Authorization);
+    const again = await sent(
+      CONFIG,
+      "exports/log.csv",
+      body,
+      "text/csv; charset=utf-8",
+      "2026-08-23T00:00:00.000Z",
+    );
+    expect(again.headers.get("Authorization")).toBe(signed.headers.get("Authorization"));
   });
 
-  it("honors a prefix and a custom endpoint (S3-compatible store)", () => {
-    const signed = signS3Put(
+  it("honors a prefix and a custom endpoint (S3-compatible store)", async () => {
+    const signed = await sent(
       { ...CONFIG, prefix: "team/", endpoint: "https://minio.internal:9000/viberr-audit" },
       "log.json",
       Buffer.from("[]"),
-      { contentType: "application/json", isoNow: "2026-08-23T00:00:00.000Z" },
+      "application/json",
+      "2026-08-23T00:00:00.000Z",
     );
     expect(signed.url).toBe("https://minio.internal:9000/viberr-audit/team/log.json");
     // F26-7: the path-style bucket prefix must be SIGNED, not just present in the
@@ -106,29 +144,24 @@ describe("signS3Put", () => {
     // WITHOUT the `/viberr-audit` base path must produce a different signature; if
     // the base path were dropped from the canonical URI (the bug), these would be
     // byte-identical.
-    const withoutBasePath = signS3Put(
+    const withoutBasePath = await sent(
       { ...CONFIG, prefix: "team/", endpoint: "https://minio.internal:9000" },
       "log.json",
       Buffer.from("[]"),
-      { contentType: "application/json", isoNow: "2026-08-23T00:00:00.000Z" },
+      "application/json",
+      "2026-08-23T00:00:00.000Z",
     );
-    expect(withoutBasePath.headers.Authorization).not.toBe(
-      signed.headers.Authorization,
+    expect(withoutBasePath.headers.get("Authorization")).not.toBe(
+      signed.headers.get("Authorization"),
     );
   });
 
-  it("changing the body changes the signature (payload is signed)", () => {
-    const a = signS3Put(CONFIG, "k", Buffer.from("A"), {
-      contentType: "text/plain",
-      isoNow: "2026-08-23T00:00:00.000Z",
-    });
-    const b = signS3Put(CONFIG, "k", Buffer.from("B"), {
-      contentType: "text/plain",
-      isoNow: "2026-08-23T00:00:00.000Z",
-    });
-    expect(a.headers.Authorization).not.toBe(b.headers.Authorization);
-    expect(a.headers["x-amz-content-sha256"]).not.toBe(
-      b.headers["x-amz-content-sha256"],
+  it("changing the body changes the signature (payload is signed)", async () => {
+    const a = await sent(CONFIG, "k", Buffer.from("A"), "text/plain", "2026-08-23T00:00:00.000Z");
+    const b = await sent(CONFIG, "k", Buffer.from("B"), "text/plain", "2026-08-23T00:00:00.000Z");
+    expect(a.headers.get("Authorization")).not.toBe(b.headers.get("Authorization"));
+    expect(a.headers.get("x-amz-content-sha256")).not.toBe(
+      b.headers.get("x-amz-content-sha256"),
     );
   });
 });

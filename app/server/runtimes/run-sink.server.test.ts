@@ -40,6 +40,7 @@ const SAVED = {
   ANTHROPIC_API_KEY: process.env.ANTHROPIC_API_KEY,
   CODEX_ACCESS_TOKEN: process.env.CODEX_ACCESS_TOKEN,
   GIT_TERMINAL_PROMPT: process.env.GIT_TERMINAL_PROMPT,
+  INNER_TOKEN: process.env.INNER_TOKEN,
 };
 
 const CLAUDE_KEY = "sk-ant-api03-VERYSECRETVALUE0123456789abcdef";
@@ -167,22 +168,19 @@ describe("the sink names a result that lands below the live sum", () => {
     warn.mockRestore();
   });
 
-  it("stays quiet for an errored result's empty usage", () => {
+  it.each([
+    ["an errored result's empty usage", { input_tokens: 0, cached_input_tokens: 0, output_tokens: 0 }],
+    ["a result that matches the live sum", { input_tokens: 1000, cached_input_tokens: 800, output_tokens: 300 }],
+  ] as const)("stays quiet for %s", (_name, usage) => {
     const warn = vi.spyOn(logger, "warn").mockImplementation(() => {});
-    const sink = sinkFor("run_quiet");
-    sink.line(usageLine({ input_tokens: 1000, cached_input_tokens: 800, output_tokens: 10 }));
-    sink.line(usageLine({ input_tokens: 0, cached_input_tokens: 0, output_tokens: 0 }, true));
-    expect(warn).not.toHaveBeenCalled();
-    warn.mockRestore();
-  });
-
-  it("stays quiet for a result that matches the live sum", () => {
-    const warn = vi.spyOn(logger, "warn").mockImplementation(() => {});
-    const sink = sinkFor("run_exact");
-    sink.line(usageLine({ input_tokens: 1000, cached_input_tokens: 800, output_tokens: 10 }));
-    sink.line(usageLine({ input_tokens: 1000, cached_input_tokens: 800, output_tokens: 300 }, true));
-    expect(warn).not.toHaveBeenCalled();
-    warn.mockRestore();
+    try {
+      const sink = sinkFor("run_quiet");
+      sink.line(usageLine({ input_tokens: 1000, cached_input_tokens: 800, output_tokens: 10 }));
+      sink.line(usageLine(usage, true));
+      expect(warn).not.toHaveBeenCalled();
+    } finally {
+      warn.mockRestore();
+    }
   });
 });
 
@@ -243,7 +241,7 @@ describe("createLineRedactor", () => {
   });
 
   it("redacts token PATTERNS the app never held (a PAT the agent minted itself)", () => {
-    const redact = createLineRedactor({});
+    const redact = createLineRedactor();
     expect(redact("remote: ghp_AAAAAAAAAAAAAAAAAAAAAAAAAAAAAA")).toBe(
       "remote: [redacted]",
     );
@@ -276,7 +274,7 @@ describe("createLineRedactor", () => {
     // Proof the env sweep alone misses it: the value is in no variable here,
     // and no token pattern claims it either.
     expect(createLineRedactor()(PERSONAL_TOKEN)).toBe(PERSONAL_TOKEN);
-    const redact = createLineRedactor(process.env, [PERSONAL_TOKEN]);
+    const redact = createLineRedactor([PERSONAL_TOKEN]);
     expect(redact(`CODEX_ACCESS_TOKEN=${PERSONAL_TOKEN}`)).toBe(
       "CODEX_ACCESS_TOKEN=[redacted]",
     );
@@ -287,7 +285,7 @@ describe("createLineRedactor", () => {
   it("holds the per-run secrets to the same length floor as the env sweep", () => {
     // A short "secret" is a flag or a fixture stub; redacting it would scrub
     // ordinary prose, and no provider issues a credential this short.
-    const redact = createLineRedactor({}, ["short", PERSONAL_TOKEN]);
+    const redact = createLineRedactor(["short", PERSONAL_TOKEN]);
     expect(redact("the short answer")).toBe("the short answer");
     expect(redact(`key ${PERSONAL_TOKEN} here`)).toBe("key [redacted] here");
   });
@@ -295,10 +293,8 @@ describe("createLineRedactor", () => {
   it("sorts a per-run secret against the env values longest-first", () => {
     // One credential CONTAINING another (a token and its prefix) must be
     // replaced whole, or the longer value leaks its tail.
-    const redact = createLineRedactor(
-      { INNER_TOKEN: PERSONAL_TOKEN.slice(0, 20) },
-      [PERSONAL_TOKEN],
-    );
+    process.env.INNER_TOKEN = PERSONAL_TOKEN.slice(0, 20);
+    const redact = createLineRedactor([PERSONAL_TOKEN]);
     expect(redact(`v=${PERSONAL_TOKEN}`)).toBe("v=[redacted]");
   });
 });
@@ -1018,17 +1014,19 @@ describe("ruling 130(d): structured refusals and the principal", () => {
     sink.markRunning();
     try {
       sink.line(emitted({ t: "10:00:00", ev: "err", tag: "run·error·auth", text: "refused\n\nThe provider reported: token revoked" }, "{}"));
+      // The refused run ends in error, which leaves the record standing.
+      sink.finalize({ outcome: "error", effectiveBackend: "claude" });
       const refused = quotaFor().credentialRefused!;
       expect(refused.credentialUserId).toBe(store.users.arda.id);
       expect(refused.providerText).toBe("token revoked");
     } finally {
       rmSync(rawLogPath("claude", runId), { force: true });
     }
-  });
 
-  it("a run with no principal names none", () => {
+    // The record is the latest refusal's: a run that billed nobody names
+    // nobody, not the account the earlier refusal named.
     const bare = `run_auth_np_${randomBytes(6).toString("hex")}`;
-    const sink2 = sinkFor(bare);
+    const sink2 = sinkFor(bare, "primary-r1");
     sink2.markRunning();
     try {
       sink2.line(emitted({ t: "10:00:00", ev: "err", tag: "run·error·auth", text: "refused" }, "{}"));
@@ -1121,23 +1119,14 @@ describe("ruling 369: the sink folds the prompt-cache record", () => {
     expect(row.first_call_cache_read).toBe(47_900);
   });
 
-  it("mixed TTLs read 'mixed'", () => {
-    const mixed = sinkFor("run_mixed");
-    mixed.line(cacheLine(call(10, 0, { ttl: { fiveMinute: 10, oneHour: 0 } })));
-    mixed.line(cacheLine(call(10, 0, { ttl: { fiveMinute: 0, oneHour: 10 } })));
-    expect(rowOf("run_mixed").cache_ttl_bucket).toBe("mixed");
-  });
-
-  it("a 5-minute-only write reads '5m'", () => {
-    const five = sinkFor("run_five");
-    five.line(cacheLine(call(10, 0, { ttl: { fiveMinute: 10, oneHour: 0 } })));
-    expect(rowOf("run_five").cache_ttl_bucket).toBe("5m");
-  });
-
-  it("no TTL split reads null", () => {
-    const none = sinkFor("run_none");
-    none.line(cacheLine(call(10, 0, { ttl: null })));
-    expect(rowOf("run_none").cache_ttl_bucket).toBeNull();
+  it.each([
+    ["mixed TTLs read 'mixed'", [{ fiveMinute: 10, oneHour: 0 }, { fiveMinute: 0, oneHour: 10 }], "mixed"],
+    ["a 5-minute-only write reads '5m'", [{ fiveMinute: 10, oneHour: 0 }], "5m"],
+    ["no TTL split reads null", [null], null],
+  ] as const)("%s", (_name, ttls, bucket) => {
+    const sink = sinkFor("run_ttl");
+    for (const ttl of ttls) sink.line(cacheLine(call(10, 0, { ttl })));
+    expect(rowOf("run_ttl").cache_ttl_bucket).toBe(bucket);
   });
 
   it("a Codex turn total is a first call and a write, never a peak or a last prompt", () => {

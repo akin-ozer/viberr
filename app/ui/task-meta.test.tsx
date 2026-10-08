@@ -1,13 +1,12 @@
 // @vitest-environment jsdom
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { cleanup, render } from "@testing-library/react";
 import { DueDatePill, LabelChips, PriorityFlag } from "./task-meta";
 
 /**
  * The shared task-metadata renderers (priority flag, label chips, due-date
- * pill). The overdue branch is time-dependent, so every
- * pill test passes an explicit `today` — the component only reaches for the
- * viewer's local clock when no `today` is given (see DueDatePill's hydration note).
+ * pill). The overdue branch reads the viewer's local clock, so each pill test
+ * that depends on it freezes `Date` on the day it names.
  */
 
 afterEach(cleanup);
@@ -69,39 +68,47 @@ describe("LabelChips", () => {
 });
 
 describe("DueDatePill", () => {
+  /** The viewer's clock on `iso` (`YYYY-MM-DD`), at local noon. */
+  function onDay(iso: string) {
+    const [y, m, d] = iso.split("-").map(Number);
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(new Date(y!, m! - 1, d!, 12));
+  }
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
   it("renders nothing without a due date", () => {
-    const { container } = render(<DueDatePill dueDate={null} today="2026-09-01" />);
+    const { container } = render(<DueDatePill dueDate={null} />);
     expect(container.textContent).toBe("");
   });
 
   it("is neutral and reads `due` when not overdue", () => {
-    const { container } = render(
-      <DueDatePill dueDate="2026-09-10" today="2026-09-01" />,
-    );
+    onDay("2026-09-01");
+    const { container } = render(<DueDatePill dueDate="2026-09-10" />);
     expect(container.textContent).toContain("due Sep 10");
     expect(container.querySelector(".pill.blocked")).toBeNull();
   });
 
   it("is red and reads `overdue` past the date", () => {
-    const { container } = render(
-      <DueDatePill dueDate="2026-08-20" today="2026-09-01" />,
-    );
+    onDay("2026-09-01");
+    const { container } = render(<DueDatePill dueDate="2026-08-20" />);
     expect(container.textContent).toContain("overdue");
     expect(container.querySelector(".pill.blocked")).not.toBeNull();
   });
 
   it("reads `due` on the day itself — today is not overdue", () => {
-    const { container } = render(<DueDatePill dueDate="2026-08-23" today="2026-08-23" />);
+    onDay("2026-08-23");
+    const { container } = render(<DueDatePill dueDate="2026-08-23" />);
     expect(container.textContent).toContain("due Aug 23");
     expect(container.querySelector(".pill.blocked")).toBeNull();
   });
 
   it("prints an unpadded day, and a date it cannot read as written", () => {
-    const { container, rerender } = render(
-      <DueDatePill dueDate="2026-01-01" today="2025-12-01" />,
-    );
+    onDay("2025-12-01");
+    const { container, rerender } = render(<DueDatePill dueDate="2026-01-01" />);
     expect(container.textContent).toContain("due Jan 1");
-    rerender(<DueDatePill dueDate="garbage" today="2026-09-01" />);
+    rerender(<DueDatePill dueDate="garbage" />);
     expect(container.textContent).toContain("due garbage");
   });
 });

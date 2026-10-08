@@ -4,7 +4,7 @@ import { fileURLToPath } from "node:url";
 import { RouterContextProvider } from "react-router";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { z } from "zod";
-import { setupAppTest, type AppTestContext } from "../../../test-support/test-app";
+import { routeArgs, setupAppTest, type AppTestContext } from "../../../test-support/test-app";
 import { listAuditEvents } from "../../../test-support/audit-log";
 
 /**
@@ -189,13 +189,7 @@ async function post(
     body: new URLSearchParams({ _csrf: csrf, ...fields }),
     headers: { "Content-Type": "application/x-www-form-urlencoded" },
   });
-  return action({
-    request,
-    url: new URL(request.url),
-    params: route.params,
-    pattern: route.path,
-    context: new RouterContextProvider(),
-  });
+  return action(routeArgs(request, route.params, route.path));
 }
 
 /** What a route answered: a thrown Response-ish refusal or a returned result.

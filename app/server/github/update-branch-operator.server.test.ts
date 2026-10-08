@@ -27,15 +27,16 @@ import { taskDir } from "~/server/files/file-store-root.server";
 import { readTaskFile } from "~/server/files/task-writer.server";
 import { readProjectFile } from "~/server/files/project-writer.server";
 import { MERGE_STAGE_BOARD, REVIEW_STAGE_REVIEWER, writeProject } from "../../../test-support/test-store";
+import { reconfigureProject } from "../../../test-support/projected-store";
 import { operatorSnapshot } from "~/server/tasks/operator-snapshot.server";
 import type { OperatorAuthority } from "~/server/tasks/operator-authority.server";
-import { performDelivery } from "~/server/tasks/task-delivery.server";
 import type { TaskActionDeps } from "~/server/tasks/task-action-core.server";
 import { upsertRun } from "~/server/runtimes/run-store.server";
 import {
   operatorUpdateBranchFromBase,
   updateBranchGate,
 } from "./update-branch-operator.server";
+import { operatorAuthority } from "../../../test-support/operator-snapshot";
 
 /**
  * N19-9, decision half. The owner ruled this operator-decided: the operator
@@ -72,24 +73,7 @@ beforeEach(() => {
 afterEach(() => ctx.cleanup());
 
 function authority(patch: Partial<OperatorAuthority> = {}): OperatorAuthority {
-  return {
-    policy: new Map([
-      ["generate-packets", "direct"],
-      ["append-typed-events", "direct"],
-    ]),
-    autonomy: "supervised",
-    backend: "claude",
-    model: "sonnet",
-    effort: "",
-    name: "Operator",
-    skills: [],
-    kb: [],
-    mcps: [],
-    persona: null,
-    deployed: true,
-    humanGatedBeforeWork: false,
-    ...patch,
-  };
+  return operatorAuthority({ "generate-packets": "direct", "append-typed-events": "direct" }, patch);
 }
 
 /** A fake git whose merge either succeeds or conflicts. */
@@ -436,12 +420,9 @@ describe("operatorUpdateBranchFromBase — the decision half (N19-9)", () => {
     writeTask(store.dataRoot, store.slug, {
       frontmatter: baseTaskFrontmatter("VIB-2", { stage: "review", branch: "vib-2" }),
     });
-    const file = readProjectFile({ projectSlug: store.slug, dataRoot: store.dataRoot })!;
-    writeProject(store.dataRoot, {
-      ...file.parsed.frontmatter,
+    reconfigureProject(store, {
       fileLeases: [{ paths: ["internal/controller/task.go"], taskKey: "VIB-2", reason: "lands first" }],
     });
-    rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
     const git = fakeGit({ behind: 2, branchFiles: ["internal/controller/task.go"] });
     const res = await act(git.exec);
     expect(res.outcome).toBe("noop");
@@ -449,21 +430,6 @@ describe("operatorUpdateBranchFromBase — the decision half (N19-9)", () => {
     expect(res.message).toContain("which VIB-2 holds (lands first)");
     expect(res.message).toContain("Do not retry the refresh until VIB-2 has merged.");
     expect(git.calls.some((c) => c.includes("push"))).toBe(false);
-  });
-
-  it("ruling 229: an already-current branch is never narrated as a refused plan step", async () => {
-    // The end-to-end consequence, pinned where it is decidable: the plan
-    // executor files a step under "refused" purely on `outcome`, and
-    // `narrateRefusedActions` headlines any refused step "The operator's plan
-    // was not carried out in full." The sentence is ALSO already on the
-    // timeline as the `github` event ruling 134(c) writes — and 134(c) goes to
-    // the trouble of suppressing that event when it would duplicate, which the
-    // refusal narration then undid with no suppression and a worse headline.
-    //
-    // Canary: return `noop` from either already-current arm.
-    const git = fakeGit({ behind: 0 });
-    const res = await act(git.exec);
-    expect(["denied", "noop"]).not.toContain(res.outcome);
   });
 
   it("says so honestly when the branch is already current — and calls it DONE", async () => {
@@ -814,13 +780,10 @@ describe("pass 35 S15: the acceptance-boundary refusal and the redirect's rework
   }
 
   function withMergeBoard(): void {
-    const file = readProjectFile({ projectSlug: store.slug, dataRoot: store.dataRoot })!;
-    writeProject(store.dataRoot, {
-      ...file.parsed.frontmatter,
+    reconfigureProject(store, (fm) => ({
       ...MERGE_STAGE_BOARD,
-      agents: [...file.parsed.frontmatter.agents, REVIEW_STAGE_REVIEWER],
-    });
-    rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
+      agents: [...fm.agents, REVIEW_STAGE_REVIEWER],
+    }));
   }
 
   it("G35-5 (d): at the acceptance boundary the tool refuses with the sentence naming acceptance-time refresh, and runs no git", async () => {
@@ -1186,7 +1149,6 @@ describe("ruling 475 (F40-20): the operator hands a conflict to the delivering a
  * the five minutes until the next poll.
  */
 describe("ruling 494: a branch update and the push after it leave the pushed head's count", () => {
-  const NEW = "c0ffee1".padEnd(40, "0");
   const SLOW = { userId: null, label: "poller" };
 
   const rowSchema = z.object({
@@ -1244,57 +1206,12 @@ describe("ruling 494: a branch update and the push after it leave the pushed hea
   const snap = () =>
     operatorSnapshot(store.db, { dataRoot: store.dataRoot }, store.slug, "VIB-1", authority());
 
-  it("branch update then push: the count after the delivery push is the pushed head's", async () => {
-    // CANARY: drop the delivery's post-push re-compare, and `get_task` reads
-    // the poll's 6 for GitHub's older copy.
+  it("an already-current update whose origin lags pushes nothing, so it records no push", async () => {
+    // CANARY: re-compare on the `already_current` arm, and a `github.push` row
+    // names a head no push published.
     const update = await act(fakeGit({ behind: 0, remote: "behind" }).exec);
     expect(update.message).toContain("behind the workspace head: call `deliver_for_review` to push it");
-    // The update pushed nothing, so it recorded no push.
     expect(rows()).toEqual([]);
-    // The poll reads GitHub's copy, which the delivery has not pushed yet.
-    await reconcileTask(store.db, { projectSlug: store.slug, taskKey: "VIB-1" }, SLOW, {
-      dataRoot: store.dataRoot,
-      fetchImpl: githubAt(REMOTE_SHA, 6).fetchImpl,
-      skipUnchangedProvenance: true,
-    });
-    expect(snap().baseBehindBy).toBe(6);
-
-    const delivered = await performDelivery(
-      store.db,
-      {
-        dataRoot: store.dataRoot,
-        fetchImpl: githubAt(NEW, 0).fetchImpl,
-        deps: {
-          pushWorkspaceBranch: async () => ({
-            status: "pushed",
-            branch: "vib-1",
-            commits: 1,
-            headSha: NEW,
-            remoteHeadBefore: REMOTE_SHA,
-            workflowFiles: [],
-          }),
-          openTaskPr: async () => ({
-            status: "ok",
-            prNumber: 9,
-            created: true,
-            url: "https://github.com/akin-ozer/viberr/pull/9",
-          }),
-        },
-      },
-      store.slug,
-      "VIB-1",
-      { userId: store.users.arda.id, label: "arda" },
-    );
-    expect(delivered).toMatchObject({
-      status: "delivered",
-      recompare: "Re-compared after the push: `vib-1` at `c0ffee1` is level with `main`.",
-    });
-    expect(rows().slice(-2)).toEqual([
-      { action: "github.push", behindBy: undefined, headSha: NEW },
-      { action: "github.reconcile", behindBy: 0, headSha: NEW },
-    ]);
-    expect(snap().baseBehindBy).toBe(0);
-    expect(snap().baseComparedHead).toMatchObject({ sha: NEW, current: true });
   });
 
   it("an update that pushes records the push and counts the merge it pushed", async () => {

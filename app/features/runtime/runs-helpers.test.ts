@@ -8,7 +8,6 @@ import {
   fmtClock,
   fmtTok,
   commandNote,
-  HEARTBEAT_NOTE,
   heartbeatLabel,
   filePathOf,
   hiddenArguments,
@@ -16,7 +15,6 @@ import {
   runInputRows,
   runLabel,
   runStatePill,
-  RUN_STATE,
   thoughtLabel,
   toolChip,
   waitCountTitle,
@@ -93,8 +91,8 @@ describe("runLabel / roleShort", () => {
 });
 
 describe("runStatePill (ruling 11 lifecycle mapping)", () => {
-  it("running/idle/done/error use RUN_STATE", () => {
-    expect(runStatePill({ ...base, state: "done", lifecycle: "finished" }).label).toBe(RUN_STATE.done.label);
+  it("a finished run reads 'finished', an unclassified error 'continuity error'", () => {
+    expect(runStatePill({ ...base, state: "done", lifecycle: "finished" }).label).toBe("finished");
     expect(runStatePill({ ...base, state: "error", lifecycle: "error" }).label).toBe("continuity error");
   });
   it("queued → neutral 'queued'", () => {
@@ -431,13 +429,12 @@ describe("fileChangeChips (P19-RC1)", () => {
         ],
       }),
     );
+    // Deliberately no line counts: `changes` carries a path and a kind, so a
+    // "+74 −41" beside it would be invented.
     expect(chips).toEqual([
       { path: "app/a.ts", kind: "add" },
       { path: "app/b.ts", kind: "delete" },
     ]);
-    // Deliberately no line counts: `changes` carries a path and a kind, so a
-    // "+74 −41" beside it would be invented.
-    expect(JSON.stringify(chips)).not.toMatch(/[+-]\d/);
   });
 
   it("is null when the line recorded no changes", () => {
@@ -565,14 +562,10 @@ describe("waitText (ruling 366)", () => {
     );
   });
 
-  it("discloses each folded heartbeat by number and figure, under a note that says what one is (366(d))", () => {
+  it("names each folded heartbeat by number and figure (366(d))", () => {
     expect(heartbeatLabel(beat("a", 30), 1)).toBe("heartbeat 1 · 30s in");
     expect(heartbeatLabel(beat("a", 90), 3)).toBe("heartbeat 3 · 1m 30s in");
     expect(heartbeatLabel(beat("a", null), 2)).toBe("heartbeat 2");
-    expect(HEARTBEAT_NOTE).toBe(
-      "A heartbeat is the runtime saying the call is still open: about one every 30 s, " +
-        "carrying no output. Nothing here changed the run.",
-    );
   });
 
   it("waitClock keeps whole units and never goes negative", () => {

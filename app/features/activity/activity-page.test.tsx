@@ -10,7 +10,6 @@ import {
   actIcon,
   auditTimeLabel,
   compactAuditEntries,
-  isRuntimeSessionOpen,
   matchesActorFilter,
   type ActivityStreamRowView,
   type AuditLogEntryView,
@@ -404,6 +403,12 @@ function session(id: number, h: number, m: number): AuditLogEntryView {
   };
 }
 
+/** Whether the column folds `entry` as a runtime-session row: it and a twin,
+ *  a run of two, compact into one row. */
+function folds(entry: AuditLogEntryView): boolean {
+  return compactAuditEntries([entry, { ...entry, id: `${entry.id}~twin` }])[0]!.compacted;
+}
+
 const CREDENTIAL: AuditLogEntryView = {
   id: "evt_cred",
   kind: "change",
@@ -498,7 +503,7 @@ describe("audit-column compaction (R19-7)", () => {
           // dangler for "." when there is none. Both forms must behave.
           for (const rendered of [text, text.replace(/ on$/, ".")]) {
             expect(
-              isRuntimeSessionOpen({ ...session(1, 9, 0), text: rendered }),
+              folds({ ...session(1, 9, 0), text: rendered }),
               `${action} + display name "${name}" → ${rendered}`,
             ).toBe(action === "runtime.run.started" && rendered === text);
           }
@@ -550,15 +555,15 @@ describe("audit-column compaction (R19-7)", () => {
   });
 
   it("only folds the audit-kind session row — never a lookalike", () => {
-    expect(isRuntimeSessionOpen(session(1, 9, 0))).toBe(true);
+    expect(folds(session(1, 9, 0))).toBe(true);
     // Same sentence filed as a policy violation is a different event class; it
     // keeps its own row and its open/resolved pill.
     expect(
-      isRuntimeSessionOpen({ ...session(1, 9, 0), kind: "violation" }),
+      folds({ ...session(1, 9, 0), kind: "violation" }),
     ).toBe(false);
-    expect(isRuntimeSessionOpen(CREDENTIAL)).toBe(false);
+    expect(folds(CREDENTIAL)).toBe(false);
     expect(
-      isRuntimeSessionOpen({
+      folds({
         ...session(1, 9, 0),
         text: "operator interrupted an agent run. Recorded per audit policy on",
       }),
@@ -567,13 +572,13 @@ describe("audit-column compaction (R19-7)", () => {
     // test above for why. A row that merely opens with the phrase, or that
     // carries anything after the audit-policy tail, is not this event.
     expect(
-      isRuntimeSessionOpen({
+      folds({
         ...session(1, 9, 0),
         text: "operator opened the Reviewer runtime session.",
       }),
     ).toBe(false);
     expect(
-      isRuntimeSessionOpen({ ...session(1, 9, 0), text: `${RUNTIME_SESSION_TEXT} VC-4` }),
+      folds({ ...session(1, 9, 0), text: `${RUNTIME_SESSION_TEXT} VC-4` }),
     ).toBe(false);
   });
 
@@ -824,8 +829,8 @@ describe("per-panel feed filters (P21)", () => {
 
 /**
  * C5 (pass 34, U34-4): the instrument goes in front of the SENTENCE, so the
- * runtime-session fold still recognises its own rows. `isRuntimeSessionOpen`
- * matches on the sentence's tail, and a parenthetical appended AFTER it would
+ * runtime-session fold still recognises its own rows. The fold matches on the
+ * sentence's tail, and a parenthetical appended AFTER it would
  * silently stop every session run from folding.
  */
 describe("C5: the controller instrument and the runtime-session fold", () => {
@@ -842,13 +847,13 @@ describe("C5: the controller instrument and the runtime-session fold", () => {
 
   it("an instrumented actor still folds; the same words appended AFTER the sentence do not", () => {
     // Canary: append the parenthetical after the sentence instead.
-    expect(isRuntimeSessionOpen(opened("Arda Kaya (via the controller)"))).toBe(true);
-    expect(isRuntimeSessionOpen(opened("Arda Kaya"))).toBe(true);
+    expect(folds(opened("Arda Kaya (via the controller)"))).toBe(true);
+    expect(folds(opened("Arda Kaya"))).toBe(true);
     const trailing: AuditLogEntryView = {
       ...opened("Arda Kaya"),
       text: `${opened("Arda Kaya").text} (via the controller)`,
     };
-    expect(isRuntimeSessionOpen(trailing)).toBe(false);
+    expect(folds(trailing)).toBe(false);
   });
 });
 

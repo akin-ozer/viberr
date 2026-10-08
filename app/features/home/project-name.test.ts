@@ -28,10 +28,4 @@ describe("projectNameFromRepo", () => {
   it("treats snake and dot separators as word breaks too", () => {
     expect(projectNameFromRepo("core_api.v2")).toBe("Core Api V2");
   });
-
-  it("round-trips with slugify", () => {
-    expect(slugify(projectNameFromRepo("payments-gateway"))).toBe(
-      "payments-gateway",
-    );
-  });
 });

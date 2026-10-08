@@ -602,18 +602,6 @@ function guardSlot(): LockGuardSlot {
   return globalThis as LockGuardSlot;
 }
 
-export interface DataRootLockGuardOptions {
-  intervalMs?: number;
-  /** Lock to watch. Defaults to the process-held lock (read every tick, so an
-   *  HMR re-acquire is picked up). Injected by tests. */
-  lock?: DataRootLock;
-  /** Ownership probe. Defaults to `lock.verifyOwnership()`. Injected by tests. */
-  verify?: (lock: DataRootLock) => LockOwnership;
-  /** Reaction to a lost lock. Default: loud log + `process.exit(1)`. Injected by
-   *  tests so the worker is not taken down. */
-  onStolen?: (lock: DataRootLock, verdict: LockOwnership) => void;
-}
-
 function loudlyShutDownOnStolenLock(
   lock: DataRootLock,
   verdict: LockOwnership,
@@ -642,20 +630,18 @@ function loudlyShutDownOnStolenLock(
  * Start the fail-closed ownership guard (F18-5): every {@link DATA_ROOT_LOCK_GUARD_INTERVAL_MS}
  * re-verify the process still owns its writer-lock file; on a `stolen` verdict,
  * loudly shut the process down instead of writing lock-less. Idempotent + HMR-safe
- * + unref'd (never blocks exit). No-op when nothing is held.
+ * + unref'd (never blocks exit). No-op when nothing is held. The held lock is
+ * read on every tick, so an HMR re-acquire is picked up.
  */
-export function startDataRootLockGuard(options: DataRootLockGuardOptions = {}): void {
+export function startDataRootLockGuard(): void {
   const slot = guardSlot();
   if (slot[GUARD_KEY]) return;
-  const intervalMs = options.intervalMs ?? DATA_ROOT_LOCK_GUARD_INTERVAL_MS;
-  const verify = options.verify ?? ((l: DataRootLock) => l.verifyOwnership());
-  const onStolen = options.onStolen ?? loudlyShutDownOnStolenLock;
   const handle = setInterval(() => {
-    const lock = options.lock ?? heldDataRootLock();
+    const lock = heldDataRootLock();
     if (!lock) return; // released (or never taken) — nothing to guard this tick.
     let verdict: LockOwnership;
     try {
-      verdict = verify(lock);
+      verdict = lock.verifyOwnership();
     } catch (error) {
       // A single probe hiccup is not proof of a steal — log and retry next tick.
       logger.warn("data-root lock guard check failed (transient)", {
@@ -665,10 +651,10 @@ export function startDataRootLockGuard(options: DataRootLockGuardOptions = {}): 
     }
     if (verdict === "stolen") {
       stopDataRootLockGuard();
-      onStolen(lock, verdict);
+      loudlyShutDownOnStolenLock(lock, verdict);
     }
     // "held" → fine; "unverifiable" → torn read, retry next tick.
-  }, intervalMs);
+  }, DATA_ROOT_LOCK_GUARD_INTERVAL_MS);
   handle.unref?.();
   slot[GUARD_KEY] = handle;
 }

@@ -27,7 +27,6 @@ import {
 } from "./create-profile-modal";
 import {
   AgentsPage,
-  LibraryPicker,
   LiveRoster,
   ProfileDetail,
   type BackendHealthMap,
@@ -1989,6 +1988,51 @@ describe("ruling 127 — the editor advises about the viewer's account, it does 
   });
 });
 
+type StubRoute = Parameters<typeof createRoutesStub>[0][number];
+
+/** The board the Agents page renders on: its stages, edges and name. */
+interface BoardView {
+  stages: typeof STAGES;
+  workflow: typeof WORKFLOW;
+  projectName: string;
+}
+const VIBERR_CORE: BoardView = { stages: STAGES, workflow: WORKFLOW, projectName: "Viberr Core" };
+
+/** The Agents page on `board` for a managing admin, with `library` to add
+ *  from; `action` stands in for the route's. */
+function renderLibraryPage(
+  library: LibraryProfileView[],
+  action: StubRoute["action"] = async () => ({ ok: true, toast: "stub done", profileId: "developer" }),
+  board: BoardView = VIBERR_CORE,
+) {
+  const Stub = createRoutesStub([
+    {
+      path: "/projects/viberr-core/agents",
+      Component: () => (
+        <ToastProvider>
+          <AgentsPage
+            profiles={[mkProfile({})]}
+            library={library}
+            deployments={[]}
+            stages={board.stages}
+            workflow={board.workflow}
+            projectSlug="viberr-core"
+            projectName={board.projectName}
+            myRole="admin"
+          />
+        </ToastProvider>
+      ),
+      action,
+    },
+  ]);
+  return render(<Stub initialEntries={["/projects/viberr-core/agents"]} />);
+}
+
+/** Opens the page's "Add from library" picker from its head. */
+function openLibrary(view: RenderResult) {
+  fireEvent.click(view.getAllByText(/Add from library/)[0]!);
+}
+
 describe("LibraryPicker (owner ruling 1 / AP-05)", () => {
   const TEMPLATES: LibraryProfileView[] = [
     {
@@ -2002,20 +2046,22 @@ describe("LibraryPicker (owner ruling 1 / AP-05)", () => {
       resources: { skills: [], mcps: [], kb: [] },
     },
   ];
+  const LIGHTWEIGHT_LAB: BoardView = {
+    stages: LIGHTWEIGHT_BOARD,
+    workflow: LIGHTWEIGHT_WORKFLOW,
+    projectName: "Lightweight Lab",
+  };
 
-  it("lists undeployed templates and adds the picked one by id", () => {
-    const onAdd = vi.fn();
-    const { getByText, getByRole } = render(
-      <LibraryPicker
-        library={TEMPLATES}
-        stages={STAGES}
-        workflow={WORKFLOW}
-        projectName="Viberr Core"
-        busy={false}
-        onClose={() => {}}
-        onAdd={onAdd}
-      />,
-    );
+  it("lists undeployed templates and adds the picked one by id", async () => {
+    const posted: Record<string, string>[] = [];
+    const view = renderLibraryPage(TEMPLATES, async ({ request }) => {
+      posted.push(
+        Object.fromEntries([...(await request.formData())].map(([k, v]) => [k, String(v)])),
+      );
+      return { ok: true, toast: "stub done", profileId: "security-reviewer" };
+    });
+    openLibrary(view);
+    const { getByText, getByRole } = view;
     expect(getByText("Security reviewer")).toBeTruthy();
     expect(
       getByText("Reviews IAM, secrets handling and supply-chain risk."),
@@ -2025,7 +2071,11 @@ describe("LibraryPicker (owner ruling 1 / AP-05)", () => {
     // tree tool reported it unnamed.
     expect(getByRole("button", { name: /Security reviewer/ })).toBeTruthy();
     fireEvent.click(getByText("Security reviewer"));
-    expect(onAdd).toHaveBeenCalledWith("security-reviewer");
+    await waitFor(() =>
+      expect(posted).toEqual([
+        expect.objectContaining({ intent: "deploy-profile", profileId: "security-reviewer" }),
+      ]),
+    );
   });
 
   // P14-UI-63: the pill printed the TEMPLATE's own stage count, so this row
@@ -2033,52 +2083,37 @@ describe("LibraryPicker (owner ruling 1 / AP-05)", () => {
   // roster contradicted it one click later. The count is now what the profile
   // will actually be eligible for HERE.
   it("counts the stages the template resolves to on THIS board, not its own", () => {
-    const { getByText, queryByText } = render(
-      <LibraryPicker
-        library={TEMPLATES}
-        stages={LIGHTWEIGHT_BOARD}
-        workflow={LIGHTWEIGHT_WORKFLOW}
-        projectName="Lightweight Lab"
-        busy={false}
-        onClose={() => {}}
-        onAdd={() => {}}
-      />,
+    // CANARY: count `t.stages` again and this row reads "2 stages here".
+    const view = renderLibraryPage(
+      [{ ...TEMPLATES[0]!, stages: ["ready", "review"] }],
+      undefined,
+      LIGHTWEIGHT_LAB,
     );
-    // `review` names the REVIEW role; this 3-stage board fills it with `doing`.
-    expect(getByText("1 stage here")).toBeTruthy();
-    expect(queryByText("1 stage")).toBeNull();
+    openLibrary(view);
+    // `review` names the REVIEW role, which this 3-stage board fills with
+    // `doing`; `ready` names a role none of its stages fills. Its own count
+    // is two.
+    const picker = view.getByRole("dialog", { name: "Add from library" }).textContent;
+    expect(picker).toContain("1 stage here");
+    expect(picker).not.toContain("2 stages");
   });
 
   it("says 'every stage here' when the declaration means nothing on this board", () => {
-    const { getByText } = render(
-      <LibraryPicker
-        library={[{ ...TEMPLATES[0]!, stages: ["spec-review"] }]}
-        stages={LIGHTWEIGHT_BOARD}
-        workflow={LIGHTWEIGHT_WORKFLOW}
-        projectName="Lightweight Lab"
-        busy={false}
-        onClose={() => {}}
-        onAdd={() => {}}
-      />,
+    const view = renderLibraryPage(
+      [{ ...TEMPLATES[0]!, stages: ["spec-review"] }],
+      undefined,
+      LIGHTWEIGHT_LAB,
     );
+    openLibrary(view);
     // Rule 3 (R14-1) — unrestricted rather than eligible for nothing, and the
     // pill says the same thing the roster will say after the deploy.
-    expect(getByText("every stage here")).toBeTruthy();
+    expect(view.getByText("every stage here")).toBeTruthy();
   });
 
   it("says so when every global profile is already deployed", () => {
-    const { getByText } = render(
-      <LibraryPicker
-        library={[]}
-        stages={STAGES}
-        workflow={WORKFLOW}
-        projectName="Viberr Core"
-        busy={false}
-        onClose={() => {}}
-        onAdd={() => {}}
-      />,
-    );
-    expect(getByText(/Every global profile is already deployed here/)).toBeTruthy();
+    const view = renderLibraryPage([]);
+    openLibrary(view);
+    expect(view.getByText(/Every global profile is already deployed here/)).toBeTruthy();
   });
 });
 
@@ -2105,33 +2140,6 @@ describe("AgentsPage failure toast kind (P13-D-10)", () => {
     resources: { skills: [], mcps: [], kb: [] },
   };
 
-  function renderPage(
-    action: () => Promise<FailedActionResult>,
-    library: LibraryProfileView[] = [REVIEWER],
-  ) {
-    const Stub = createRoutesStub([
-      {
-        path: "/projects/viberr-core/agents",
-        Component: () => (
-          <ToastProvider>
-            <AgentsPage
-              profiles={[mkProfile({})]}
-              library={library}
-              deployments={[]}
-              stages={STAGES}
-              workflow={WORKFLOW}
-              projectSlug="viberr-core"
-              projectName="Viberr Core"
-              myRole="admin"
-            />
-          </ToastProvider>
-        ),
-        action,
-      },
-    ]);
-    return render(<Stub initialEntries={["/projects/viberr-core/agents"]} />);
-  }
-
   // Ruling 638 (and ruling 368's in-flight rule): the picked row names the
   // work while the deploy is in flight, read off the page's own fetcher; the
   // other rows only wait at the busy step.
@@ -2140,8 +2148,7 @@ describe("AgentsPage failure toast kind (P13-D-10)", () => {
     const pending = new Promise<FailedActionResult>((resolve) => {
       finish = resolve;
     });
-    const { getAllByText, getByText } = renderPage(
-      () => pending,
+    const view = renderLibraryPage(
       [
         REVIEWER,
         {
@@ -2155,8 +2162,10 @@ describe("AgentsPage failure toast kind (P13-D-10)", () => {
           resources: { skills: [], mcps: [], kb: [] },
         },
       ],
+      () => pending,
     );
-    fireEvent.click(getAllByText(/Add from library/)[0]!);
+    const { getByText } = view;
+    openLibrary(view);
     fireEvent.click(getByText("Reviewer").closest("button")!);
     const picked = getByText("Reviewer").closest("button")!;
     const other = getByText("Docs Writer").closest("button")!;
@@ -2172,11 +2181,12 @@ describe("AgentsPage failure toast kind (P13-D-10)", () => {
   });
 
   it("renders the alert glyph, not the success tick, when a deploy fails", async () => {
-    const { getAllByText, getByText } = renderPage(async () => ({
+    const view = renderLibraryPage([REVIEWER], async () => ({
       ok: false,
       error: "That template no longer exists.",
     }));
-    fireEvent.click(getAllByText(/Add from library/)[0]!);
+    const { getByText } = view;
+    openLibrary(view);
     fireEvent.click(getByText("Reviewer").closest("button")!);
     await waitFor(() => expect(document.querySelector(".toast")).toBeTruthy());
     const toast = document.querySelector(".toast")!;

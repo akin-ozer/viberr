@@ -14,8 +14,7 @@ import { readTaskFile } from "~/server/files/task-writer.server";
 import { getTaskSummary } from "~/server/projections/task-query.server";
 import type { DatabaseSync } from "node:sqlite";
 import type { RunOperatorInput } from "~/server/runtimes/operator-run.server";
-import { readProjectFile } from "~/server/files/project-writer.server";
-import { writeProject } from "../../../test-support/test-store";
+import { reconfigureProject } from "../../../test-support/projected-store";
 import { createTask } from "./task-edits.server";
 import { setTaskArchived } from "./task-archive.server";
 import { transitionStage } from "./task-transitions.server";
@@ -51,11 +50,9 @@ async function seed(store: TestStore): Promise<void> {
   }
   // An operator is deployed so a release has someone to re-invoke
   // (`autoInvokeOperator` returns early without one).
-  const pf = readProjectFile({ projectSlug: store.slug, dataRoot: store.dataRoot })!;
-  writeProject(store.dataRoot, {
-    ...pf.parsed.frontmatter,
+  reconfigureProject(store, (fm) => ({
     agents: [
-      ...pf.parsed.frontmatter.agents,
+      ...fm.agents,
       {
         profileId: "operator",
         capabilities: [
@@ -66,8 +63,7 @@ async function seed(store: TestStore): Promise<void> {
         definition: { kind: "operator", backends: ["claude"], model: "sonnet", autonomy: "supervised" },
       },
     ],
-  });
-  rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
+  }));
 }
 
 const file = (store: TestStore, key: string) =>
@@ -225,7 +221,7 @@ describe("setTaskDependencies", () => {
     expect(file(store, "VIB-9").timeline[0]!.text).toBe("Waits on VIB-5 (added VIB-5). Held until every entry is done; Viberr releases it then.");
   });
 
-  it("keeps waiting when a packet or a running agent still owes something; refuses an archived task and a viewer", async () => {
+  it("keeps waiting when a running agent still owes something; refuses an archived task and a viewer", async () => {
     const store = setupTestStore(ctx);
     await seed(store);
     writeTask(store.dataRoot, store.slug, {
@@ -294,18 +290,7 @@ describe("setTaskDependencies", () => {
   });
 });
 
-async function eventually(assertion: () => void, ms = 4000): Promise<void> {
-  const deadline = Date.now() + ms;
-  for (;;) {
-    try {
-      assertion();
-      return;
-    } catch (error) {
-      if (Date.now() > deadline) throw error;
-      await new Promise((resolve) => setTimeout(resolve, 20));
-    }
-  }
-}
+const eventually = (assertion: () => void, ms = 4000) => vi.waitFor(assertion, { timeout: ms, interval: 20 });
 
 const runOperatorStub = () =>
   vi.fn((_db: DatabaseSync, _input: RunOperatorInput) =>
@@ -456,7 +441,8 @@ describe("the release engine", () => {
   it("completing the LAST dependency releases the dependent through the transition hook: list cleared, note, readiness lifted, hold cleared, waiting back on a person, watchers notified, operator re-invoked with the payload; a partial completion releases nothing", async () => {
     // Canaries: delete the `autoInvokeOperator` call in `announceRelease`
     // (no re-invoke); treat `failed` as satisfied in `dependenciesSatisfied`
-    // (the archived case below releases).
+    // (the archived dependency in "a done dependency releases; an archived
+    // dependency is noted ONCE…" below then releases).
     const store = setupTestStore(ctx);
     await seed(store);
     writeTask(store.dataRoot, store.slug, {
@@ -525,7 +511,6 @@ describe("the release engine", () => {
       ),
     ).toEqual(new Set([`/projects/${store.slug}/tasks/VIB-10#event-${note.occurredAt}`]));
     const release = runOperator.mock.calls.find((c) => c[1].trigger === "dependencies-released");
-    expect(release).toBeDefined();
     expect(release![1].dependencyRelease).toEqual({ entries: ["VIB-2", "VIB-5", "VIB-1"], clearedBy: null });
     // VIB-4 (seeded waiting on VIB-5) was released by the same sweep; VIB-10's
     // own release is exactly one row, the engine's (nobody cleared it by hand).

@@ -177,7 +177,7 @@ function reconcileExec(git: WorkspaceGit, serverDir: string): CommandExec {
 
 // ------------------------------------------------------------------- input
 
-export interface ReconcileWorkspaceDeliveryInput {
+interface ReconcileWorkspaceDeliveryInput {
   db: DatabaseSync;
   projectSlug: string;
   taskKey: string;
@@ -799,7 +799,8 @@ export async function reconcileWorkspaceDelivery(
               { pr: detected },
             );
             // An accepted (merge-pending) PR that was closed on GitHub without
-            // merging loses its Complete-merge path — say why, typed `policy`.
+            // merging loses its Complete-merge path — say why, in a note from the
+            // policy engine.
             if (samePr && cur.state === "accepted" && detected.state === "closed") {
               await appendTimelineEvent(ref, {
                 occurredAt: new Date().toISOString(),

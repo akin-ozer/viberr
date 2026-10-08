@@ -1,4 +1,6 @@
+import type { TaskRunPrincipalView } from "~/features/task-detail/run-principal-view";
 import type { TaskDetail } from "~/server/projections/task-query.server";
+import type { AcceptanceAffordance } from "~/server/tasks/task-acceptance.server";
 import type { TaskSummary } from "~/shared/mapping/task.server";
 
 /**
@@ -66,6 +68,31 @@ export function taskDetail(patch: Partial<TaskDetail> = {}): TaskDetail {
     workflow: [],
     lastActivityAt: null,
     quiet: false,
+    ...patch,
+  };
+}
+
+/** A run's principal: Arda Kaya (`u-arda`) with both backends connected (ruling 127). */
+export function connectedPrincipal(patch: Partial<TaskRunPrincipalView> = {}): TaskRunPrincipalView {
+  return {
+    ownerUserId: "u-arda",
+    ownerName: "Arda Kaya",
+    claude: { available: true, detail: null },
+    codex: { available: true, detail: null },
+    ...patch,
+  };
+}
+
+/** Acceptance at the review boundary for a viewer who may accept: nothing blocks it. */
+export function acceptanceAffordance(patch: Partial<AcceptanceAffordance> = {}): AcceptanceAffordance {
+  return {
+    hasAuthority: true,
+    atBoundary: true,
+    blockedReason: null,
+    blockedGates: [],
+    blockedReasonViaPacket: null,
+    canAccept: true,
+    terminallyBlocked: false,
     ...patch,
   };
 }

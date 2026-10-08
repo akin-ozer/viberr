@@ -12,6 +12,7 @@ import type { DatabaseSync } from "node:sqlite";
 import { resetAgentIsolationForTests } from "./agent-isolation.server";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { createTestDbContext } from "../../../test-support/test-db";
+import { withEnv } from "../../../test-support/env";
 import { insertUser } from "~/server/auth/user-store.server";
 import {
   ANSI_ESCAPE,
@@ -354,9 +355,11 @@ describe("startBackendLogin (claude)", () => {
   });
 
   it("spawns argv only, on one home and no credential-shaped variable", async () => {
-    process.env.ANTHROPIC_API_KEY = "sk-ant-should-never-reach-the-child";
-    process.env.CODEX_HOME = "/some/ambient/codex-home";
-    try {
+    const ambient = {
+      ANTHROPIC_API_KEY: "sk-ant-should-never-reach-the-child",
+      CODEX_HOME: "/some/ambient/codex-home",
+    };
+    await withEnv(ambient, async () => {
       start("claude", "console");
       await waitForLogin("claude", (view) => view.needsCode, "the code prompt");
       const env = fakeVendorEnv(home("claude"));
@@ -374,10 +377,7 @@ describe("startBackendLogin (claude)", () => {
         "login",
         "--console",
       ]);
-    } finally {
-      delete process.env.ANTHROPIC_API_KEY;
-      delete process.env.CODEX_HOME;
-    }
+    });
   });
 
   it("fails with the vendor's redacted sentence on a non-zero exit", async () => {
@@ -394,7 +394,7 @@ describe("startBackendLogin (claude)", () => {
   });
 
   it("refuses to record a sign-in the vendor does not confirm", async () => {
-    setFakeVendorLoggedOut(true);
+    setFakeVendorLoggedOut();
     start("claude", "claudeai");
     await waitForLogin("claude", (view) => view.needsCode, "the code prompt");
     submitBackendLoginCode(db, ACTOR, "claude", "abc");

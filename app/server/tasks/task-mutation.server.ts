@@ -12,7 +12,6 @@ import {
   createNotification,
   followClosedDecision,
   markTaskPacketApprovalRead,
-  proposalLink,
   taskDecisionLink,
   taskEventLink,
   taskRecommendationsLink,
@@ -313,17 +312,14 @@ export type NoticeSubject =
    *  by its id: ruling 547 moves the row to the event that closes it. */
   | { decision: string | undefined }
   /** The task's pending recommendation cards. */
-  | "recommendations"
-  /** A knowledge-base proposal, by id (ruling 483). */
-  | { proposal: string };
+  | "recommendations";
 
 /** Where a row about `about` on this task opens (the links in
  *  `notifications.server.ts`). */
-export function noticeHref(projectSlug: string, taskKey: string, about: NoticeSubject): string {
+function noticeHref(projectSlug: string, taskKey: string, about: NoticeSubject): string {
   if (about === "recommendations") return taskRecommendationsLink(projectSlug, taskKey);
   if ("decision" in about) return taskDecisionLink(projectSlug, taskKey, about.decision);
-  if ("event" in about) return taskEventLink(projectSlug, taskKey, about.event);
-  return proposalLink(projectSlug, about.proposal);
+  return taskEventLink(projectSlug, taskKey, about.event);
 }
 
 export interface TaskWatcherNotice {

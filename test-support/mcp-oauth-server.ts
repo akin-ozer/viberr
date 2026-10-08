@@ -27,8 +27,6 @@ import { fixtureServer, listen } from "./mcp-upstream";
 export interface OAuthServerOptions {
   /** `expires_in` of the next access token issued. */
   accessTokenTtlSec: number;
-  /** Whether the token endpoint issues refresh tokens. */
-  issueRefreshToken: boolean;
   /** How the next refresh grant is answered. */
   refresh: "ok" | "invalid_grant" | "server_error";
   /** The consent screen's answer: approve, or the user said no. */
@@ -53,6 +51,10 @@ export interface OAuthServerOptions {
    *  read-only grant (a tool result, `isError`, "10000: Authentication
    *  error"); null runs the tool. */
   refuseWrites: "http-403" | "tool-error" | null;
+  /** R-oauth-3: the next token request carrying `grant` waits for `until`
+   *  before it is answered, so a test lands a write while it is on the wire.
+   *  Spent by the request it holds; null answers at once. */
+  holdTokenAnswer: { grant: "authorization_code" | "refresh_token"; until: () => Promise<void> } | null;
 }
 
 export interface OAuthRegistration {
@@ -98,7 +100,6 @@ export interface OAuthMcpServerHandle {
 
 const DEFAULTS: OAuthServerOptions = {
   accessTokenTtlSec: 3600,
-  issueRefreshToken: true,
   refresh: "ok",
   consent: "approve",
   registration: true,
@@ -107,6 +108,7 @@ const DEFAULTS: OAuthServerOptions = {
   grantedScope: null,
   scopesSupported: null,
   refuseWrites: null,
+  holdTokenAnswer: null,
 };
 
 /** What Cloudflare's API MCP server answers a write on a read-only grant
@@ -236,19 +238,16 @@ export async function startOAuthMcpServer(
 
   const issueTokens = (clientId: string): TokenReply => {
     const access = token("at");
+    const refresh = token("rt");
     accessTokens.set(access, clientId);
-    issued.push(access);
+    refreshTokens.set(refresh, clientId);
+    issued.push(access, refresh);
     const body: TokenReply = {
       access_token: access,
       token_type: "Bearer",
       expires_in: options.accessTokenTtlSec,
+      refresh_token: refresh,
     };
-    if (options.issueRefreshToken) {
-      const refresh = token("rt");
-      refreshTokens.set(refresh, clientId);
-      issued.push(refresh);
-      body.refresh_token = refresh;
-    }
     if (options.grantedScope !== null) body.scope = options.grantedScope;
     return body;
   };
@@ -343,6 +342,12 @@ export async function startOAuthMcpServer(
     if (url.pathname === "/token" && req.method === "POST") {
       const form = new URLSearchParams(await readBody(req));
       const grant = form.get("grant_type") ?? "";
+      const hold = options.holdTokenAnswer;
+      if (hold?.grant === grant) {
+        // Spent before it waits, so a request `until` itself makes is answered.
+        options.holdTokenAnswer = null;
+        await hold.until();
+      }
       const answer = (status: number, body: TokenReply | ErrorReply) => {
         tokenRequests.push({ grant, answered: "error" in body ? body.error : "tokens" });
         sendJson(res, status, JSON.stringify(body));

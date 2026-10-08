@@ -198,7 +198,7 @@ const GIST_MAX = 160;
  * The first sentence of a reply as plain words: markdown's marks and link
  * targets dropped, code blocks skipped, cut at the first sentence end.
  */
-export function replyGist(text: string): string {
+function replyGist(text: string): string {
   const plain = text
     .replace(/```[\s\S]*?(?:```|$)/g, " ")
     .replace(/!?\[([^\]]*)\]\([^)]*\)/g, "$1")

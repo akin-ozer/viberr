@@ -1,17 +1,7 @@
 import { afterEach, describe, expect, it } from "vitest";
+import { withEnv } from "../../../test-support/env";
 import { createTestDbContext } from "../../../test-support/test-db";
-import {
-  DEFAULT_DISK_CRITICAL_FREE_MB,
-  DEFAULT_DISK_LOW_FREE_MB,
-  resetEnvCacheForTests,
-} from "~/server/config/env.server";
-import {
-  classifyFreeBytes,
-  dfReading,
-  diskThresholds,
-  formatBytes,
-  measureDataRootSpace,
-} from "./disk-space.server";
+import { dfReading, formatBytes, measureDataRootSpace } from "./disk-space.server";
 
 /**
  * Gap 16 — nothing in the app had ever measured free space on the data root.
@@ -21,27 +11,11 @@ import {
  */
 
 const MB = 1024 * 1024;
-const DEFAULT_DISK_LOW_FREE_BYTES = DEFAULT_DISK_LOW_FREE_MB * MB;
-const DEFAULT_DISK_CRITICAL_FREE_BYTES = DEFAULT_DISK_CRITICAL_FREE_MB * MB;
-
-/** The thresholds are read through `getEnv()`, which parses once per process:
- *  a case that sets them drops the cached parse (ruling 458(c)). */
-function setThresholdsMb(env: {
-  VIBERR_DISK_LOW_FREE_MB?: string;
-  VIBERR_DISK_CRITICAL_FREE_MB?: string;
-}): void {
-  Object.assign(process.env, env);
-  resetEnvCacheForTests();
-}
+const DEFAULT_DISK_LOW_FREE_BYTES = 2048 * MB;
+const DEFAULT_DISK_CRITICAL_FREE_BYTES = 512 * MB;
 
 const ctx = createTestDbContext();
-
-afterEach(() => {
-  delete process.env.VIBERR_DISK_LOW_FREE_MB;
-  delete process.env.VIBERR_DISK_CRITICAL_FREE_MB;
-  resetEnvCacheForTests();
-  ctx.cleanup();
-});
+afterEach(ctx.cleanup);
 
 describe("measureDataRootSpace (gap 16)", () => {
   it("reports real free/total bytes for the data root", () => {
@@ -145,18 +119,14 @@ describe("the host disk under the data root (ruling 603)", () => {
     return { df: byPath, statfs: () => null };
   }
 
-  afterEach(() => {
-    delete process.env.VIBERR_HOST_DISK_PATH;
-  });
-
-  it("reports the host disk when it has less room, and names it", () => {
+  it("reports the host disk when it has less room, and names it", async () => {
     const dataRoot = ctx.makeTempDir();
     const host = ctx.makeTempDir();
-    // Through the env the compose file sets. CANARY: drop the default that
-    // reads VIBERR_HOST_DISK_PATH and the volume's 940.8 GB comes back.
-    process.env.VIBERR_HOST_DISK_PATH = host;
-    resetEnvCacheForTests();
-    const space = measureDataRootSpace(dataRoot, probesFor(dataRoot, host));
+    // Through the env the compose file sets. CANARY: drop the read of
+    // VIBERR_HOST_DISK_PATH and the volume's 940.8 GB comes back.
+    const space = await withEnv({ VIBERR_HOST_DISK_PATH: host }, () =>
+      measureDataRootSpace(dataRoot, probesFor(dataRoot, host)),
+    );
     expect(space).toEqual(
       expect.objectContaining({
         freeBytes: hostDisk.freeBytes,
@@ -167,24 +137,27 @@ describe("the host disk under the data root (ruling 603)", () => {
     );
   });
 
-  it("keeps the data root's reading when the host has more room", () => {
+  it("keeps the data root's reading when the host has more room", async () => {
     const dataRoot = ctx.makeTempDir();
     const host = ctx.makeTempDir();
     const roomy = { totalBytes: 2000 * 1024 ** 3, freeBytes: 1500 * 1024 ** 3 };
-    const space = measureDataRootSpace(dataRoot, probesFor(dataRoot, host, roomy), host);
+    const space = await withEnv({ VIBERR_HOST_DISK_PATH: host }, () =>
+      measureDataRootSpace(dataRoot, probesFor(dataRoot, host, roomy)),
+    );
     expect(space).toEqual(
       expect.objectContaining({ freeBytes: vmVolume.freeBytes, source: "data-root" }),
     );
   });
 
-  it("measures the data root alone when the host path is unset or not mounted", () => {
+  it("measures the data root alone when the host path is unset or not mounted", async () => {
     const dataRoot = ctx.makeTempDir();
     const host = ctx.makeTempDir();
     const probes = probesFor(dataRoot, host);
-    expect(measureDataRootSpace(dataRoot, probes, undefined)?.source).toBe("data-root");
-    expect(measureDataRootSpace(dataRoot, probes, `${host}/not-mounted`)?.source).toBe(
-      "data-root",
+    expect(measureDataRootSpace(dataRoot, probes)?.source).toBe("data-root");
+    const notMounted = await withEnv({ VIBERR_HOST_DISK_PATH: `${host}/not-mounted` }, () =>
+      measureDataRootSpace(dataRoot, probes),
     );
+    expect(notMounted?.source).toBe("data-root");
   });
 });
 
@@ -200,48 +173,51 @@ describe("dfReading", () => {
 });
 
 describe("thresholds", () => {
+  /** The reading of a data root whose volume has `freeBytes` free. */
+  function readingAt(freeBytes: number) {
+    return measureDataRootSpace(ctx.makeTempDir(), {
+      df: () => ({ totalBytes: 100 * 1024 ** 3, freeBytes }),
+      statfs: () => null,
+    });
+  }
+
   it("classifies against the byte thresholds in force", () => {
-    expect(classifyFreeBytes(DEFAULT_DISK_LOW_FREE_BYTES + 1)).toBe("ok");
-    expect(classifyFreeBytes(DEFAULT_DISK_LOW_FREE_BYTES - 1)).toBe("low");
-    expect(classifyFreeBytes(DEFAULT_DISK_CRITICAL_FREE_BYTES - 1)).toBe(
-      "critical",
-    );
+    expect(readingAt(DEFAULT_DISK_LOW_FREE_BYTES + 1)?.status).toBe("ok");
+    expect(readingAt(DEFAULT_DISK_LOW_FREE_BYTES - 1)?.status).toBe("low");
+    expect(readingAt(DEFAULT_DISK_CRITICAL_FREE_BYTES - 1)?.status).toBe("critical");
   });
 
-  it("is configurable in MB", () => {
-    setThresholdsMb({
-      VIBERR_DISK_LOW_FREE_MB: "10",
-      VIBERR_DISK_CRITICAL_FREE_MB: "2",
+  it("is configurable in MB", async () => {
+    await withEnv({ VIBERR_DISK_LOW_FREE_MB: "10", VIBERR_DISK_CRITICAL_FREE_MB: "2" }, () => {
+      expect(readingAt(5 * MB)).toMatchObject({
+        status: "low",
+        lowThresholdBytes: 10 * MB,
+        criticalThresholdBytes: 2 * MB,
+      });
+      expect(readingAt(MB)?.status).toBe("critical");
     });
-    expect(diskThresholds()).toEqual({
-      low: 10 * 1024 * 1024,
-      critical: 2 * 1024 * 1024,
-    });
-    expect(classifyFreeBytes(5 * 1024 * 1024)).toBe("low");
-    expect(classifyFreeBytes(1024 * 1024)).toBe("critical");
   });
 
-  it("clamps a critical threshold configured above the low one", () => {
-    setThresholdsMb({
-      VIBERR_DISK_LOW_FREE_MB: "1",
-      VIBERR_DISK_CRITICAL_FREE_MB: "50",
-    });
-    // Otherwise "low" would be unreachable and the warning tier would silently
-    // never fire — the exact failure this whole gap is about.
-    expect(diskThresholds()).toEqual({
-      low: 50 * 1024 * 1024,
-      critical: 50 * 1024 * 1024,
+  it("clamps a critical threshold configured above the low one", async () => {
+    await withEnv({ VIBERR_DISK_LOW_FREE_MB: "1", VIBERR_DISK_CRITICAL_FREE_MB: "50" }, () => {
+      // Otherwise "low" would be unreachable and the warning tier would silently
+      // never fire — the exact failure this whole gap is about.
+      expect(readingAt(60 * MB)).toMatchObject({
+        lowThresholdBytes: 50 * MB,
+        criticalThresholdBytes: 50 * MB,
+      });
     });
   });
 
   // Ruling 458(c): a nonsense override used to be ignored for the default. It
   // still cannot disable the signal, and it no longer passes in silence: the
   // env schema refuses it, which fails boot.
-  it("refuses a nonsense override rather than disabling the signal", () => {
-    setThresholdsMb({ VIBERR_DISK_LOW_FREE_MB: "not-a-number" });
-    expect(() => diskThresholds()).toThrowError(
-      /Invalid environment configuration:[\s\S]*VIBERR_DISK_LOW_FREE_MB/,
-    );
+  it("refuses a nonsense override rather than disabling the signal", async () => {
+    await withEnv({ VIBERR_DISK_LOW_FREE_MB: "not-a-number" }, () => {
+      expect(() => readingAt(MB)).toThrowError(
+        /Invalid environment configuration:[\s\S]*VIBERR_DISK_LOW_FREE_MB/,
+      );
+    });
   });
 });
 

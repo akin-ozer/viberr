@@ -1,8 +1,7 @@
-import { RouterContextProvider } from "react-router";
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 import { readZip } from "~/server/files/zip.server";
 import { createPat } from "~/server/secrets/pat-store.server";
-import { setupAppTest, type AppTestContext } from "../../test-support/test-app";
+import { routeArgs, setupAppTest, type AppTestContext } from "../../test-support/test-app";
 
 /**
  * Ruling 653: what the routes add to a board's export and import — the
@@ -68,13 +67,7 @@ async function post(fields: Record<string, string>, file?: { name: string; bytes
   if (file) fd.set("file", new File([new Uint8Array(file.bytes)], file.name, { type: "application/zip" }));
   fd.set("_csrf", csrf);
   const request = app.request("/org/settings", { method: "POST", body: fd, cookie });
-  const result = await action({
-    request,
-    url: new URL(request.url),
-    pattern: "/org/settings",
-    params: {},
-    context: new RouterContextProvider(),
-  });
+  const result = await action(routeArgs(request, {}, "/org/settings"));
   return "data" in result ? result.data : result;
 }
 

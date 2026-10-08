@@ -5,7 +5,7 @@ import { createRoutesStub, redirect, useRevalidator, type LoaderFunctionArgs } f
 import { ToastProvider } from "~/ui/toast";
 import type { NotificationListItem } from "~/server/projections/notifications.server";
 import * as listRoute from "~/routes/resources.notifications";
-import { BELL_LIST_URL, TopBell } from "./top-bell";
+import { TopBell } from "./top-bell";
 
 /**
  * Ruling 457 (FL-4 / SRV-6): the bell loads its own list. These pin what the
@@ -15,6 +15,9 @@ import { BELL_LIST_URL, TopBell } from "./top-bell";
  */
 
 afterEach(cleanup);
+
+/** The list's resource route, as `routes.ts` mounts it. */
+const LIST_ROUTE = "/resources/notifications";
 
 /** A row as the list route answers it (`listNotifications`). */
 function notification(i: number): NotificationListItem {
@@ -66,7 +69,7 @@ function mountWorkspace(server: { unread: number; list: NotificationListItem[] }
       },
     },
     {
-      path: BELL_LIST_URL,
+      path: LIST_ROUTE,
       loader: ({ request }): ListAnswer => {
         listLoads.push(request.url);
         return { notifications: [...server.list] };
@@ -173,7 +176,7 @@ function mountFailing(server: () => Promise<ListAnswer>) {
         </ToastProvider>
       ),
     },
-    { path: BELL_LIST_URL, loader: listLoaderOver(server), shouldRevalidate: listRoute.shouldRevalidate },
+    { path: LIST_ROUTE, loader: listLoaderOver(server), shouldRevalidate: listRoute.shouldRevalidate },
   ]);
   return render(<Stub initialEntries={["/"]} />);
 }

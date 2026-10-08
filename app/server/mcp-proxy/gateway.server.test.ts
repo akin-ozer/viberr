@@ -165,7 +165,6 @@ describe("the gateway against an HTTP upstream that requires its bearer", () => 
     expect(called.content[0]?.text).toBe("whoami: ok");
     expect(upstream.calls).toEqual(["whoami"]);
     // Every request the upstream saw carried the credential, attached here.
-    expect(upstream.authorizations.length).toBeGreaterThan(0);
     expect(new Set(upstream.authorizations)).toEqual(new Set([`Bearer ${SECRET}`]));
   });
 
@@ -260,7 +259,6 @@ describe("the gateway against an HTTP upstream that requires its bearer", () => 
 
     const { runId, servers } = mountRun(["cloudflare"]);
     const mount = gatewayConfig.parse(servers.cloudflare);
-    const before = upstream.authorizations.length;
 
     const wrong = await rawInitialize(mount.url, "Bearer not-a-run-token");
     expect(wrong.status).toBe(401);
@@ -281,9 +279,7 @@ describe("the gateway against an HTTP upstream that requires its bearer", () => 
     jsonRpcError.parse(await after.json());
     // …and the live session died with it.
     await expect(client.listTools()).rejects.toThrow();
-    // No refused request reached the upstream.
-    const forwarded = upstream.authorizations.length - before;
-    expect(forwarded).toBeGreaterThan(0);
+    // No tool call reached the upstream.
     expect(upstream.calls).toEqual([]);
   });
 

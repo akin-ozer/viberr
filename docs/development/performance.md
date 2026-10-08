@@ -103,7 +103,7 @@ The harnesses, one home each:
 |---|---|
 | `test-support/test-app.ts`, `demo-seed.ts` | route loaders and actions in-process, with real sessions and CSRF |
 | `test-support/perf-clock.ts` | the wall clock a server fixture reads: one local time, the same in every zone (`pinPerfClock`) |
-| `test-support/perf-counters.ts` | SQL executions, rows, compiles and commits (`countSql`, `tallyServerReads`), store-file reads and writes (`countFileReads`, `countFileWrites`); wraps the `node:sqlite` prototypes and `node:fs`, restored when the window closes or, on a throw inside it, when the test ends (`onTestFinished`) |
+| `test-support/perf-counters.ts` | SQL executions, rows and commits (`countSql`, `tallyServerReads`), store-file reads and writes (`countFileReads`, `countFileWrites`); wraps the `node:sqlite` prototypes and `node:fs`, restored when the window closes or, on a throw inside it, when the test ends (`onTestFinished`) |
 | `test-support/render-counter.ts` | which components rendered in each commit, read off the fiber tree the way DevTools does (`createRenderCounter` + `<Profiler onRender>`), `settle`, and DOM writes (`observeMutations`) |
 | `test-support/revalidation-harness.tsx` | loaders re-run per trigger, with single fetch's choice of routes and the real SSE broker in-process; `harnessLifecycle()` gives each test a fresh broker and `tab(options)` a tab with its streams open |
 | `test-support/console-fixture.ts` | a big task: 870 console lines over three agent groups |

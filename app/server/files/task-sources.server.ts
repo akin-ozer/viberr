@@ -56,9 +56,9 @@ import {
 /** The most one source holds: what a person's upload may (10 MB). */
 export const SOURCE_MAX_BYTES = MAX_UPLOAD_BYTES;
 /** The most sources one task keeps. */
-export const SOURCES_PER_TASK_MAX = 200;
+const SOURCES_PER_TASK_MAX = 200;
 /** The most bytes one task's sources come to together. */
-export const SOURCES_TASK_MAX_BYTES = 100 * 1024 * 1024;
+const SOURCES_TASK_MAX_BYTES = 100 * 1024 * 1024;
 /** A source's title is one line a reader names it by. */
 export const SOURCE_TITLE_MAX = 200;
 /** Where it came from: a URL, a command, or `owner/repo@<commit>:path`. */
@@ -150,7 +150,7 @@ const deliveryLineSchema = z.object({
 
 const indexLineSchema = z.discriminatedUnion("kind", [sourceLineSchema, deliveryLineSchema]);
 
-export function taskSourcesDir(slug: string, key: string, dataRoot?: string): string {
+function taskSourcesDir(slug: string, key: string, dataRoot?: string): string {
   return path.join(taskDir(slug, key, dataRoot), "sources");
 }
 

@@ -11,7 +11,6 @@ import {
   OPERATOR_CAP_IDS,
   capabilityPatchRefusal,
 } from "./capability-catalog";
-import { capabilitiesToActionLabels } from "./agents-query.server";
 
 describe("CAP_MODAL_CATALOG (ruling 7 — id-based against the shared catalog)", () => {
   it("carries only runtime-consulted agent toggles (ruling 7 prune + generic-agents Collaboration)", () => {
@@ -57,39 +56,6 @@ describe("CAP_MODAL_CATALOG (ruling 7 — id-based against the shared catalog)",
       expect(MODAL_CAP_IDS.has(id)).toBe(true);
       expect(CAP_MODAL_DEFAULTS[id]).toBe("human");
     }
-  });
-});
-
-describe("capabilitiesToActionLabels", () => {
-  it("renders catalog labels from ids and appends extras per bucket", () => {
-    const buckets = capabilitiesToActionLabels(
-      [
-        { capabilityId: "author-test-cases", mode: "direct" },
-        { capabilityId: "attach-evidence-references", mode: "direct" },
-        { capabilityId: "report-validation-verdict", mode: "recommend" },
-        { capabilityId: "merge-pull-request", mode: "human" },
-        { capabilityId: "transition-to-done", mode: "human" },
-      ],
-      [{ label: "Run the validation suite", mode: "direct" }],
-    );
-    expect(buckets.direct).toEqual([
-      "Author test cases",
-      "Attach evidence references",
-      "Run the validation suite",
-    ]);
-    expect(buckets.recommend).toEqual(["Report a validation verdict"]);
-    expect(buckets.forbidden).toEqual([
-      "Merge a pull request",
-      "Transition a task to Done",
-    ]);
-  });
-
-  it("keeps unknown capability ids tolerantly (renders the id)", () => {
-    const buckets = capabilitiesToActionLabels(
-      [{ capabilityId: "not-a-real-cap", mode: "direct" }],
-      [],
-    );
-    expect(buckets.direct).toEqual(["not-a-real-cap"]);
   });
 });
 

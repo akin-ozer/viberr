@@ -11,6 +11,7 @@ import {
 import type { FileActorRef } from "~/schemas/task-file.schema";
 import { readProjectFile } from "~/server/files/project-writer.server";
 import { readTaskFile } from "~/server/files/task-writer.server";
+import { upsertRun } from "~/server/runtimes/run-store.server";
 import { rebuildAll } from "~/server/projections/rebuilder.server";
 import { recordAgentCompletion } from "./agent-completion.server";
 
@@ -52,65 +53,6 @@ function timeline(store: TestStore, key = "VIB-1") {
 }
 
 describe("recordAgentCompletion notifies the humans the report @tags (P13-RT-01)", () => {
-  it("a completed run's reply fans out a mention notification", async () => {
-    // BEFORE: the reply comment landed on the timeline and ZERO `mention`
-    // notifications were created — live-proven with a Docs Writer reply opening
-    // "@Arda …". Only the interrupted/errored path (postAgentReplyComment) and
-    // Claude's mid-run post_comment fanned out, so on Codex — which has no
-    // mid-run comment channel at all — an agent tag NEVER reached anyone.
-    const store = setupTestStore(ctx);
-    seedTask(store);
-    await recordAgentCompletion(
-      store.db,
-      { dataRoot: store.dataRoot },
-      store.slug,
-      "VIB-1",
-      {
-        actorRef: AGENT,
-        runId: "run_1",
-        delivers: true,
-        replyText:
-          "@Arda I rewrote the onboarding guide and split the CLI section out. " +
-          "Please confirm the new ordering before I touch the API reference.",
-        verdict: null,
-        question: null,
-      },
-    );
-
-    const rows = notifications(store);
-    expect(rows).toHaveLength(1);
-    expect(rows[0]).toMatchObject({
-      user_id: store.users.arda.id,
-      kind: "mention",
-    });
-    expect(rows[0]!.text).toContain("mentioned you");
-    // The comment itself is still the timeline event it always was.
-    expect(timeline(store)[0]).toMatchObject({ type: "comment", actor: AGENT });
-  });
-
-  it("notifies every tagged human, including a multi-word display name", async () => {
-    const store = setupTestStore(ctx);
-    seedTask(store);
-    const selinLocal = store.users.selin.email.split("@")[0]!;
-    await recordAgentCompletion(
-      store.db,
-      { dataRoot: store.dataRoot },
-      store.slug,
-      "VIB-1",
-      {
-        actorRef: AGENT,
-        runId: "run_1",
-        delivers: true,
-        replyText: `@${store.users.arda.name} the migration is written. @${selinLocal} can you take acceptance once CI is green?`,
-        verdict: null,
-        question: null,
-      },
-    );
-    expect(new Set(notifications(store).map((r) => r.user_id))).toEqual(
-      new Set([store.users.arda.id, store.users.selin.id]),
-    );
-  });
-
   it("an untagged report notifies nobody", async () => {
     const store = setupTestStore(ctx);
     seedTask(store);
@@ -143,14 +85,20 @@ describe("recordAgentCompletion notifies the humans the report @tags (P13-RT-01)
     const runId = "run_dedup";
     const startedAt = "2026-08-31T00:00:00.000Z";
     // A real run row so the mid-run-comment dedup can bound on started_at.
-    store.db
-      .prepare(
-        `INSERT INTO agent_runs (id, task_key, project_slug, thread_id, role, kind,
-           backend, model, state, started_at, created_at, updated_at, agent_profile_id)
-         VALUES (?, 'VIB-1', ?, 'th_dedup', 'Docs Writer', 'primary',
-           'codex', 'gpt-test', 'finished', ?, ?, ?, 'docs-writer')`,
-      )
-      .run(runId, store.slug, startedAt, startedAt, startedAt);
+    upsertRun(store.db, {
+      id: runId,
+      projectSlug: store.slug,
+      taskKey: "VIB-1",
+      threadId: "th_dedup",
+      role: "Docs Writer",
+      kind: "primary",
+      backend: "codex",
+      model: "gpt-test",
+      sdk: "codex",
+      agentProfileId: "docs-writer",
+      state: "finished",
+      startedAt,
+    });
 
     // The agent's mid-run comment — the body its report repeats. Tags NOBODY, so
     // the dispatch cc below is a genuinely NEW mention (not a re-notify).

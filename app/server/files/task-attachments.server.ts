@@ -412,7 +412,7 @@ export function taskAttachmentExists(
 /** Extension → inline content type (`INLINE_TYPES`). Anything absent there is
  *  served as a download (`application/octet-stream`), never rendered on the
  *  app origin. */
-export function attachmentContentType(name: string): {
+function attachmentContentType(name: string): {
   type: string;
   inline: boolean;
 } {
@@ -425,7 +425,7 @@ export function attachmentContentType(name: string): {
 
 // ------------------------------------------------------- the human writer
 
-export { MAX_UPLOAD_BYTES, READABLE_TEXT_EXTENSIONS } from "~/shared/attachment-kinds";
+export { MAX_UPLOAD_BYTES } from "~/shared/attachment-kinds";
 
 export interface WrittenAttachment {
   name: string;
@@ -441,7 +441,7 @@ export interface WrittenAttachment {
  * Turkish, answered 500 to the person who attached it. The quoted name is the
  * ASCII fallback and `filename*` carries the real one (RFC 6266).
  */
-export function attachmentDisposition(name: string, inline: boolean): string {
+function attachmentDisposition(name: string, inline: boolean): string {
   const ascii = name.replace(/[^\x20-\x7e]/g, "_").replace(/["\\]/g, "_");
   const encoded = encodeURIComponent(name).replace(/['()*]/g, (c) => `%${c.charCodeAt(0).toString(16).toUpperCase()}`);
   return `${inline ? "inline" : "attachment"}; filename="${ascii}"; filename*=UTF-8''${encoded}`;
@@ -784,7 +784,7 @@ const EMBEDDED_FILE_RE = new RegExp(
  * by its length, and the read says how many were left out. The file is
  * untouched: a run's shell still reads its bytes.
  */
-export function withoutEmbeddedFiles(text: string): EmbeddedFilesLeftOut {
+function withoutEmbeddedFiles(text: string): EmbeddedFilesLeftOut {
   let files = 0;
   let chars = 0;
   const kept = text.replace(EMBEDDED_FILE_RE, (_whole, head: string, payload: string) => {

@@ -5,7 +5,6 @@ import {
   CREDENTIAL_ENV_RE,
   createAdapters,
   filteredSpawnEnv,
-  selectAdapter,
 } from "./runtime-registry.server";
 import {
   repoWriteWithheldFromDenylist,
@@ -17,7 +16,7 @@ import type { ClaudeQueryOptions } from "./claude-runtime.server";
 import { fakeClaudeQuery } from "../../../test-support/fake-claude-query";
 import { resolveSpecialistDisallowedTools } from "../tasks/specialist-tool-policy";
 import { agentGitIdentity } from "../tasks/specialist-workspace.server";
-import { CAP_CATALOG, capabilityEnforcement } from "~/shared/capabilities";
+import { UNIFIED_CAP_CATALOG, capabilityEnforcement } from "~/shared/capabilities";
 import type { CapabilityGrant } from "~/schemas/project-file.schema";
 import { ENV_KEYS, resetEnvCacheForTests } from "~/server/config/env.server";
 
@@ -357,18 +356,6 @@ describe("runtime-registry", () => {
     }
   });
 
-  it("selectAdapter is a plain lookup — availability is not its business", () => {
-    // Ruling 127: whether a run may proceed is decided upstream, by resolving
-    // its credential principal. `startRun` never reaches this function for a
-    // run it refused, so an "unavailable" arm here would be a second, quieter
-    // place for that decision to live.
-    const adapters = createAdapters({
-      claudeQueryFn: () => fakeClaudeQuery(),
-    });
-    expect(selectAdapter("claude", adapters)).toBe(adapters.claude);
-    expect(selectAdapter("codex", adapters)).toBe(adapters.codex);
-  });
-
   it("createAdapters accepts injected SDK fakes (no real SDK constructed)", () => {
     let queryCalled = false;
     const adapters = createAdapters({
@@ -510,7 +497,7 @@ describe("UC-16 backend parity (claude ↔ codex, one spec, two adapters)", () =
     // it does not. Derive the tool-layer capabilities from the policy itself (so
     // a NEW deny rule is covered the day it lands) and check each one against
     // the Codex thread options the same grant actually produces.
-    const allGranted: CapabilityGrant[] = CAP_CATALOG.map((c) => ({
+    const allGranted: CapabilityGrant[] = UNIFIED_CAP_CATALOG.map((c) => ({
       capabilityId: c.id,
       mode: "direct",
     }));
@@ -524,7 +511,7 @@ describe("UC-16 backend parity (claude ↔ codex, one spec, two adapters)", () =
       ]);
 
     const toolLayer: string[] = [];
-    for (const cap of CAP_CATALOG) {
+    for (const cap of UNIFIED_CAP_CATALOG) {
       const denied = resolveSpecialistDisallowedTools(
         withMode(allGranted, cap.id, "off"),
       );

@@ -18,6 +18,7 @@ import { flush, waitFor } from "../../../test-support/polling";
 import { decisionsRequiring } from "~/server/projections/decisions.server";
 import { listNotifications } from "~/server/projections/notifications.server";
 import { listAuditEvents } from "../../../test-support/audit-log";
+import { reconfigureProject } from "../../../test-support/projected-store";
 import type {
   ParsedTaskFile,
   Recommendation,
@@ -166,6 +167,73 @@ afterEach(() => {
   ctx.cleanup();
 });
 
+/** The operator's collision decision on VIB-1, `resolve_remote_collision`
+ *  first: what F32-7 and ruling 136(a) resolve. */
+const BLOCKED_COLLISION_PACKET: TaskPacket = {
+  type: "blocked",
+  kind: "Blocked decision",
+  from: "operator",
+  title: "Branch vib-1 collides with an unrelated remote branch",
+  body: "deliver_for_review push-conflicted.",
+  observations: [],
+  options: [
+    { kind: "resolve_remote_collision", t: "Delete the stale remote branch, then redeliver", d: "", rec: true },
+    { kind: "custom", t: "Something else", d: "", rec: false },
+  ],
+};
+
+/** VIB-1 blocked on that decision: a delivered revision, an unrelated PR #232
+ *  on `vib-1` and a project PAT, with GitHub answering `routes`. */
+async function seedCollision(routes: Record<string, { status?: number; body?: unknown }>) {
+  const { fakeGithubFetch } = await import("../../../test-support/fake-github");
+  const { createPat, setProjectCredential } = await import("~/server/secrets/pat-store.server");
+  const patActor = { userId: store.users.arda.id, label: "arda@viberr.dev" };
+  const pat = createPat(store.db, { userId: store.users.arda.id, label: "bot", token: "ghp_collision00000000000000000000136" }, patActor);
+  setProjectCredential(store.db, { projectSlug: store.slug, patId: pat.id }, patActor);
+  const github = fakeGithubFetch(routes);
+  writeTask(store.dataRoot, store.slug, {
+    frontmatter: baseTaskFrontmatter("VIB-1", {
+      stage: "impl",
+      waiting: "human",
+      readiness: "blocked",
+      branch: "vib-1",
+      operator: { assignedAtStageId: "ready" },
+      workRevision: {
+        id: "rev_collision136",
+        headSha: "e".repeat(40),
+        treeSha: "f".repeat(40),
+        branch: "vib-1",
+        createdAt: new Date().toISOString(),
+        sourceProfileId: "developer",
+        kind: "delivered",
+      },
+      github: { commits: [], changed: null, unownedPr: 232 },
+    }),
+    packet: BLOCKED_COLLISION_PACKET,
+  });
+  rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
+  return github;
+}
+
+/** GitHub lets the ceremony close PR #232, delete the branch and redeliver. */
+const clearedRoutes = () => ({
+  // Ruling 128: the delivery reads the base ref before pushing.
+  "GET /repos/akin-ozer/viberr/git/ref/heads/main": { body: { object: { sha: "c".repeat(40) } } },
+  "PATCH /repos/akin-ozer/viberr/pulls/232": { status: 200, body: { state: "closed" } },
+  "DELETE /repos/akin-ozer/viberr/git/refs/heads/vib-1": { status: 204, body: "" },
+});
+
+/** The person elects the decision's first option. */
+async function resolveCollision(github: { fetchImpl: typeof fetch }): Promise<void> {
+  const { resolvePacket } = await import("./packet-resolution.server");
+  await resolvePacket(
+    store.db,
+    { projectSlug: store.slug, taskKey: "VIB-1", optionIndex: 0 },
+    { userId: store.users.arda.id, label: "arda@viberr.dev" },
+    { dataRoot: store.dataRoot, fetchImpl: github.fetchImpl, deps: DEPS },
+  );
+}
+
 /**
  * F32-7 (pass 32). The `resolve_remote_collision` decision re-delivers through
  * `manualDeliverForReview` — the HUMAN door — and `performDelivery` records no
@@ -177,77 +245,15 @@ afterEach(() => {
  * full autonomy re-queues the operator with the `delivered` trigger.
  */
 describe("F32-7 — a collision resolution's redelivery leaves a next step", () => {
-  const COLLISION_PACKET: TaskPacket = {
-    type: "blocked",
-    kind: "Blocked decision",
-    from: "operator",
-    title: "Branch vib-1 collides with an unrelated remote branch",
-    body: "deliver_for_review push-conflicted: the remote branch holds unrelated commits.",
-    observations: [],
-    options: [
-      {
-        kind: "resolve_remote_collision",
-        t: "Delete the stale remote branch, then redeliver",
-        d: "",
-        rec: true,
-      },
-      { kind: "custom", t: "Something else", d: "", rec: false },
-    ],
-  };
-
-  async function resolveCollision(): Promise<void> {
-    const { fakeGithubFetch } = await import("../../../test-support/fake-github");
-    const { createPat, setProjectCredential } = await import(
-      "~/server/secrets/pat-store.server"
-    );
-    const { resolvePacket } = await import("./packet-resolution.server");
-    const patActor = { userId: store.users.arda.id, label: "arda@viberr.dev" };
-    const pat = createPat(
-      store.db,
-      { userId: store.users.arda.id, label: "bot", token: "ghp_collision00000000000000000000009" },
-      patActor,
-    );
-    setProjectCredential(store.db, { projectSlug: store.slug, patId: pat.id }, patActor);
-    const github = fakeGithubFetch({
-      // Ruling 128: the delivery reads the base ref before pushing.
-      "GET /repos/akin-ozer/viberr/git/ref/heads/main": { body: { object: { sha: "c".repeat(40) } } },
-      "PATCH /repos/akin-ozer/viberr/pulls/232": { status: 200, body: { state: "closed" } },
-      "DELETE /repos/akin-ozer/viberr/git/refs/heads/vib-1": { status: 204, body: "" },
-    });
-    writeTask(store.dataRoot, store.slug, {
-      frontmatter: baseTaskFrontmatter("VIB-1", {
-        stage: "impl",
-        waiting: "human",
-        readiness: "blocked",
-        branch: "vib-1",
-        operator: { assignedAtStageId: "ready" },
-        workRevision: {
-          id: "rev_collision9",
-          headSha: "e".repeat(40),
-          treeSha: "f".repeat(40),
-          branch: "vib-1",
-          createdAt: new Date().toISOString(),
-          sourceProfileId: "developer",
-          kind: "delivered",
-        },
-        github: { commits: [], changed: null, unownedPr: 232 },
-      }),
-      packet: COLLISION_PACKET,
-    });
-    rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
-    await resolvePacket(
-      store.db,
-      { projectSlug: store.slug, taskKey: "VIB-1", optionIndex: 0 },
-      { userId: store.users.arda.id, label: "Arda" },
-      { dataRoot: store.dataRoot, fetchImpl: github.fetchImpl, deps: DEPS },
-    );
+  async function resolveClearedCollision(): Promise<void> {
+    await resolveCollision(await seedCollision(clearedRoutes()));
     // The redelivery really went out through the injected doors.
     expect(openTaskPrMock).toHaveBeenCalled();
   }
 
   it("supervised: the server records the Move-to-Review card after the redelivery", async () => {
     deployDeliveryOperator(store, "supervised");
-    await resolveCollision();
+    await resolveClearedCollision();
     const pending = recs();
     expect(pending).toHaveLength(1);
     expect(pending[0]).toMatchObject({ kind: "transition", toStageId: "review" });
@@ -260,7 +266,7 @@ describe("F32-7 — a collision resolution's redelivery leaves a next step", () 
 
   it("full autonomy: the operator is re-queued with the delivered trigger — exactly once, no card", async () => {
     deployDeliveryOperator(store, "full");
-    await resolveCollision();
+    await resolveClearedCollision();
     await waitFor(() => runOp.mock.calls.length > 0, "the delivered re-queue");
     expect(runOp.mock.calls[0]![1]).toMatchObject({
       projectSlug: store.slug,
@@ -499,11 +505,9 @@ describe("F19-1 — a successful delivery leaves an actionable next step", () =>
 
   /** F36-6 (pass 36): a verdict-capable reviewer deployed on the project. */
   function deployReviewerToo(): void {
-    const file = readProjectFile({ projectSlug: store.slug, dataRoot: store.dataRoot })!;
-    writeProject(store.dataRoot, {
-      ...file.parsed.frontmatter,
+    reconfigureProject(store, (fm) => ({
       agents: [
-        ...file.parsed.frontmatter.agents,
+        ...fm.agents,
         {
           profileId: "reviewer",
           capabilities: [{ capabilityId: "report-validation-verdict", mode: "direct" }],
@@ -518,8 +522,7 @@ describe("F19-1 — a successful delivery leaves an actionable next step", () =>
           },
         },
       ],
-    });
-    rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
+    }));
   }
   const REVIEWED = "a".repeat(40);
   const reviewerEngagement = {
@@ -674,72 +677,12 @@ describe("F19-1 — a successful delivery leaves an actionable next step", () =>
  * on the refusal arm or the edgeless board).
  */
 describe("ruling 136(a): the collision ceremony hands off exactly once", () => {
-  const PACKET: TaskPacket = {
-    type: "blocked",
-    kind: "Blocked decision",
-    from: "operator",
-    title: "Branch vib-1 collides with an unrelated remote branch",
-    body: "deliver_for_review push-conflicted.",
-    observations: [],
-    options: [
-      { kind: "resolve_remote_collision", t: "Delete the stale remote branch, then redeliver", d: "", rec: true },
-      { kind: "custom", t: "Something else", d: "", rec: false },
-    ],
-  };
-
-  async function seedCollision(routes: Record<string, { status?: number; body?: unknown }>) {
-    const { fakeGithubFetch } = await import("../../../test-support/fake-github");
-    const { createPat, setProjectCredential } = await import("~/server/secrets/pat-store.server");
-    const patActor = { userId: store.users.arda.id, label: "arda@viberr.dev" };
-    const pat = createPat(store.db, { userId: store.users.arda.id, label: "bot", token: "ghp_collision00000000000000000000136" }, patActor);
-    setProjectCredential(store.db, { projectSlug: store.slug, patId: pat.id }, patActor);
-    const github = fakeGithubFetch(routes);
-    writeTask(store.dataRoot, store.slug, {
-      frontmatter: baseTaskFrontmatter("VIB-1", {
-        stage: "impl",
-        waiting: "human",
-        readiness: "blocked",
-        branch: "vib-1",
-        operator: { assignedAtStageId: "ready" },
-        workRevision: {
-          id: "rev_collision136",
-          headSha: "e".repeat(40),
-          treeSha: "f".repeat(40),
-          branch: "vib-1",
-          createdAt: new Date().toISOString(),
-          sourceProfileId: "developer",
-          kind: "delivered",
-        },
-        github: { commits: [], changed: null, unownedPr: 232 },
-      }),
-      packet: PACKET,
-    });
-    rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
-    return github;
-  }
-
-  const clearedRoutes = () => ({
-    "GET /repos/akin-ozer/viberr/git/ref/heads/main": { body: { object: { sha: "c".repeat(40) } } },
-    "PATCH /repos/akin-ozer/viberr/pulls/232": { status: 200, body: { state: "closed" } },
-    "DELETE /repos/akin-ozer/viberr/git/refs/heads/vib-1": { status: 204, body: "" },
-  });
-
-  async function resolve(github: { fetchImpl: typeof fetch }): Promise<void> {
-    const { resolvePacket } = await import("./packet-resolution.server");
-    await resolvePacket(
-      store.db,
-      { projectSlug: store.slug, taskKey: "VIB-1", optionIndex: 0 },
-      { userId: store.users.arda.id, label: "arda@viberr.dev" },
-      { dataRoot: store.dataRoot, fetchImpl: github.fetchImpl, deps: DEPS },
-    );
-  }
-
   it("a refusal hands the operator the typed reason once, as Viberr's own record beside the human's decision", async () => {
     deployDeliveryOperator(store, "supervised");
     const github = await seedCollision({
       "DELETE /repos/akin-ozer/viberr/git/refs/heads/vib-1": { status: 500, body: { message: "Server Error" } },
     });
-    await resolve(github);
+    await resolveCollision(github);
     await waitFor(() => runOp.mock.calls.length >= 1, "the operator run");
     await flush();
     expect(runOp).toHaveBeenCalledTimes(1);
@@ -755,14 +698,11 @@ describe("ruling 136(a): the collision ceremony hands off exactly once", () => {
 
   it("on a board with no `impl → review` edge the cleared, re-delivered task still hands off (no card, one run)", async () => {
     deployDeliveryOperator(store, "supervised");
-    const file = readProjectFile({ projectSlug: store.slug, dataRoot: store.dataRoot })!;
-    writeProject(store.dataRoot, {
-      ...file.parsed.frontmatter,
-      workflow: file.parsed.frontmatter.workflow.filter((w) => !(w.from === "impl" && w.to === "review")),
-    });
-    rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
+    reconfigureProject(store, (fm) => ({
+      workflow: fm.workflow.filter((w) => !(w.from === "impl" && w.to === "review")),
+    }));
     const github = await seedCollision(clearedRoutes());
-    await resolve(github);
+    await resolveCollision(github);
     await waitFor(() => runOp.mock.calls.length >= 1, "the operator run");
     await flush();
     expect(recs()).toEqual([]);

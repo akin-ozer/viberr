@@ -14,7 +14,6 @@ import {
   isPrivateKbFolder,
   kbSizeClass,
   readKbDocForRun,
-  readKbIndexDetailed,
   readKbIndexes,
 } from "./kb-injection.server";
 import { createTempDirs } from "../../../test-support/temp-dirs";
@@ -30,7 +29,14 @@ function freshKb(dir = "notes") {
   return { dataRoot, kbDir };
 }
 
-describe("readKbIndexDetailed — the index a run receives (ruling 283)", () => {
+/** One knowledge base's index as a run is given it: `readKbIndexes`, the
+ *  reader a run's prompt is built from, for that one name. */
+function kbIndex(name: string, dataRoot: string, opts: { hasKnowledgeTool?: boolean } = {}) {
+  const set = readKbIndexes([name], dataRoot, opts);
+  return { body: set.parts[0]?.body ?? "", unresolved: set.unresolved[0] };
+}
+
+describe("one knowledge base's index — what a run receives (ruling 283)", () => {
   it("names a top-level doc with its size and its sections", () => {
     const { dataRoot, kbDir } = freshKb();
     writeFileSync(
@@ -38,7 +44,7 @@ describe("readKbIndexDetailed — the index a run receives (ruling 283)", () => 
       "# Top\n\nprose\n\n## Deploying\n\nmore",
       "utf8",
     );
-    const body = readKbIndexDetailed("notes", dataRoot).body;
+    const body = kbIndex("notes", dataRoot).body;
     expect(body).toContain("`overview.md` · under 1k chars");
     expect(body).toContain("# Top");
     expect(body).toContain("## Deploying");
@@ -50,14 +56,14 @@ describe("readKbIndexDetailed — the index a run receives (ruling 283)", () => 
     const { dataRoot, kbDir } = freshKb();
     mkdirSync(path.join(kbDir, "repo", "docs"), { recursive: true });
     writeFileSync(path.join(kbDir, "repo", "docs", "api.md"), "# API", "utf8");
-    expect(readKbIndexDetailed("notes", dataRoot).body).toContain("`repo/docs/api.md`");
+    expect(kbIndex("notes", dataRoot).body).toContain("`repo/docs/api.md`");
   });
 
   it("indexes non-.md text docs, which have no headings to outline", () => {
     const { dataRoot, kbDir } = freshKb();
     writeFileSync(path.join(kbDir, "hosts.txt"), "a\nb\nc", "utf8");
     writeFileSync(path.join(kbDir, "ports.json"), '{"gateway":4000}', "utf8");
-    const body = readKbIndexDetailed("notes", dataRoot).body;
+    const body = kbIndex("notes", dataRoot).body;
     expect(body).toContain("`hosts.txt`");
     expect(body).toContain("`ports.json`");
   });
@@ -69,7 +75,7 @@ describe("readKbIndexDetailed — the index a run receives (ruling 283)", () => 
     writeFileSync(path.join(kbDir, ".secret.md"), "# Secret", "utf8");
     mkdirSync(path.join(kbDir, ".git"), { recursive: true });
     writeFileSync(path.join(kbDir, ".git", "config.md"), "# Git", "utf8");
-    const body = readKbIndexDetailed("notes", dataRoot).body;
+    const body = kbIndex("notes", dataRoot).body;
     expect(body).toMatch(/^Folder `[^`]+`\. 1 document:\n\n- `real\.md`/);
     expect(body).not.toContain("secret");
     expect(body).not.toContain(".git");
@@ -90,7 +96,7 @@ describe("readKbIndexDetailed — the index a run receives (ruling 283)", () => 
     mkdirSync(path.join(kbDir, "brand"), { recursive: true });
     writeFileSync(path.join(kbDir, "brand", "logo.png"), Buffer.alloc(200 * 1024));
     writeFileSync(path.join(kbDir, ".DS_Store"), "x", "utf8");
-    expect(readKbIndexDetailed("rulings", dataRoot).body).toBe(
+    expect(kbIndex("rulings", dataRoot).body).toBe(
       `Folder \`${kbDir}\`. 1 document:\n\n` +
         "- `rulings.md` · under 1k chars\n  # Rulings\n\n" +
         "2 other files here are not documents (a template, a sample, an image). `read_knowledge_doc` does not read them; " +
@@ -102,7 +108,7 @@ describe("readKbIndexDetailed — the index a run receives (ruling 283)", () => 
     // pushes the template at the root past the cap, unnamed.
     mkdirSync(path.join(kbDir, "assets"), { recursive: true });
     for (let i = 0; i < 45; i += 1) writeFileSync(path.join(kbDir, "assets", `icon-${String(i).padStart(2, "0")}.svg`), "<svg/>");
-    const capped = readKbIndexDetailed("rulings", dataRoot).body;
+    const capped = kbIndex("rulings", dataRoot).body;
     expect(capped).toContain("47 other files here are not documents");
     expect(capped).toContain("- `proposal-template.html` · under 10 KB\n- `assets/icon-00.svg` · under 10 KB");
     expect(capped).toContain("- … 7 more files in this folder, not listed here.");
@@ -114,7 +120,7 @@ describe("readKbIndexDetailed — the index a run receives (ruling 283)", () => 
     // said every run given it would see the files.
     const { dataRoot, kbDir } = freshKb("templates");
     writeFileSync(path.join(kbDir, "proposal-template.pdf"), "%PDF-1.4", "utf8");
-    const given = readKbIndexDetailed("templates", dataRoot);
+    const given = kbIndex("templates", dataRoot);
     expect(given.unresolved).toBeUndefined();
     expect(given.body).toBe(
       `Folder \`${kbDir}\`. No documents.\n\n` +
@@ -124,7 +130,7 @@ describe("readKbIndexDetailed — the index a run receives (ruling 283)", () => 
     // CANARY: give a private one the same index and a run is sent to a
     // folder its shell is refused, for files no tool of its own reads.
     chmodSync(kbDir, 0o700);
-    expect(readKbIndexDetailed("templates", dataRoot, { hasKnowledgeTool: true })).toEqual({
+    expect(kbIndex("templates", dataRoot, { hasKnowledgeTool: true })).toEqual({
       body: "",
       unresolved: {
         name: "templates",
@@ -138,7 +144,7 @@ describe("readKbIndexDetailed — the index a run receives (ruling 283)", () => 
     // instance gains a line, which moves every cached prompt.
     const { dataRoot, kbDir } = freshKb();
     writeFileSync(path.join(kbDir, "real.md"), "# Real", "utf8");
-    expect(readKbIndexDetailed("notes", dataRoot).body).toBe(
+    expect(kbIndex("notes", dataRoot).body).toBe(
       `Folder \`${kbDir}\`. 1 document:\n\n- \`real.md\` · under 1k chars\n  # Real`,
     );
   });
@@ -167,7 +173,7 @@ describe("readKbIndexDetailed — the index a run receives (ruling 283)", () => 
       "# Corrections\n\nthree rules",
       "utf8",
     );
-    const index = readKbIndexDetailed("rulings", dataRoot);
+    const index = kbIndex("rulings", dataRoot);
     // Every document is named, whatever the one ahead of it weighs.
     expect(index.body).toContain("`conventions.md`");
     expect(index.body).toContain("`published-history.md`");
@@ -191,7 +197,7 @@ describe("readKbIndexDetailed — the index a run receives (ruling 283)", () => 
         "utf8",
       );
     }
-    const body = readKbIndexDetailed("notes", dataRoot).body;
+    const body = kbIndex("notes", dataRoot).body;
     expect(body).toContain("`doc-000.md`");
     // The last doc is reached with the outline budget spent: named, no outline.
     expect(body).toContain("`doc-149.md`");
@@ -208,14 +214,14 @@ describe("readKbIndexDetailed — the index a run receives (ruling 283)", () => 
       "# Real heading\n\n```sh\n# not a heading\nmake up\n```\n",
       "utf8",
     );
-    const body = readKbIndexDetailed("notes", dataRoot).body;
+    const body = kbIndex("notes", dataRoot).body;
     expect(body).toContain("# Real heading");
     expect(body).not.toContain("not a heading");
   });
 
   it("reports a missing KB folder as a structured unresolved grant", () => {
     const { dataRoot } = freshKb();
-    const detailed = readKbIndexDetailed("renamed-away", dataRoot);
+    const detailed = kbIndex("renamed-away", dataRoot);
     expect(detailed.body).toBe("");
     expect(detailed.unresolved).toEqual({
       name: "renamed-away",
@@ -225,7 +231,7 @@ describe("readKbIndexDetailed — the index a run receives (ruling 283)", () => 
 
   it("reports an EMPTY KB folder (the grant is attached, the content is not)", () => {
     const { dataRoot } = freshKb("hollow");
-    expect(readKbIndexDetailed("hollow", dataRoot).unresolved?.name).toBe("hollow");
+    expect(kbIndex("hollow", dataRoot).unresolved?.name).toBe("hollow");
   });
 
   /**
@@ -239,7 +245,7 @@ describe("readKbIndexDetailed — the index a run receives (ruling 283)", () => 
     const outside = temp.make("viberr-outside-");
     writeFileSync(path.join(outside, "secret.md"), "MARKER-OUTSIDE", "utf8");
     symlinkSync(outside, path.join(dataRoot, "kb", "linked"));
-    const detailed = readKbIndexDetailed("linked", dataRoot);
+    const detailed = kbIndex("linked", dataRoot);
     expect(detailed.body).toBe("");
     expect(detailed.unresolved?.reason).toContain("symlink");
     expect(detailed.body).not.toContain("secret.md");
@@ -293,16 +299,16 @@ describe("the index survives an edit inside a document (ruling 506)", () => {
     // of the kind `correct_knowledge_doc` appends.
     const text = `# Conventions\n\n${"x".repeat(20_600)}\n\n## Boundaries\n\ntail`;
     writeFileSync(doc, text, "utf8");
-    const before = readKbIndexDetailed("rulings", dataRoot).body;
+    const before = kbIndex("rulings", dataRoot).body;
     expect(before).toContain("`conventions.md` · 20k to 50k chars");
     writeFileSync(doc, `${text}\n\nCorrected 2026-09-26: never rebase a shared branch.`, "utf8");
-    expect(readKbIndexDetailed("rulings", dataRoot).body).toBe(before);
+    expect(kbIndex("rulings", dataRoot).body).toBe(before);
     // What the index SAYS still moves it: a new section, and a document that
     // crosses a step.
     writeFileSync(doc, `${text}\n\n## Rebasing\n\nnever`, "utf8");
-    expect(readKbIndexDetailed("rulings", dataRoot).body).toContain("## Rebasing");
+    expect(kbIndex("rulings", dataRoot).body).toContain("## Rebasing");
     writeFileSync(doc, `# Conventions\n\n${"x".repeat(60_000)}`, "utf8");
-    expect(readKbIndexDetailed("rulings", dataRoot).body).toContain(
+    expect(kbIndex("rulings", dataRoot).body).toContain(
       "`conventions.md` · 50k to 100k chars",
     );
   });
@@ -316,7 +322,7 @@ describe("the index survives an edit inside a document (ruling 506)", () => {
     for (const name of ["beta.md", "README.md", "api.md", "Zeta.md"]) {
       writeFileSync(path.join(kbDir, name), `# ${name}`, "utf8");
     }
-    const body = readKbIndexDetailed("notes", dataRoot).body;
+    const body = kbIndex("notes", dataRoot).body;
     const order = ["README.md", "Zeta.md", "api.md", "beta.md"].map((name) =>
       body.indexOf(`\`${name}\``),
     );
@@ -366,7 +372,7 @@ describe("a private knowledge base (ruling 578)", () => {
     const { dataRoot, kbDir } = freshKb("keys");
     writeFileSync(path.join(kbDir, "sample-01.md"), "# Sample 01\n\nEXPECTED-TOTAL", "utf8");
     chmodSync(kbDir, 0o700);
-    const tooled = readKbIndexDetailed("keys", dataRoot, { hasKnowledgeTool: true });
+    const tooled = kbIndex("keys", dataRoot, { hasKnowledgeTool: true });
     expect(tooled.body).toContain("is private (ruling 578): no shell on this run can open it, so read each document with `read_knowledge_doc`.");
     expect(tooled.body).toContain("`sample-01.md`");
     expect(tooled.body).not.toContain("EXPECTED-TOTAL");
@@ -384,7 +390,7 @@ describe("a private knowledge base (ruling 578)", () => {
     // CANARY: print the open folder's sentence for a private one and a run is
     // told to open a file its shell is refused.
     writeFileSync(path.join(kbDir, "answer-sheet.xlsx"), "PK", "utf8");
-    expect(readKbIndexDetailed("keys", dataRoot, { hasKnowledgeTool: true }).body).toContain(
+    expect(kbIndex("keys", dataRoot, { hasKnowledgeTool: true }).body).toContain(
       "1 other file here is not a document, and no run can open them: the folder is closed to every shell and " +
         "`read_knowledge_doc` reads documents only:\n\n- `answer-sheet.xlsx` · under 10 KB",
     );

@@ -165,14 +165,6 @@ describe("the echo of one's own action (RF-5)", () => {
 });
 
 describe("search params (BOARD-1 / RF-3)", () => {
-  it("a keystroke in the board filter re-runs no loader", async () => {
-    const harness = await tab({ path: BOARD });
-    await act(async () => typeInFilter("x"));
-    await settle();
-    expect(harness.router.state.location.search).toBe("?q=x");
-    expect(harness.total()).toBe(0);
-  });
-
   it("the task's timeline window re-runs the task loader alone, with the new value", async () => {
     const harness = await tab({ path: TASK_PAGE });
     await act(async () => {

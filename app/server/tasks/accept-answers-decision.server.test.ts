@@ -3,6 +3,7 @@ import { createTestDbContext, type TestDbContext } from "../../../test-support/t
 import {
   actorOf,
   baseTaskFrontmatter,
+  REVIEWER_ENGAGEMENT,
   writeTask,
   type TestStore,
 } from "../../../test-support/test-store";
@@ -20,8 +21,9 @@ import {
 } from "~/server/projections/notifications.server";
 import type { runOperator } from "~/server/runtimes/operator-run.server";
 // Loaded up front so a hand-off, were one made, reaches the stub within the
-// settle below instead of waiting on a cold dynamic import.
-
+// settle below instead of waiting on a cold dynamic import: `autoInvokeOperator`
+// loads it when a hand-off runs.
+import "./operator-authority.server";
 import { applyAcceptanceWrite, forceAcceptCompletion } from "./task-acceptance.server";
 import { resolvePacket } from "./packet-resolution.server";
 import { transitionStage } from "./task-transitions.server";
@@ -109,13 +111,6 @@ const DEV: Engagement = {
   delivers: true,
   verdictCapable: false,
 };
-const REVIEWER: Engagement = {
-  profileId: "reviewer",
-  backend: "claude",
-  role: "Review & validation",
-  delivers: false,
-  verdictCapable: true,
-};
 const REVISION: WorkRevision = {
   id: "rev_1",
   headSha: "a".repeat(40),
@@ -144,7 +139,7 @@ function wedged(packet: TaskPacket): void {
       stage: "impl",
       ownerUserId: store.users.arda.id,
       branch: "vib-1-work",
-      engagements: [DEV, REVIEWER],
+      engagements: [DEV, REVIEWER_ENGAGEMENT],
       workRevision: REVISION,
       verdicts: [
         {

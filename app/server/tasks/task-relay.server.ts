@@ -52,7 +52,7 @@ import type { TaskActionContext } from "./task-action-core.server";
 export const RELAY_MAX_ENTRIES = 2;
 
 /** Ruling 538: how many files one relay may carry. */
-export const RELAY_MAX_FILES = 10;
+const RELAY_MAX_FILES = 10;
 
 /** One relay a specialist asks for in its outcome. */
 export interface RelayEntry {
@@ -102,7 +102,7 @@ export interface RelayPayload {
 }
 
 /** The comment's header: the source task and the author, before the text. */
-export function relayHeader(fromTaskKey: string, by: string): string {
+function relayHeader(fromTaskKey: string, by: string): string {
   return `**From ${fromTaskKey} (${by}):**`;
 }
 
@@ -124,7 +124,7 @@ const SOURCE_LINE_QUOTE_MAX = 120;
  * line that says anything, without a heading's marks, and an ellipsis when
  * the text runs past what is quoted.
  */
-export function relaySourceLine(toTaskKey: string, text: string): string {
+function relaySourceLine(toTaskKey: string, text: string): string {
   const lines = text.split("\n").map((l) => l.trim()).filter((l) => l.length > 0);
   const first = (lines[0] ?? "").replace(/^#+\s*/, "");
   const quoted =

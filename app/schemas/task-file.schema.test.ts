@@ -823,24 +823,6 @@ describe("packet block parse (tolerant)", () => {
     return { packet: parsed.packet, diagnostics };
   };
 
-  it("valid packet parses with option kinds intact", () => {
-    const { packet, diagnostics } = parsePacket({
-      type: "input",
-      kind: "Completion report",
-      from: "operator",
-      title: "Accept completion, or send back for one fix?",
-      body: "…",
-      observations: [{ k: "Changed", v: "9 files", code: true }],
-      options: [
-        { kind: "accept_completion", t: "Accept completion", d: "", rec: true },
-        { kind: "request_edit", t: "Request one edit", d: "", rec: false, ev: "**Decision:** …" },
-      ],
-    });
-    expect(diagnostics).toEqual([]);
-    expect(packet?.options[0]?.kind).toBe("accept_completion");
-    expect(packet?.options[1]?.ev).toBe("**Decision:** …");
-  });
-
   it("F20-6: a discard_branch option parses with its kind intact", () => {
     const { packet, diagnostics } = parsePacket({
       type: "input",

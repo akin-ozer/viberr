@@ -12,8 +12,8 @@ import {
   type OAuthMcpServerHandle,
 } from "../../../test-support/mcp-oauth-server";
 import { CLOUDFLARE_READ_ONLY_GRANT } from "../../../test-support/cloudflare-read-only-grant";
-import { resetMcpOAuthForTests, signOutMcpOAuth } from "~/server/org/mcp-oauth.server";
-import { getMcpServer, saveMcpServer } from "~/server/org/resources.server";
+import { signOutMcpOAuth } from "~/server/org/mcp-oauth.server";
+import { listMcpServers, saveMcpServer } from "~/server/org/resources.server";
 import { resolveSpecialistMcpServersDetailed } from "~/server/tasks/specialist-mcp.server";
 import { listAuditEvents } from "../../../test-support/audit-log";
 import { bindRunToMcpGateway, closeRunMcpGatewayCalls, startMcpGateway, stopMcpGateway } from "./gateway.server";
@@ -47,6 +47,9 @@ const textResult = z.object({
 
 const toolResult = textResult.extend({ isError: z.boolean().optional() });
 
+/** The connection as the Agent resources list reads it. */
+const mcpRow = () => listMcpServers(db).find((mcp) => mcp.id === "mcp_cf");
+
 beforeEach(async () => {
   db = ctx.makeDb();
   await startMcpGateway({ port: 0, connectTimeoutMs: 3_000 });
@@ -63,7 +66,6 @@ beforeEach(async () => {
 afterEach(async () => {
   for (const client of clients.splice(0)) await client.close().catch(() => undefined);
   await stopMcpGateway();
-  resetMcpOAuthForTests();
   await server.close();
   ctx.cleanup();
 });
@@ -121,7 +123,7 @@ describe("the gateway and an OAuth sign-in (ruling 469)", () => {
     server.options.refresh = "invalid_grant";
     server.invalidateAccessTokens();
     await expect(client.callTool({ name: "whoami", arguments: {} })).rejects.toThrow(OAUTH_SIGN_IN_EXPIRED);
-    expect(getMcpServer(db, "mcp_cf")?.oauth?.status).toBe("expired");
+    expect(mcpRow()?.oauth?.status).toBe("expired");
     expect(server.calls).toEqual([]);
   });
 
@@ -151,7 +153,7 @@ describe("the gateway and an OAuth sign-in (ruling 469)", () => {
       expect(server.authorizations.length).toBe(before);
       const oldHeard = JSON.stringify(server.authorizations);
       for (const secret of moved.issuedSecrets()) expect(oldHeard).not.toContain(secret);
-      expect(getMcpServer(db, "mcp_cf")?.oauth?.status).toBe("signed_in");
+      expect(mcpRow()?.oauth?.status).toBe("signed_in");
     } finally {
       await moved.close();
     }
@@ -190,7 +192,7 @@ describe("the gateway and an OAuth sign-in (ruling 469)", () => {
       expect(readOnly.endsWith(SENTENCE)).toBe(true);
       expect(server.calls).toEqual(["refused:delete_zone"]);
       // The sign-in stands: a refusal of authority is not an expired token.
-      expect(getMcpServer(db, "mcp_cf")?.oauth?.status).toBe("signed_in");
+      expect(mcpRow()?.oauth?.status).toBe("signed_in");
 
       await grantedAgain(`${CLOUDFLARE_READ_ONLY_GRANT} workers-scripts.write`);
       const writes = await refusalOf(client.callTool({ name: "delete_zone", arguments: {} }));
@@ -260,7 +262,7 @@ describe("the gateway and an OAuth sign-in (ruling 469)", () => {
       expect(server.calls).toEqual([]);
 
       const [head, writes, reads] = text.split("\n\n");
-      const expiresAt = getMcpServer(db, "mcp_cf")?.oauth?.expiresAt;
+      const expiresAt = mcpRow()?.oauth?.expiresAt;
       expect(expiresAt).toEqual(expect.any(String));
       expect(head).toContain("cloudflare-api: signed in (expires in 60 minutes, renews itself) with OAuth");
       expect(head).toContain(`the access token expires at ${expiresAt}.`);
@@ -285,7 +287,7 @@ describe("the gateway and an OAuth sign-in (ruling 469)", () => {
     });
 
     it("says the server did not name the grant when its sign-in named no scope", async () => {
-      expect(getMcpServer(db, "mcp_cf")?.oauth?.scope).toBeNull();
+      expect(mcpRow()?.oauth?.scope).toBeNull();
       const { client } = await runClient();
       expect((await client.listTools()).tools.map((tool) => tool.name)).toContain(MCP_GRANT_TOOL_NAME);
       const { text } = await grantAnswer(client);

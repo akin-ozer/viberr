@@ -1,7 +1,6 @@
-import { RouterContextProvider } from "react-router";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { z } from "zod";
-import { setupAppTest, type AppTestContext } from "../../test-support/test-app";
+import { routeArgs, setupAppTest, type AppTestContext } from "../../test-support/test-app";
 import { listAuditEvents } from "../../test-support/audit-log";
 import {
   consentAt,
@@ -61,13 +60,7 @@ async function settingsAction(userId: string, fields: Record<string, string>) {
   for (const [key, value] of Object.entries(fields)) fd.set(key, value);
   fd.set("_csrf", await app.csrfFor(sessionId));
   const request = app.request("/org/settings", { method: "POST", body: fd, cookie });
-  const result = await action({
-    request,
-    url: new URL(request.url),
-    pattern: "/org/settings",
-    params: {},
-    context: new RouterContextProvider(),
-  });
+  const result = await action(routeArgs(request, {}, "/org/settings"));
   return { cookie, body: settingsReply.parse("data" in result ? result.data : result) };
 }
 
@@ -75,13 +68,7 @@ async function callback(back: URL, cookie: string): Promise<{ status: number; ht
   const { loader } = await import("./resources.mcp-oauth.callback");
   const request = app.request(`/resources/mcp-oauth/callback${back.search}`, { cookie });
   try {
-    const response = await loader({
-      request,
-      url: new URL(request.url),
-      params: {},
-      pattern: "/resources/mcp-oauth/callback",
-      context: new RouterContextProvider(),
-    });
+    const response = await loader(routeArgs(request, {}, "/resources/mcp-oauth/callback"));
     return { status: response.status, html: await response.text(), headers: response.headers };
   } catch (thrown) {
     // The admin guard throws a Response (403 for a member).

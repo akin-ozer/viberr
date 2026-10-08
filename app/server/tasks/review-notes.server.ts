@@ -45,8 +45,8 @@ export interface ReviewNote {
 }
 
 /** The most notes one post carries, and the longest note. */
-export const REVIEW_NOTES_MAX = 50;
-export const REVIEW_NOTE_MAX_CHARS = 4_000;
+const REVIEW_NOTES_MAX = 50;
+const REVIEW_NOTE_MAX_CHARS = 4_000;
 
 /** A panel note as the `review-notes` intent receives it (JSON). A note on
  *  several lines (ruling 509) also names its first line and that line's side;

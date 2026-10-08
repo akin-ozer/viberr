@@ -27,11 +27,11 @@ import type { RealBackend } from "./runtime-registry.server";
  * opposed to quota, auth, or a crash (which are transient or credential
  * problems, not model problems). Anchored on the live F20-4 text.
  */
-export const MODEL_UNSUPPORTED_RE =
+const MODEL_UNSUPPORTED_RE =
   /model is not supported|model .*(?:does not exist|not found|unavailable)|unknown model|invalid model/i;
 
 /** Mark a model unavailable (upsert): the newest failure's sentence wins. */
-export function markModelUnavailable(
+function markModelUnavailable(
   db: DatabaseSync,
   input: { backend: RealBackend; model: string; reason: string; runId?: string },
 ): void {

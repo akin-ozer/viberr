@@ -23,7 +23,6 @@ import {
   cloneWorkspaceRepo,
   mirrorGitEnv,
   mirrorIsCold,
-  projectRepoMirrorDir,
   refreshProjectMirror,
 } from "./repo-mirror.server";
 
@@ -47,7 +46,8 @@ describe("cloneWorkspaceRepo — the per-project repository mirror cache", () =>
   let origins: string;
   let firstCommit: string;
 
-  const mirrorDir = () => projectRepoMirrorDir(SLUG, REPO, dataRoot)!;
+  /** The mirror's documented home: `projects/<slug>/.repo-mirror/<owner>__<repo>.git`. */
+  const mirrorDir = () => path.join(dataRoot, "projects", SLUG, ".repo-mirror", "acme__widgets.git");
   const workspace = (name: string) => path.join(dataRoot, "workspaces", name);
 
   /** The `acme/widgets` origin (test-support/git-origin.ts), one commit on main. */
@@ -499,7 +499,7 @@ describe("cloneWorkspaceRepo — the per-project repository mirror cache", () =>
     await makeOrigin(); // acme/widgets
     await makeBareOrigin("gadgets"); // acme/gadgets, the repointed target
     await withLocalGithub(origins, () => clone("a"));
-    const widgetsMirror = projectRepoMirrorDir(SLUG, "acme/widgets", dataRoot)!;
+    const widgetsMirror = path.join(dataRoot, "projects", SLUG, ".repo-mirror", "acme__widgets.git");
     expect(existsSync(path.join(widgetsMirror, "HEAD"))).toBe(true);
 
     // The project now points at acme/gadgets: cloning it builds the gadgets
@@ -513,7 +513,7 @@ describe("cloneWorkspaceRepo — the per-project repository mirror cache", () =>
       }),
     );
 
-    const gadgetsMirror = projectRepoMirrorDir(SLUG, "acme/gadgets", dataRoot)!;
+    const gadgetsMirror = path.join(dataRoot, "projects", SLUG, ".repo-mirror", "acme__gadgets.git");
     expect(existsSync(path.join(gadgetsMirror, "HEAD"))).toBe(true); // new survives
     expect(existsSync(widgetsMirror)).toBe(false); // old evicted
     // Exactly one mirror remains in the parent — the current one.
@@ -554,10 +554,14 @@ describe("mirrorGitEnv", () => {
     try {
       expect(anonymous.env.GIT_ASKPASS).toBeUndefined();
       expect(anonymous.env.SSH_ASKPASS).toBeUndefined();
-      // The rest of the hardening the manual object carried is still there.
+      // The rest of the hardening the manual object carried is still there,
+      // after whatever GIT_CONFIG_* entries the host carries.
       expect(anonymous.env.GIT_TERMINAL_PROMPT).toBe("0");
-      expect(anonymous.env.GIT_CONFIG_KEY_0).toBe("credential.helper");
-      expect(anonymous.env.GIT_CONFIG_VALUE_0).toBe("");
+      const n = Number(anonymous.env.GIT_CONFIG_COUNT);
+      expect([anonymous.env[`GIT_CONFIG_KEY_${n - 3}`], anonymous.env[`GIT_CONFIG_VALUE_${n - 3}`]]).toEqual([
+        "credential.helper",
+        "",
+      ]);
     } finally {
       anonymous.dispose();
     }
@@ -579,30 +583,6 @@ describe("mirrorGitEnv", () => {
   });
 });
 
-describe("projectRepoMirrorDir", () => {
-  it("derives a path only from a plain owner/name pair", () => {
-    // The repo string comes from `project.md` frontmatter, which a human or an
-    // agent edits. A cache path is never derived from anything else — a bad
-    // value skips the cache instead of escaping the store.
-    const root = "/data";
-    expect(projectRepoMirrorDir("p", "acme/widgets", root)).toBe(
-      path.join(root, "projects", "p", ".repo-mirror", "acme__widgets.git"),
-    );
-    for (const bad of [
-      "../../etc/passwd",
-      "acme/../../evil",
-      "acme/widgets/extra",
-      "acme/.",
-      "./widgets",
-      "widgets",
-      "acme/",
-      "",
-    ]) {
-      expect(projectRepoMirrorDir("p", bad, root)).toBeNull();
-    }
-  });
-});
-
 describe("D1: mirrorIsCold + cloneStepLabel (first-task clone honesty)", () => {
   let root: string;
   let ctx: TestDbContext;
@@ -620,7 +600,7 @@ describe("D1: mirrorIsCold + cloneStepLabel (first-task clone honesty)", () => {
 
     // What `git clone --bare` leaves when it is KILLED mid-transfer: a HEAD
     // written before the first object, no refs, and no fetch refspec.
-    const dir = projectRepoMirrorDir("p", "acme/widgets", root)!;
+    const dir = path.join(root, "projects", "p", ".repo-mirror", "acme__widgets.git");
     mkdirSync(dir, { recursive: true });
     writeFileSync(path.join(dir, "HEAD"), "ref: refs/heads/.invalid\n");
     writeFileSync(path.join(dir, "config"), "[core]\n\tbare = true\n");
@@ -636,7 +616,23 @@ describe("D1: mirrorIsCold + cloneStepLabel (first-task clone honesty)", () => {
 
   it("reports NOT cold for a repo that does not resolve to a mirror path", () => {
     // An invalid owner/name has no mirror to prewarm; never mislabel the wait.
-    expect(mirrorIsCold("p", "../../etc/passwd", root)).toBe(false);
+    // The repo string comes from `project.md` frontmatter, which a human or an
+    // agent edits. A cache path is never derived from anything but a plain
+    // owner/name pair — a bad value skips the cache instead of escaping the store.
+    // CANARY: drop the REPO_SLUG_RE guard in `projectRepoMirrorDir` and each of
+    // these reads as a cold clone of a mirror under a path it chose.
+    for (const bad of [
+      "../../etc/passwd",
+      "acme/../../evil",
+      "acme/widgets/extra",
+      "acme/.",
+      "./widgets",
+      "widgets",
+      "acme/",
+      "",
+    ]) {
+      expect(mirrorIsCold("p", bad, root)).toBe(false);
+    }
   });
 
   it("labels the cold clone as the multi-minute first-task build, warm as plain", () => {

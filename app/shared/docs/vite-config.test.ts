@@ -1,7 +1,7 @@
 import path from "node:path";
 import type { Rolldown } from "vite";
 import { describe, expect, it } from "vitest";
-import config, { inlineAsset, shellChunkOf } from "../../../vite.config";
+import config from "../../../vite.config";
 
 /**
  * Ruling 457: no font file is inlined into the render-blocking root
@@ -11,19 +11,20 @@ import config, { inlineAsset, shellChunkOf } from "../../../vite.config";
  * bytes, and this holds the reason they went away.
  */
 describe("vite.config.ts never inlines a font (ruling 457)", () => {
+  /** The build's own inline decision for one asset, as Vite asks it. */
+  const limit = config.build?.assetsInlineLimit;
+  const inlines = (file: string) =>
+    limit instanceof Function ? limit(file, Buffer.alloc(0)) : limit;
+
   it("refuses every woff and woff2 file, whatever its size", () => {
-    expect(inlineAsset("/x/node_modules/@fontsource/jetbrains-mono/files/jetbrains-mono-vietnamese-400-normal.woff2")).toBe(false);
-    expect(inlineAsset("/x/jetbrains-mono-cyrillic-ext-500-normal.woff")).toBe(false);
-    expect(inlineAsset("/x/inter-latin-400-normal.woff2?url")).toBe(false);
+    expect(inlines("/x/node_modules/@fontsource/jetbrains-mono/files/jetbrains-mono-vietnamese-400-normal.woff2")).toBe(false);
+    expect(inlines("/x/jetbrains-mono-cyrillic-ext-500-normal.woff")).toBe(false);
+    expect(inlines("/x/inter-latin-400-normal.woff2?url")).toBe(false);
   });
 
   it("leaves every other asset to Vite's default", () => {
-    expect(inlineAsset("/x/public/favicon.svg")).toBeUndefined();
-    expect(inlineAsset("/x/app/icon.png")).toBeUndefined();
-  });
-
-  it("is the predicate the build uses", () => {
-    expect(config.build?.assetsInlineLimit).toBe(inlineAsset);
+    expect(inlines("/x/public/favicon.svg")).toBeUndefined();
+    expect(inlines("/x/app/icon.png")).toBeUndefined();
   });
 });
 
@@ -32,7 +33,7 @@ describe("vite.config.ts never inlines a font (ruling 457)", () => {
  * route's static closures) ships as two chunks, npm code and app code, not
  * ~30 slices cut by which routes import each piece. The bytes are held by the
  * bundle ratchet; this holds which modules may join those chunks, on a small
- * module graph.
+ * module graph, through the client build's own chunk namers.
  */
 describe("the shell chunks (ruling 457)", () => {
   const app = (file: string) => path.resolve("app", file);
@@ -58,36 +59,29 @@ describe("the shell chunks (ruling 457)", () => {
     const importedIds = graph.get(next);
     return importedIds ? { importedIds } : null;
   };
-  const classify = shellChunkOf();
-  const chunkOf = (id: string) => classify(id, { getModuleInfo });
+  const output = config.environments?.client?.build?.rolldownOptions?.output;
+  const splitting = Array.isArray(output) ? undefined : output?.codeSplitting;
+  const groups = splitting instanceof Object ? (splitting.groups ?? []) : [];
+  // SAFETY: the build's chunk namers read only `importedIds` off a module's
+  // info (the shell walk in vite.config.ts), which is all this graph holds.
+  const ctx = { getModuleInfo } as Rolldown.ChunkingContext;
+  /** The chunks the client build's groups name for one module. */
+  const chunksOf = (id: string) =>
+    groups.flatMap((group) =>
+      (group.name instanceof Function ? group.name(id, ctx) : group.name) ?? [],
+    );
 
   it("puts npm code every page loads in vendor and app code in shell", () => {
-    expect(chunkOf(npm("react/index.js"))).toBe("vendor");
-    expect(chunkOf(npm("react-dom/client.js"))).toBe("vendor");
-    expect(chunkOf(npm("react-router/index.js"))).toBe("vendor");
-    expect(chunkOf(app("ui/icon.tsx"))).toBe("shell");
-    expect(chunkOf(app("ui/boot.ts"))).toBe("shell");
+    expect(chunksOf(npm("react/index.js"))).toEqual(["vendor"]);
+    expect(chunksOf(npm("react-dom/client.js"))).toEqual(["vendor"]);
+    expect(chunksOf(npm("react-router/index.js"))).toEqual(["vendor"]);
+    expect(chunksOf(app("ui/icon.tsx"))).toEqual(["shell"]);
+    expect(chunksOf(app("ui/boot.ts"))).toEqual(["shell"]);
   });
 
   it("leaves the entries, root.tsx with its stylesheets, and route-only code alone", () => {
-    for (const id of [ENTRY, ROOT_ENTRY, ROOT, app("app.css")]) expect(chunkOf(id), id).toBeNull();
-    expect(chunkOf(app("features/board/board-page.tsx"))).toBeNull();
-    expect(chunkOf(npm("@dnd-kit/react/index.js"))).toBeNull();
-  });
-
-  it("is what the client build uses", () => {
-    const output = config.environments?.client?.build?.rolldownOptions?.output;
-    const splitting = Array.isArray(output) ? undefined : output?.codeSplitting;
-    const groups = splitting instanceof Object ? (splitting.groups ?? []) : [];
-    // SAFETY: the build's chunk namers read only `importedIds` off a module's
-    // info (shellChunkOf's walk), which is all this graph holds.
-    const ctx = { getModuleInfo } as Rolldown.ChunkingContext;
-    const chunksOf = (id: string) =>
-      groups.flatMap((group) =>
-        (group.name instanceof Function ? group.name(id, ctx) : group.name) ?? [],
-      );
-    expect(chunksOf(npm("react/index.js"))).toEqual(["vendor"]);
-    expect(chunksOf(app("ui/icon.tsx"))).toEqual(["shell"]);
+    for (const id of [ENTRY, ROOT_ENTRY, ROOT, app("app.css")]) expect(chunksOf(id), id).toEqual([]);
     expect(chunksOf(app("features/board/board-page.tsx"))).toEqual([]);
+    expect(chunksOf(npm("@dnd-kit/react/index.js"))).toEqual([]);
   });
 });

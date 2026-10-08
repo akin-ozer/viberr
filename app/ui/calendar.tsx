@@ -41,15 +41,12 @@ function dayLabel(d: Date): string {
 export function Calendar({
   selected,
   onSelect,
-  today,
 }: {
   /** `YYYY-MM-DD` or null. */
   selected: string | null;
   onSelect: (iso: string) => void;
-  /** `YYYY-MM-DD` override for "today" (tests/determinism). Defaults to now. */
-  today?: string;
 }) {
-  const todayDate = fromISODate(today ?? null) ?? new Date();
+  const todayDate = new Date();
   const selectedDate = fromISODate(selected);
   const [month, setMonth] = useState<Date>(() =>
     startOfMonth(selectedDate ?? todayDate),

@@ -78,10 +78,7 @@ import {
 } from "~/server/github/update-branch-operator.server";
 import { DONE_SIGNAL_RULE } from "./done-signal.server";
 import { normalizeEscapedNewlines } from "./model-prose.server";
-import {
-  resolveSpecialistMcpServers,
-  type SpecialistMcpServerConfig,
-} from "./specialist-mcp.server";
+import type { SpecialistMcpServerConfig } from "./specialist-mcp.server";
 import { listDeployedSpecialists } from "./specialist-roster.server";
 import { SCHEDULE_MAX_MINUTES } from "./schedule.server";
 import {
@@ -197,8 +194,7 @@ interface ToolkitDeps {
    * (`operatorMcpResolution`). Passed in so the toolkit mounts exactly what the
    * system prompt announced: resolving a second time here would re-mount a
    * stdio server the pre-flight just dropped, and the prompt and the mount would
-   * disagree about what the run has. Omitted only by callers with no resolution
-   * of their own (tests), which fall back to the un-pre-flighted resolve.
+   * disagree about what the run has. Omitted, nothing mounts beside `viberr`.
    */
   orgMcpServers?: Record<string, SpecialistMcpServerConfig>;
 }
@@ -1464,20 +1460,18 @@ export function buildOperatorToolkit(deps: ToolkitDeps): OperatorToolkit {
   // were offered by the resource catalog and rendered as granted, but nothing
   // ever resolved them for an operator run — `OperatorAuthority` carried skills
   // and kb only, so a live operator granted `everything-mcp` correctly reported
-  // "MCP servers/tools I can call: none". `resolveSpecialistMcpServers` skips
-  // the reserved `viberr` name, so the in-process toolkit can never be shadowed.
+  // "MCP servers/tools I can call: none". The run's resolver skips the reserved
+  // `viberr` name, so the in-process toolkit can never be shadowed.
   // Their tools must also be auto-approved: `allowedTools` is the APPROVAL list,
   // not a restriction (P14-KM-12) — without the entry every org MCP call would
   // stall on a permission prompt no human is there to answer.
   //
-  // F21-3: prefer the caller's ALREADY PRE-FLIGHTED resolution. Resolving again
-  // here would undo the pre-flight — a stdio server that failed to start was
-  // dropped from the prompt but would be mounted anyway by this second resolve.
-  // Ruling 176: the operator never writes, so a server's marked write tools
-  // are withheld here as on the run path (which hands its own resolution in).
-  const orgServers =
-    deps.orgMcpServers ??
-    resolveSpecialistMcpServers(db, authority.mcps, { withholdWriteTools: true });
+  // F21-3: what mounts is the caller's ALREADY PRE-FLIGHTED resolution, never a
+  // second resolve here, which would undo the pre-flight — a stdio server that
+  // failed to start was dropped from the prompt but would be mounted anyway.
+  // Ruling 176: that resolution withholds a server's marked write tools, since
+  // the operator never writes.
+  const orgServers = deps.orgMcpServers ?? {};
   for (const name of Object.keys(orgServers)) {
     allowed.push(`mcp__${name}`);
   }

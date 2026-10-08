@@ -244,12 +244,11 @@ export function getTaskDetail(
   db: DatabaseSync,
   slug: string,
   key: string,
-  /** Gap-10: the instant "has this gone quiet?" is asked against (tests only).
-   *  `dataRoot` feeds the live-backend overlay (tests only — production
+  /** `dataRoot` feeds the live-backend overlay (tests only — production
    *  defaults to the env root). `timelineLimit` (ruling 457): read only the
    *  newest N events, the window the task page ships; the summary's
    *  `eventCount` is the total. */
-  opts: { now?: Date; dataRoot?: string; timelineLimit?: number } = {},
+  opts: { dataRoot?: string; timelineLimit?: number } = {},
 ): TaskDetail | null {
   const summary = getTaskSummary(
     db,
@@ -271,9 +270,6 @@ export function getTaskDetail(
     // Ruling 225: the clock a schedule-resting task is measured against.
     resumesAt: summary.resumesAt ?? null,
   };
-  // Test-only clock override: left ABSENT when unset, so `isQuiet` reads the
-  // real clock rather than being handed an explicit `undefined`.
-  if (opts.now) quietCheck.now = opts.now;
   return {
     ...summary,
     timeline: listTaskEvents(

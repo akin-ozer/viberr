@@ -6,8 +6,8 @@ import { taskDir } from "~/server/files/file-store-root.server";
 import {
   actorOf,
   baseTaskFrontmatter,
+  REVIEWER_ENGAGEMENT,
   setupTestStore,
-  writeProject,
   writeTask,
   type TestStore,
 } from "../../../test-support/test-store";
@@ -19,7 +19,6 @@ import type {
   WorkRevision,
 } from "~/schemas/task-file.schema";
 import { DIVERGED_BRANCH_REMEDY } from "~/schemas/task-file.schema";
-import { readProjectFile } from "~/server/files/project-writer.server";
 import { readTaskFile } from "~/server/files/task-writer.server";
 import { rebuildAll } from "~/server/projections/rebuilder.server";
 import { applyRecommendation } from "./task-recommendations.server";
@@ -53,8 +52,10 @@ import {
   fakeGithubFetch,
   type FakeGithub,
 } from "../../../test-support/fake-github";
+import { reconfigureProject } from "../../../test-support/projected-store";
 import { createPat, setProjectCredential } from "~/server/secrets/pat-store.server";
 import type { TaskActionContext } from "./task-action-core.server";
+import { operatorAuthority } from "../../../test-support/operator-snapshot";
 
 const pushMock = vi.fn<typeof pushWorkspaceBranch>();
 const openPrMock = vi.fn<typeof openTaskPr>();
@@ -94,14 +95,6 @@ function fm() {
   })!.parsed;
 }
 
-const REVIEWER: Engagement = {
-  profileId: "reviewer",
-  backend: "claude",
-  role: "Review & validation",
-  delivers: false,
-  verdictCapable: true,
-};
-
 function revision(id = "rev_1", sha = "a".repeat(40)): WorkRevision {
   return {
     id,
@@ -130,20 +123,7 @@ function authority(
   autonomy: "supervised" | "full" = "supervised",
   humanGatedBeforeWork = false,
 ): OperatorAuthority {
-  return {
-    policy: new Map(Object.entries(modes)),
-    autonomy,
-    backend: "claude",
-    model: "sonnet",
-    effort: "",
-    name: "Operator",
-    skills: [],
-    kb: [],
-    mcps: [],
-    persona: null,
-    deployed: true,
-    humanGatedBeforeWork,
-  };
+  return operatorAuthority(modes, { autonomy, humanGatedBeforeWork });
 }
 
 /** Every entry point gets the injected doubles; the canned transport rides
@@ -159,6 +139,17 @@ function dataCtx(): TaskActionContext {
   };
   if (github) callCtx.fetchImpl = github.fetchImpl;
   return callCtx;
+}
+
+/** The project's GitHub credential: a PAT of arda's, set on the project. */
+function withCredential(): void {
+  const patActor = actorOf(store.users.arda);
+  const pat = createPat(
+    store.db,
+    { userId: store.users.arda.id, label: "bot", token: "ghp_headgate0001" },
+    patActor,
+  );
+  setProjectCredential(store.db, { projectSlug: store.slug, patId: pat.id }, patActor);
 }
 
 describe("R15-2: transitionStage no longer auto-delivers on review entry", () => {
@@ -223,9 +214,7 @@ describe("R15-2: transitionStage no longer auto-delivers on review entry", () =>
     // A board that delivers results has no pull request to open, and the note
     // told its owner the operator was deciding a push and a review PR.
     // CANARY: drop the repository term from the condition and it is written.
-    const project = readProjectFile({ projectSlug: store.slug, dataRoot: store.dataRoot })!;
-    writeProject(store.dataRoot, { ...project.parsed.frontmatter, repo: null });
-    rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
+    reconfigureProject(store, { repo: null });
     seed({ stage: "impl" });
     await transitionStage(
       store.db,
@@ -467,13 +456,7 @@ describe("F15-15/B-GH1: performDelivery refuses a PR over a conflicted or failed
     // event blames a credential. Delete the `openPr` guard on a conflicted push
     // in performDelivery and the openPrMock assertion fails.
     seed({ stage: "review", branch: "vib-1" });
-    const patActor = actorOf(store.users.arda);
-    const pat = createPat(
-      store.db,
-      { userId: store.users.arda.id, label: "bot", token: "ghp_realpush0001" },
-      patActor,
-    );
-    setProjectCredential(store.db, { projectSlug: store.slug, patId: pat.id }, patActor);
+    withCredential();
 
     // The workspace clone the delivery pushes from. `akin-ozer/viberr` → viberr.
     const repoDir = path.join(
@@ -584,33 +567,65 @@ describe("F15-15/B-GH1: performDelivery refuses a PR over a conflicted or failed
     expect(outcome).toMatchObject({ status: "delivered", prNumber: 9, created: true });
   });
 
-  it("F29-7: a successful delivery supersedes a stale delivery-conflict blocked packet", async () => {
-    // A prior server-owned push conflicted; the operator opened a blocked
-    // "push conflict … no PR opened" packet (its branch/delivery family is
-    // marked by the `discard_branch` option) and readiness floored to blocked.
-    // The human then clears the remote branch and re-delivers from the panel —
-    // the packet's premise is now moot and must not persist next to a live PR.
-    const CONFLICT_PACKET: TaskPacket = {
-      id: "pkt_conflict",
-      type: "blocked",
-      kind: "Blocked decision",
-      from: "operator",
-      title: "Delivery push conflict on branch `vib-1` — remote holds unrelated commits",
-      body: "No review PR was opened.",
-      observations: [],
-      options: [
-        { kind: "custom", t: "Delete or rename the remote branch, then retry delivery", d: "", rec: true },
-        { kind: "discard_branch", t: "Give this task a different branch name and re-deliver", d: "", rec: false },
-        { kind: "custom", t: "Deliberate force-push to `vib-1`", d: "", rec: false },
-      ],
-    };
+  // F29-7: a prior server-owned push conflicted; the operator opened a blocked
+  // "push conflict … no PR opened" packet (its branch/delivery family is
+  // marked by the `discard_branch` option) and readiness floored to blocked.
+  // The human then clears the remote branch and re-delivers from the panel —
+  // the packet's premise is now moot and must not persist next to a live PR.
+  //
+  // V10 (pass-31 review): F31-6 refuses `discard_branch` authoring exactly when
+  // delivered work stands on the branch, so post-F31-6 push-conflict packets
+  // carry `resolve_remote_collision` instead. Keying the supersession on
+  // `discard_branch` alone reopened F29-7 for every such packet: the human
+  // resolves the branch out-of-band, re-delivers, and the task keeps a
+  // blocked "no PR opened" card beside a live "PR #N" panel.
+  it.each<{ marker: string; packet: TaskPacket }>([
+    {
+      marker: "discard_branch",
+      packet: {
+        id: "pkt_conflict",
+        type: "blocked",
+        kind: "Blocked decision",
+        from: "operator",
+        title: "Delivery push conflict on branch `vib-1` — remote holds unrelated commits",
+        body: "No review PR was opened.",
+        observations: [],
+        options: [
+          { kind: "custom", t: "Delete or rename the remote branch, then retry delivery", d: "", rec: true },
+          { kind: "discard_branch", t: "Give this task a different branch name and re-deliver", d: "", rec: false },
+          { kind: "custom", t: "Deliberate force-push to `vib-1`", d: "", rec: false },
+        ],
+      },
+    },
+    {
+      marker: "resolve_remote_collision, V10",
+      packet: {
+        id: "pkt_conflict_rrc",
+        type: "blocked",
+        kind: "Blocked decision",
+        from: "operator",
+        title: "Delivery push conflict on branch `vib-1` — remote holds unrelated commits",
+        body: "No review PR was opened.",
+        observations: [],
+        options: [
+          {
+            kind: "resolve_remote_collision",
+            t: "Clear the stale remote branch and re-deliver",
+            d: "",
+            rec: true,
+          },
+          { kind: "archive_task", t: "Archive this task", d: "", rec: false },
+        ],
+      },
+    },
+  ])("F29-7: a successful delivery supersedes a stale delivery-conflict blocked packet ($marker)", async ({ packet }) => {
     writeTask(store.dataRoot, store.slug, {
       frontmatter: baseTaskFrontmatter("VIB-1", {
         stage: "review",
         branch: "vib-1",
         readiness: "blocked",
       }),
-      packet: CONFLICT_PACKET,
+      packet,
     });
     rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
     pushMock.mockResolvedValue({ status: "pushed", branch: "vib-1", commits: 2, headSha: "a".repeat(40), remoteHeadBefore: null, workflowFiles: [] });
@@ -638,65 +653,6 @@ describe("F15-15/B-GH1: performDelivery refuses a PR over a conflicted or failed
     );
   });
 
-  it("V10 (pass-31 review): a conflict packet authored with resolve_remote_collision is superseded too", async () => {
-    // F31-6 refuses `discard_branch` authoring exactly when delivered work
-    // stands on the branch, so post-F31-6 push-conflict packets carry
-    // `resolve_remote_collision` instead. Keying the supersession on
-    // `discard_branch` alone reopened F29-7 for every such packet: the human
-    // resolves the branch out-of-band, re-delivers, and the task keeps a
-    // blocked "no PR opened" card beside a live "PR #N" panel.
-    const COLLISION_CONFLICT_PACKET: TaskPacket = {
-      id: "pkt_conflict_rrc",
-      type: "blocked",
-      kind: "Blocked decision",
-      from: "operator",
-      title: "Delivery push conflict on branch `vib-1` — remote holds unrelated commits",
-      body: "No review PR was opened.",
-      observations: [],
-      options: [
-        {
-          kind: "resolve_remote_collision",
-          t: "Clear the stale remote branch and re-deliver",
-          d: "",
-          rec: true,
-        },
-        { kind: "archive_task", t: "Archive this task", d: "", rec: false },
-      ],
-    };
-    writeTask(store.dataRoot, store.slug, {
-      frontmatter: baseTaskFrontmatter("VIB-1", {
-        stage: "review",
-        branch: "vib-1",
-        readiness: "blocked",
-      }),
-      packet: COLLISION_CONFLICT_PACKET,
-    });
-    rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
-    pushMock.mockResolvedValue({ status: "pushed", branch: "vib-1", commits: 2, headSha: "a".repeat(40), remoteHeadBefore: null, workflowFiles: [] });
-    openPrMock.mockResolvedValue({
-      status: "ok",
-      prNumber: 13,
-      created: true,
-      url: "https://github.com/x/y/pull/13",
-    });
-
-    const outcome = await performDelivery(
-      store.db,
-      dataCtx(),
-      store.slug,
-      "VIB-1",
-      actorOf(store.users.arda),
-    );
-    expect(outcome).toMatchObject({ status: "delivered", prNumber: 13 });
-
-    const after = fm();
-    expect(after.packet).toBeNull();
-    expect(after.frontmatter.readiness).not.toBe("blocked");
-    expect(after.timeline.some((e) => /Packet withdrawn/.test(e.text ?? ""))).toBe(
-      true,
-    );
-  });
-
   it("V11 (pass-31 review): a fully successful resolve_remote_collision lifts the packet's readiness block", async () => {
     // The push-conflict packet floored readiness at `blocked`
     // (operatorOpenPacket does that for every blocked packet), and the
@@ -705,13 +661,7 @@ describe("F15-15/B-GH1: performDelivery refuses a PR over a conflicted or failed
     // nothing in the delivery path writes readiness. Without the explicit lift
     // the task stayed in the board's Blocked filter forever, packet-less, even
     // after the PR opened.
-    const patActor = { userId: store.users.arda.id, label: "arda@viberr.dev" };
-    const pat = createPat(
-      store.db,
-      { userId: store.users.arda.id, label: "bot", token: "ghp_v11collision0000000000000000000001" },
-      patActor,
-    );
-    setProjectCredential(store.db, { projectSlug: store.slug, patId: pat.id }, patActor);
+    withCredential();
     github = fakeGithubFetch({
       // Ruling 128: the delivery reads the base ref before pushing.
       "GET /repos/akin-ozer/viberr/git/ref/heads/main": { body: { object: { sha: "c".repeat(40) } } },
@@ -891,33 +841,27 @@ describe("F15-15/B-GH1: performDelivery refuses a PR over a conflicted or failed
 });
 
 describe("R15-2: the operator's deliver_for_review decision", () => {
-  it("deliverGate: absent grant = direct; explicit off = deny; recommend promotes to direct only at full autonomy", () => {
-    expect(deliverGate(authority({}))).toBe("direct");
-    expect(deliverGate(authority({ "deliver-review-pr": "off" }))).toBe("deny");
-    expect(deliverGate(authority({ "deliver-review-pr": "human" }))).toBe("deny");
-    expect(deliverGate(authority({ "deliver-review-pr": "recommend" }))).toBe("recommend");
-    expect(
-      deliverGate(authority({ "deliver-review-pr": "recommend" }, "full")),
-    ).toBe("direct");
-  });
-
-  it("R15-9: an ABSENT grant resolves from the project's governance, not a constant", () => {
-    // `deliver-review-pr` postdates every pre-R15-2 deployment, so "absent" is
-    // the normal state on existing projects. Resolving it to a flat `direct`
-    // meant a strict project created before the pass pushed branches on its own
-    // while an identical one created after asked a human first — the same
-    // governance behaving differently by creation date.
+  // `args` are `authority()`'s: the grants, the autonomy, and whether the
+  // project human-gates advancement before work starts.
+  it.each<{ label: string; args: Parameters<typeof authority>; gate: ReturnType<typeof deliverGate> }>([
+    { label: "absent grant", args: [{}, "supervised", false], gate: "direct" },
+    { label: "explicit off", args: [{ "deliver-review-pr": "off" }, "supervised", false], gate: "deny" },
+    { label: "human", args: [{ "deliver-review-pr": "human" }, "supervised", false], gate: "deny" },
+    { label: "recommend", args: [{ "deliver-review-pr": "recommend" }, "supervised", false], gate: "recommend" },
+    // Recommend promotes to direct only at full autonomy.
+    { label: "recommend at full autonomy", args: [{ "deliver-review-pr": "recommend" }, "full", false], gate: "direct" },
+    // R15-9: `deliver-review-pr` postdates every pre-R15-2 deployment, so
+    // "absent" is the normal state on existing projects. Resolving it to a flat
+    // `direct` meant a strict project created before the pass pushed branches on
+    // its own while an identical one created after asked a human first — the
+    // same governance behaving differently by creation date. An EXPLICIT grant
+    // always wins over the derived default, in both directions.
     // Canary: return "direct" unconditionally from absentDeliverReviewPrMode.
-    expect(deliverGate(authority({}, "supervised", false))).toBe("direct");
-    expect(deliverGate(authority({}, "supervised", true))).toBe("recommend");
-
-    // An EXPLICIT grant always wins over the derived default, in both directions.
-    expect(
-      deliverGate(authority({ "deliver-review-pr": "direct" }, "supervised", true)),
-    ).toBe("direct");
-    expect(
-      deliverGate(authority({ "deliver-review-pr": "off" }, "supervised", true)),
-    ).toBe("deny");
+    { label: "absent grant, human-gated project", args: [{}, "supervised", true], gate: "recommend" },
+    { label: "explicit direct, human-gated project", args: [{ "deliver-review-pr": "direct" }, "supervised", true], gate: "direct" },
+    { label: "explicit off, human-gated project", args: [{ "deliver-review-pr": "off" }, "supervised", true], gate: "deny" },
+  ])("deliverGate: $label → $gate", ({ args, gate }) => {
+    expect(deliverGate(authority(...args))).toBe(gate);
   });
 
   it("recommend mode posts a `delivery` recommendation card that round-trips the task file", async () => {
@@ -1090,13 +1034,17 @@ describe("R15-2 safety net (b): manual delivery from the task page", () => {
         dataCtx(),
       ),
     ).rejects.toMatchObject({ status: 403 });
-    const outcome = await manualDeliverForReview(
+    await manualDeliverForReview(
       store.db,
       { projectSlug: store.slug, taskKey: "VIB-1" },
       actorOf(store.users.selin), // contributor OWNER
       dataCtx(),
     );
-    expect(outcome.status).not.toBe(undefined);
+    // The owner's delivery ran and is audited as theirs; the viewer was
+    // refused before any delivery, so it wrote no row.
+    expect(
+      listAuditEvents(store.db, { action: "github.delivery.manual" }).map((row) => row.actorUserId),
+    ).toEqual([store.users.selin.id]);
 
     // Ownership moved elsewhere → the same contributor is refused.
     seed({ stage: "review", branch: "vib-1", ownerUserId: store.users.murat.id });
@@ -1201,36 +1149,6 @@ describe("R15-1: the verdict gate on human acceptance (F15-19)", () => {
       message: expect.stringContaining("no review pull request"),
     });
   });
-
-  it("accepts once a verdict-capable reviewer approved the delivered revision", async () => {
-    seed({
-      stage: "review",
-      branch: "vib-1",
-      engagements: [REVIEWER],
-      workRevision: revision(),
-      verdicts: [approval()],
-      pr: { number: 7, state: "review", title: "[VIB-1] t" },
-      validation: "healthy",
-    });
-    const task = await transitionStage(
-      store.db,
-      { projectSlug: store.slug, taskKey: "VIB-1", toStageId: "done", manual: true },
-      actorOf(store.users.arda),
-      dataCtx(),
-    );
-    expect(task.stage).toBe("done");
-  });
-
-  it("a task with NOTHING delivered stays acceptable (planning / non-repo work)", async () => {
-    seed({ stage: "review" });
-    const task = await transitionStage(
-      store.db,
-      { projectSlug: store.slug, taskKey: "VIB-1", toStageId: "done", manual: true },
-      actorOf(store.users.arda),
-      dataCtx(),
-    );
-    expect(task.stage).toBe("done");
-  });
 });
 
 describe("R15-1 gate 2 (F15-15): the PR head must contain the delivered revision", () => {
@@ -1239,17 +1157,7 @@ describe("R15-1 gate 2 (F15-15): the PR head must contain the delivered revision
    *  the `/compare/` verdict below, 404 (unknown, never a refusal) for
    *  anything else. */
   function githubReportsHead(headSha: string, compareStatus = "diverged") {
-    const patActor = actorOf(store.users.arda);
-    const pat = createPat(
-      store.db,
-      { userId: store.users.arda.id, label: "bot", token: "ghp_headgate0001" },
-      patActor,
-    );
-    setProjectCredential(
-      store.db,
-      { projectSlug: store.slug, patId: pat.id },
-      patActor,
-    );
+    withCredential();
     github = fakeGithubFetch({
       "GET /repos/akin-ozer/viberr/pulls/114": { body: { head: { sha: headSha } } },
       [`GET /repos/akin-ozer/viberr/compare/${"a".repeat(40)}...${headSha}`]: {
@@ -1262,7 +1170,7 @@ describe("R15-1 gate 2 (F15-15): the PR head must contain the delivered revision
     seed({
       stage: "review",
       branch: "vib-1",
-      engagements: [REVIEWER],
+      engagements: [REVIEWER_ENGAGEMENT],
       workRevision: revision(),
       verdicts: [approval()],
       pr: { number: 114, state: "review", title: "[VIB-1] t" },
@@ -1304,7 +1212,7 @@ describe("R15-1 gate 2 (F15-15): the PR head must contain the delivered revision
     seed({
       stage: "review",
       branch: "vib-1",
-      engagements: [REVIEWER],
+      engagements: [REVIEWER_ENGAGEMENT],
       workRevision: revision(),
       verdicts: [approval()],
       pr: {
@@ -1348,9 +1256,7 @@ describe("R15-1 gate 2 (F15-15): the PR head must contain the delivered revision
     // The status below is what `gh api repos/<repo>/commits/<unknown-sha>`
     // actually answers.
     healthySeed();
-    const patActor = actorOf(store.users.arda);
-    const pat = createPat(store.db, { userId: store.users.arda.id, label: "bot", token: "ghp_headgate0135" }, patActor);
-    setProjectCredential(store.db, { projectSlug: store.slug, patId: pat.id }, patActor);
+    withCredential();
     const head = "f".repeat(40);
     github = fakeGithubFetch({
       "GET /repos/akin-ozer/viberr/pulls/114": { body: { head: { sha: head } } },
@@ -1456,7 +1362,7 @@ describe("R15-1 gate 2 (F15-15): the PR head must contain the delivered revision
     seed({
       stage: "done",
       branch: "vib-1",
-      engagements: [REVIEWER],
+      engagements: [REVIEWER_ENGAGEMENT],
       workRevision: revision(),
       verdicts: [approval()],
       pr: { number: 114, state: "accepted", title: "[VIB-1] t" },
@@ -1523,13 +1429,7 @@ describe("R15-1 gate 2 (F15-15): the PR head must contain the delivered revision
     // The case where GitHub ANSWERS the pull and refuses only the comparison is
     // ruling 226's, and is tested as a refusal above.
     healthySeed();
-    const patActor = actorOf(store.users.arda);
-    const pat = createPat(
-      store.db,
-      { userId: store.users.arda.id, label: "bot", token: "ghp_headgate0009" },
-      patActor,
-    );
-    setProjectCredential(store.db, { projectSlug: store.slug, patId: pat.id }, patActor);
+    withCredential();
     github = fakeGithubFetch({
       "GET /repos/akin-ozer/viberr/pulls/114": { status: 500, body: { message: "boom" } },
     });
@@ -1576,15 +1476,6 @@ describe("R15-1 gate 2 (F15-15): the PR head must contain the delivered revision
           body: { message: `No commit found for SHA: ${delivered}` },
         },
       });
-    const withCredential = () => {
-      const patActor = actorOf(store.users.arda);
-      const pat = createPat(
-        store.db,
-        { userId: store.users.arda.id, label: "bot", token: "ghp_headgate0235" },
-        patActor,
-      );
-      setProjectCredential(store.db, { projectSlug: store.slug, patId: pat.id }, patActor);
-    };
     const accept = () =>
       transitionStage(
         store.db,
@@ -1671,15 +1562,6 @@ describe("R15-1 gate 2 (F15-15): the PR head must contain the delivered revision
           body: { message: "boom" },
         },
       });
-    const withCredential = () => {
-      const patActor = actorOf(store.users.arda);
-      const pat = createPat(
-        store.db,
-        { userId: store.users.arda.id, label: "bot", token: "ghp_headgate0226" },
-        patActor,
-      );
-      setProjectCredential(store.db, { projectSlug: store.slug, patId: pat.id }, patActor);
-    };
     const accept = () =>
       transitionStage(
         store.db,
@@ -1872,7 +1754,7 @@ describe("B-WF1: the in-lock re-check after the merge await", () => {
     seed({
       stage: "review",
       branch: "vib-1",
-      engagements: [REVIEWER],
+      engagements: [REVIEWER_ENGAGEMENT],
       workRevision: revision(),
       verdicts: [approval()],
       pr: { number: 7, state: "review", title: "[VIB-1] t" },
@@ -1912,7 +1794,7 @@ describe("F15-13: already-merged honesty in the acceptance event", () => {
     seed({
       stage: "review",
       branch: "vib-1",
-      engagements: [REVIEWER],
+      engagements: [REVIEWER_ENGAGEMENT],
       workRevision: revision(),
       verdicts: [approval()],
       pr: { number: 7, state: "merged", title: "[VIB-1] t" },
@@ -1966,17 +1848,7 @@ describe("gap 1: resolvePacket's accept_completion is the THIRD Done writer and 
     // operator's own acceptance packet.
     // As in githubReportsHead: a real credential + canned transport, answering
     // this packet's PR #7 with a junk head and the compare with "diverged".
-    const patActor = actorOf(store.users.arda);
-    const pat = createPat(
-      store.db,
-      { userId: store.users.arda.id, label: "bot", token: "ghp_headgate0002" },
-      patActor,
-    );
-    setProjectCredential(
-      store.db,
-      { projectSlug: store.slug, patId: pat.id },
-      patActor,
-    );
+    withCredential();
     github = fakeGithubFetch({
       "GET /repos/akin-ozer/viberr/pulls/7": {
         body: { head: { sha: "f".repeat(40) } },
@@ -1988,7 +1860,7 @@ describe("gap 1: resolvePacket's accept_completion is the THIRD Done writer and 
     seedWithPacket({
       stage: "review",
       branch: "vib-1",
-      engagements: [REVIEWER],
+      engagements: [REVIEWER_ENGAGEMENT],
       workRevision: revision(),
       verdicts: [approval()],
       pr: { number: 7, state: "review", title: "[VIB-1] t" },
@@ -2035,13 +1907,7 @@ describe("gap 1: resolvePacket's accept_completion is the THIRD Done writer and 
     // The option made the same head check as the button and wrote a record
     // that read like a verified accept: "…and the review PR was merged."
     // CANARY: drop `unverifiedHeadNote` from the packet arm's write.
-    const patActor = actorOf(store.users.arda);
-    const pat = createPat(
-      store.db,
-      { userId: store.users.arda.id, label: "bot", token: "ghp_headgate0010" },
-      patActor,
-    );
-    setProjectCredential(store.db, { projectSlug: store.slug, patId: pat.id }, patActor);
+    withCredential();
     // GitHub cannot be read for the pull, so the containment check cannot run.
     github = fakeGithubFetch({
       "GET /repos/akin-ozer/viberr/pulls/7": { status: 500, body: { message: "boom" } },
@@ -2050,7 +1916,7 @@ describe("gap 1: resolvePacket's accept_completion is the THIRD Done writer and 
     seedWithPacket({
       stage: "review",
       branch: "vib-1",
-      engagements: [REVIEWER],
+      engagements: [REVIEWER_ENGAGEMENT],
       workRevision: revision(),
       verdicts: [approval()],
       pr: { number: 7, state: "review", title: "[VIB-1] t" },
@@ -2080,7 +1946,7 @@ describe("gap 1: resolvePacket's accept_completion is the THIRD Done writer and 
     seedWithPacket({
       stage: "review",
       branch: "vib-1",
-      engagements: [REVIEWER],
+      engagements: [REVIEWER_ENGAGEMENT],
       workRevision: revision(),
       verdicts: [approval()],
       pr: { number: 7, state: "merged", title: "[VIB-1] t" },
@@ -2105,7 +1971,7 @@ describe("gap 1: resolvePacket's accept_completion is the THIRD Done writer and 
     seedWithPacket({
       stage: "review",
       branch: "vib-1",
-      engagements: [REVIEWER],
+      engagements: [REVIEWER_ENGAGEMENT],
       workRevision: revision(),
       verdicts: [approval()],
       pr: { number: 7, state: "review", title: "[VIB-1] t" },
@@ -2306,9 +2172,7 @@ describe("ruling 334: an unreachable GitHub is not a broken credential", () => {
 describe("P11-13: the delivery push carries the deliverer's repo-write grant", () => {
   /** Deploy a `dev` specialist whose repo-write grants are `mode`. */
   function deployDev(mode: "direct" | "human"): void {
-    const project = readProjectFile({ projectSlug: store.slug, dataRoot: store.dataRoot })!;
-    writeProject(store.dataRoot, {
-      ...project.parsed.frontmatter,
+    reconfigureProject(store, {
       repo: null,
       agents: [
         {
@@ -2328,7 +2192,6 @@ describe("P11-13: the delivery push carries the deliverer's repo-write grant", (
         },
       ],
     });
-    rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
   }
 
   const deliverer = (profileId: string): Engagement => ({

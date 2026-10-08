@@ -186,8 +186,6 @@ interface CodexAdapterDeps {
    *  is exactly what `runCredentialFor` already puts there for the ONE person
    *  the run bills (ruling 127). */
   env?: Record<string, string>;
-  /** Extra supported CLI config overrides, primarily for test/deployment seams. */
-  config?: CodexOptions["config"];
   /** Ruling 376: how the completion compaction starts `codex app-server`
    *  (a test scripts the JSON-RPC exchange over pipes of its own). */
   spawnAppServer?: SpawnAppServer;
@@ -197,28 +195,6 @@ interface CodexAdapterDeps {
 }
 
 type CodexConfig = NonNullable<CodexOptions["config"]>;
-type CodexConfigValue = CodexConfig[string];
-
-/** The SDK's recursive `--config` value, as a parser. The SDK flattens this
- * object into dotted `key=value` argv and serializes each leaf as a TOML
- * literal, so the arms below are the complete set of things a CLI override can
- * be. */
-const codexConfigValueSchema: z.ZodType<CodexConfigValue> = z.lazy(() =>
-  z.union([
-    z.string(),
-    z.number(),
-    z.boolean(),
-    z.array(codexConfigValueSchema),
-    z.record(z.string(), codexConfigValueSchema),
-  ]),
-);
-
-/** The TABLE arm of that value, for merging a deployment's base config into
- * Viberr's own. A scalar or array override carries no sub-keys to merge, so it
- * decodes to an empty table rather than being spread key-by-key. */
-const codexConfigTableSchema = z
-  .record(z.string(), codexConfigValueSchema)
-  .catch({});
 
 /** One portable MCP declaration, decoded from the opaque value `RunSpec` carries
  * (the two SDKs disagree on the shape, so nothing upstream can type it). Arms
@@ -495,11 +471,7 @@ function shellExportedEnv(spec: RunSpec) {
  * two carriers; the alternative would be re-opening this channel to a CLI that
  * re-installs its own bundled skills into any home.
  */
-function codexConfigForRun(
-  spec: RunSpec,
-  base?: CodexOptions["config"],
-): CodexConfig {
-  const baseFeatures = codexConfigTableSchema.parse(base?.features);
+function codexConfigForRun(spec: RunSpec): CodexConfig {
   const exported = shellExportedEnv(spec);
   const shellEnvironmentPolicy: CodexConfig = {
     inherit: "core",
@@ -510,10 +482,9 @@ function codexConfigForRun(
   if (Object.keys(exported).length) shellEnvironmentPolicy.set = exported;
 
   const config: CodexConfig = {
-    ...base,
-    // Enforce these after base config so a host/deployment override cannot
-    // re-expose the principal's CODEX_ACCESS_TOKEN (or any other credential
-    // on the CLI's own process env) to tools the model runs.
+    // This and the shell policy below keep the principal's CODEX_ACCESS_TOKEN
+    // (or any other credential on the CLI's own process env) from tools the
+    // model runs.
     allow_login_shell: false,
     // RT-04: the checked-out repo's `AGENTS.md` (and any fallback project doc)
     // is otherwise merged into the run's INSTRUCTIONS at a higher trust tier
@@ -536,7 +507,6 @@ function codexConfigForRun(
       bundled: { enabled: false },
     },
     features: {
-      ...baseFeatures,
       // Viberr exposes only a profile's declared external MCPs; ambient
       // ChatGPT apps/connectors must not appear as extra tools.
       apps: false,
@@ -557,17 +527,16 @@ function codexConfigForRun(
       dedicated_tools: false,
     },
     // The SDK accepts arbitrary supported CLI config overrides. Translate the
-    // portable HTTP/stdio declarations and replace any base declaration so a
-    // run sees only the MCPs its profile selected. NOTE: the CLI merges this
-    // per-leaf-key into `$CODEX_HOME/config.toml`, so it removes nothing the
-    // home declares — the app-owned run home is what makes this exhaustive.
+    // portable HTTP/stdio declarations so a run sees only the MCPs its
+    // profile selected. NOTE: the CLI merges this per-leaf-key into
+    // `$CODEX_HOME/config.toml`, so it removes nothing the home declares —
+    // the app-owned run home is what makes this exhaustive.
     mcp_servers: codexMcpServers(spec.mcpServers, spec.env, spec.mcpToolDenials, spec.mcpOptional),
     shell_environment_policy: shellEnvironmentPolicy,
   };
-  // The persona/expertise prompt, when the run carries one. Set after the
-  // literal so it still overrides a base declaration of the same key without
-  // ever landing as an empty one. Ruling 370: a prompt split is the same text
-  // in the same order, joined — Codex has no boundary to hand it to.
+  // The persona/expertise prompt, only when the run carries one, so the key
+  // never lands empty. Ruling 370: a prompt split is the same text in the
+  // same order, joined — Codex has no boundary to hand it to.
   if (spec.systemPrompt) config.developer_instructions = joinedPrompt(spec.systemPrompt);
   // Ruling 371: a specialist's context is compacted at the shared window,
   // with the shared summarizer prompt; a kind with no window (the operator)
@@ -1304,7 +1273,7 @@ export function createCodexAdapter(
           mergedEnv.CODEX_HOME = runHome.dir;
           mergedEnv.CODEX_SQLITE_HOME = runHome.sharedHome;
         }
-        const config = codexConfigForRun(spec, deps.config);
+        const config = codexConfigForRun(spec);
         const codexOptions: CodexOptions = { config };
         if (mergedEnv) codexOptions.env = mergedEnv;
         // Ruling 460: the SDK spawns `codexPathOverride` with the argv it

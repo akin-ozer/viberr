@@ -1,3 +1,5 @@
+import type { CapabilityMode } from "~/schemas/project-file.schema";
+import type { OperatorAuthority } from "~/server/tasks/operator-authority.server";
 import type { OperatorTaskSnapshot } from "~/server/tasks/operator-snapshot.server";
 
 /**
@@ -48,5 +50,30 @@ export function operatorSnapshot(
     autonomy: "supervised",
     operatorPolicy: { scope: "operator", note: "", capabilities: {} },
     ...over,
+  };
+}
+
+/** A deployed Claude operator's resolved authority holding `policy`
+ *  (capability → mode): supervised, on a board with no human gate before work,
+ *  with no skills, knowledge bases or MCP servers. What a prompt or toolkit
+ *  test hands in place of `resolveOperatorAuthority`; pass what the case is about. */
+export function operatorAuthority(
+  policy: Readonly<Record<string, CapabilityMode>> = {},
+  patch: Partial<OperatorAuthority> = {},
+): OperatorAuthority {
+  return {
+    policy: new Map(Object.entries(policy)),
+    autonomy: "supervised",
+    backend: "claude",
+    model: "sonnet",
+    effort: "",
+    name: "Operator",
+    skills: [],
+    kb: [],
+    mcps: [],
+    persona: null,
+    deployed: true,
+    humanGatedBeforeWork: false,
+    ...patch,
   };
 }

@@ -28,7 +28,6 @@ import {
   getBackendCredential,
   isBackendAvailableFor,
   listBackendAccounts,
-  listBackendCredentials,
   loginTargetFor,
   recordBackendLogin,
   renameBackendAccount,
@@ -304,27 +303,18 @@ describe("setBackendApiKey", () => {
     expect(listAuditEvents(db, { action: "profile.backend.connected" })).toEqual([]);
   });
 
-  it("names the host it could not reach — and never the key it was sending", async () => {
-    const provider = unreachableProvider(CLAUDE_KEY);
+  it.each([
+    ["claude", CLAUDE_KEY, "api.anthropic.com"],
+    ["codex", OPENAI_KEY, "api.openai.com"],
+  ] as const)("names the %s host it could not reach — and never the key it was sending", async (backend, secret, host) => {
     const error = await thrownFromAsync(() =>
-      setBackendApiKey(db, actor, "claude", "api_key", CLAUDE_KEY, {
-        fetchImpl: provider.fetchImpl,
+      setBackendApiKey(db, actor, backend, "api_key", secret, {
+        fetchImpl: unreachableProvider(secret).fetchImpl,
       }),
     );
-    expect(error?.userMessage).toContain("api.anthropic.com");
-    expect(error?.userMessage).not.toContain(CLAUDE_KEY);
-    expect(getBackendCredential(db, actor.userId, "claude")).toBeNull();
-  });
-
-  it("names the OpenAI host on a codex network failure", async () => {
-    const provider = unreachableProvider(OPENAI_KEY);
-    const error = await thrownFromAsync(() =>
-      setBackendApiKey(db, actor, "codex", "api_key", OPENAI_KEY, {
-        fetchImpl: provider.fetchImpl,
-      }),
-    );
-    expect(error?.userMessage).toContain("api.openai.com");
-    expect(error?.userMessage).not.toContain(OPENAI_KEY);
+    expect(error?.userMessage).toContain(host);
+    expect(error?.userMessage).not.toContain(secret);
+    expect(getBackendCredential(db, actor.userId, backend)).toBeNull();
   });
 
   it("stores a ChatGPT workspace access token UNVERIFIED, with no probe at all", async () => {
@@ -458,7 +448,7 @@ describe("recordBackendLogin", () => {
   it("adds a sign-in beside a pasted key (ruling 507), and the sign-in is the one in use", async () => {
     const key = await pasteKey("codex");
     const { row } = signIn("codex", "device");
-    const rows = listBackendCredentials(db, actor.userId);
+    const rows = listBackendAccounts(db, actor.userId, "codex");
     expect(rows.map((account) => account.id)).toEqual([row.id, key.id]);
     expect(rows[0]!.kind).toBe("login");
     expect(rows[1]!.secretSuffix).toBe("wxyz");
@@ -513,7 +503,7 @@ describe("recordBackendLogin", () => {
       role: "member",
     });
     signIn("claude", "console");
-    expect(listBackendCredentials(db, murat.id)).toEqual([]);
+    expect(listBackendAccounts(db, murat.id, "claude")).toEqual([]);
     expect(getBackendCredential(db, murat.id, "claude")).toBeNull();
   });
 });
@@ -1053,7 +1043,7 @@ describe("no reader hands out a box", () => {
     expect(fetched).not.toBeNull();
     expectNoSecretInRow(created, CLAUDE_KEY);
     expectNoSecretInRow(fetched!, CLAUDE_KEY);
-    for (const row of listBackendCredentials(db, actor.userId)) {
+    for (const row of listBackendAccounts(db, actor.userId, "claude")) {
       expectNoSecretInRow(row, CLAUDE_KEY);
     }
     // The health answer every surface renders is just as clean.

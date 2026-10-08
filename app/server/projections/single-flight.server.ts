@@ -30,8 +30,6 @@ export type SingleFlightOutcome<T> =
 export interface SingleFlightOptions {
   /** Minimum gap between two runs of the same key. */
   minIntervalMs: number;
-  /** Injectable clock for tests. */
-  now?: () => number;
 }
 
 /** Cooldowns for the operations this guard fronts. Sized by how expensive the
@@ -53,7 +51,7 @@ export function runSingleFlight<T>(
   work: () => T,
   options: SingleFlightOptions,
 ): SingleFlightOutcome<T> {
-  const now = (options.now ?? Date.now)();
+  const now = Date.now();
   const previous = lastRunAt.get(key);
   if (previous !== undefined && now - previous < options.minIntervalMs) {
     return {

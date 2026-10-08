@@ -46,12 +46,12 @@ import { type StoreTarget, utf8Bytes, writeStoreDoc } from "./store-files.server
  * it by hand.
  */
 
-export const KB_CORRECTION_MERGED_ACTION = "task.kb_correction.merged";
-export const KB_CORRECTION_UNDONE_ACTION = "task.kb_correction.undone";
+const KB_CORRECTION_MERGED_ACTION = "task.kb_correction.merged";
+const KB_CORRECTION_UNDONE_ACTION = "task.kb_correction.undone";
 
 /** A correction replaces a passage, not a document: each side is capped, which
  *  also bounds the audit row that carries both (UTF-8 bytes, ruling 466). */
-export const KB_CORRECTION_MAX_BYTES = 8 * 1024;
+const KB_CORRECTION_MAX_BYTES = 8 * 1024;
 
 /** The evidence kept on the record. It is read, never replayed, so a long
  *  command output is clipped rather than refused. */

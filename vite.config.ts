@@ -41,7 +41,7 @@ const resolvedNodeModules = path.join(
  * they download only when a glyph in their `unicode-range` renders, and stay
  * cached. Every other asset keeps Vite's default (`undefined`).
  */
-export function inlineAsset(filePath: string): false | undefined {
+function inlineAsset(filePath: string): false | undefined {
   return /\.woff2?(?:$|\?)/.test(filePath) ? false : undefined;
 }
 
@@ -65,7 +65,7 @@ const ROOT_ROUTE_ENTRY = `${ROOT_ROUTE}?__react-router-build-client-route`;
  * The two entry modules stay entries, and CSS stays with root.tsx: a
  * stylesheet in a chunk that lazy chunks also import is treated as dynamic.
  */
-export function shellChunkOf(): (
+function shellChunkOf(): (
   id: string,
   graph: { getModuleInfo(id: string): { importedIds: readonly string[] } | null },
 ) => "vendor" | "shell" | null {

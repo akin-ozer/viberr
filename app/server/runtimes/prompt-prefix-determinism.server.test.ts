@@ -11,6 +11,7 @@ import { buildOperatorSystemPrompt, type OperatorMcpResolution } from "./operato
 import type { OperatorWorkspaceView } from "./operator-run.server";
 import { joinedPrompt } from "./prompt-prefix.server";
 import { createTempDirs } from "../../../test-support/temp-dirs";
+import { operatorAuthority } from "../../../test-support/operator-snapshot";
 
 const temp = createTempDirs();
 afterAll(temp.cleanup);
@@ -128,25 +129,10 @@ describe("ruling 370: the specialist prefix", () => {
 
 describe("ruling 370: the operator prefix", () => {
   function authority(overrides: Partial<OperatorAuthority> = {}): OperatorAuthority {
-    const policy = new Map<string, CapabilityMode>([
-      ["transition-to-done", "human"],
-      ["accept-completion", "recommend"],
-    ]);
-    return {
-      policy,
-      autonomy: "supervised",
-      backend: "claude",
-      model: "sonnet",
-      effort: "",
-      name: "Operator",
-      skills: [],
-      kb: ["house-style", "architecture"],
-      mcps: [],
-      persona: null,
-      deployed: true,
-      humanGatedBeforeWork: false,
-      ...overrides,
-    };
+    return operatorAuthority(
+      { "transition-to-done": "human", "accept-completion": "recommend" },
+      { kb: ["house-style", "architecture"], ...overrides },
+    );
   }
   const mcp: OperatorMcpResolution = {
     servers: {},

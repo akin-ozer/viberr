@@ -243,6 +243,7 @@ describe("demo fixture", () => {
     expect(task.reviewers[0]).toMatchObject({ backend: "claude", role: "Review & validation" });
     expect(task.operator).toMatchObject({ assignedAtStageId: "triage", sinceLabel: "since Triage" });
     expect(task.filePath).toBe("projects/viberr-core/tasks/VIB-142/task.md");
+    expect(task.stages.map((s) => s.id)).toEqual(["triage", "ready", "impl", "review", "done"]);
 
     // Packet — verbatim strings + stable option kinds (ruling 7).
     const packet = task.packet!;

@@ -91,7 +91,7 @@ export type ResourceRequest = z.infer<typeof resourceRequestSchema>;
  * file is a record ABOUT the controller, so writing it changes nothing about
  * how the controller is loaded.
  */
-export function controllerRequestsFilePath(dataRoot?: string): string {
+function controllerRequestsFilePath(dataRoot?: string): string {
   return path.join(getDataRoot(dataRoot), "agents", "controller-requests.md");
 }
 
@@ -181,7 +181,7 @@ export function raiseResourceRequest(
 }
 
 /** Close one. Returns null when no OPEN request carries that id. */
-export function closeResourceRequest(
+function closeResourceRequest(
   id: string,
   status: Exclude<ResourceRequestStatus, "open">,
   closedByLabel: string,

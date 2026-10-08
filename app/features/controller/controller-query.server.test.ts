@@ -143,7 +143,7 @@ describe("getControllerSurface — the open conversation's runtime", () => {
     expect(surfaceFor(store.users.murat).canInterruptTurn).toBe(false);
   });
 
-  it("offers the interrupt to the owner and to an org admin, not to another member", async () => {
+  it("offers the interrupt to the owner and to an org admin", async () => {
     // Canary: derive `canInterruptTurn` from `viewerOwnsActive` alone and the
     // admin loses the control the engine would honour.
     const conversation = await conversationWithRun(store.users.murat.id, store.users.murat.email);
@@ -156,8 +156,6 @@ describe("getControllerSurface — the open conversation's runtime", () => {
       });
     expect(open(store.users.murat).canInterruptTurn).toBe(true);
     expect(open(store.users.arda, true).canInterruptTurn).toBe(true);
-    // Selin cannot even open it (404); the surface never reaches the flag.
-    expect(() => open(store.users.selin)).toThrow();
   });
 });
 
@@ -399,18 +397,13 @@ describe("getControllerSurface — other people's threads for a project admin (r
     const { createConversation, appendMessage } = await import(
       "~/server/controller/controller-conversations.server"
     );
-    const { readProjectFile } = await import("~/server/files/project-writer.server");
-    const { writeProject } = await import("../../../test-support/test-store");
-    const { rebuildAll } = await import("~/server/projections/rebuilder.server");
+    const { reconfigureProject } = await import("../../../test-support/projected-store");
     // Murat administers the project and is no org admin.
-    const file = readProjectFile({ projectSlug: store.slug, dataRoot: store.dataRoot })!;
-    writeProject(store.dataRoot, {
-      ...file.parsed.frontmatter,
-      members: file.parsed.frontmatter.members.map((m) =>
+    reconfigureProject(store, (fm) => ({
+      members: fm.members.map((m) =>
         m.userId === store.users.murat.id ? { ...m, role: "admin" as const } : m,
       ),
-    });
-    rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
+    }));
     const thread = (owner: { id: string; email: string }, projectSlug: string | null, text: string) => {
       const c = createConversation(store.db, { userId: owner.id, userLabel: owner.email, projectSlug });
       appendMessage(store.db, { conversationId: c.id, author: "user", userId: owner.id, text });

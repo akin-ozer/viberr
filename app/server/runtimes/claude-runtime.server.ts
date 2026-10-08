@@ -344,7 +344,7 @@ const CLI_EXIT_ERROR_RE = /^Claude Code process (?:exited with code|terminated b
  * ids through; return undefined for anything unknown so the SDK falls back to
  * the subscription's default model.
  */
-export function resolveClaudeModel(model?: string): string | undefined {
+function resolveClaudeModel(model?: string): string | undefined {
   if (!model) return undefined;
   // Pass 34 (F34-7): split the bracketed context-window variant off FIRST,
   // resolve the base through the ordinary rules (dated test included) and
@@ -426,7 +426,7 @@ function claudeIdleTimeoutMs(): number {
  * 138 Claude runs tried to keep notes there, 32 writes in all; ruling 564's
  * hook refused every one, and each refusal cost the run a turn.
  */
-export const AUTO_MEMORY_OFF_ENV = "CLAUDE_CODE_DISABLE_AUTO_MEMORY";
+const AUTO_MEMORY_OFF_ENV = "CLAUDE_CODE_DISABLE_AUTO_MEMORY";
 
 /**
  * How long a cooperative stop is given to take effect before the adapter
@@ -1305,11 +1305,6 @@ function recallReported(spec: RunSpec): void {
  *  which the CLI restores and counts against a run's spending cap. */
 function restoredSpendUsd(sessionId: string | null | undefined): number {
   return sessionId ? (reportedBySession.get(sessionId)?.costUsd ?? 0) : 0;
-}
-
-/** Test seam: forget every session's totals, as a restart does. */
-export function resetSessionTotalsForTests(): void {
-  reportedBySession.clear();
 }
 
 /** What `assembleClaudeOptions` returns: the SDK options and the first prompt. */

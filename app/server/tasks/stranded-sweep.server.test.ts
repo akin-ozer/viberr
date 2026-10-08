@@ -14,13 +14,7 @@ import type { TaskFrontmatter, TaskPacket } from "~/schemas/task-file.schema";
 import type { TaskActionDeps } from "./task-action-core.server";
 import { operatorCancelSchedule, operatorScheduleRun } from "./operator-dispatch.server";
 import { resolveOperatorAuthority } from "./operator-authority.server";
-import {
-  findStrandedTasks,
-  STRANDED_AFTER_MS,
-  STRANDED_NOTE_TITLE,
-  strandedNoteText,
-  sweepStrandedTasks,
-} from "./stranded-sweep.server";
+import { STRANDED_NOTE_TITLE, strandedNoteText, sweepStrandedTasks } from "./stranded-sweep.server";
 
 /**
  * Ruling 330 — the state, not the causes.
@@ -89,17 +83,8 @@ function deployOperator(store: TestStore): void {
   });
 }
 
-describe("findStrandedTasks", () => {
-  it("finds a task nothing is going to move", () => {
-    const store = prepared((s) => seed(s, "VIB-1"));
-    const found = findStrandedTasks(store.db, dataCtx(store), NOW);
-    expect(found.map((t) => t.taskKey)).toEqual(["VIB-1"]);
-    // The board's own claim travels, because it is the misleading part.
-    expect(found[0]!.waiting).toBe("agent");
-    expect(found[0]!.quietForMs).toBeGreaterThan(STRANDED_AFTER_MS);
-  });
-
-  it("leaves alone every task with a REASON to be quiet", () => {
+describe("what the sweep finds", () => {
+  it("leaves alone every task with a REASON to be quiet", async () => {
     /**
      * Each of these is silence the product already explains, and a sweep that
      * nudged them would be noise on the one signal that has to stay rare.
@@ -132,7 +117,7 @@ describe("findStrandedTasks", () => {
       seed(s, "VIB-7", { stage: "done" });                    // finished
       seed(s, "VIB-8", { updatedAt: new Date(NOW - 60_000).toISOString() }); // quiet a minute
     });
-    expect(findStrandedTasks(store.db, dataCtx(store), NOW)).toEqual([]);
+    expect(await sweepStrandedTasks(store.db, dataCtx(store), NOW)).toBe(0);
   });
 
   it("does not speak twice: its own note is the idempotence key", async () => {
@@ -151,12 +136,10 @@ describe("findStrandedTasks", () => {
      * CANARY: drop the STRANDED_NOTE_TITLE check in findStrandedTasks.
      */
     const store = prepared((s) => seed(s, "VIB-1"));
-    expect(findStrandedTasks(store.db, dataCtx(store), NOW)).toHaveLength(1);
-    await sweepStrandedTasks(store.db, dataCtx(store), NOW);
-    expect(findStrandedTasks(store.db, dataCtx(store), NOW)).toEqual([]);
+    expect(await sweepStrandedTasks(store.db, dataCtx(store), NOW)).toBe(1);
+    expect(await sweepStrandedTasks(store.db, dataCtx(store), NOW)).toBe(0);
     // …and an hour later, with the note long past the staleness window.
-    const muchLater = NOW + 4 * STRANDED_AFTER_MS;
-    expect(findStrandedTasks(store.db, dataCtx(store), muchLater)).toEqual([]);
+    expect(await sweepStrandedTasks(store.db, dataCtx(store), NOW + 60 * 60_000)).toBe(0);
   });
 
   it("speaks again once something else has happened", async () => {
@@ -178,9 +161,7 @@ describe("findStrandedTasks", () => {
       });
     });
     rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
-    expect(
-      findStrandedTasks(store.db, dataCtx(store), NOW + 4 * STRANDED_AFTER_MS).map((t) => t.taskKey),
-    ).toEqual(["VIB-1"]);
+    expect(await sweepStrandedTasks(store.db, dataCtx(store), NOW + 60 * 60_000)).toBe(1);
   });
 });
 
@@ -204,7 +185,10 @@ describe("sweepStrandedTasks", () => {
     const parsed = readTaskFile({ projectSlug: store.slug, taskKey: "VIB-1", dataRoot: store.dataRoot })!.parsed;
     const note = parsed.timeline[0]!;
     expect(note.title).toBe(STRANDED_NOTE_TITLE);
+    // The board's own claim travels, because it is the misleading part, and
+    // the quiet is counted from the task's last write.
     expect(note.text).toContain("no run is live or queued");
+    expect(note.text).toContain("Nothing has happened on this task for 120 minutes");
     expect(note.text).toContain("nothing is scheduled to");
     // CANARY: drop the autoInvokeOperator call and the sweep becomes a
     // complaint — it would name the state and leave the task exactly as stuck.
@@ -266,7 +250,6 @@ describe("ruling 487: a run the operator scheduled is a reason for quiet", () =>
 
     // Half an hour on: quiet by every clock, the run still ninety minutes out.
     const later = Date.now() + 30 * 60_000;
-    expect(findStrandedTasks(store.db, dataCtx(store), later)).toEqual([]);
     const runOperator = vi.fn<NonNullable<TaskActionDeps["runOperator"]>>(async () => ({
       runId: "run_1",
       queued: false,
@@ -288,8 +271,8 @@ describe("ruling 487: a run the operator scheduled is a reason for quiet", () =>
     );
     expect(cancelled.outcome).toBe("done");
     expect(
-      findStrandedTasks(store.db, dataCtx(store), Date.now() + 30 * 60_000).map((t) => t.taskKey),
-    ).toEqual(["VIB-1"]);
+      await sweepStrandedTasks(store.db, { dataRoot: store.dataRoot, deps: { runOperator } }, Date.now() + 30 * 60_000),
+    ).toBe(1);
   });
 });
 

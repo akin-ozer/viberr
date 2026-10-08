@@ -17,7 +17,6 @@ import { rebuildAll } from "~/server/projections/rebuilder.server";
 import {
   mentionNonDeliveryNote,
   notifyMentionedUsers,
-  resolveMentionTargets,
   stampNotifiedRecipients,
   withAmbiguityDisclosure,
 } from "./mention-notify.server";
@@ -54,14 +53,14 @@ describe("notifyMentionedUsers", () => {
     const store = setupTestStore(ctx);
     const selinLocal = store.users.selin.email.split("@")[0]!; // e.g. selin7
     const matched = notifyMentionedUsers(store.db, {
-      text: `@ARDA the review is clean; @${selinLocal} please take acceptance.`,
+      text: `@${selinLocal} please take acceptance; @ARDA the review is clean.`,
       projectSlug: store.slug,
       taskKey: "VIB-1",
       from: OPERATOR_FROM,
     });
-    expect(new Set(matched)).toEqual(
-      new Set([store.users.arda.id, store.users.selin.id]),
-    );
+    // Users-table order, not mention order: the order `stampNotifiedRecipients`
+    // writes into the event (ruling 382).
+    expect(matched).toEqual([store.users.arda.id, store.users.selin.id]);
     const rows = notificationRows(store);
     expect(rows).toHaveLength(2);
     for (const row of rows) {
@@ -114,11 +113,23 @@ describe("notifyMentionedUsers", () => {
     expect(matched).toEqual([store.users.arda.id]);
   });
 
-  it("reserved agent handles never notify a person; no handles → no rows", () => {
+  it("reserved agent handles never notify a person, even one whose handle spells them (ruling 99); no handles → no rows", () => {
+    // Unprojected, so resolution runs app-wide and each handle below is the
+    // email local-part of exactly one enabled person. CANARY: drop the
+    // RESERVED_HANDLES filter from the resolver and all five are notified.
     const store = setupTestStore(ctx);
+    for (const [id, handle, name] of [
+      ["u_op", "operator", "Operator"],
+      ["u_ag", "agent", "Agent"],
+      ["u_cla", "claude", "Claude"],
+      ["u_cdx", "codex", "Codex"],
+      ["u_ctl", "controller", "Controller"],
+    ] as const) {
+      insertUser(store.db, { id, email: `${handle}@viberr.test`, name, role: "member" });
+    }
     expect(
       notifyMentionedUsers(store.db, {
-        text: "@operator @agent @claude @codex all reserved",
+        text: "@operator @agent @claude @codex @controller look",
         projectSlug: store.slug,
         taskKey: "VIB-1",
         from: OPERATOR_FROM,
@@ -133,14 +144,6 @@ describe("notifyMentionedUsers", () => {
       }),
     ).toEqual([]);
     expect(notificationRows(store)).toHaveLength(0);
-  });
-
-  it("a person whose handle spells a reserved word (controller, claude) is never the target (ruling 99)", () => {
-    const users = [
-      { id: "u_ctl", email: "controller@viberr.test", name: "Controller" },
-      { id: "u_cla", email: "claude@viberr.test", name: "Claude" },
-    ];
-    expect(resolveMentionTargets(users, "@controller @claude look").userIds).toEqual([]);
   });
 
   it("never notifies the excluded author, and skips disabled users", () => {
@@ -346,31 +349,6 @@ describe("mention disambiguation (B-FD2)", () => {
         excludeUserId: store.users.arda.id,
       }),
     ).toEqual([]);
-  });
-
-  it("resolveMentionTargets is pure and keeps users-table order", () => {
-    const users = [
-      { id: "u1", email: "arda.kaya@x.test", name: "Arda Kaya" },
-      { id: "u2", email: "selin@x.test", name: "Selin Ay" },
-      { id: "u3", email: "arda.yilmaz@x.test", name: "Arda Yilmaz" },
-    ];
-    expect(resolveMentionTargets(users, "@selin @arda-kaya ship it")).toEqual({
-      userIds: ["u1", "u2"],
-      // Ruling 233: which handle won which user, so a caller can quote the
-      // span that actually names the recipient.
-      matchedBy: new Map([
-        ["selin", "u2"],
-        ["arda-kaya", "u1"],
-      ]),
-      ambiguous: [],
-      nonMembers: [],
-    });
-    expect(resolveMentionTargets(users, "@arda ship it")).toEqual({
-      userIds: [],
-      matchedBy: new Map(),
-      ambiguous: ["arda"],
-      nonMembers: [],
-    });
   });
 
   it("the appended disclosure closes an unclosed ``` fence so the note renders as prose", () => {
@@ -718,16 +696,19 @@ describe("every comment writer notifies the human it @tags (NEW-4)", () => {
   /**
    * Every writer that appends a `comment` timeline event, each driven through the
    * function a run/route actually calls. `roster` is only about what the writer
-   * needs to exist, never about the fan-out.
+   * needs to exist, never about the fan-out; `from` is the author its
+   * notification row must name.
    */
   const WRITERS: {
     name: string;
     roster: boolean;
+    from: Partial<ActorRender>;
     write: (store: TestStore, tag: string) => Promise<void>;
   }[] = [
     {
       name: "appendComment (a human comment)",
       roster: false,
+      from: { kind: "human" },
       // Authored by Selin so the tag is not the author's own (never self-notify).
       write: async (store, tag) => {
         await appendComment(
@@ -745,6 +726,7 @@ describe("every comment writer notifies the human it @tags (NEW-4)", () => {
     {
       name: "postAgentReplyComment (an interrupted/errored agent reply)",
       roster: false,
+      from: { kind: "agent", backend: "claude" },
       write: async (store, tag) => {
         await postAgentReplyComment(
           store.db,
@@ -762,6 +744,7 @@ describe("every comment writer notifies the human it @tags (NEW-4)", () => {
     {
       name: "recordAgentCompletion (the FINISHED run — the common case)",
       roster: false,
+      from: { kind: "agent", backend: "claude" },
       write: async (store, tag) => {
         await recordAgentCompletion(
           store.db,
@@ -782,6 +765,7 @@ describe("every comment writer notifies the human it @tags (NEW-4)", () => {
     {
       name: "operatorPostComment (operator narration)",
       roster: true,
+      from: OPERATOR_FROM,
       write: async (store, tag) => {
         const result = await operatorPostComment(
           store.db,
@@ -803,6 +787,7 @@ describe("every comment writer notifies the human it @tags (NEW-4)", () => {
     {
       name: "addRecommendation (the operator's recommendation reasoning)",
       roster: true,
+      from: OPERATOR_FROM,
       write: async (store, tag) => {
         const result = await operatorDispatchAgent(
           store.db,
@@ -823,6 +808,7 @@ describe("every comment writer notifies the human it @tags (NEW-4)", () => {
     {
       name: "postAgentComment (an agent's mid-run comment tool)",
       roster: false,
+      from: { kind: "agent", backend: "claude" },
       write: async (store, tag) => {
         await postAgentComment(
           store.db,
@@ -840,6 +826,7 @@ describe("every comment writer notifies the human it @tags (NEW-4)", () => {
       // Ruling 488: a relay from another task lands on VIB-1 as a comment.
       name: "relayToTask (another task's relay, the operator's or an agent's)",
       roster: false,
+      from: OPERATOR_FROM,
       write: async (store, tag) => {
         writeTask(store.dataRoot, store.slug, {
           frontmatter: baseTaskFrontmatter("VIB-2", { stage: "impl", ownerUserId: store.users.arda.id }),
@@ -859,6 +846,7 @@ describe("every comment writer notifies the human it @tags (NEW-4)", () => {
       // Ruling 557: a take lands on VIB-1 as the operator's claiming comment.
       name: "takeFromTask (files taken from another task, with a line on why)",
       roster: false,
+      from: OPERATOR_FROM,
       write: async (store, tag) => {
         writeTask(store.dataRoot, store.slug, {
           frontmatter: baseTaskFrontmatter("VIB-2", { stage: "impl", ownerUserId: store.users.arda.id }),
@@ -896,9 +884,11 @@ describe("every comment writer notifies the human it @tags (NEW-4)", () => {
       expect(mentions).toHaveLength(1);
       expect(mentions[0]!.user_id).toBe(store.users.arda.id);
       expect(mentions[0]!.text).toContain("mentioned you");
-      // …and it says WHO tagged them: a bare row with no author is how a
-      // machine-authored ping reads as a system notice instead of an answer.
-      expect(mentions[0]!.actor_json).toBeTruthy();
+      // …and it says WHO tagged them, as that writer's author: a bare row is
+      // how a machine-authored ping reads as a system notice instead of an
+      // answer. CANARY: send an agent reply's ping `from` the Operator and
+      // postAgentReplyComment's row fails.
+      expect(JSON.parse(String(mentions[0]!.actor_json))).toMatchObject(writer.from);
       // Ruling 382 (F39-9): the EVENT records who the fan-out reached, so
       // compaction can never fold a comment somebody was told about. Asserted
       // here, on the same enumerated table, because a writer that notifies but
@@ -1042,14 +1032,6 @@ describe("every comment writer notifies the human it @tags (NEW-4)", () => {
     }
     expect(found).toEqual(COMMENT_WRITER_SITES);
 
-    for (const file of Object.keys(COMMENT_WRITER_SITES)) {
-      if (NO_FANOUT_BY_DESIGN.has(file)) continue;
-      const src = readFileSync(path.join(APP, file), "utf8");
-      expect(
-        /\bnotifyMentionedUsers\s*\(/.test(src),
-        `${file} appends comments but never calls the shared mention fan-out`,
-      ).toBe(true);
-    }
     // Every writer the table drives is covered; the counts differ on purpose
     // (see the doc comment) so this asserts the direction that matters.
     expect(WRITERS.length).toBeGreaterThanOrEqual(

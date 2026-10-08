@@ -117,21 +117,13 @@ function isOverdue(dueDate: string | null, today: string): boolean {
  *  "Overdue" depends on the VIEWER's local today, which the server does not
  *  know — rendering it during SSR would hydrate to different text across a
  *  timezone/midnight boundary (the recoverable React #418 `LocalDayDotTime`
- *  guards against). So unless an explicit `today` is passed (tests, or a caller
- *  that already has a deterministic date), the overdue branch is withheld until
- *  after hydration: first paint is the neutral "due Mon D" on both sides, and an
- *  effect swaps in the red "overdue" once the client's date is known. */
-export function DueDatePill({
-  dueDate,
-  today,
-}: {
-  dueDate: string | null;
-  today?: string;
-}) {
+ *  guards against). So the overdue branch is withheld until after hydration:
+ *  first paint is the neutral "due Mon D" on both sides, and the red "overdue"
+ *  follows once the client's date is known. */
+export function DueDatePill({ dueDate }: { dueDate: string | null }) {
   const hydrated = useHydrated();
   if (!dueDate) return null;
-  const effectiveToday = today ?? (hydrated ? todayISO() : null);
-  const overdue = effectiveToday != null && isOverdue(dueDate, effectiveToday);
+  const overdue = hydrated && isOverdue(dueDate, todayISO());
   return (
     // A date that has not passed is a fact about the task; an overdue one is a
     // problem. Only the problem gets a fill (design pass 2026-09-08).

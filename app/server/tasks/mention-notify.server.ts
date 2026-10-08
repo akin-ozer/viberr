@@ -182,7 +182,7 @@ function fullNameKeys(name: string): string[] {
  * Omitting it resolves app-wide, which is only correct for a caller that has no
  * project in hand — every project-scoped caller passes the set.
  */
-export function resolveMentionTargets(
+function resolveMentionTargets(
   users: readonly MentionableUser[],
   text: string,
   memberIds?: ReadonlySet<string>,

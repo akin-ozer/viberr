@@ -33,9 +33,9 @@ import { reprojectTask, taskRef, type TaskMutationContext } from "./task-mutatio
  * corrections, with Undo.
  */
 
-export const RULINGS_CORRECTED_TITLE = "Rulings corrected";
-export const KB_CORRECTED_TITLE = "Knowledge base corrected";
-export const KB_CORRECTION_UNDONE_TITLE = "Knowledge-base correction undone";
+const RULINGS_CORRECTED_TITLE = "Rulings corrected";
+const KB_CORRECTED_TITLE = "Knowledge base corrected";
+const KB_CORRECTION_UNDONE_TITLE = "Knowledge-base correction undone";
 
 /** What an agent corrects. */
 export interface KbCorrectionRequest {
@@ -153,7 +153,7 @@ function notQuotedSentence(kb: string, leftOut: readonly string[]): string {
  *  `read_timeline_entry` reads them whole ({@link readCorrectionOfEntry}).
  *  Ruling 568: with agents the knowledge base is not given to, only where and
  *  the id. */
-export function correctionEventText(c: KbCorrection, leftOut: readonly string[] = []): string {
+function correctionEventText(c: KbCorrection, leftOut: readonly string[] = []): string {
   const where = `\`${c.kb}/${c.doc}\``;
   if (leftOut.length > 0) {
     return `${c.replaced === null ? "Added to" : "Corrected"} ${where} as \`${c.id}\`. ${notQuotedSentence(c.kb, leftOut)}`;

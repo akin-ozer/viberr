@@ -1,11 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { DIVERGED_BRANCH_REMEDY, type WorkRevision } from "~/schemas/task-file.schema";
 import { serverOutcomeSentence } from "~/shared/packet-server-outcome";
-import {
-  headMovedSince,
-  reportExcerpt,
-  STUCK_REPORT_EXCERPT_MAX,
-} from "./react-progress.server";
+import { headMovedSince, stuckLoopStandings } from "./react-progress.server";
 
 /**
  * Ruling 489 (pass 40, F40-68): the react loop's progress signal is the work
@@ -111,22 +107,24 @@ describe("ruling 489: the operator reads what the delivery option did, in Viberr
 });
 
 describe("ruling 489: the capped packet quotes the report's first paragraph", () => {
+  /** The packet body for a task with no head on record, after `replyText`. */
+  const body = (replyText: string | null) =>
+    stuckLoopStandings({ fm: { workRevision: null, pr: null }, gates: [], replyText, agentHandle: "dev" }).text;
+
   it("drops heading marks and the dispatch cc line, and stops at the first blank line", () => {
     // CANARY: quote the whole reply and the second paragraph lands on the card.
-    expect(
-      reportExcerpt(
-        "## Rework done\non `178dc22`: main merged in.\ncc @Akin @operator\n\nFinding 1 …",
-      ),
-    ).toBe("Rework done on `178dc22`: main merged in.");
-    expect(reportExcerpt("")).toBeNull();
-    expect(reportExcerpt(null)).toBeNull();
+    expect(body("## Rework done\non `178dc22`: main merged in.\ncc @Akin @operator\n\nFinding 1 …")).toBe(
+      "The last report, from @dev: “Rework done on `178dc22`: main merged in.” No committed head is on record for this task.",
+    );
+    // No report, no quote.
+    expect(body("")).toBe("No committed head is on record for this task.");
+    expect(body(null)).toBe("No committed head is on record for this task.");
   });
 
   it("caps a long first paragraph with an ellipsis", () => {
     // CANARY: drop the cap and a 2,000-character paragraph fills the body.
-    const long = "word ".repeat(400).trim();
-    const excerpt = reportExcerpt(long)!;
-    expect(excerpt.length).toBe(STUCK_REPORT_EXCERPT_MAX);
-    expect(excerpt.endsWith("…")).toBe(true);
+    const excerpt = /“(.*)”/.exec(body("word ".repeat(400).trim()))?.[1];
+    expect(excerpt).toHaveLength(280);
+    expect(excerpt?.endsWith("…")).toBe(true);
   });
 });

@@ -47,9 +47,9 @@ import {
  * governed hand-off the PRD promises: a reviewer opening the PR on GitHub can
  * see the task's goal, a change summary, evidence, and — critically — a link
  * back to the canonical Viberr task, so task ↔ branch ↔ PR stays traceable
- * without asking. Pure + exported so its exact contents are unit-tested.
+ * without asking.
  */
-export function composePrBody(input: {
+function composePrBody(input: {
   taskKey: string;
   projectSlug: string;
   title: string;
@@ -220,7 +220,7 @@ function deliveredStatsToPrParts(
  * own text. Line endings read as LF: GitHub's web editor saves CRLF, so a
  * description opened and saved unchanged is not an edit.
  */
-export function prBodySha256(body: string): string {
+function prBodySha256(body: string): string {
   return createHash("sha256").update(body.replace(/\r\n/g, "\n"), "utf8").digest("hex");
 }
 
@@ -821,11 +821,12 @@ export async function openTaskPr(
     }
     return { status: "refused", message: detail };
   }
-  // Ruling 128: GitHub answered. An unmapped status or a body this reader
-  // could not decode is a REFUSAL that quotes GitHub, never "unreachable".
+  // Ruling 128: GitHub answered with a status nothing above maps. That is a
+  // REFUSAL that quotes GitHub, never "unreachable" (a body this reader could
+  // not decode took the salvage path above).
   return {
     status: "refused",
-    message: created.kind === "http" ? created.message : "GitHub answered 304 (not modified) to a create",
+    message: created.message,
   };
 }
 

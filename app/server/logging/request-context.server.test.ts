@@ -1,4 +1,3 @@
-import { RouterContextProvider } from "react-router";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { z } from "zod";
 import { logger } from "./logger.server";
@@ -15,6 +14,7 @@ import {
   runWithRequestContext,
   type RequestCorrelation,
 } from "./request-context.server";
+import { routeArgs } from "../../../test-support/test-app";
 
 /**
  * P13-D-30: `architecture.md` promises request/job correlation identifiers in
@@ -248,13 +248,7 @@ describe("requestContextMiddleware (ruling 458(d))", () => {
     });
     let seenBelow: string | null = null;
     const response = await requestContextMiddleware(
-      {
-        request,
-        url: new URL(request.url),
-        params: {},
-        pattern: "/",
-        context: new RouterContextProvider(),
-      },
+      routeArgs(request, {}, "/"),
       async () => {
         seenBelow = currentRequestId();
         return new Response("page");

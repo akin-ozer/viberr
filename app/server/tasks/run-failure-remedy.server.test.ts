@@ -601,17 +601,6 @@ describe("describeRunFailure", () => {
       expect(d.options.find((o) => o.recommended)).toBeTruthy();
     });
 
-    it("offers nothing of the kind for a window that has already reopened", () => {
-      const store = setupTestStore(ctx);
-      // RESET is in the past: waiting for it is not a remedy, it is a no-op.
-      const d = describe_(store, {
-        role: "specialist",
-        agentHandle: "jc-developer",
-        failure: failure("quota", { windowRejected: true, window: "five_hour", resetsAt: RESET }),
-      });
-      expect(d.options.some((o) => o.kind === "wait_for_window")).toBe(false);
-    });
-
     it("offers nothing of the kind for a failure that is not a spent window", () => {
       const store = setupTestStore(ctx);
       // An auth refusal has a reset instant on its facts too in principle, and

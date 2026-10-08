@@ -1,6 +1,7 @@
 import { existsSync, mkdirSync, utimesSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { withEnv } from "../../../test-support/env";
 import { createTestDbContext } from "../../../test-support/test-db";
 import {
   baseTaskFrontmatter,
@@ -8,10 +9,7 @@ import {
   writeTask,
   type TestStore,
 } from "../../../test-support/test-store";
-import {
-  DEFAULT_MAINTENANCE_INTERVAL_SECONDS,
-  resetEnvCacheForTests,
-} from "~/server/config/env.server";
+import { resetEnvCacheForTests } from "~/server/config/env.server";
 import { taskDir } from "~/server/files/file-store-root.server";
 import { COMPACTING_AFTER_RUN_STEP, RUN_PHASE } from "~/server/runtimes/adapter.server";
 import { COMPLETION_COMPACT_DEADLINE_MS } from "~/server/runtimes/context-policy.server";
@@ -235,22 +233,21 @@ describe("runMaintenancePass (gaps 15 + 20)", () => {
     const state = maintenanceState();
     expect(state.lastPassAt).not.toBeNull();
     expect(state.lastPassReason).toBe("interval");
-    expect(state.intervalMs).toBe(DEFAULT_MAINTENANCE_INTERVAL_SECONDS * 1000);
+    expect(state.intervalMs).toBe(6 * 60 * 60 * 1000);
   });
 });
 
 describe("startMaintenanceScheduler (gap 15)", () => {
-  it("runs a pass on every interval tick — the long-lived deployment case", () => {
+  it("runs a pass on every interval tick — the long-lived deployment case", async () => {
     vi.useFakeTimers();
     const store = storeWithTerminalTask();
     const workspace = seedWorkspace(store, "VIB-1");
     agedTranscript(store, "run_old.jsonl", 40);
 
-    startMaintenanceScheduler(store.db, {
-      intervalMs: 1_000,
-      diskCheckIntervalMs: 60_000,
-      dataRoot: store.dataRoot,
-    });
+    // The period a deployment sets; the scheduler reads it once, at start.
+    await withEnv({ VIBERR_MAINTENANCE_INTERVAL_SECONDS: "1" }, () =>
+      startMaintenanceScheduler(store.db, { dataRoot: store.dataRoot }),
+    );
     expect(maintenanceState().scheduled).toBe(true);
     expect(maintenanceState().lastPassAt).toBeNull(); // no immediate pass
 
@@ -262,11 +259,13 @@ describe("startMaintenanceScheduler (gap 15)", () => {
     expect(existsSync(workspace)).toBe(false);
   });
 
-  it("is idempotent: a second start leaves no timer the reset misses", () => {
+  it("is idempotent: a second start leaves no timer the reset misses", async () => {
     vi.useFakeTimers();
     const store = storeWithTerminalTask();
-    startMaintenanceScheduler(store.db, { intervalMs: 1_000 });
-    startMaintenanceScheduler(store.db, { intervalMs: 1_000 });
+    await withEnv({ VIBERR_MAINTENANCE_INTERVAL_SECONDS: "1" }, () => {
+      startMaintenanceScheduler(store.db);
+      startMaintenanceScheduler(store.db);
+    });
     resetMaintenanceStateForTests();
     vi.advanceTimersByTime(10_000);
     expect(maintenanceState().lastPassAt).toBeNull();

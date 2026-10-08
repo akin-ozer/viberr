@@ -3,26 +3,14 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { cleanup, fireEvent, render, waitFor, within } from "@testing-library/react";
 import { createRoutesStub } from "react-router";
 import type { TaskDetail } from "~/server/projections/task-query.server";
-import type { AcceptanceAffordance } from "~/server/tasks/task-acceptance.server";
 import type { TimelineEventRender } from "~/shared/mapping/task-event.server";
 import type { LogLine, RunView } from "~/features/runtime/runtime-types";
 import { NO_RUN_CACHE } from "../../../test-support/run-view";
 import { ToastProvider } from "~/ui/toast";
-import { ContinuityRecoveryPanel, EXECUTION_PANEL_LABEL } from "./continuity-recovery";
+import { ContinuityRecoveryPanel } from "./continuity-recovery";
 import { deriveContinuityLoss } from "./continuity-loss";
 import { TaskDetailPage } from "./task-detail-page";
-import { taskDetail } from "../../../test-support/task-detail";
-
-/** Ruling 127: the task owner whose accounts a run bills, both backends
- *  connected — the ordinary case, so the run controls render live and these
- *  tests keep testing what they are about. The refusal states are covered in
- *  execution-profile.test.tsx. */
-const CONNECTED_PRINCIPAL = {
-  ownerUserId: "u-arda",
-  ownerName: "Arda Kaya",
-  claude: { available: true, detail: null },
-  codex: { available: true, detail: null },
-};
+import { acceptanceAffordance, connectedPrincipal, taskDetail } from "../../../test-support/task-detail";
 
 afterEach(() => {
   cleanup();
@@ -386,13 +374,13 @@ describe("ContinuityRecoveryPanel", () => {
     expect(hint.textContent).toContain("@mention");
     expect(hint.textContent).toContain("Dana");
     expect(hint.textContent).toContain("The lost conversation is not restored");
-    expect(hint.textContent).not.toContain(EXECUTION_PANEL_LABEL);
+    expect(hint.textContent).not.toContain("Execution profile");
     cleanup();
 
     const runner = renderPanel({ canRunAgents: true });
     expect(
       runner.container.querySelector(".continuity-panel .hint")!.textContent,
-    ).toContain(EXECUTION_PANEL_LABEL);
+    ).toContain("Execution profile");
   });
 
   it("offers no control the server cannot honour — there is no resume door", () => {
@@ -410,16 +398,6 @@ describe("ContinuityRecoveryPanel", () => {
 });
 
 /* ------------------------------------------------------------ page wiring */
-
-const ACCEPTANCE: AcceptanceAffordance = {
-  hasAuthority: true,
-  atBoundary: true,
-  blockedReason: null,
-  blockedGates: [],
-  blockedReasonViaPacket: null,
-  canAccept: true,
-  terminallyBlocked: false,
-};
 
 function detail(patch: Partial<TaskDetail> = {}): TaskDetail {
   return taskDetail({
@@ -458,7 +436,7 @@ function renderPage(task: Partial<TaskDetail> = {}, runtime: RunView[] = [broken
             deployedSpecialists={[]}
             operatorBackend="claude"
             operatorAutonomy="supervised"
-            runPrincipal={CONNECTED_PRINCIPAL}
+            runPrincipal={connectedPrincipal()}
             liveAgentRuns={[]}
             timelineHasMore={false}
             timelineRemaining={0}
@@ -470,7 +448,7 @@ function renderPage(task: Partial<TaskDetail> = {}, runtime: RunView[] = [broken
             mentionables={{ agents: [], users: [], reserved: [] }}
             recommendations={[]}
             schedules={[]}
-            acceptance={ACCEPTANCE}
+            acceptance={acceptanceAffordance()}
             githubHost="https://github.com"
           />
         </ToastProvider>
@@ -515,9 +493,9 @@ describe("task detail wiring", () => {
     // the hint and the heading it points at are read off the same page.
     const { container, getByRole } = renderPage();
     expect(container.querySelector(".continuity-panel .hint")!.textContent).toContain(
-      EXECUTION_PANEL_LABEL,
+      "Execution profile",
     );
-    expect(getByRole("heading", { level: 2, name: EXECUTION_PANEL_LABEL })).toBeTruthy();
+    expect(getByRole("heading", { level: 2, name: "Execution profile" })).toBeTruthy();
   });
 
   it("hands the panel the page's own console selector and Ask-operator signal", () => {

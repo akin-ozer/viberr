@@ -18,11 +18,10 @@
  */
 
 /** Cached observations older than this stop being presentable as current. */
-export const STALE_AFTER_MS = 60 * 60 * 1000;
+const STALE_AFTER_MS = 60 * 60 * 1000;
 
-/** Never observed, unparseable, or older than `maxAgeMs`. `now` is injectable
- *  for tests; production passes nothing. */
-export function isStale(
+/** Never observed, unparseable, or older than `maxAgeMs`. */
+function isStale(
   observedAt: string | null | undefined,
   maxAgeMs: number = STALE_AFTER_MS,
   now: number = Date.now(),

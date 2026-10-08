@@ -6,7 +6,9 @@ import { useState } from "react";
 import {
   $createParagraphNode,
   $getRoot,
+  $getSelection,
   $isParagraphNode,
+  $isRangeSelection,
   UNDO_COMMAND,
   SKIP_DOM_SELECTION_TAG,
   type LexicalEditor,
@@ -143,6 +145,19 @@ async function setText(editor: LexicalEditor, text: string) {
   });
 }
 
+/** Type `text` after whatever the draft holds, as `setText` updates it. An
+ *  update queues behind the ones before it, so what it extends is the draft
+ *  those left. */
+async function appendText(editor: LexicalEditor, text: string) {
+  await act(async () => {
+    editor.update(() => {
+      $getRoot().selectEnd();
+      const selection = $getSelection();
+      if ($isRangeSelection(selection)) selection.insertText(text);
+    }, { tag: SKIP_DOM_SELECTION_TAG });
+  });
+}
+
 function readText(editor: LexicalEditor): string {
   let out = "";
   editor.getEditorState().read(() => {
@@ -260,9 +275,10 @@ describe("comment composer @-mention autocomplete", () => {
     expect(before).toHaveLength(1);
     fireEvent.keyDown(ce, { key: "ArrowDown" });
     fireEvent.keyDown(ce, { key: "Enter" });
-    // Something was inserted: an @mention (a display name, which may contain
-    // spaces like "@Arda Kaya") followed by a trailing space.
-    await waitFor(() => expect(/^@.+ $/.test(readText(editor))).toBe(true));
+    // The rows read agent, Arda Kaya, operator, claude: the arrow armed the
+    // second, and Enter inserts its display name. CANARY: let `pickActive`
+    // take the first row and "@agent " goes in.
+    await waitFor(() => expect(readText(editor)).toBe("@Arda Kaya "));
   });
 
   it("Arrow navigation survives caret-only refreshes (no snap back to top)", async () => {
@@ -368,8 +384,10 @@ describe("plain-text submission contract (exact posted bytes)", () => {
     const { ce, editor } = await renderComposer({ onPosted: (t) => texts.push(t) });
     await setText(editor, "   \n  ");
     fireEvent.keyDown(ce, { key: "Enter", metaKey: true });
-    await new Promise((r) => setTimeout(r, 100));
-    expect(texts).toHaveLength(0);
+    // The next real draft is the first post: the blank one never went.
+    await setText(editor, "real");
+    fireEvent.keyDown(ce, { key: "Enter", metaKey: true });
+    await waitFor(() => expect(texts).toEqual(["real"]));
   });
 
   it("Ctrl+Enter submits like ⌘+Enter", async () => {
@@ -387,11 +405,13 @@ describe("submit outcomes", () => {
     await setText(editor, "posted away");
     fireEvent.keyDown(ce, { key: "Enter", metaKey: true });
     await waitFor(() => expect(readText(editor)).toBe(""));
-    act(() => {
+    await act(async () => {
       editor.dispatchCommand(UNDO_COMMAND, undefined);
     });
-    await new Promise((r) => setTimeout(r, 50));
-    expect(readText(editor)).toBe("");
+    // What is typed next starts from nothing: a resurrected draft would read
+    // "posted awaynext".
+    await appendText(editor, "next");
+    await waitFor(() => expect(readText(editor)).toBe("next"));
   });
 
   it("failure keeps the draft as typed and shows the inline error", async () => {
@@ -410,7 +430,7 @@ describe("submit outcomes", () => {
 });
 
 describe("Ask operator prefill", () => {
-  it("prefills only a blank draft with @operator and focuses the composer", async () => {
+  it("prefills a blank draft with @operator", async () => {
     const { editor, getByTestId } = await renderComposer();
     fireEvent.click(getByTestId("bump-ask"));
     await waitFor(() => expect(readText(editor)).toBe("@operator "));
@@ -420,8 +440,10 @@ describe("Ask operator prefill", () => {
     const { editor, getByTestId } = await renderComposer();
     await setText(editor, "half-written thought");
     fireEvent.click(getByTestId("bump-ask"));
-    await new Promise((r) => setTimeout(r, 50));
-    expect(readText(editor)).toBe("half-written thought");
+    // Typed after the ask, the words land behind its prefill: an overwritten
+    // draft would read "@operator !".
+    await appendText(editor, "!");
+    await waitFor(() => expect(readText(editor)).toBe("half-written thought!"));
   });
 });
 

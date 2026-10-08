@@ -142,14 +142,12 @@ describe("NumberTicker", () => {
   });
 
   it("unmounting cancels the frame it was waiting on", () => {
-    const cancel = vi.spyOn(window, "cancelAnimationFrame");
     const { unmount } = render(<NumberTicker end={100} />);
     act(() => {
       vi.advanceTimersByTime(100);
     });
     unmount();
-    expect(cancel).toHaveBeenCalled();
     // Nothing left on the clock touches an unmounted figure.
-    expect(() => vi.advanceTimersByTime(2100)).not.toThrow();
+    expect(vi.getTimerCount()).toBe(0);
   });
 });

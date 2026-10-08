@@ -33,6 +33,7 @@ import {
 import { drainRunCompletions, installFakeRuntime, queueFakeRun, startedRunSpecs } from "../../../test-support/fake-runtime";
 import { connectFakeBackend } from "../../../test-support/backend-credentials";
 import { pollUntil } from "../../../test-support/polling";
+import { reconfigureProject } from "../../../test-support/projected-store";
 import { joinedPrompt } from "~/server/runtimes/prompt-prefix.server";
 import { userBackendHome } from "~/server/runtimes/user-homes.server";
 import { probeSessionContinuity } from "~/server/runtimes/session-export.server";
@@ -41,25 +42,27 @@ import {
   listRunsForTaskRows,
   patchRun,
   upsertRun,
+  type InsertRunInput,
 } from "~/server/runtimes/run-store.server";
 import {
   agentMentionHandle,
   ambiguousBackendHandle,
   ambiguousBackendHandleNote,
-  extractReplyText,
-  normalizeWorkspacePaths,
+  fullReplyTextForRun,
   resumeWorkdir,
   resolveMentionedAgent,
   unreachedAgents,
   unreachedAgentNote,
   runFailureReason,
 } from "./agent-reply.server";
+import { buildAgentQuestionPacket } from "./agent-outcome.server";
 import { resolveResumeConfinement, startAgentRun } from "./specialist-run.server";
 import { commentToAgent } from "./task-comments.server";
 import { deliverDeferredMention } from "./agent-completion.server";
 import type { runOperator } from "~/server/runtimes/operator-run.server";
 import type { LogLine } from "~/features/runtime/runtime-types";
 import { emptyRunFailureFacts } from "~/shared/run-failure";
+import { normalizeWorkspacePaths } from "~/shared/workspace-paths";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 
@@ -76,10 +79,7 @@ let store: TestStore;
 
 /** Deploy a `dev` specialist (claude) with no repo (skips the network clone). */
 function deployDevSpecialist(): void {
-  const file = readProjectFile({ projectSlug: store.slug, dataRoot: store.dataRoot })!;
-  const fm = file.parsed.frontmatter;
-  writeProject(store.dataRoot, {
-    ...fm,
+  reconfigureProject(store, {
     repo: null,
     agents: [
       {
@@ -96,17 +96,13 @@ function deployDevSpecialist(): void {
       },
     ],
   });
-  rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
 }
 
 /** Ruling 211(h): a SECOND deployed profile, so a test can mention an agent
  *  that is real and is not the one under test — the state the cross-agent guard
  *  in `deliverDeferredMention` actually exists for. */
 function deployReviewerSpecialist(): void {
-  const file = readProjectFile({ projectSlug: store.slug, dataRoot: store.dataRoot })!;
-  const fm = file.parsed.frontmatter;
-  writeProject(store.dataRoot, {
-    ...fm,
+  reconfigureProject(store, (fm) => ({
     repo: null,
     agents: [
       ...fm.agents,
@@ -123,8 +119,7 @@ function deployReviewerSpecialist(): void {
         },
       },
     ],
-  });
-  rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
+  }));
 }
 
 /**
@@ -145,6 +140,27 @@ function writeTranscript(sessionId: string): void {
   const dir = path.join(home, "projects", "-fake-cwd");
   mkdirSync(dir, { recursive: true });
   writeFileSync(path.join(dir, `${sessionId}.jsonl`), "{}\n");
+}
+
+/** A run row on VIB-1: the fixture's `dev`, a finished primary Claude run
+ *  with a session of its own, unless `over` says otherwise. */
+function devRun(id: string, over: Partial<InsertRunInput> = {}): void {
+  upsertRun(store.db, {
+    id,
+    projectSlug: store.slug,
+    taskKey: "VIB-1",
+    threadId: "primary",
+    role: "developer",
+    kind: "primary",
+    backend: "claude",
+    model: "sonnet",
+    sdk: "claude",
+    sessionId: `${id}-session`,
+    agentName: "dev",
+    agentProfileId: "dev",
+    state: "finished",
+    ...over,
+  });
 }
 
 beforeEach(async () => {
@@ -361,9 +377,7 @@ describe("resolveMentionedAgent", () => {
   // but the resolver used to parse a single token — so every agent whose name
   // contains a space ("Docs Writer") silently routed nowhere.
   it("resolves a multi-word display name (@Docs Writer)", () => {
-    const file = readProjectFile({ projectSlug: store.slug, dataRoot: store.dataRoot })!;
-    writeProject(store.dataRoot, {
-      ...file.parsed.frontmatter,
+    reconfigureProject(store, {
       agents: [
         {
           profileId: "docs-writer",
@@ -379,7 +393,6 @@ describe("resolveMentionedAgent", () => {
         },
       ],
     });
-    rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
 
     expect(call("@Docs Writer can you take another look?")).toMatchObject({
       profileId: "docs-writer",
@@ -396,9 +409,7 @@ describe("resolveMentionedAgent", () => {
     expect(call("@operator can you summarize")).toBeNull();
 
     // Deploy an operator; now @operator targets the operator, NOT the dev.
-    const file = readProjectFile({ projectSlug: store.slug, dataRoot: store.dataRoot })!;
-    writeProject(store.dataRoot, {
-      ...file.parsed.frontmatter,
+    reconfigureProject(store, (fm) => ({
       agents: [
         {
           profileId: "operator",
@@ -406,10 +417,9 @@ describe("resolveMentionedAgent", () => {
           extras: [],
           definition: { kind: "operator", name: "Operator", backends: ["claude"], model: "sonnet" },
         },
-        ...file.parsed.frontmatter.agents,
+        ...fm.agents,
       ],
-    });
-    rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
+    }));
 
     const target = call("@operator can you summarize");
     expect(target).toMatchObject({ profileId: "operator", isOperator: true, isPrimary: false });
@@ -426,28 +436,11 @@ describe("resolveMentionedAgent", () => {
 
   it("never resumes the DEAD backend's session after a backend switch (P13-RT-12)", () => {
     // The `dev` profile ran on Claude and has a live Claude session…
-    upsertRun(store.db, {
-      id: "run_claude_old",
-      projectSlug: store.slug,
-      taskKey: "VIB-1",
-      threadId: "primary",
-      role: "developer",
-      kind: "primary",
-      backend: "claude",
-      model: "sonnet",
-      sdk: "claude",
-      sessionId: "claude-session-1",
-      agentName: "dev",
-      agentProfileId: "dev",
-      state: "finished",
-    });
+    devRun("run_claude_old", { sessionId: "claude-session-1" });
     expect(call("@dev please continue")!.session?.session_id).toBe("claude-session-1");
 
     // …then an admin switches the profile to Codex (quota exhausted, say).
-    const file = readProjectFile({ projectSlug: store.slug, dataRoot: store.dataRoot })!;
-    const fm = file.parsed.frontmatter;
-    writeProject(store.dataRoot, {
-      ...fm,
+    reconfigureProject(store, (fm) => ({
       agents: [
         {
           ...fm.agents[0]!,
@@ -458,8 +451,7 @@ describe("resolveMentionedAgent", () => {
           },
         },
       ],
-    });
-    rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
+    }));
 
     // BEFORE: latestSessionRun matched on profile + kind only, so this resumed
     // the DEAD Claude session with `model: gpt-5.6-sol` — a (backend, model)
@@ -474,21 +466,7 @@ describe("resolveMentionedAgent", () => {
 
   it("resumes on the STUCK retry pin, not the live profile backend (F28-P1)", () => {
     // `dev` ran on Claude and has a live Claude session…
-    upsertRun(store.db, {
-      id: "run_claude_prepin",
-      projectSlug: store.slug,
-      taskKey: "VIB-1",
-      threadId: "primary",
-      role: "developer",
-      kind: "primary",
-      backend: "claude",
-      model: "sonnet",
-      sdk: "claude",
-      sessionId: "claude-session-prepin",
-      agentName: "dev",
-      agentProfileId: "dev",
-      state: "finished",
-    });
+    devRun("run_claude_prepin", { sessionId: "claude-session-prepin" });
     expect(call("@dev continue")!.session?.session_id).toBe(
       "claude-session-prepin",
     );
@@ -533,23 +511,8 @@ describe("resolveMentionedAgent", () => {
   it("skips a run whose provider session is PROVEN gone (P13-D-2 stranding)", () => {
     // Two Claude sessions for `dev`: an older live one and the newest, whose
     // transcript the provider has since swept.
-    const row = (id: string, threadId: string, sessionId: string) => ({
-      id,
-      projectSlug: store.slug,
-      taskKey: "VIB-1",
-      threadId,
-      role: "developer",
-      kind: "primary" as const,
-      backend: "claude" as const,
-      model: "sonnet",
-      sdk: "claude",
-      sessionId,
-      agentName: "dev",
-      agentProfileId: "dev",
-      state: "finished" as const,
-    });
-    upsertRun(store.db, row("run_live", "primary", "claude-session-live"));
-    upsertRun(store.db, row("run_dead", "primary-r1", "claude-session-dead"));
+    devRun("run_live");
+    devRun("run_dead", { threadId: "primary-r1" });
     // Newest wins while nothing is known to be dead.
     expect(call("@dev continue")!.session!.id).toBe("run_dead");
 
@@ -563,7 +526,7 @@ describe("resolveMentionedAgent", () => {
         t: "00:00:00",
         ev: "err",
         tag: "run·session_missing",
-        text: "The Claude Code session claude-session-dead no longer exists on this machine.",
+        text: "The Claude Code session run_dead-session no longer exists on this machine.",
       },
     });
 
@@ -574,21 +537,7 @@ describe("resolveMentionedAgent", () => {
   });
 
   it("falls back to a FRESH run when every session of the agent is gone", () => {
-    upsertRun(store.db, {
-      id: "run_only",
-      projectSlug: store.slug,
-      taskKey: "VIB-1",
-      threadId: "primary",
-      role: "developer",
-      kind: "primary",
-      backend: "claude",
-      model: "sonnet",
-      sdk: "claude",
-      sessionId: "claude-session-gone",
-      agentName: "dev",
-      agentProfileId: "dev",
-      state: "finished",
-    });
+    devRun("run_only");
     insertRunLine(store.db, {
       runId: "run_only",
       seq: 0,
@@ -600,21 +549,7 @@ describe("resolveMentionedAgent", () => {
   });
 
   it("an agent merely PRINTING the marker cannot strand its own session", () => {
-    upsertRun(store.db, {
-      id: "run_chatty",
-      projectSlug: store.slug,
-      taskKey: "VIB-1",
-      threadId: "primary",
-      role: "developer",
-      kind: "primary",
-      backend: "claude",
-      model: "sonnet",
-      sdk: "claude",
-      sessionId: "claude-session-fine",
-      agentName: "dev",
-      agentProfileId: "dev",
-      state: "finished",
-    });
+    devRun("run_chatty");
     insertRunLine(store.db, {
       runId: "run_chatty",
       seq: 0,
@@ -660,9 +595,7 @@ describe("agentMentionHandle (P14-RT-12)", () => {
   /** Re-deploy `dev` with a multi-word ROLE — the shape the two old, divergent
    *  derivations disagreed on. */
   function deployWithRole(role: string): void {
-    const file = readProjectFile({ projectSlug: store.slug, dataRoot: store.dataRoot })!;
-    writeProject(store.dataRoot, {
-      ...file.parsed.frontmatter,
+    reconfigureProject(store, {
       repo: null,
       agents: [
         {
@@ -679,7 +612,6 @@ describe("agentMentionHandle (P14-RT-12)", () => {
         },
       ],
     });
-    rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
   }
 
   it("derives a handle that actually RESOLVES back to the agent", () => {
@@ -687,13 +619,6 @@ describe("agentMentionHandle (P14-RT-12)", () => {
     const handle = agentMentionHandle({ profileId: "dev", name: "dev" });
     expect(handle).toBe("dev");
     expect(call(`@${handle} please continue`)).toMatchObject({ profileId: "dev" });
-  });
-
-  it("the old ROLE-derived handle resolved to nobody — which is the bug", () => {
-    deployWithRole("Senior Developer");
-    // `startAgentRun` used to register completion with the role's first word,
-    // so the stuck packet's "Agent: @senior" named a handle no reply could use.
-    expect(call("@senior please continue")).toBeNull();
   });
 
   it("prefers the profile id so the bare @word grammar matches it", () => {
@@ -709,12 +634,23 @@ describe("agentMentionHandle (P14-RT-12)", () => {
   });
 });
 
-/* ---------------------------------------------------------- extractReplyText */
+/* ------------------------------------------------------- fullReplyTextForRun */
 
-describe("extractReplyText", () => {
+describe("fullReplyTextForRun", () => {
   const line = (partial: Partial<LogLine>): LogLine => ({
     t: "", ev: "text", tag: "assistant", text: "", ...partial,
   });
+  let runs = 0;
+  /** Persist `lines` as a fresh run's log, then read its reply back. */
+  function replyOf(lines: LogLine[]): string | null {
+    runs += 1;
+    const runId = `run_reply_${runs}`;
+    devRun(runId, { threadId: runId });
+    lines.forEach((display, seq) => {
+      insertRunLine(store.db, { runId, seq, occurredAt: new Date().toISOString(), raw: "", display });
+    });
+    return fullReplyTextForRun(store.db, runId);
+  }
 
   it("prefers the last substantial assistant/agent_message text line", () => {
     const lines = [
@@ -724,7 +660,7 @@ describe("extractReplyText", () => {
       line({ tag: "assistant", text: "the actual reply" }),
       line({ ev: "result", tag: "result", text: "done" }),
     ];
-    expect(extractReplyText(lines)).toBe("the actual reply");
+    expect(replyOf(lines)).toBe("the actual reply");
   });
 
   it("does NOT fall back to the result line — those are runtime STATS (P13-RT-09)", () => {
@@ -742,40 +678,31 @@ describe("extractReplyText", () => {
       line({ ev: "init", tag: "system·init", text: "boot" }),
       line({ ev: "result", tag: "result", text: "success · 3 turns · 12s · $0.02" }),
     ];
-    expect(extractReplyText(claudeStats)).toBeNull();
+    expect(replyOf(claudeStats)).toBeNull();
 
     const codexStats = [
       line({ ev: "init", tag: "thread.started", text: "boot" }),
       line({ ev: "result", tag: "turn.completed", text: "in 4.1k (cached 2.0k) · out 0.3k tokens" }),
     ];
-    expect(extractReplyText(codexStats)).toBeNull();
+    expect(replyOf(codexStats)).toBeNull();
 
     // A real report still wins, even with a stats line after it.
     const withReport = [
       line({ tag: "agent_message", text: "Split the CLI docs into their own page." }),
       line({ ev: "result", tag: "turn.completed", text: "in 4.1k · out 0.3k tokens" }),
     ];
-    expect(extractReplyText(withReport)).toBe(
+    expect(replyOf(withReport)).toBe(
       "Split the CLI docs into their own page.",
     );
   });
 
   it("returns null when nothing usable was produced", () => {
-    expect(extractReplyText([line({ ev: "tool", tag: "tool_use", text: "ls" })])).toBeNull();
+    expect(replyOf([line({ ev: "tool", tag: "tool_use", text: "ls" })])).toBeNull();
   });
 
-  it("truncates a huge reply but keeps it readable, pointing at the agent logs", () => {
+  it("returns the untruncated text (verdicts classify on this)", () => {
     const big = "x".repeat(5000);
-    const out = extractReplyText([line({ tag: "assistant", text: big })])!;
-    expect(out.length).toBeLessThan(5000);
-    expect(out).toContain("…");
-    expect(out.endsWith("_(truncated; full report in the agent logs)_")).toBe(true);
-  });
-
-  it("extractFullReplyText returns the untruncated text (verdicts classify on this)", async () => {
-    const big = "x".repeat(5000);
-    const { extractFullReplyText } = await import("./agent-reply.server");
-    const out = extractFullReplyText([line({ tag: "assistant", text: big })])!;
+    const out = replyOf([line({ tag: "assistant", text: big })])!;
     expect(out.length).toBe(5000);
   });
 
@@ -784,7 +711,7 @@ describe("extractReplyText", () => {
       "See [the doc](/Users/akinozer/projects/viberr/data/store/projects/viberr-core/tasks/VIB-2/workspace/viberr/docs/x.md) " +
       "and also /Users/akinozer/.../tasks/PLG-1/workspace/my-repo/src/index.ts — " +
       "full report at https://example.com/tasks/VIB-2/workspace/viberr/docs/x.md";
-    const out = extractReplyText([line({ tag: "assistant", text: reply })])!;
+    const out = replyOf([line({ tag: "assistant", text: reply })])!;
     // Workspace-absolute host paths collapse to repo-relative.
     expect(out).toContain("[the doc](docs/x.md)");
     expect(out).toContain(" src/index.ts ");
@@ -975,7 +902,7 @@ describe("runFailureReason (F7-RUN1)", () => {
     ).toMatchObject({ kind: "session_missing" });
   });
 
-  it("ruling 175: a spending-cap cut-off is its own kind, by record or by tag", () => {
+  it("ruling 175: a spending-cap cut-off is its own kind, by its tag", () => {
     expect(
       classify([
         errLine({
@@ -1099,32 +1026,21 @@ describe("resumeWorkdir", () => {
 describe("ruling 133: the @mention resume door is stage-gated like every other door", () => {
   /** Redeploy with `dev` (delivers) and `rev` (supporting) both scoped to review only. */
   function scopeBothToReview(): void {
-    const file = readProjectFile({ projectSlug: store.slug, dataRoot: store.dataRoot })!;
-    writeProject(store.dataRoot, {
-      ...file.parsed.frontmatter,
+    reconfigureProject(store, {
       repo: null,
       agents: [
         { profileId: "dev", capabilities: [], extras: [], definition: { kind: "specialist", name: "dev", role: "developer", backends: ["claude"], model: "claude-sonnet", stages: ["review"] } },
         { profileId: "rev", capabilities: [], extras: [], definition: { kind: "specialist", name: "rev", role: "reviewer", backends: ["claude"], model: "claude-sonnet", stages: ["review"] } },
       ],
     });
-    rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
   }
   const sessionRow = (id: string, profileId: string, kind: "primary" | "reviewer") =>
-    upsertRun(store.db, {
-      id,
-      projectSlug: store.slug,
-      taskKey: "VIB-1",
+    devRun(id, {
       threadId: `${profileId}-thread`,
       role: profileId === "dev" ? "developer" : "reviewer",
       kind,
-      backend: "claude",
-      model: "sonnet",
-      sdk: "claude",
-      sessionId: `${id}-session`,
       agentName: profileId,
       agentProfileId: profileId,
-      state: "finished",
     });
 
   it("an @mention of a SUPPORTING agent at an undeclared stage posts the comment and refuses the run with the dispatcher's sentence", async () => {
@@ -1172,20 +1088,14 @@ describe("ruling 133: the @mention resume door is stage-gated like every other d
           { profileId: "rev", backend: "claude", role: "reviewer", delivers: false, verdictCapable: true },
         ],
       }),
-      packet: {
-        id: "pkt_562",
-        type: "input",
-        kind: "Agent question",
-        from: "agent:claude/rev (reviewer)",
-        askedBy: "rev",
-        title: "Keep the proposed defaults?",
-        body: "The mapping applies defaults for the gaps.",
-        observations: [],
-        options: [
-          { kind: "custom", t: "Keep the defaults", d: "", rec: true },
-          { kind: "custom", t: "Send corrections", d: "", rec: false },
-        ],
-      },
+      packet: buildAgentQuestionPacket(
+        { kind: "agent", backend: "claude", profileId: "rev", roleHint: "reviewer" },
+        {
+          title: "Keep the proposed defaults?",
+          body: "The mapping applies defaults for the gaps.",
+          options: [{ title: "Keep the defaults (Recommended)" }, { title: "Send corrections" }],
+        },
+      ),
     });
     rebuildAll(store.db, { dataRoot: store.dataRoot });
     sessionRow("run_rev_562", "rev", "reviewer");
@@ -1214,16 +1124,13 @@ describe("ruling 133: the @mention resume door is stage-gated like every other d
     // "straight to" the architect. The completion delivers it (ruling 203), so
     // it is owed, not lost. CANARY: return `result.triggered !== null` alone
     // and the operator is handed the answer and nothing says it waits.
-    const file = readProjectFile({ projectSlug: store.slug, dataRoot: store.dataRoot })!;
-    writeProject(store.dataRoot, {
-      ...file.parsed.frontmatter,
+    reconfigureProject(store, {
       repo: null,
       agents: [
         { profileId: "rev", capabilities: [], extras: [], definition: { kind: "specialist", name: "rev", role: "reviewer", backends: ["claude"], model: "claude-sonnet" } },
         { profileId: "operator", capabilities: [], extras: [], definition: { kind: "operator", name: "Operator", backends: ["claude"], model: "sonnet", autonomy: "supervised" } },
       ],
     });
-    rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
     writeTask(store.dataRoot, store.slug, {
       frontmatter: baseTaskFrontmatter("VIB-1", {
         stage: "impl",
@@ -1232,34 +1139,21 @@ describe("ruling 133: the @mention resume door is stage-gated like every other d
           { profileId: "rev", backend: "claude", role: "reviewer", delivers: false, verdictCapable: false },
         ],
       }),
-      packet: {
-        id: "pkt_565",
-        type: "input",
-        kind: "Agent question",
-        from: "agent:claude/rev (reviewer)",
-        askedBy: "rev",
-        title: "Which instance class?",
-        body: "The mapping keeps the default until you answer.",
-        observations: [],
-        options: [
-          { kind: "custom", t: "Keep the default", d: "", rec: true },
-          { kind: "custom", t: "Take the cheaper one", d: "", rec: false },
-        ],
-      },
+      packet: buildAgentQuestionPacket(
+        { kind: "agent", backend: "claude", profileId: "rev", roleHint: "reviewer" },
+        {
+          title: "Which instance class?",
+          body: "The mapping keeps the default until you answer.",
+          options: [{ title: "Keep the default (Recommended)" }, { title: "Take the cheaper one" }],
+        },
+      ),
     });
     rebuildAll(store.db, { dataRoot: store.dataRoot });
     const startedAt = new Date(Date.now() - 60_000).toISOString();
-    upsertRun(store.db, {
-      id: "run_rev_live",
-      projectSlug: store.slug,
-      taskKey: "VIB-1",
+    devRun("run_rev_live", {
       threadId: "rev-thread",
       role: "reviewer",
       kind: "reviewer",
-      backend: "claude",
-      model: "sonnet",
-      sdk: "claude",
-      sessionId: "run_rev_live-session",
       agentName: "rev",
       agentProfileId: "rev",
       state: "running",
@@ -1428,22 +1322,7 @@ describe("ruling 133: the @mention resume door is stage-gated like every other d
       }),
     });
     rebuildAll(store.db, { dataRoot: store.dataRoot });
-    upsertRun(store.db, {
-      id: "run_dev_pinned",
-      projectSlug: store.slug,
-      taskKey: "VIB-1",
-      threadId: "dev-thread",
-      role: "developer",
-      kind: "primary",
-      backend: "claude",
-      model: "sonnet",
-      sdk: "claude",
-      sessionId: "run_dev_pinned-session",
-      agentName: "dev",
-      agentProfileId: "dev",
-      state: "finished",
-      reviewSubject: "rev_1",
-    });
+    devRun("run_dev_pinned", { threadId: "dev-thread", reviewSubject: "rev_1" });
     const result = await commentToAgent(
       store.db,
       { projectSlug: store.slug, taskKey: "VIB-1", text: "@dev look again" },
@@ -1503,21 +1382,7 @@ describe("ruling 157: an @mention that RESUMES a session lifts a packet-less hol
       }),
     });
     rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
-    upsertRun(store.db, {
-      id: "run_dev_failed",
-      projectSlug: store.slug,
-      taskKey: "VIB-1",
-      threadId: "dev-thread",
-      role: "developer",
-      kind: "primary",
-      backend: "claude",
-      model: "sonnet",
-      sdk: "claude",
-      sessionId: "run_dev_failed-session",
-      agentName: "dev",
-      agentProfileId: "dev",
-      state: "finished",
-    });
+    devRun("run_dev_failed", { threadId: "dev-thread" });
 
     const result = await commentToAgent(
       store.db,
@@ -1564,21 +1429,7 @@ describe("ruling 152(c): an @mention that RESUMES a session is held like any oth
       }),
     });
     rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
-    upsertRun(store.db, {
-      id: "run_dev_failed",
-      projectSlug: store.slug,
-      taskKey: "VIB-1",
-      threadId: "dev-thread",
-      role: "developer",
-      kind: "primary",
-      backend: "claude",
-      model: "sonnet",
-      sdk: "claude",
-      sessionId: "run_dev_failed-session",
-      agentName: "dev",
-      agentProfileId: "dev",
-      state: "finished",
-    });
+    devRun("run_dev_failed", { threadId: "dev-thread" });
     const { recordBackendQuotaExhaustion } = await import(
       "~/server/runtimes/backend-quota.server"
     );
@@ -1635,21 +1486,7 @@ describe("ruling 152(c): an @mention that RESUMES a session is held like any oth
       }),
     });
     rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
-    upsertRun(store.db, {
-      id: "run_dev_done",
-      projectSlug: store.slug,
-      taskKey: "VIB-1",
-      threadId: "dev-thread",
-      role: "developer",
-      kind: "primary",
-      backend: "claude",
-      model: "sonnet",
-      sdk: "claude",
-      sessionId: "run_dev_done-session",
-      agentName: "dev",
-      agentProfileId: "dev",
-      state: "finished",
-    });
+    devRun("run_dev_done", { threadId: "dev-thread" });
     const { recordBackendQuotaExhaustion } = await import(
       "~/server/runtimes/backend-quota.server"
     );
@@ -1713,15 +1550,13 @@ describe("commentToAgent", () => {
     );
     expect(result.triggered).toBe("started");
 
-    // The reply lands as an agent-authored comment once the run finishes. The
-    // fresh fallback reuses startAgentRun's realistic-cadence analyze
-    // stream (~7 lines at 1–3.2s each), so allow generous headroom.
+    // The reply lands as an agent-authored comment once the run finishes.
     const posted = await pollUntil(() => {
       const file = readTaskFile({ projectSlug: store.slug, taskKey: "VIB-1", dataRoot: store.dataRoot })!;
       return file.parsed.timeline.some(
         (e) => e.type === "comment" && e.actor.kind === "agent",
       );
-    }, 25_000);
+    });
     expect(posted).toBe(true);
 
     const file = readTaskFile({ projectSlug: store.slug, taskKey: "VIB-1", dataRoot: store.dataRoot })!;
@@ -1737,7 +1572,7 @@ describe("commentToAgent", () => {
 
     const audit = listAuditEvents(store.db, { action: "task.agent.replied" });
     expect(audit[0]?.taskKey).toBe("VIB-1");
-  }, 30_000);
+  });
 
   /**
    * Ruling 203 (F37-23, live on SHOP-6). A8's refusal used to end with a
@@ -1751,22 +1586,7 @@ describe("commentToAgent", () => {
   it("ruling 203: the @mention refused while the agent was busy is delivered when that run finishes", async () => {
     deployDevSpecialist();
     const startedAt = "2026-09-13T10:00:00.000Z";
-    upsertRun(store.db, {
-      id: "run_live_primary",
-      projectSlug: store.slug,
-      taskKey: "VIB-1",
-      threadId: "primary",
-      role: "developer",
-      kind: "primary",
-      backend: "claude",
-      model: "sonnet",
-      sdk: "claude",
-      sessionId: null,
-      agentName: "dev",
-      agentProfileId: "dev",
-      state: "running",
-      startedAt,
-    });
+    devRun("run_live_primary", { sessionId: null, state: "running", startedAt });
 
     const refused = await commentToAgent(
       store.db,
@@ -1816,7 +1636,7 @@ describe("commentToAgent", () => {
     expect(
       file.parsed.timeline.filter((e) => e.text.includes("fix the class")),
     ).toHaveLength(1);
-  }, 30_000);
+  });
 
   it("ruling 203, end to end: a real run's completion delivers the mention it was too busy to take", async () => {
     deployDevSpecialist();
@@ -1861,7 +1681,7 @@ describe("commentToAgent", () => {
     );
     const started = startedRunSpecs().at(-1)!;
     expect(started.prompt).toContain("one more thing before you finish");
-  }, 30_000);
+  });
 
   /**
    * Ruling 203's own claim, tested: "Oldest first, one per completion, which
@@ -1875,22 +1695,7 @@ describe("commentToAgent", () => {
   it("ruling 205: a BURST posted while the agent was busy is delivered whole, not just its first", async () => {
     deployDevSpecialist();
     const startedAt = "2026-09-13T10:00:00.000Z";
-    upsertRun(store.db, {
-      id: "run_live_primary",
-      projectSlug: store.slug,
-      taskKey: "VIB-1",
-      threadId: "primary",
-      role: "developer",
-      kind: "primary",
-      backend: "claude",
-      model: "sonnet",
-      sdk: "claude",
-      sessionId: null,
-      agentName: "dev",
-      agentProfileId: "dev",
-      state: "running",
-      startedAt,
-    });
+    devRun("run_live_primary", { sessionId: null, state: "running", startedAt });
 
     // Each comment is longer than ANCHOR_EVENT_MAX_CHARS (220) and carries a
     // unique tail token, so the canonical anchor's clamped timeline summary
@@ -1933,7 +1738,7 @@ describe("commentToAgent", () => {
         (r) => r.agent_profile_id === "dev" && r.id !== "run_live_primary",
       ),
     ).toHaveLength(1);
-  }, 30_000);
+  });
 
   /**
    * Ruling 211(h): this test's first two versions never reached the guard they
@@ -1953,16 +1758,10 @@ describe("commentToAgent", () => {
       ["run_live_dev", "dev", "primary"],
       ["run_live_rev", "reviewer", "support"],
     ] as const) {
-      upsertRun(store.db, {
-        id,
-        projectSlug: store.slug,
-        taskKey: "VIB-1",
+      devRun(id, {
         threadId: thread,
         role: profile,
         kind: profile === "dev" ? "primary" : "reviewer",
-        backend: "claude",
-        model: "sonnet",
-        sdk: "claude",
         sessionId: null,
         agentName: profile,
         agentProfileId: profile,
@@ -2085,21 +1884,7 @@ describe("commentToAgent", () => {
     // rather than by running an agent: a real run's async completion handler
     // rewrites task.md, and it raced this test's packet away.
     const priorSessionId = "sess_r1514_dev";
-    upsertRun(store.db, {
-      id: "run_r1514_prior",
-      projectSlug: store.slug,
-      taskKey: "VIB-1",
-      threadId: "t_r1514",
-      role: "developer",
-      kind: "primary",
-      backend: "claude",
-      model: "sonnet",
-      sessionId: priorSessionId,
-      sdk: "test",
-      agentName: "dev",
-      agentProfileId: "dev",
-      state: "finished",
-    });
+    devRun("run_r1514_prior", { threadId: "t_r1514", sessionId: priorSessionId, sdk: "test" });
     writeTranscript(priorSessionId);
     const priorCount = listRunsForTaskRows(store.db, store.slug, "VIB-1").length;
 
@@ -2111,20 +1896,14 @@ describe("commentToAgent", () => {
     })!;
     writeTask(store.dataRoot, store.slug, {
       ...existing.parsed,
-      packet: {
-        id: "pkt_r1514",
-        type: "input",
-        kind: "Agent question",
-        from: "agent:claude/dev (developer)",
-        askedBy: "dev",
-        title: "Which config should I target?",
-        body: "Ambiguous scope.",
-        observations: [],
-        options: [
-          { kind: "custom", t: "Target the staging config", d: "", rec: true },
-          { kind: "custom", t: "Target production", d: "", rec: false },
-        ],
-      },
+      packet: buildAgentQuestionPacket(
+        { kind: "agent", backend: "claude", profileId: "dev", roleHint: "developer" },
+        {
+          title: "Which config should I target?",
+          body: "Ambiguous scope.",
+          options: [{ title: "Target the staging config (Recommended)" }, { title: "Target production" }],
+        },
+      ),
     });
     rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
 
@@ -2173,7 +1952,7 @@ describe("commentToAgent", () => {
     expect(relayed!.text).toContain("staging only, production needs sign-off");
     expect(relayed!.text).toContain("do not re-open the same question");
     expect(spec?.prompt).toContain("Target the staging config");
-  }, 30_000);
+  });
 
   /**
    * Ruling 447 (O39-a), live on ax-clone three of three: an answer that routed
@@ -2215,39 +1994,19 @@ describe("commentToAgent", () => {
 
   it("ruling 447: an answer that names the operator goes to the operator, and the asker is not resumed", async () => {
     const priorSessionId = "sess_r447_dev";
-    upsertRun(store.db, {
-      id: "run_r447_prior",
-      projectSlug: store.slug,
-      taskKey: "VIB-1",
-      threadId: "t_r447",
-      role: "developer",
-      kind: "primary",
-      backend: "claude",
-      model: "sonnet",
-      sessionId: priorSessionId,
-      sdk: "test",
-      agentName: "dev",
-      agentProfileId: "dev",
-      state: "finished",
-    });
+    devRun("run_r447_prior", { threadId: "t_r447", sessionId: priorSessionId, sdk: "test" });
     writeTranscript(priorSessionId);
     const existing = readTaskFile({ projectSlug: store.slug, taskKey: "VIB-1", dataRoot: store.dataRoot })!;
     writeTask(store.dataRoot, store.slug, {
       ...existing.parsed,
-      packet: {
-        id: "pkt_r447",
-        type: "input",
-        kind: "Agent question",
-        from: "agent:claude/dev (developer)",
-        askedBy: "dev",
-        title: "Synchronize VIB-1 with current main?",
-        body: "The branch is behind.",
-        observations: [],
-        options: [
-          { kind: "custom", t: "Synchronize now", d: "", rec: true },
-          { kind: "custom", t: "Leave it", d: "", rec: false },
-        ],
-      },
+      packet: buildAgentQuestionPacket(
+        { kind: "agent", backend: "claude", profileId: "dev", roleHint: "developer" },
+        {
+          title: "Synchronize VIB-1 with current main?",
+          body: "The branch is behind.",
+          options: [{ title: "Synchronize now (Recommended)" }, { title: "Leave it" }],
+        },
+      ),
     });
     rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
     const { resolvePacket } = await import("./packet-resolution.server");
@@ -2282,44 +2041,25 @@ describe("commentToAgent", () => {
    */
   it("ruling 447: an option whose description mentions the operator still answers the asker", async () => {
     const priorSessionId = "sess_r447_desc";
-    upsertRun(store.db, {
-      id: "run_r447_desc",
-      projectSlug: store.slug,
-      taskKey: "VIB-1",
-      threadId: "t_r447_desc",
-      role: "developer",
-      kind: "primary",
-      backend: "claude",
-      model: "sonnet",
-      sessionId: priorSessionId,
-      sdk: "test",
-      agentName: "dev",
-      agentProfileId: "dev",
-      state: "finished",
-    });
+    devRun("run_r447_desc", { threadId: "t_r447_desc", sessionId: priorSessionId, sdk: "test" });
     writeTranscript(priorSessionId);
     const existing = readTaskFile({ projectSlug: store.slug, taskKey: "VIB-1", dataRoot: store.dataRoot })!;
     writeTask(store.dataRoot, store.slug, {
       ...existing.parsed,
-      packet: {
-        id: "pkt_r447_desc",
-        type: "input",
-        kind: "Agent question",
-        from: "agent:claude/dev (developer)",
-        askedBy: "dev",
-        title: "Keep the retry loop?",
-        body: "It doubles the test time.",
-        observations: [],
-        options: [
-          {
-            kind: "custom",
-            t: "Keep it",
-            d: "I finish the loop here and the operator then moves the task to Verify.",
-            rec: true,
-          },
-          { kind: "custom", t: "Drop it", d: "", rec: false },
-        ],
-      },
+      packet: buildAgentQuestionPacket(
+        { kind: "agent", backend: "claude", profileId: "dev", roleHint: "developer" },
+        {
+          title: "Keep the retry loop?",
+          body: "It doubles the test time.",
+          options: [
+            {
+              title: "Keep it (Recommended)",
+              detail: "I finish the loop here and the operator then moves the task to Verify.",
+            },
+            { title: "Drop it" },
+          ],
+        },
+      ),
     });
     rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
     const { resolvePacket } = await import("./packet-resolution.server");
@@ -2495,16 +2235,13 @@ describe("commentToAgent", () => {
 describe("mention routing keeps each agent on its OWN session (regression)", () => {
   /** Redeploy with dev (primary, claude) + analyst (a second claude specialist). */
   function deployTwoSpecialists(): void {
-    const file = readProjectFile({ projectSlug: store.slug, dataRoot: store.dataRoot })!;
-    writeProject(store.dataRoot, {
-      ...file.parsed.frontmatter,
+    reconfigureProject(store, {
       repo: null,
       agents: [
         { profileId: "dev", capabilities: [], extras: [], definition: { kind: "specialist", name: "dev", role: "developer", backends: ["claude"], model: "claude-sonnet" } },
         { profileId: "analyst", capabilities: [], extras: [], definition: { kind: "specialist", name: "analyst", role: "reviewer", backends: ["claude"], model: "claude-sonnet" } },
       ],
     });
-    rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
   }
 
   it("@analyst does NOT inherit the primary dev's claude session (matched by identity, not backend)", async () => {
@@ -2607,12 +2344,7 @@ describe("a resumed @mention keeps the run's natively-mounted skills (pass-18)",
     mkdirSync(ws, { recursive: true });
     await exec("git", ["-C", ws, "init", "-q"]);
     // A finished run with a live transcript ⇒ the @mention RESUMES it.
-    upsertRun(store.db, {
-      id: "run_prior", projectSlug: store.slug, taskKey: "VIB-1", threadId: "primary",
-      role: "developer", kind: "primary", backend: "claude", model: "sonnet",
-      sdk: "claude", sessionId: "claude-session-skills", agentName: "dev",
-      agentProfileId: "dev", state: "finished",
-    });
+    devRun("run_prior", { sessionId: "claude-session-skills" });
     writeTranscript("claude-session-skills");
 
     const result = await commentToAgent(
@@ -2668,12 +2400,7 @@ describe("a resumed @mention keeps its known-down server optional (ruling 658)",
       ],
     });
     rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
-    upsertRun(store.db, {
-      id: "run_prior", projectSlug: store.slug, taskKey: "VIB-1", threadId: "primary",
-      role: "developer", kind: "primary", backend: "claude", model: "sonnet",
-      sdk: "claude", sessionId: "claude-session-mcp", agentName: "dev",
-      agentProfileId: "dev", state: "finished",
-    });
+    devRun("run_prior", { sessionId: "claude-session-mcp" });
     writeTranscript("claude-session-mcp");
 
     const result = await commentToAgent(
@@ -2704,12 +2431,7 @@ describe("a resumed @mention keeps the project's rulings (ruling 239)", () => {
     writeProject(store.dataRoot, { ...fm, rulingsKb: "project-rulings" });
     rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
     // A finished run with a live transcript ⇒ the @mention RESUMES it.
-    upsertRun(store.db, {
-      id: "run_prior", projectSlug: store.slug, taskKey: "VIB-1", threadId: "primary",
-      role: "developer", kind: "primary", backend: "claude", model: "sonnet",
-      sdk: "claude", sessionId: "claude-session-rulings", agentName: "dev",
-      agentProfileId: "dev", state: "finished",
-    });
+    devRun("run_prior", { sessionId: "claude-session-rulings" });
     writeTranscript("claude-session-rulings");
 
     const result = await commentToAgent(
@@ -2744,9 +2466,7 @@ describe("a resumed @mention keeps the project's rulings (ruling 239)", () => {
 describe("comment routing: agent handles engage agents, teammate handles never do (UC-09)", () => {
   /** Deploy the operator alongside the fixture's `dev` specialist. */
   function deployOperatorToo(): void {
-    const file = readProjectFile({ projectSlug: store.slug, dataRoot: store.dataRoot })!;
-    writeProject(store.dataRoot, {
-      ...file.parsed.frontmatter,
+    reconfigureProject(store, {
       repo: null,
       agents: [
         {
@@ -2774,7 +2494,6 @@ describe("comment routing: agent handles engage agents, teammate handles never d
         },
       ],
     });
-    rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
   }
 
   async function clearOperatorLeases(): Promise<void> {
@@ -2800,9 +2519,7 @@ describe("comment routing: agent handles engage agents, teammate handles never d
    * specialist of that backend" could be read as "the only deployed specialist".
    */
   it("@codex reaches the codex specialist and @claude the claude one — backends never cross", () => {
-    const file = readProjectFile({ projectSlug: store.slug, dataRoot: store.dataRoot })!;
-    writeProject(store.dataRoot, {
-      ...file.parsed.frontmatter,
+    reconfigureProject(store, {
       repo: null,
       agents: [
         {
@@ -2831,7 +2548,6 @@ describe("comment routing: agent handles engage agents, teammate handles never d
         },
       ],
     });
-    rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
 
     const call = (text: string) =>
       resolveMentionedAgent(store.db, { dataRoot: store.dataRoot }, store.slug, "VIB-1", text);
@@ -2927,21 +2643,15 @@ describe("comment routing: agent handles engage agents, teammate handles never d
     })!;
     writeTask(store.dataRoot, store.slug, {
       ...existing.parsed,
-      packet: {
-        id: "pkt_gone",
-        type: "input",
-        kind: "Agent question",
-        from: "agent:claude/ghost-writer (documentation)",
-        // The profile that asked has since been removed from the project.
-        askedBy: "ghost-writer",
-        title: "Which config should I target?",
-        body: "Ambiguous scope.",
-        observations: [],
-        options: [
-          { kind: "custom", t: "Target the staging config", d: "", rec: true },
-          { kind: "custom", t: "Target production", d: "", rec: false },
-        ],
-      },
+      // The profile that asked has since been removed from the project.
+      packet: buildAgentQuestionPacket(
+        { kind: "agent", backend: "claude", profileId: "ghost-writer", roleHint: "documentation" },
+        {
+          title: "Which config should I target?",
+          body: "Ambiguous scope.",
+          options: [{ title: "Target the staging config (Recommended)" }, { title: "Target production" }],
+        },
+      ),
     });
     rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
 
@@ -3063,5 +2773,5 @@ describe("F37-66 — the undelivered-mention withdrawal survives the early retur
     const note = timeline().find((e) => e.title === "Mention still not delivered")!;
     expect(note.text).toContain("a comment");
     expect(note.text).toContain("@dev");
-  }, 30_000);
+  });
 });

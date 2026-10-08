@@ -3,21 +3,21 @@ import { createTestDbContext, type TestDbContext } from "../../../test-support/t
 import {
   baseTaskFrontmatter,
   setupTestStore,
-  writeProject,
   writeTask,
   type TestStore,
 } from "../../../test-support/test-store";
 import { listAuditEvents } from "../../../test-support/audit-log";
 import { installFakeRuntime } from "../../../test-support/fake-runtime";
+import { reconfigureProject } from "../../../test-support/projected-store";
 import {
   closedPrBlockedReason,
   type TaskFrontmatter,
   type TaskPacket,
 } from "~/schemas/task-file.schema";
 import type { CapabilityMode } from "~/schemas/project-file.schema";
-import { readProjectFile } from "~/server/files/project-writer.server";
 import { readTaskFile } from "~/server/files/task-writer.server";
 import { rebuildAll } from "~/server/projections/rebuilder.server";
+import { upsertRun } from "~/server/runtimes/run-store.server";
 import { forceAcceptCompletion, acceptanceStanding } from "./task-acceptance.server";
 import { resolvePacket } from "./packet-resolution.server";
 import { transitionStage } from "./task-transitions.server";
@@ -46,9 +46,7 @@ const OPERATOR_POLICY: { capabilityId: string; mode: CapabilityMode }[] = [
 ];
 
 function deployOperator(): void {
-  const file = readProjectFile({ projectSlug: store.slug, dataRoot: store.dataRoot })!;
-  writeProject(store.dataRoot, {
-    ...file.parsed.frontmatter,
+  reconfigureProject(store, {
     repo: null,
     agents: [
       {
@@ -70,7 +68,6 @@ function deployOperator(): void {
       },
     ],
   });
-  rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
 }
 
 /** A task sitting in Review whose PR a human closed on GitHub. */
@@ -392,14 +389,19 @@ describe("path 3 — operatorAcceptCompletion", () => {
     );
     expect(empty.liveRuns).toEqual([]);
 
-    store.db
-      .prepare(
-        `INSERT INTO agent_runs (id, task_key, project_slug, thread_id, role, kind,
-           backend, model, state, created_at, updated_at, agent_profile_id)
-         VALUES ('run_live1', 'VIB-1', ?, 't1', 'Implementation', 'primary',
-           'codex', 'gpt-test', 'running', ?, ?, 'blog-writer')`,
-      )
-      .run(store.slug, new Date().toISOString(), new Date().toISOString());
+    upsertRun(store.db, {
+      id: "run_live1",
+      taskKey: "VIB-1",
+      projectSlug: store.slug,
+      threadId: "t1",
+      role: "Implementation",
+      kind: "primary",
+      backend: "codex",
+      model: "gpt-test",
+      sdk: "codex-sdk",
+      agentProfileId: "blog-writer",
+      state: "running",
+    });
     const withRun = operatorSnapshot(
       store.db,
       { dataRoot: store.dataRoot },
@@ -504,7 +506,8 @@ describe("F19-25 — the admin override is WITHDRAWN on the server too, not only
       ),
     ).rejects.toMatchObject({
       status: 409,
-      message: expect.stringMatching(/closed on GitHub without merging/i),
+      // The refusal names the closure and says why the override does not apply.
+      message: expect.stringMatching(/closed on GitHub without merging[\s\S]*Force-accept cannot override that/i),
     });
     // The task did not move and the closed PR was NOT overwritten.
     expect(task().frontmatter.stage).toBe("review");
@@ -512,20 +515,6 @@ describe("F19-25 — the admin override is WITHDRAWN on the server too, not only
     // No audit row either: a `task.acceptance.forced` record for an override
     // that was refused would read as a completed bypass in the log.
     expect(listAuditEvents(store.db, { action: "task.acceptance.forced" })).toHaveLength(0);
-  });
-
-  it("the refusal says WHY the override does not apply here", async () => {
-    seedClosedPrTask();
-    await expect(
-      forceAcceptCompletion(
-        store.db,
-        { projectSlug: store.slug, taskKey: "VIB-1" },
-        arda(),
-        { dataRoot: store.dataRoot },
-      ),
-    ).rejects.toMatchObject({
-      message: expect.stringContaining("Force-accept cannot override that"),
-    });
   });
 
   it("ruling 123: force-accept refuses an ARCHIVED task and says to restore it first", async () => {

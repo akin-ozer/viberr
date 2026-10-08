@@ -274,7 +274,7 @@ function fileKb(bytes: number): string {
  * line naming the files they sent with it and the tool that reads them. The
  * transcript keeps the words alone; the files show under them.
  */
-export function withFilesNote(text: string, files: readonly MessageFile[] | undefined): string {
+function withFilesNote(text: string, files: readonly MessageFile[] | undefined): string {
   if (!files?.length) return text;
   const list = files.map((f) => `\`${f.name}\` (${fileKb(f.bytes)})`).join(", ");
   const one = files.length === 1;
@@ -626,7 +626,7 @@ function steeringChannel(
  * The message gets no reply of its own, so the turn's reply is where its
  * sender hears back.
  */
-export function steeringText(
+function steeringText(
   conversation: Pick<ControllerConversation, "userLabel">,
   messages: readonly (Pick<WaitingMessage, "text" | "surface"> & { files?: readonly MessageFile[] })[],
 ): string {

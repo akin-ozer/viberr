@@ -2,34 +2,16 @@
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { createRoutesStub } from "react-router";
 import { afterEach, describe, expect, it } from "vitest";
-import type { Mentionables } from "~/server/tasks/mention-suggestions.server";
-import type { TimelineEventRender } from "~/shared/mapping/task-event.server";
 import { ToastProvider } from "~/ui/toast";
 import { AttachmentLightboxProvider, useAttachmentLightbox } from "./attachment-lightbox";
-import { Timeline } from "./timeline";
 
 /**
  * Ruling 582: a project admin takes a file off a task's record from the card
- * it opens in; anyone else is not offered it. Ruling 584 gave a comment's
- * words to the operator, so no comment offers Remove. The writer and its
- * refusals are `record-removal.server.test.ts`'s.
+ * it opens in; anyone else is not offered it. The writer and its refusals are
+ * `record-removal.server.test.ts`'s.
  */
 
 afterEach(cleanup);
-
-const MENTIONABLES: Mentionables = { agents: [], users: [], reserved: [] };
-const AT = "2026-09-29T03:34:51.000Z";
-const COMMENT: TimelineEventRender = {
-  id: 1,
-  type: "comment",
-  occurredAt: AT,
-  actor: { kind: "agent", backend: "claude", name: "Estimate Judge", role: "Estimate Judge" },
-  title: null,
-  text: "sample-02 prices no load-balancer line.",
-  toAgent: false,
-  evidence: null,
-  attachments: null,
-};
 
 /** What the task route was sent, keyed by the path that took it. */
 function renderOn(page: () => React.JSX.Element) {
@@ -45,20 +27,6 @@ function renderOn(page: () => React.JSX.Element) {
   ]);
   render(<Stub initialEntries={["/projects/p/tasks/K"]} />);
   return posted;
-}
-
-function timeline() {
-  return (
-    <Timeline
-      events={[COMMENT]}
-      hasMore={false}
-      remaining={0}
-      nextLimit={40}
-      tlDefault="all"
-      ask={0}
-      mentionables={MENTIONABLES}
-    />
-  );
 }
 
 function OpenFile() {
@@ -90,11 +58,10 @@ describe("ruling 582: removing from a task's record", () => {
     });
   });
 
-  it("offers no Remove to a viewer without the grant, and none on a comment (ruling 584)", async () => {
+  it("offers no Remove on a file's card to a viewer without the grant", async () => {
     renderOn(() => (
       <AttachmentLightboxProvider>
         <OpenFile />
-        {timeline()}
       </AttachmentLightboxProvider>
     ));
     fireEvent.click(await screen.findByRole("link", { name: "golden-files.md" }));

@@ -1,7 +1,6 @@
-import { RouterContextProvider } from "react-router";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { z } from "zod";
-import { setupAppTest, type AppTestContext } from "../../test-support/test-app";
+import { routeArgs, setupAppTest, type AppTestContext } from "../../test-support/test-app";
 
 /**
  * Ruling 121 — the controller dock's resource route.
@@ -54,13 +53,7 @@ const loaderView = z.object({
 async function load(query: string, cookie?: string) {
   const { loader } = await import("~/routes/resources.controller");
   const request = app.request(`/resources/controller${query}`, cookie ? { cookie } : {});
-  return loader({
-    request,
-    url: new URL(request.url),
-    params: {},
-    pattern: "/resources/controller",
-    context: new RouterContextProvider(),
-  });
+  return loader(routeArgs(request, {}, "/resources/controller"));
 }
 
 async function get(userId: string, query: string) {
@@ -87,13 +80,7 @@ async function submit(fields: Record<string, string>, cookie?: string, files: re
   const init: RequestInit & { cookie?: string } = { method: "POST", body };
   if (cookie) init.cookie = cookie;
   const request = app.request("/resources/controller", init);
-  return action({
-    request,
-    url: new URL(request.url),
-    params: {},
-    pattern: "/resources/controller",
-    context: new RouterContextProvider(),
-  });
+  return action(routeArgs(request, {}, "/resources/controller"));
 }
 
 async function post(userId: string, fields: Record<string, string>, csrf?: string, files: readonly File[] = []) {
@@ -369,7 +356,7 @@ describe("POST /resources/controller", () => {
     expect(refused.data.error).toContain("Claude isn't connected for you yet");
     // The same sentence is in the transcript the reload shows.
     const messages = listMessages(app.db, thread.id);
-    expect(messages[messages.length - 1]).toMatchObject({ author: "controller" });
+    expect(messages.at(-1)).toMatchObject({ author: "controller", text: refused.data.error });
   });
 
   it("creates a conversation bound to the exact scope, records the surface, and runs the turn", async () => {
@@ -507,13 +494,7 @@ describe("ruling 573: files sent with a controller message", () => {
     const request = app.request(`/resources/controller-file/${fileId}`, {
       cookie: (await app.cookieFor(userId)).cookie,
     });
-    return loader({
-      request,
-      url: new URL(request.url),
-      params: { id: fileId },
-      pattern: "/resources/controller-file/:id",
-      context: new RouterContextProvider(),
-    });
+    return loader(routeArgs(request, { id: fileId }, "/resources/controller-file/:id"));
   }
 
   it("refuses a file the upload rules refuse before any thread exists", async () => {

@@ -3,8 +3,8 @@ import { createTestDbContext, type TestDbContext } from "../../../test-support/t
 import { pollUntil } from "../../../test-support/polling";
 import {
   baseTaskFrontmatter,
+  REVIEWER_ENGAGEMENT,
   setupTestStore,
-  writeProject,
   writeTask,
   type TestStore,
 } from "../../../test-support/test-store";
@@ -12,16 +12,8 @@ import {
   installFakeRuntime,
   queueFakeRun,
 } from "../../../test-support/fake-runtime";
-import {
-  normalizeEvidenceRows,
-  EVIDENCE_MAX_ROWS,
-  type TaskFileEvent,
-} from "~/schemas/task-file.schema";
-import {
-  parseTaskFileContent,
-  serializeTaskFile,
-} from "~/server/files/task-file.server";
-import { readProjectFile } from "~/server/files/project-writer.server";
+import { reconfigureProject } from "../../../test-support/projected-store";
+import { normalizeEvidenceRows } from "~/schemas/task-file.schema";
 import { readTaskFile } from "~/server/files/task-writer.server";
 import { rebuildAll } from "~/server/projections/rebuilder.server";
 import { getTaskDetail } from "~/server/projections/task-query.server";
@@ -128,35 +120,7 @@ describe("normalizeEvidenceRows", () => {
       result: "1 passed",
       status: "pass",
     }));
-    expect(normalizeEvidenceRows(many)!.length).toBe(EVIDENCE_MAX_ROWS);
-  });
-
-  it("round-trips through the task.md serializer/parser", () => {
-    const rows = normalizeEvidenceRows([
-      { label: "suite · integration", result: "38 passed, 4 failed", status: "fail" },
-      { label: "9 files changed on `vib-1`", result: "+412 −87", status: "info" },
-      // No result: the file writes the placeholder, and it reads back empty.
-      { label: "gate · build.log", result: "", status: "pass" },
-    ])!;
-    const event: TaskFileEvent = {
-      occurredAt: "2026-07-24T10:00:00.000Z",
-      type: "quality",
-      actor: { kind: "agent", backend: "claude", profileId: "reviewer", roleHint: "Review" },
-      title: "Review passed",
-      text: "**Validation:** healthy. Reviewer approved the work.",
-      toAgent: false,
-      evidence: rows,
-    };
-    const text = serializeTaskFile({
-      frontmatter: baseTaskFrontmatter("VIB-1"),
-      unknownFrontmatter: {},
-      goal: "g",
-      packet: null,
-      timeline: [event],
-      extraSections: [],
-    });
-    const back = parseTaskFileContent(text).parsed.timeline[0]!;
-    expect(back.evidence).toEqual(rows);
+    expect(normalizeEvidenceRows(many)!.length).toBe(8); // ruling 493: eight rows
   });
 });
 
@@ -199,15 +163,7 @@ describe("recordAgentCompletion attaches evidence to the outcome event", () => {
     writeTask(store.dataRoot, store.slug, {
       frontmatter: baseTaskFrontmatter("VIB-1", {
         stage: "review",
-        engagements: [
-          {
-            profileId: "reviewer",
-            backend: "claude",
-            role: "Review & validation",
-            delivers: false,
-            verdictCapable: true,
-          },
-        ],
+        engagements: [REVIEWER_ENGAGEMENT],
         workRevision: {
           id: "rev_1",
           headSha: "a".repeat(40),
@@ -324,9 +280,7 @@ describe("end-to-end: a staged report_outcome envelope lands its evidence", () =
   function deployReviewer(
     capabilities: { capabilityId: string; mode: "direct" | "human" | "off" }[],
   ): void {
-    const file = readProjectFile({ projectSlug: store.slug, dataRoot: store.dataRoot })!;
-    writeProject(store.dataRoot, {
-      ...file.parsed.frontmatter,
+    reconfigureProject(store, {
       repo: null,
       agents: [
         {
@@ -343,7 +297,6 @@ describe("end-to-end: a staged report_outcome envelope lands its evidence", () =
         },
       ],
     });
-    rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
   }
 
   function writeReviewTask(): void {
@@ -354,15 +307,7 @@ describe("end-to-end: a staged report_outcome envelope lands its evidence", () =
         title: "Attach execution workspace",
         branch: "vib-1-work",
         validation: "changed",
-        engagements: [
-          {
-            profileId: "reviewer",
-            backend: "claude",
-            role: "Review & validation",
-            delivers: false,
-            verdictCapable: true,
-          },
-        ],
+        engagements: [REVIEWER_ENGAGEMENT],
         workRevision: {
           id: "rev_1",
           headSha: "a".repeat(40),

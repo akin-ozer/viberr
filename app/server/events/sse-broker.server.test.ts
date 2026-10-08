@@ -8,19 +8,20 @@ import {
 } from "~/server/db/data-root-lock.server";
 import { createTestDbContext } from "../../../test-support/test-db";
 import {
-  closeAllSseConnections,
   connectSseClient,
   getSseBrokerStats,
-  HEARTBEAT_CHUNK,
-  HEARTBEAT_INTERVAL_MS,
   parseSseScope,
   publishSseEvent,
   resetSseBrokerForTests,
-  RING_BUFFER_SIZE,
-  STREAM_RING_BUFFER_SIZE,
   runProcessShutdown,
   type SseScope,
 } from "./sse-broker.server";
+
+/** The stream's documented figures (codebase-map.md, `events/`): a 25 s
+ *  heartbeat, and a 256-event replay ring for data events and another for
+ *  console lines. */
+const HEARTBEAT_MS = 25_000;
+const RING_SIZE = 256;
 
 const lockCtx = createTestDbContext();
 
@@ -309,7 +310,7 @@ describe("ring buffer replay (Last-Event-ID)", () => {
 
   it("sends stream.resync when the id predates the buffer window", () => {
     const base = getSseBrokerStats().headId;
-    for (let i = 0; i < RING_BUFFER_SIZE + 10; i += 1) {
+    for (let i = 0; i < RING_SIZE + 10; i += 1) {
       publishSseEvent(rebuiltEvent(), { broadcast: true });
     }
     // Oldest buffered id is now 11 — lastEventId 3 cannot be caught up.
@@ -317,8 +318,8 @@ describe("ring buffer replay (Last-Event-ID)", () => {
     expect(conn.names()).toEqual(["stream.open", "stream.resync"]);
     // And 10, the newest id the ring let go of, can: 11 onwards is replayed.
     const edge = connect("u1", [{ kind: "user" }], { lastEventId: base + 10 });
-    expect(edge.names().filter((n) => n === "projection.rebuilt")).toHaveLength(RING_BUFFER_SIZE);
-    // 9, one short of the edge, is gone: the ring holds exactly RING_BUFFER_SIZE.
+    expect(edge.names().filter((n) => n === "projection.rebuilt")).toHaveLength(RING_SIZE);
+    // 9, one short of the edge, is gone: the ring holds exactly RING_SIZE.
     const past = connect("u1", [{ kind: "user" }], { lastEventId: base + 9 });
     expect(past.names()).toEqual(["stream.open", "stream.resync"]);
   });
@@ -391,7 +392,7 @@ describe("ring buffer replay (Last-Event-ID)", () => {
     expect(conn.writes.at(-1)).toContain("K-3");
     // The newest console lines replay too, in id order (the console reads
     // any older ones through its own cursor).
-    expect(conn.names().filter((n) => n === "run.log-appended")).toHaveLength(STREAM_RING_BUFFER_SIZE);
+    expect(conn.names().filter((n) => n === "run.log-appended")).toHaveLength(RING_SIZE);
     const ids = conn.writes
       .slice(1)
       .map((w) => Number(/^id: (\d+)$/m.exec(w)?.[1]));
@@ -405,14 +406,12 @@ describe("heartbeat", () => {
     const conn = connect("u1", [{ kind: "user" }]);
     const before = conn.writes.length;
 
-    vi.advanceTimersByTime(HEARTBEAT_INTERVAL_MS);
+    vi.advanceTimersByTime(HEARTBEAT_MS);
     expect(conn.writes.length).toBe(before + 1);
-    expect(conn.writes.at(-1)).toBe(HEARTBEAT_CHUNK);
-    // Comment format: starts with ":", terminated by a blank line.
-    expect(conn.writes.at(-1)!.startsWith(":")).toBe(true);
-    expect(conn.writes.at(-1)!.endsWith("\n\n")).toBe(true);
+    // An SSE comment (":" and a blank line): clients ignore it, proxies see traffic.
+    expect(conn.writes.at(-1)).toBe(": hb\n\n");
 
-    vi.advanceTimersByTime(HEARTBEAT_INTERVAL_MS);
+    vi.advanceTimersByTime(HEARTBEAT_MS);
     expect(conn.writes.length).toBe(before + 2);
   });
 
@@ -421,7 +420,7 @@ describe("heartbeat", () => {
     const conn = connect("u1", [{ kind: "user" }]);
     conn.handle.close();
     const count = conn.writes.length;
-    vi.advanceTimersByTime(HEARTBEAT_INTERVAL_MS * 3);
+    vi.advanceTimersByTime(HEARTBEAT_MS * 3);
     expect(conn.writes.length).toBe(count);
   });
 
@@ -456,7 +455,7 @@ describe("heartbeat", () => {
 
     // Removed from beta, still a member of alpha.
     allowed = [{ kind: "project", slug: "alpha" }];
-    vi.advanceTimersByTime(HEARTBEAT_INTERVAL_MS);
+    vi.advanceTimersByTime(HEARTBEAT_MS);
     const afterBeat = writes.length;
     publishSseEvent(rebuiltEvent(), { projectSlug: "beta" });
     expect(writes.length).toBe(afterBeat); // beta no longer reaches them
@@ -466,7 +465,7 @@ describe("heartbeat", () => {
     // Removed from everything: the stream closes rather than idling on with
     // scopes its user no longer holds.
     allowed = [];
-    vi.advanceTimersByTime(HEARTBEAT_INTERVAL_MS);
+    vi.advanceTimersByTime(HEARTBEAT_MS);
     expect(lifecycle.closed).toBe(true);
     handle.close();
   });
@@ -507,15 +506,6 @@ describe("drop-and-close on failed write", () => {
 });
 
 describe("shutdown", () => {
-  it("closeAllSseConnections closes everything", () => {
-    const a = connect("u1", [{ kind: "user" }]);
-    const b = connect("u2", [{ kind: "project", slug: "p" }]);
-    closeAllSseConnections();
-    expect(a.closed).toBe(true);
-    expect(b.closed).toBe(true);
-    expect(getSseBrokerStats().connections).toBe(0);
-  });
-
   // G1: the SIGINT/SIGTERM handler ends in a re-raise, so Node's `exit` event
   // never fires — everything the process owes the disk has to happen HERE. A
   // stranded writer.lock is what bricks the next `docker compose up`.
@@ -527,11 +517,15 @@ describe("shutdown", () => {
       isAlive: () => true,
     });
     expect(existsSync(lock.path)).toBe(true);
-    const conn = connect("u1", [{ kind: "user" }]);
+    const a = connect("u1", [{ kind: "user" }]);
+    const b = connect("u2", [{ kind: "project", slug: "p" }]);
 
     runProcessShutdown();
 
-    expect(conn.closed).toBe(true);
+    // Every connection, whatever its scopes, and none left registered.
+    expect(a.closed).toBe(true);
+    expect(b.closed).toBe(true);
+    expect(getSseBrokerStats().connections).toBe(0);
     expect(existsSync(lock.path)).toBe(false);
     expect(heldDataRootLock()).toBeNull();
   });

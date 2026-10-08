@@ -72,7 +72,7 @@ export interface DiskThresholds {
   critical: number;
 }
 
-export function diskThresholds(): DiskThresholds {
+function diskThresholds(): DiskThresholds {
   const env = getEnv();
   const low = Math.floor(env.VIBERR_DISK_LOW_FREE_MB * MB);
   const critical = Math.floor(env.VIBERR_DISK_CRITICAL_FREE_MB * MB);
@@ -81,10 +81,7 @@ export function diskThresholds(): DiskThresholds {
   return { low: Math.max(low, critical), critical };
 }
 
-export function classifyFreeBytes(
-  freeBytes: number,
-  thresholds = diskThresholds(),
-): DiskStatus {
+function classifyFreeBytes(freeBytes: number, thresholds: DiskThresholds): DiskStatus {
   if (freeBytes < thresholds.critical) return "critical";
   if (freeBytes < thresholds.low) return "low";
   return "ok";
@@ -187,8 +184,8 @@ function readPath(path: string, probes: DiskProbes): RawDiskReading | null {
 export function measureDataRootSpace(
   dataRoot?: string,
   probes: DiskProbes = DEFAULT_PROBES,
-  hostDiskPath: string | undefined = getEnv().VIBERR_HOST_DISK_PATH,
 ): DiskSpace | null {
+  const hostDiskPath = getEnv().VIBERR_HOST_DISK_PATH;
   const root = readPath(getDataRoot(dataRoot), probes);
   if (!root) return null;
   const host = hostDiskPath ? readPath(hostDiskPath, probes) : null;

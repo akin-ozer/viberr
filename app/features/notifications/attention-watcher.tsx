@@ -37,7 +37,7 @@ import {
  */
 
 /** A hidden or unfocused tab reads the snapshot this often. */
-export const ATTENTION_POLL_MS = 60_000;
+const ATTENTION_POLL_MS = 60_000;
 
 /** The person is looking at this tab: it is visible and its window has focus. */
 function attended(): boolean {

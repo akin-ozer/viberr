@@ -30,7 +30,7 @@ import { toError } from "~/shared/errors";
  *   running watcher instead of stacking duplicates.
  */
 
-export const KB_WATCH_DEBOUNCE_MS = 250;
+const KB_WATCH_DEBOUNCE_MS = 250;
 
 const KB_WATCHER_KEY = Symbol.for("viberr.kbWatcher");
 

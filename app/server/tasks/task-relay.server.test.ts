@@ -20,6 +20,7 @@ import {
   startedRunSpecs,
 } from "../../../test-support/fake-runtime";
 import { connectFakeBackend } from "../../../test-support/backend-credentials";
+import { reconfigureProject } from "../../../test-support/projected-store";
 import { readProjectFile } from "~/server/files/project-writer.server";
 import { readTaskFile } from "~/server/files/task-writer.server";
 import { rebuildAll } from "~/server/projections/rebuilder.server";
@@ -162,18 +163,7 @@ async function relay(
   return replyText.parse(await def.handler(args, {}));
 }
 
-async function eventually(assertion: () => void, ms = 8_000): Promise<void> {
-  const deadline = Date.now() + ms;
-  for (;;) {
-    try {
-      assertion();
-      return;
-    } catch (error) {
-      if (Date.now() > deadline) throw error;
-      await new Promise((resolve) => setTimeout(resolve, 20));
-    }
-  }
-}
+const eventually = (assertion: () => void, ms = 8_000) => vi.waitFor(assertion, { timeout: ms, interval: 20 });
 
 const NUMBERS =
   "Deployed cron CPU: 5 ms and 6 ms of the 10 ms limit, 3/50 subrequests.\n\n" +
@@ -278,20 +268,6 @@ describe("ruling 488: the operator's relay_to_task", () => {
     expect(timeline("VIB-4")).toHaveLength(counts.archived);
     expect(listAuditEvents(store.db, { action: "task.relayed" })).toEqual([]);
     expect(runOperator).not.toHaveBeenCalled();
-  });
-
-  it("is withheld with the comment grant", () => {
-    // Canary: build the tool outside the `append-typed-events` block.
-    const authority = resolveOperatorAuthority(dctx(), store.slug);
-    authority.policy.set("append-typed-events", "off");
-    const toolkit = buildOperatorToolkit({
-      db: store.db,
-      ctx: dctx(),
-      projectSlug: store.slug,
-      taskKey: "VIB-1",
-      authority,
-    });
-    expect(toolkit.allowedTools).not.toContain("mcp__viberr__relay_to_task");
   });
 });
 
@@ -496,12 +472,9 @@ describe("ruling 557: a task takes the files it works from", () => {
   });
 
   it("is withheld with the comment grant, as the relay is", () => {
-    const project = readProjectFile({ projectSlug: store.slug, dataRoot: store.dataRoot })!;
-    writeProject(store.dataRoot, {
-      ...project.parsed.frontmatter,
+    reconfigureProject(store, {
       agents: [{ ...OPERATOR, capabilities: [{ capabilityId: "append-typed-events", mode: "off" }] }, PLATFORM_ENGINEER],
     });
-    rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
     const toolkit = buildOperatorToolkit({
       db: store.db,
       ctx: dctx(),

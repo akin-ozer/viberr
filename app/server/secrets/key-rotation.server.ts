@@ -39,11 +39,11 @@ import { toError } from "~/shared/errors";
  */
 
 /** Every table that stores a sealed box. key-rotation.server.test.ts pins this
- *  list to the `sealSecret(` call sites in `app/` and fails when a new one
- *  appears unregistered, because a count that silently misses a store is worse
- *  than no count — it would tell an operator the rotation is finished while a
- *  whole table still needs the retired key. */
-export const SEALED_STORES = [
+ *  list, as the status report names it, to the `sealSecret(` call sites in
+ *  `app/` and fails when a new one appears unregistered, because a count that
+ *  silently misses a store is worse than no count — it would tell an operator
+ *  the rotation is finished while a whole table still needs the retired key. */
+const SEALED_STORES = [
   {
     id: "github_pats",
     label: "GitHub PATs",

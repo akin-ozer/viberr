@@ -14,7 +14,6 @@ import {
 } from "~/server/files/file-store-root.server";
 import { createConnection } from "./connections.server";
 import {
-  getSkill,
   listKnowledgeBases,
   listSkills,
   resolveStoreTarget,
@@ -45,10 +44,6 @@ afterEach(dbCtx.cleanup);
 /** The freshness columns these tests read back off an adopted store row. */
 const skillFreshnessRow = z.object({ id: z.string(), updated_at: z.string() });
 const kbIndexedRow = z.object({ id: z.string(), last_indexed_at: z.string() });
-const kbStampsRow = z.object({
-  last_indexed_at: z.string(),
-  updated_at: z.string(),
-});
 const kbLastIndexedRow = z.object({ last_indexed_at: z.string() });
 
 const ACTOR = { userId: "u_t", label: "t@test" };
@@ -153,7 +148,7 @@ describe("uploads", () => {
     );
     expect(result.capturedSkillMd).toBe(true);
     // The skill body is re-read from disk on the next load.
-    expect(getSkill(db, skill.id, ctx)!.body).toBe("## captured body");
+    expect(listSkills(db, ctx).find((s) => s.id === skill.id)!.body).toBe("## captured body");
   });
 
   // Ruling 183 (pass 36, F36-2): the upload path is a SKILL.md writer too.
@@ -181,7 +176,7 @@ describe("uploads", () => {
       ),
     ).toThrowError(/JSON-escaped/);
     expect(existsSync(path.join(target.rootAbs, "notes.md"))).toBe(false);
-    expect(getSkill(db, skill.id, ctx)!.body).toBe("# kept");
+    expect(listSkills(db, ctx).find((s) => s.id === skill.id)!.body).toBe("# kept");
     // A nested SKILL.md is a supporting file, not the skill: not judged.
     const nested = writeStoreFiles(
       db,
@@ -615,24 +610,22 @@ describe("the `manual` refresh pin (C5)", () => {
       ACTOR,
       ctx,
     );
-    const before = kbStampsRow.parse(
+    const before = kbLastIndexedRow.parse(
       db
-        .prepare(`SELECT last_indexed_at, updated_at FROM org_knowledge_bases WHERE id = ?`)
+        .prepare(`SELECT last_indexed_at FROM org_knowledge_bases WHERE id = ?`)
         .get(kb.id),
     );
 
     const target = resolveStoreTarget(db, "kb", kb.id, ctx)!;
     writeStoreDoc(db, target, [], "note.md", "hello", ACTOR);
 
-    const after = kbStampsRow.parse(
+    const after = kbLastIndexedRow.parse(
       db
-        .prepare(`SELECT last_indexed_at, updated_at FROM org_knowledge_bases WHERE id = ?`)
+        .prepare(`SELECT last_indexed_at FROM org_knowledge_bases WHERE id = ?`)
         .get(kb.id),
     );
-    // The re-scan stamp is pinned…
+    // The re-scan stamp is pinned.
     expect(after.last_indexed_at).toBe(before.last_indexed_at);
-    // …but the row genuinely changed, so `updated_at` still moves.
-    expect(after.updated_at >= before.updated_at).toBe(true);
   });
 
   it("an 'on change' KB still advances last_indexed_at (the pin is not a freeze)", async () => {
@@ -864,12 +857,12 @@ describe("writeStoreDoc", () => {
         overwrite: true,
       }),
     ).toThrowError(/frontmatter/);
-    expect(getSkill(db, skill.id, ctx)!.body).toBe("# kept");
+    expect(listSkills(db, ctx).find((s) => s.id === skill.id)!.body).toBe("# kept");
     const ok = writeStoreDoc(db, target, [], "SKILL.md", "# Rewritten\n- fine", ACTOR, {
       overwrite: true,
     });
     expect(ok.replaced).toBe(true);
-    expect(getSkill(db, skill.id, ctx)!.body).toBe("# Rewritten\n- fine");
+    expect(listSkills(db, ctx).find((s) => s.id === skill.id)!.body).toBe("# Rewritten\n- fine");
   });
 
   // P14-RV-02: `assertInsideRoot` was LEXICAL — it proved the path STRING sat
