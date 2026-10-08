@@ -821,8 +821,9 @@ export async function openTaskPr(
     }
     return { status: "refused", message: detail };
   }
-  // Ruling 128: GitHub answered. An unmapped status or a body this reader
-  // could not decode is a REFUSAL that quotes GitHub, never "unreachable".
+  // Ruling 128: GitHub answered with a status nothing above maps. That is a
+  // REFUSAL that quotes GitHub, never "unreachable" (a body this reader could
+  // not decode took the salvage path above).
   return {
     status: "refused",
     message: created.message,
