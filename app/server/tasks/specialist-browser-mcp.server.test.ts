@@ -206,7 +206,6 @@ describe("attachmentsDropSection — ruling 159, an absolute path outside the ch
   const dir = "/data/projects/knc/tasks/KNC-9/attachments";
   it("prints the absolute dir, says it is outside the checkout and never to commit it", () => {
     const p = attachmentsDropSection(dir);
-    expect(path.isAbsolute(dir)).toBe(true);
     expect(p).toContain(`\`${dir}\``);
     expect(p).toContain("ABSOLUTE path");
     expect(p).toContain("outside the repository checkout");
