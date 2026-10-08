@@ -75,9 +75,16 @@ Build the cover as one HTML page that holds one box of exactly the cover's size 
 
 ## Saving and recording
 
-1. When it is right, the same call with `scale` 1.5 makes the cover you keep. Look at that one too: it is the picture that goes out. Copy the picture `capture_page` saved for your run (its reply names the file) into the task's attachments folder as `cover.png`, or under the name the rulings ask for, before you capture anything else: each capture replaces the file of the one before. Keep `cover.html` beside it, so a person can change it later.
+1. Finish the page first, with whatever title or description it carries: once the cover is kept, the page does not change, and a change to it means a new cover kept over the old one. When it is right, the same call with `scale` 1.5 makes the cover you keep. Look at that one too: it is the picture that goes out. Copy the picture `capture_page` saved for your run (its reply names the file) into the task's attachments folder as `cover.png`, or under the name the rulings ask for, before you capture anything else: each capture replaces the file of the one before. Keep `cover.html` beside it, so a person can change it later.
 2. Write alt text that says what is on the cover, for someone who cannot see it.
-3. Name the cover where the destination takes one, as the rulings describe: a field of the piece, or its first image where the destination shows the cover inside the text. Where the rulings keep the piece's fields in a file beside it, the field that names its cover is yours to fill: the file, where it goes and its alt text, in place of what stood there. In a field that lists the piece's pictures, add the cover and leave every other entry as it is. Read those files again just before you change them: another agent may have changed them since you first read them. Change nothing else in the piece. Its words and its title are the writer's, and a sentence elsewhere that your change makes out of date (a word count, a publishing step) is a line of your report, not yours to rewrite.
+3. Name the cover where the destination takes one, as the rulings describe: a field of the piece, or its first image where the destination shows the cover inside the text. Where the rulings keep the piece's fields in a file beside it, the field that names its cover is yours to fill: the file, where it goes and its alt text, in place of what stood there. In a field that lists the piece's pictures, add the cover and leave every other entry as it is. Read those files again just before you change them: another agent may have changed them since you first read them. Make each change as an exact replacement of the lines it touches in the file as it stands, never a rewrite of the file. A file of fields is text: read it, and do not picture it. Where the cover sits inside the piece, look at the piece once at the phone width (`view` chooses the width) to see that it shows there. Change nothing else in the piece. Its words and its title are the writer's, and a sentence elsewhere that your change makes out of date (a word count, a publishing step) is a line of your report, not yours to rewrite.
+
+## What you do not prove
+
+Your cover is your evidence: the reviewer opens it and looks. What you did not touch needs no proof from you.
+
+- Take no hash of a file, keep no copy to compare against, run no diff, and make no fresh render to show that a kept cover still matches its page. Write up no check, and keep none as a source.
+- A rework that changes nothing on the cover needs no render and no look: change the lines it names, and report.
 
 ## When it comes back
 

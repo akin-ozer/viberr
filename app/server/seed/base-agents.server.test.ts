@@ -360,6 +360,28 @@ describe("ruling 699: the library ships a Diagrammer and a Cover Designer", () =
     const cover = said(dataRoot, "cover-designer-expertise");
     expect(cover).toContain("**It shows something from the piece.**");
     expect(cover).toContain("would this cover fit another piece on the same topic? Then it is wallpaper.");
+    // Live on BLOG-5, the first post through both stages: each agent hashed
+    // the task's files, kept copies to diff against, rendered its drawing
+    // again to show the kept picture still matched and pictured the notes
+    // file as a page, and a one-entry fix to a field took eight minutes, five
+    // captures and a kept source of its own check. CANARY: drop any sentence.
+    for (const manual of [diagrammer, cover]) {
+      expect(manual).toContain("## What you do not prove");
+      expect(manual).toContain("Take no hash of a file, keep no copy to compare against, run no diff");
+      expect(manual).toContain("Write up no check, and keep none as a source.");
+      expect(manual).toMatch(/A rework that changes (no picture|nothing on the cover) needs no render and no look/);
+      expect(manual).toMatch(/once the (picture|cover) is kept, the (drawing|page) does not change/);
+      expect(manual).toMatch(/(That file|A file of fields) is text: read it, and do not picture it\./);
+      expect(manual).toContain("an exact replacement of the lines it touches in the file as it stands, never a rewrite of the file");
+    }
+    expect(cover).toContain("look at the piece once at the phone width");
+    // The same post went back to its writer before review, for lines of the
+    // writer's own note the two pictures had made untrue: `wc -w` of the
+    // whole file, "the post has no images", "you supply the cover".
+    // CANARY: drop either sentence.
+    const writerOnPictures = said(dataRoot, "writer-expertise");
+    expect(writerOnPictures).toContain("say nothing in your note that they will make untrue: no count of the whole file, and not that the piece has no pictures");
+    expect(writerOnPictures).toContain("leave the fields for its pictures and its cover to the agent that makes them");
     expect(cover).toContain("Generated or stock imagery, and anything drawn to look like either.");
     expect(cover).toContain("An invented screen, output, quote or number.");
     // Read before it shipped: the recipe hid the page's overflow, and the
@@ -439,6 +461,10 @@ describe("ruling 699: the library ships a Diagrammer and a Cover Designer", () =
     // changed. CANARY: remove either hash.
     expect(shippedCopyIsUnedited("skills/diagrammer-expertise/SKILL.md", "e9fc50d6d8b5faec3d5cc42c1769c1294f754b1c646e8b4a7bbd2149f9041cb4", {})).toBe(true);
     expect(shippedCopyIsUnedited("skills/cover-designer-expertise/SKILL.md", "2d5812d25c1d2a95b4dbc865c37fba3eec8c743bf4b0923fdcb51bf88940f5e0", {})).toBe(true);
+    // And as they stood for the first live post. CANARY: remove any hash.
+    expect(shippedCopyIsUnedited("skills/writer-expertise/SKILL.md", "d6d81936257867a5e9989e6986262d8cbcc034a69b4f350c6f15eaaa21da6c11", {})).toBe(true);
+    expect(shippedCopyIsUnedited("skills/diagrammer-expertise/SKILL.md", "dee86c6136a016eeaf393b461996152fd62ee49ac879b9ad61a7ece73dbb3564", {})).toBe(true);
+    expect(shippedCopyIsUnedited("skills/cover-designer-expertise/SKILL.md", "943933d71103d9fc7665ba1ce87f887129cc87394d5171ecb09c81d857afbf78", {})).toBe(true);
   });
 });
 

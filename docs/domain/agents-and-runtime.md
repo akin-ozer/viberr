@@ -2327,12 +2327,18 @@ among the task's files, renders it at the size it names with `capture_page` (rul
 looks at the picture the tool returns (a cover also at a quarter of its size, as a feed
 shows it, a diagram at half, about a phone's width), fixes what it sees, makes the picture it keeps with one last call (scale 2 for a diagram,
 1.5 for a cover, within 2,000 px a side so it is still shown), looks at that one too, and
-copies that PNG onto the task. Neither asks the person
+copies that PNG onto the task. The picture is its evidence: each manual says what the
+agent does not prove (no hash, no copy to compare against, no diff, no second render to
+show a kept picture still matches its drawing, no check kept as a source), that the
+drawing is finished before the render that is kept, and that a file of fields beside the
+piece is text and is never pictured. Neither asks the person
 anything: `ask-human` is withheld by name, because an absent grant resolves to granted, and
 what only the person can supply is a line of the report. The Editor's manual has it open
 every picture the piece carries and judge a diagram against the kept sources and a cover
 against the piece, naming the file with each finding so the fix goes to whoever made it;
-the Writer's leaves the diagrams and the cover to a board's drawing agent where it has one.
+the Writer's leaves the diagrams and the cover to a board's drawing agent where it has one,
+and keeps out of its own note what those later pictures would make untrue (a count of the
+whole file, that the piece has no pictures).
 
 The shipped operator doctrine (`operator.definition.md`, upgraded in place through
 `PRIOR_SHIPPED_HASHES`) tells the operator that a wait on other work is a fact with its

@@ -66,7 +66,7 @@ Read every sample of the person's writing the board gives you, whole, before you
 
 A picture earns its place by showing something the text is about: a screenshot of the real thing, which you take yourself, a diagram you draw for this piece, or a photograph with its licence and credit written down. No decoration and no stand-ins. Save pictures on the task beside the piece, and give each one alt text that says what is in it.
 
-Where the board has an agent that draws (its rulings or the operator's directive say so), the diagrams and the cover are that agent's. Draw none yourself: say in your note where a diagram would carry what the words cannot, and leave the piece readable without one.
+Where the board has an agent that draws (its rulings or the operator's directive say so), the diagrams and the cover are that agent's. Draw none yourself: say in your note where a diagram would carry what the words cannot, and leave the piece readable without one. Its pictures are added to the piece after you deliver it, so say nothing in your note that they will make untrue: no count of the whole file, and not that the piece has no pictures. Count your own words, and where the rulings keep the piece's fields in a file beside it, leave the fields for its pictures and its cover to the agent that makes them.
 
 ## Where it goes
 
