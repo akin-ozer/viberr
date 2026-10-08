@@ -244,8 +244,12 @@ A nudged drive that again ends stranded WITHOUT progress — no stage move away 
 it started, no delivery, and no action carried out at all (rulings 202, 406) — records a
 deliberate hold (`heldAtStage`) with a note, and later external triggers find the hold
 and stay quiet until a person re-litigates it (a transition, a packet resolution, a goal
-edit, a person's Run). When the nudged drive's plan was wholly refused again, the note
-says the operator was STOPPED, not holding, and names the three remedies (ruling 399).
+edit, a person's Run). An action carried out is any governed action that answered `done`,
+or one whose outcome is the packet it opened (ruling 443), on either backend: a Codex plan
+step through the executor's `record` and a Claude tool call through the toolkit's reply
+both stamp it with `noteCarriedOutAction` (ruling 705). When the nudged drive's plan was
+wholly refused again, the note says the operator was STOPPED, not holding, and names the
+three remedies (ruling 399).
 The nudge chain shares `OPERATOR_TRANSITION_CHAIN_CAP`; at the cap a note says the
 operator ended that many runs without advancing, opening a packet or engaging an agent.
 

@@ -127,6 +127,30 @@ export interface OperatorActionResult {
   notifiedUserIds?: string[];
 }
 
+/**
+ * Ruling 406: an operator that ACTED did not hold. Stamps the drive's
+ * `carriedOutAction` when an action's result says it was carried out, `done`
+ * or (ruling 443) a step whose outcome is the decision packet it opened,
+ * whatever effect it had.
+ *
+ * Ruling 705: the ONE predicate both operator backends answer from. A Codex
+ * plan's steps pass through `executeCodexPlan`'s `record` and a Claude drive's
+ * governed tools reply through the toolkit's `resultText`, and each calls
+ * this, so the next action shape counts on both the day it is added. The
+ * stamp used to live in `record` alone, which covered one backend: a Claude
+ * nudge whose one action was a comment, or a refresh of a branch already
+ * current (AX-18's shape), was recorded as a deliberate hold where the same
+ * plan on Codex was resumed.
+ */
+export function noteCarriedOutAction(
+  ctx: TaskMutationContext,
+  result: OperatorActionResult,
+): void {
+  if (ctx.operatorRun && (result.outcome === "done" || result.openedPacket)) {
+    ctx.operatorRun.carriedOutAction = true;
+  }
+}
+
 function readAutonomy(
   definition: AgentDeploymentDefinition | undefined,
 ): OperatorAutonomy {

@@ -26,6 +26,7 @@ import {
   deliverGate,
   dispatchGate,
   gate,
+  noteCarriedOutAction,
   type OperatorActionResult,
   type OperatorAuthority,
 } from "./operator-authority.server";
@@ -205,10 +206,6 @@ interface ToolkitDeps {
 // literal "\n" rendered verbatim on the timeline).
 const prose = normalizeEscapedNewlines;
 
-function resultText(r: OperatorActionResult) {
-  return textResult(`[${r.outcome}] ${r.message}`);
-}
-
 // The action inputs, taken FROM the actions themselves: each handler below
 // fills one field at a time (an absent key and a key set to undefined are not
 // the same thing to these actions), so it needs the contract by name.
@@ -335,6 +332,15 @@ export function buildOperatorToolkit(deps: ToolkitDeps): OperatorToolkit {
   /** R20-9: the profiles THIS run prompted, for the disclosure the shared
    *  packet writer appends (`operatorOpenPacketDisclosed`). */
   const consultedProfileIds: string[] = [];
+
+  /** The reply every governed tool answers with; the reads answer through
+   *  `textResult`. Ruling 406: it is a Claude drive's one funnel, as `record`
+   *  is a Codex plan's, so it stamps the drive's `carriedOutAction` through the
+   *  predicate `record` asks (ruling 705). */
+  const resultText = (r: OperatorActionResult) => {
+    noteCarriedOutAction(ctx, r);
+    return textResult(`[${r.outcome}] ${r.message}`);
+  };
 
   // get_task — always available (read-only). Also reports the operator's own
   // policy + autonomy so the model knows which actions it may take.

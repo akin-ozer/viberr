@@ -6,6 +6,7 @@ import type { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { expect } from "vitest";
 import { z } from "zod";
 import type { SpecialistMcpServerConfig } from "~/server/tasks/specialist-mcp.server";
+import type { RunMcpServerDeclaration } from "~/server/runtimes/adapter.server";
 import type { JsonValue } from "~/features/runtime/runtime-types";
 
 /**
@@ -106,6 +107,13 @@ export async function publishedInstructions(
   }
   const client = await connectedClient(server, "instructions-read");
   return client.getInstructions() ?? "";
+}
+
+/** A run's mount that is an in-process SDK server, which a client can call. */
+export function inProcess(
+  server: RunMcpServerDeclaration | undefined,
+): server is McpSdkServerConfigWithInstance {
+  return server !== undefined && "instance" in server && "type" in server && server.type === "sdk";
 }
 
 /** A real MCP client, connected over an in-memory pair to a mount's live server. */

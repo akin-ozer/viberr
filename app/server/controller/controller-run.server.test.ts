@@ -1,6 +1,4 @@
-import type { McpSdkServerConfigWithInstance } from "@anthropic-ai/claude-agent-sdk";
 import { joinedPrompt, sortedNames } from "~/server/runtimes/prompt-prefix.server";
-import type { RunMcpServerDeclaration } from "~/server/runtimes/adapter.server";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import {
   setupAppTest,
@@ -1036,13 +1034,6 @@ describe("ruling 370: the controller prefix", () => {
   });
 });
 
-/** A run's mount that is an in-process SDK server, which a client can call. */
-function inProcess(
-  server: RunMcpServerDeclaration | undefined,
-): server is McpSdkServerConfigWithInstance {
-  return server !== undefined && "instance" in server && "type" in server && server.type === "sdk";
-}
-
 /**
  * Ruling 476(h) (F40-61): a chain records the conversation that planned it.
  * Live, goal-1 was planned in a 16-message instance thread, and the project's
@@ -1074,8 +1065,8 @@ describe("ruling 476(h): an epic a turn creates records the conversation it was 
     }
     // The tool the turn was really handed, called the way the model calls it.
     const server = lastRunSpec()?.mcpServers?.["viberr_controller"];
+    const { connectedClient, inProcess } = await import("../../../test-support/mcp-tool-meta");
     if (!inProcess(server)) throw new Error("the turn must mount viberr_controller in process");
-    const { connectedClient } = await import("../../../test-support/mcp-tool-meta");
     const client = await connectedClient(server, "ruling-476");
     const reply = JSON.stringify(
       (
@@ -1155,8 +1146,8 @@ describe("ruling 685: a turn's tools know which message the turn answers", () =>
 
     // The tool the turn was really handed, called the way the model calls it.
     const server = lastRunSpec()?.mcpServers?.["viberr_controller"];
+    const { connectedClient, inProcess } = await import("../../../test-support/mcp-tool-meta");
     if (!inProcess(server)) throw new Error("the turn must mount viberr_controller in process");
-    const { connectedClient } = await import("../../../test-support/mcp-tool-meta");
     const client = await connectedClient(server, "ruling-685");
     const reply = JSON.stringify(
       (

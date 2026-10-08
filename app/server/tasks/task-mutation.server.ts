@@ -114,8 +114,10 @@ export interface TaskMutationContext {
      */
     planWhollyRefused?: boolean;
     /**
-     * Ruling 406 (F39-33): this drive CARRIED OUT at least one planned action
-     * (an `outcome: "done"`), whatever effect it had.
+     * Ruling 406 (F39-33): this drive CARRIED OUT at least one action (an
+     * `outcome: "done"`, or a packet it opened, ruling 443), whatever effect it
+     * had: a Codex plan step or a Claude tool call alike, both stamped by
+     * `noteCarriedOutAction` (ruling 705).
      *
      * The settle-time "deliberate hold" verdict used to be reached by
      * enumerating effects, and the list kept turning out to be short: ruling

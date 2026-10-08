@@ -51,6 +51,7 @@ import {
   deliverGate,
   dispatchGate,
   gate,
+  noteCarriedOutAction,
   type OperatorActionResult,
   type OperatorAuthority,
 } from "~/server/tasks/operator-authority.server";
@@ -910,11 +911,9 @@ export async function executeCodexPlan(
     }
     // Ruling 406: the drive acted. Stamped HERE, on the one funnel every plan
     // step already passes through, so a new action shape is covered the day it
-    // is added instead of the day it is mistaken for a deliberate hold.
-    // Ruling 443: a step whose outcome is the packet it opened acted too.
-    if ((result.outcome === "done" || result.openedPacket) && ctx.operatorRun) {
-      ctx.operatorRun.carriedOutAction = true;
-    }
+    // is added instead of the day it is mistaken for a deliberate hold. The
+    // Claude toolkit's replies ask the same predicate (ruling 705).
+    noteCarriedOutAction(ctx, result);
   };
   // B-6 (pass 24): OpenAI-strict structured output makes every plan field
   // present-but-nullable, so a step like `{tool:"transition_stage", toStageId:null}`
