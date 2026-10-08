@@ -44,7 +44,7 @@ export interface TaskFileReadResult {
 }
 
 /** Reads + tolerantly parses a task file. Returns null when absent, and for a
- *  key that is not one folder under the project's tasks (ruling 695): a read
+ *  key that is not one folder under the project's tasks (ruling 696): a read
  *  finds no task there, as it finds none under a key nobody has used. */
 export function readTaskFile(ref: TaskFileRef): TaskFileReadResult | null {
   let absPath: string;

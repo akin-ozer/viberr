@@ -156,14 +156,14 @@ describe("GET /projects/:slug/tasks/:key/attachments/:file (R19-19)", () => {
   });
 
   /**
-   * Ruling 695: the task key is one folder under the project's tasks. The
+   * Ruling 696: the task key is one folder under the project's tasks. The
    * router hands a loader its params decoded, `%2F` as `/` (measured over HTTP
    * on the production build, 2026-10-07: `/projects/viberr-core/tasks/
    * ..%2F..%2Fbilling-service%2Ftasks%2FBIL-9/attachments/<file>` answered 200
    * with billing-service's bytes to a person who is not in it), so the key
    * this loader reads can hold a path.
    */
-  it("ruling 695: a key that walks to another task's folder serves nothing, another project's files least of all", async () => {
+  it("ruling 696: a key that walks to another task's folder serves nothing, another project's files least of all", async () => {
     const billing = { slug: "billing-service", key: "BIL-9" };
     const dir = path.join(app.dataRoot, "projects", billing.slug, "tasks", billing.key, "attachments");
     mkdirSync(dir, { recursive: true });

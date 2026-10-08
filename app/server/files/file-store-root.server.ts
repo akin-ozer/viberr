@@ -75,7 +75,7 @@ export function projectFilePath(slug: string, dataRoot?: string): string {
 }
 
 /**
- * One task's folder. Ruling 695: the key is one folder under the project's
+ * One task's folder. Ruling 696: the key is one folder under the project's
  * tasks, or it names no task.
  *
  * A key arrives from a URL and from an agent's tool call as well as from the
