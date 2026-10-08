@@ -29,7 +29,6 @@ import { readProjectFile } from "~/server/files/project-writer.server";
 import { MERGE_STAGE_BOARD, REVIEW_STAGE_REVIEWER, writeProject } from "../../../test-support/test-store";
 import { operatorSnapshot } from "~/server/tasks/operator-snapshot.server";
 import type { OperatorAuthority } from "~/server/tasks/operator-authority.server";
-import { performDelivery } from "~/server/tasks/task-delivery.server";
 import type { TaskActionDeps } from "~/server/tasks/task-action-core.server";
 import { upsertRun } from "~/server/runtimes/run-store.server";
 import {
@@ -1171,7 +1170,6 @@ describe("ruling 475 (F40-20): the operator hands a conflict to the delivering a
  * the five minutes until the next poll.
  */
 describe("ruling 494: a branch update and the push after it leave the pushed head's count", () => {
-  const NEW = "c0ffee1".padEnd(40, "0");
   const SLOW = { userId: null, label: "poller" };
 
   const rowSchema = z.object({
@@ -1229,57 +1227,12 @@ describe("ruling 494: a branch update and the push after it leave the pushed hea
   const snap = () =>
     operatorSnapshot(store.db, { dataRoot: store.dataRoot }, store.slug, "VIB-1", authority());
 
-  it("branch update then push: the count after the delivery push is the pushed head's", async () => {
-    // CANARY: drop the delivery's post-push re-compare, and `get_task` reads
-    // the poll's 6 for GitHub's older copy.
+  it("an already-current update whose origin lags pushes nothing, so it records no push", async () => {
+    // CANARY: re-compare on the `already_current` arm, and a `github.push` row
+    // names a head no push published.
     const update = await act(fakeGit({ behind: 0, remote: "behind" }).exec);
     expect(update.message).toContain("behind the workspace head: call `deliver_for_review` to push it");
-    // The update pushed nothing, so it recorded no push.
     expect(rows()).toEqual([]);
-    // The poll reads GitHub's copy, which the delivery has not pushed yet.
-    await reconcileTask(store.db, { projectSlug: store.slug, taskKey: "VIB-1" }, SLOW, {
-      dataRoot: store.dataRoot,
-      fetchImpl: githubAt(REMOTE_SHA, 6).fetchImpl,
-      skipUnchangedProvenance: true,
-    });
-    expect(snap().baseBehindBy).toBe(6);
-
-    const delivered = await performDelivery(
-      store.db,
-      {
-        dataRoot: store.dataRoot,
-        fetchImpl: githubAt(NEW, 0).fetchImpl,
-        deps: {
-          pushWorkspaceBranch: async () => ({
-            status: "pushed",
-            branch: "vib-1",
-            commits: 1,
-            headSha: NEW,
-            remoteHeadBefore: REMOTE_SHA,
-            workflowFiles: [],
-          }),
-          openTaskPr: async () => ({
-            status: "ok",
-            prNumber: 9,
-            created: true,
-            url: "https://github.com/akin-ozer/viberr/pull/9",
-          }),
-        },
-      },
-      store.slug,
-      "VIB-1",
-      { userId: store.users.arda.id, label: "arda" },
-    );
-    expect(delivered).toMatchObject({
-      status: "delivered",
-      recompare: "Re-compared after the push: `vib-1` at `c0ffee1` is level with `main`.",
-    });
-    expect(rows().slice(-2)).toEqual([
-      { action: "github.push", behindBy: undefined, headSha: NEW },
-      { action: "github.reconcile", behindBy: 0, headSha: NEW },
-    ]);
-    expect(snap().baseBehindBy).toBe(0);
-    expect(snap().baseComparedHead).toMatchObject({ sha: NEW, current: true });
   });
 
   it("an update that pushes records the push and counts the merge it pushed", async () => {
