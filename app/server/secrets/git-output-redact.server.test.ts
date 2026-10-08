@@ -2,34 +2,28 @@ import { describe, expect, it } from "vitest";
 import { gitErrorText, redactGitOutput } from "./git-output-redact.server";
 
 describe("redactGitOutput (F19-6 / F19-18)", () => {
-  it("removes the project PAT by value, wherever git echoed it", () => {
-    // Deliberately BELOW the pattern rule's 16-char floor: only the by-value
-    // layer can catch this one, which is the layer the call sites exist to
-    // supply (they hold the token at the failure site).
+  it.each([
+    // The project PAT, deliberately BELOW the pattern rule's 16-char floor:
+    // only the by-value layer can catch this one, which is the layer the call
+    // sites exist to supply (they hold the token at the failure site).
     // Canary: delete the `opts.token` split → the token survives.
-    const out = redactGitOutput(
+    [
+      "ghp_short",
       "remote: Invalid credentials ghp_short\n" +
         "fatal: Authentication failed for 'https://github.com/a/b.git'",
-      { token: "ghp_short" },
-    );
-    expect(out).toContain("Authentication failed");
-    expect(out).toContain("[redacted]");
-    expect(out).not.toContain("ghp_short");
-  });
-
-  it("F20-7: scrubs a SUB-8-char credential by value (the length floor is gone)", () => {
-    // The live leak: a 5-char `MCP_CREDENTIAL` printed as `CRED=xy7Qk` into the
-    // MCP row error, the toast, and the persisted `last_error`. The old
-    // `>= MIN_TOKEN_LEN` (8) floor skipped the by-value pass for a value this
-    // short, and no token PATTERN matches an arbitrary 5-char secret.
+      "Authentication failed",
+    ],
+    // F20-7, the live leak: a 5-char `MCP_CREDENTIAL` printed as `CRED=xy7Qk`
+    // into the MCP row error, the toast, and the persisted `last_error`. The
+    // old `>= MIN_TOKEN_LEN` (8) floor skipped the by-value pass for a value
+    // this short, and no token PATTERN matches an arbitrary 5-char secret.
     // Canary: restore the `opts.token.length >= 8` gate → `xy7Qk` survives.
-    const out = redactGitOutput(
-      "exited before responding — CRED=xy7Qk\nfatal: giving up",
-      { token: "xy7Qk" },
-    );
-    expect(out).toContain("exited before responding");
+    ["xy7Qk", "exited before responding — CRED=xy7Qk\nfatal: giving up", "exited before responding"],
+  ])("scrubs the caller's credential %s by value (F19-6, F20-7)", (token, text, kept) => {
+    const out = redactGitOutput(text, { token });
+    expect(out).toContain(kept);
     expect(out).toContain("[redacted]");
-    expect(out).not.toContain("xy7Qk");
+    expect(out).not.toContain(token);
   });
 
   it("F20-7: an EMPTY token is still a no-op, never a per-character redaction", () => {
