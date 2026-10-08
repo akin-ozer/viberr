@@ -3923,7 +3923,7 @@ describe("ruling 189: a resolved decision amends the task goal", () => {
   it("ruling 295: an unchanged title writes nothing, and an over-long one is refused whole", async () => {
     const store = setupProjectedStore(ctx);
     withTask(store, { stage: "impl", ownerUserId: store.users.arda.id }, null);
-    const { updateTaskTitle, TASK_TITLE_MAX_CHARS } = await import("./task-edits.server");
+    const { updateTaskTitle } = await import("./task-edits.server");
     const current = readTaskFile({
       projectSlug: store.slug,
       taskKey: "VIB-1",
@@ -3943,15 +3943,16 @@ describe("ruling 189: a resolved decision amends the task goal", () => {
         .parsed.timeline.some((e) => e.title === "Title updated"),
     ).toBe(false);
 
-    // Ruling 288's rule one field over: refused by name with nothing written,
-    // never cut. CANARY: `.slice(0, TASK_TITLE_MAX_CHARS)`.
+    // Ruling 288's rule one field over: a title past ruling 295's 200
+    // characters is refused by name with nothing written, never cut.
+    // CANARY: `.slice(0, TASK_TITLE_MAX_CHARS)`.
     await expect(
       updateTaskTitle(
         store.db,
         {
           projectSlug: store.slug,
           taskKey: "VIB-1",
-          title: "x".repeat(TASK_TITLE_MAX_CHARS + 1),
+          title: "x".repeat(201),
         },
         actorOf(store.users.arda),
         { dataRoot: store.dataRoot },
