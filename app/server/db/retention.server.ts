@@ -51,9 +51,9 @@ import { toError } from "~/shared/errors";
  */
 
 /** Raw run log lines: high-volume, low durability value — kept 30 days. */
-export const RUN_LOG_RETENTION_DAYS = 30;
+const RUN_LOG_RETENTION_DAYS = 30;
 /** Audit events: governance record — kept much longer (90 days). */
-export const AUDIT_RETENTION_DAYS = 90;
+const AUDIT_RETENTION_DAYS = 90;
 
 /**
  * B-FD10: audit actions that double as IDEMPOTENCY KEYS, exempt from the window
@@ -77,7 +77,7 @@ const IDEMPOTENCY_AUDIT_ACTIONS = [
   "runtime.operator.plan_executed",
 ] as const;
 /** Notifications: keep the newest N per user (the UI reads far fewer). */
-export const NOTIFICATION_MAX_PER_USER = 500;
+const NOTIFICATION_MAX_PER_USER = 500;
 
 export interface RetentionResult {
   runLogLines: number;
