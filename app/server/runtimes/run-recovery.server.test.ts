@@ -23,6 +23,7 @@ import {
   RECOVERY_REINVOKE_CAP,
 } from "./run-recovery.server";
 import { getRun, insertRunLine, patchRun, upsertRun } from "./run-store.server";
+import { COMPACTING_AFTER_RUN_STEP, RUN_PHASE, SESSION_SETTLING_STEP } from "./adapter.server";
 import {
   codexCompactionHomeId,
   ensureBackendAccountHome,
@@ -201,6 +202,22 @@ describe("finalizeOrphanedRuns (F-RUN1)", () => {
     expect(note!.text).toMatch(/the operator is re-invoked/);
     // One note per task, not one per run.
     expect(parsed.timeline.filter((e) => e.title === "Interrupted by a restart")).toHaveLength(1);
+  });
+
+  it("ruling 701: the restart note says a run parked for its session waited for a summary, not for a slot", async () => {
+    // CANARY: read no step and the run is said to have been queued behind the
+    // concurrent-run cap, on an instance that may have none.
+    seedRun("run_held_orphan", {
+      state: "queued", startedAt: null, kind: "reviewer", role: "Diagrams", agentProfileId: "diagrammer",
+      threadId: "r-diagrammer",
+    });
+    patchRun(store.db, "run_held_orphan", { step: SESSION_SETTLING_STEP });
+    const res = finalizeOrphanedRuns(store.db, { dataRoot: store.dataRoot });
+    await res.notes;
+    const parsed = readTaskFile({ projectSlug: store.slug, taskKey: "VIB-1", dataRoot: store.dataRoot })!.parsed;
+    const note = parsed.timeline.find((e) => e.type === "note" && e.title === "Interrupted by a restart");
+    expect(note!.text).toContain("`run_held_orphan` (Diagrams) was waiting for the summary of its session's last run and had not started");
+    expect(note!.text).not.toContain("concurrent-run cap");
   });
 
   it("ruling 662: the restart note names a supporting agent's run by its role, not as a reviewer", async () => {
@@ -389,6 +406,65 @@ describe("finalizeOrphanedRuns (F-RUN1)", () => {
     expect(existsSync(compaction.dir)).toBe(false);
     expect(readFileSync(path.join(accountHome, "auth.json"), "utf8")).toBe('{"token":"billed-refreshed"}');
     expect(readFileSync(path.join(sharedHome, "auth.json"), "utf8")).toBe('{"token":"other-account"}');
+  });
+
+  it("ruling 701: a finished run whose compaction the restart cut has that compaction's home finished, its process swept and its mark cleared", async () => {
+    // A specialist's run is terminal while its session is compacted, so the
+    // restart leaves no orphan to find it by. CANARY: key the sweep on live
+    // rows alone and the fork stays for good, with its copy of the sign-in
+    // and the token the compaction refreshed.
+    const arda = store.users.arda;
+    const sharedHome = ensureUserBackendHome(arda.id, "codex", store.dataRoot);
+    writeFileSync(path.join(sharedHome, "auth.json"), '{"token":"other-account"}');
+    const target = loginTargetFor(store.db, arda.id, "codex");
+    recordBackendLogin(store.db, { userId: arda.id, label: arda.email }, "codex", "device", {}, target);
+    const { home: accountHome } = ensureBackendAccountHome(arda.id, "codex", target, store.dataRoot);
+    writeFileSync(path.join(accountHome, "auth.json"), '{"token":"billed-old"}');
+    const compaction = prepareCodexRunHome(
+      sharedHome,
+      codexCompactionHomeId("run_codex_done"),
+      undefined,
+      accountHome,
+    );
+    writeFileSync(path.join(compaction.dir, "auth.json"), '{"token":"billed-refreshed"}');
+    const finishedRun = {
+      state: "finished" as const,
+      finishedAt: new Date().toISOString(),
+      kind: "primary" as const,
+      role: "Implementation",
+      agentProfileId: "developer",
+      backend: "codex" as const,
+      model: "gpt-5.6-luna",
+      sdk: "Codex SDK",
+      credentialUserId: arda.id,
+      credentialAccountId: target.id,
+    };
+    seedRun("run_codex_done", finishedRun);
+    patchRun(store.db, "run_codex_done", { phase: RUN_PHASE.compacting, step: COMPACTING_AFTER_RUN_STEP });
+    // A finished run with no mark was settled in its own process.
+    seedRun("run_codex_settled", { ...finishedRun, threadId: "primary-settled" });
+    const asked: string[][] = [];
+    const result = finalizeOrphanedRuns(store.db, {
+      dataRoot: store.dataRoot,
+      reapProcesses: async (targets) => {
+        asked.push([...targets.runIds]);
+        return { terminated: 0, killed: 0 };
+      },
+    });
+    expect(result.finalized).toBe(0);
+    await result.reaped;
+    expect(existsSync(compaction.dir)).toBe(false);
+    expect(readFileSync(path.join(accountHome, "auth.json"), "utf8")).toBe('{"token":"billed-refreshed"}');
+    expect(readFileSync(path.join(sharedHome, "auth.json"), "utf8")).toBe('{"token":"other-account"}');
+    expect(getRun(store.db, "run_codex_done")).toMatchObject({ state: "finished", phase: null, step: null });
+    expect(asked).toEqual([["run_codex_done:compaction"]]);
+    // A second boot finds nothing.
+    asked.length = 0;
+    await finalizeOrphanedRuns(store.db, { dataRoot: store.dataRoot, reapProcesses: async (targets) => {
+      asked.push([...targets.runIds]);
+      return { terminated: 0, killed: 0 };
+    } }).reaped;
+    expect(asked).toEqual([]);
   });
 
   it("ruling 507: an orphaned run of an account removed since hands its token back to nobody", () => {

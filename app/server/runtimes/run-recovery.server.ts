@@ -14,6 +14,7 @@ import {
 } from "./agent-isolation.server";
 import { removeAgentTreeSync } from "./agent-trees.server";
 import { patchRun, type AgentRunRow } from "./run-store.server";
+import { COMPACTING_AFTER_RUN_STEP, RUN_PHASE, SESSION_SETTLING_STEP } from "./adapter.server";
 import type { RealBackend } from "./runtime-registry.server";
 import { getBackendAccount } from "./backend-credentials.server";
 import {
@@ -179,6 +180,109 @@ function notifyCappedTask(
   }
 }
 
+/**
+ * Finish the private `CODEX_HOME`s a Codex run's process never got to finish:
+ * the refreshed `auth.json` written back when its bytes changed, the directory
+ * removed. A no-op for a Claude run, for a run that billed nobody, and for a
+ * home that is not there.
+ */
+function finishCodexRunHomes(
+  db: DatabaseSync,
+  run: { backend: string; credential_user_id: string | null; credential_account_id: string | null },
+  homeIds: readonly string[],
+  dataRoot: string | undefined,
+): void {
+  if (run.backend !== "codex" || !run.credential_user_id) return;
+  const sharedHome = userBackendHome(run.credential_user_id, "codex", dataRoot);
+  // Ruling 460: the write-back is the server's file, handed back to the
+  // person's uid like the adapter's settle does; ruling 485: the run home
+  // their CLI wrote is removed as them.
+  const principal = run.credential_user_id;
+  const person = launchesAgents()
+    ? {
+        own: (target: string) => prepareAgentPath(agentUidFor(db, principal), target),
+        remove: (target: string) =>
+          removeAgentTreeSync(target, agentGitLaunchFor(db, principal, dataRoot)),
+      }
+    : undefined;
+  // Ruling 507: the refreshed sign-in goes back to the account the run
+  // billed. A run from before the ruling billed the one account there was,
+  // whose sign-in sits in the shared home; an account removed since then
+  // gets nothing back (its home is gone, and the write-back refuses to
+  // resurrect a sign-in the person removed).
+  const account = run.credential_account_id
+    ? getBackendAccount(db, principal, run.credential_account_id)
+    : null;
+  const authHome = !run.credential_account_id
+    ? sharedHome
+    : account
+      ? backendAccountHome(principal, "codex", account, dataRoot)
+      : backendAccountHome(
+          principal,
+          "codex",
+          { id: run.credential_account_id, legacyHome: false },
+          dataRoot,
+        );
+  for (const id of homeIds) {
+    const dir = codexRunHomeDir(sharedHome, id);
+    if (existsSync(dir)) finishCodexRunHome({ dir, sharedHome, authHome, runId: id }, person);
+  }
+}
+
+/**
+ * Ruling 701: finish the completion compactions a restart cut on runs that had
+ * already ended. Such a row is terminal and carries the run service's mark
+ * (`RUN_PHASE.compacting` with {@link COMPACTING_AFTER_RUN_STEP}); nothing else
+ * at boot would find it, because every other pass keys on a live row. Each
+ * gets what an orphan's epilogue gets: its compaction's process swept, a Codex
+ * compaction's private home finished (it holds a copy of the person's
+ * sign-in), and the mark cleared. The session keeps the size it had; ruling
+ * 372 is its backstop. Resolves when the sweep has run, and never rejects.
+ */
+function finishCutCompactions(
+  db: DatabaseSync,
+  deps: FinalizeOrphanedRunsDeps,
+  reapProcesses: ReapRunProcesses,
+): Promise<void> {
+  // SAFETY: `id` and `backend` are NOT NULL TEXT on `agent_runs`; the two
+  // credential columns are nullable TEXT, as in the orphan read below.
+  const cut = db
+    .prepare(
+      `SELECT id, backend, credential_user_id, credential_account_id
+         FROM agent_runs
+        WHERE state NOT IN ('running', 'queued') AND phase = ? AND step = ?`,
+    )
+    .all(RUN_PHASE.compacting, COMPACTING_AFTER_RUN_STEP) as {
+    id: string;
+    backend: string;
+    credential_user_id: string | null;
+    credential_account_id: string | null;
+  }[];
+  if (cut.length === 0) return Promise.resolve();
+  for (const run of cut) {
+    try {
+      finishCodexRunHomes(db, run, [codexCompactionHomeId(run.id)], deps.dataRoot);
+    } catch (error) {
+      logger.warn("a cut compaction's home could not be finished", {
+        runId: run.id,
+        err: toError(error),
+      });
+    }
+    patchRun(db, run.id, { phase: null, step: null });
+  }
+  logger.info("finished the completion compactions a restart cut", {
+    runIds: cut.map((run) => run.id),
+  });
+  return reapProcesses({ runIds: cut.map((run) => compactionRunId(run.id)) }).then(
+    () => {},
+    (error) => {
+      logger.warn("reaping the cut compactions' processes failed", {
+        err: toError(error),
+      });
+    },
+  );
+}
+
 export function finalizeOrphanedRuns(
   db: DatabaseSync,
   deps: FinalizeOrphanedRunsDeps = {},
@@ -192,12 +296,14 @@ export function finalizeOrphanedRuns(
   const orphans = db
     .prepare(
       `SELECT id, project_slug, task_key, kind, backend, credential_user_id,
-              credential_account_id, started_at, agent_profile_id, role
+              credential_account_id, started_at, agent_profile_id, role, step
          FROM agent_runs
         WHERE state IN ('running', 'queued')`,
     )
     .all() as {
     id: string;
+    /** Ruling 701: what a queued run waited for, when its row says. */
+    step: string | null;
     project_slug: string;
     task_key: string;
     kind: string;
@@ -211,30 +317,36 @@ export function finalizeOrphanedRuns(
     /** Ruling 310(b): null for a run that never got a concurrency slot. */
     started_at: string | null;
   }[];
+  const reapProcesses = deps.reapProcesses ?? reapRunProcesses;
+  // Ruling 701: a specialist's run is terminal while its session is being
+  // compacted, so a restart during that leaves a finished row and no orphan.
+  const cutCompactions = finishCutCompactions(db, deps, reapProcesses);
   if (orphans.length === 0) {
     return {
       finalized: 0,
       reinvoked: 0,
       capped: 0,
       reinvokes: Promise.resolve(),
-      reaped: Promise.resolve(),
+      reaped: cutCompactions,
       notes: Promise.resolve(),
       claimedTasks: new Set<string>(),
     };
   }
 
-  const reapProcesses = deps.reapProcesses ?? reapRunProcesses;
   // Ruling 376: an epilogue interrupted by the restart carries its own marker.
-  const reaped = reapProcesses({
-    runIds: orphans.flatMap((run) => [run.id, compactionRunId(run.id)]),
-  }).then(
-    () => {},
-    (error) => {
-      logger.warn("reaping the orphaned runs' processes failed", {
-        err: toError(error),
-      });
-    },
-  );
+  const reaped = Promise.all([
+    cutCompactions,
+    reapProcesses({
+      runIds: orphans.flatMap((run) => [run.id, compactionRunId(run.id)]),
+    }).then(
+      () => {},
+      (error) => {
+        logger.warn("reaping the orphaned runs' processes failed", {
+          err: toError(error),
+        });
+      },
+    ),
+  ]).then(() => {});
 
   const now = new Date().toISOString();
   const realTasks = new Map<string, { projectSlug: string; taskKey: string }>();
@@ -247,6 +359,8 @@ export function finalizeOrphanedRuns(
       id: string;
       kind: string;
       started: boolean;
+      /** Ruling 701: it waited for its session's compaction, not for a slot. */
+      heldForSession: boolean;
       backend: string;
       profileId: string | null;
       role: string | null;
@@ -259,44 +373,9 @@ export function finalizeOrphanedRuns(
     // `codex-home/runs/<runId>/`, each with a copy of the person's sign-in.
     // Finish them here exactly as the settle would: the refreshed `auth.json`
     // written back when its bytes changed, the directory removed.
-    if (run.backend === "codex" && run.credential_user_id) {
-      const sharedHome = userBackendHome(run.credential_user_id, "codex", deps.dataRoot);
-      // Ruling 460: the write-back is the server's file, handed back to the
-      // person's uid like the adapter's settle does; ruling 485: the run home
-      // their CLI wrote is removed as them.
-      const principal = run.credential_user_id;
-      const person = launchesAgents()
-        ? {
-            own: (target: string) => prepareAgentPath(agentUidFor(db, principal), target),
-            remove: (target: string) =>
-              removeAgentTreeSync(target, agentGitLaunchFor(db, principal, deps.dataRoot)),
-          }
-        : undefined;
-      // Ruling 507: the refreshed sign-in goes back to the account the run
-      // billed. A run from before the ruling billed the one account there was,
-      // whose sign-in sits in the shared home; an account removed since then
-      // gets nothing back (its home is gone, and the write-back refuses to
-      // resurrect a sign-in the person removed).
-      const account = run.credential_account_id
-        ? getBackendAccount(db, principal, run.credential_account_id)
-        : null;
-      const authHome = !run.credential_account_id
-        ? sharedHome
-        : account
-          ? backendAccountHome(principal, "codex", account, deps.dataRoot)
-          : backendAccountHome(
-              principal,
-              "codex",
-              { id: run.credential_account_id, legacyHome: false },
-              deps.dataRoot,
-            );
-      // The run's own home, and its completion compaction's when the restart
-      // landed during that epilogue (ruling 376), each finished like a settle.
-      for (const id of [run.id, codexCompactionHomeId(run.id)]) {
-        const dir = codexRunHomeDir(sharedHome, id);
-        if (existsSync(dir)) finishCodexRunHome({ dir, sharedHome, authHome, runId: id }, person);
-      }
-    }
+    // The run's own home, and its completion compaction's when the restart
+    // landed during that epilogue (ruling 376), each finished like a settle.
+    finishCodexRunHomes(db, run, [run.id, codexCompactionHomeId(run.id)], deps.dataRoot);
     patchRun(db, run.id, {
       state: "interrupted",
       finishedAt: now,
@@ -319,6 +398,7 @@ export function finalizeOrphanedRuns(
         id: run.id,
         kind: run.kind,
         started: run.started_at !== null,
+        heldForSession: run.started_at === null && run.step === SESSION_SETTLING_STEP,
         backend: run.backend,
         profileId: run.agent_profile_id,
         role: run.role,
@@ -417,7 +497,9 @@ export function finalizeOrphanedRuns(
       // restart note called it still running. `started_at` is the fact, kept on
       // the row permanently, and this writer had it in hand.
       const ran = runs.filter((r) => r.started);
-      const never = runs.filter((r) => !r.started);
+      const never = runs.filter((r) => !r.started && !r.heldForSession);
+      // Ruling 701: nor was a run parked for its session waiting on a slot.
+      const held = runs.filter((r) => !r.started && r.heldForSession);
       // Ruling 567: an agent run the restart cut off gets the effects a
       // person's Stop would have given it, before the note: its last words and
       // the files it saved are posted under its name, and a deliverer's files
@@ -438,6 +520,9 @@ export function finalizeOrphanedRuns(
         ran.length ? clause(ran, "still running when the server stopped") : "",
         never.length
           ? clause(never, "queued behind the concurrent-run cap and had not started")
+          : "",
+        held.length
+          ? clause(held, "waiting for the summary of its session's last run and had not started")
           : "",
       ]
         .filter(Boolean)

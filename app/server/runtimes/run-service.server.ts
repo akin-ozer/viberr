@@ -34,7 +34,9 @@ import {
   getMaxRunSpendUsd,
 } from "~/server/settings/instance-settings.server";
 import {
+  COMPACTING_AFTER_RUN_STEP,
   RUN_PHASE,
+  SESSION_SETTLING_STEP,
   type CompactCallbacks,
   type CompactOutcome,
   type EmittedLine,
@@ -120,6 +122,7 @@ import {
 } from "~/server/mcp-proxy/gateway.server";
 import {
   COMPACT_AT_COMPLETION_TOKENS,
+  COMPLETION_COMPACT_DEADLINE_MS,
   contextWindowEnv,
   resumeVerdict,
 } from "./context-policy.server";
@@ -182,10 +185,12 @@ interface ServiceState {
    */
   completions: Map<string, RunCompletionCallback>;
   /**
-   * U39-30: one-shot callbacks for a run whose answer is complete while a
-   * completion compaction (ruling 376) still holds its settle back. Fired
-   * just before that compaction, only for a run that finished, and dropped
-   * at settle whether or not it fired. In-process only, like `completions`.
+   * U39-30: one-shot callbacks for a controller turn whose answer is complete
+   * while a completion compaction (ruling 376) still holds its settle back.
+   * Fired just before that compaction, only for a turn that finished, and
+   * dropped at settle whether or not it fired. A specialist's run needs none:
+   * its completion itself fires before the compaction (ruling 701).
+   * In-process only, like `completions`.
    */
   answered: Map<string, RunAnsweredCallback>;
   /**
@@ -205,21 +210,15 @@ interface ServiceState {
   draining?: boolean;
   /**
    * Ruling 701: the sessions a completion compaction (ruling 376) is still
-   * summarizing after their run has ended, by session id. The run's record is
-   * closed and its completion has fired; what is left is the session's own
-   * housekeeping. A run that resumes one of these sessions is held, `queued`,
-   * until `done` settles ({@link startRun}), and the gateway keeps answering
-   * the listings of `runId` meanwhile. In-process only, like the queues.
+   * summarizing after their run has ended: session id → the run that left it.
+   * That run's record is closed and its completion has fired; what is left is
+   * the session's own housekeeping. A run that resumes one of these sessions
+   * is parked in its lane's queue and passed over by the drain until the
+   * entry goes ({@link admitRun}, {@link nextPromotable}), and the gateway
+   * keeps answering the listings of that run meanwhile. In-process only, like
+   * the queues; the run's row carries the same fact for a restart.
    */
-  settling: Map<string, SettlingSession>;
-}
-
-/** A session being compacted after the run that used it ended (ruling 701). */
-interface SettlingSession {
-  /** The run that just left the session. */
-  runId: string;
-  /** Settles when the compaction is over, whatever it answered. Never rejects. */
-  done: Promise<void>;
+  settling: Map<string, string>;
 }
 
 /** A live adapter and the admission lane its slot is counted in. */
@@ -238,6 +237,12 @@ interface PendingRun {
    *  the task (ruling 311): the drain runs from another run's onExit or the
    *  org-settings action, neither of which knows it. */
   dataRoot?: string;
+  /** Ruling 701: the provider session this run resumes. While that session is
+   *  being compacted the drain passes the run over, whatever the cap says. */
+  sessionId?: string;
+  /** Ruling 701: it was parked for that session and not for a slot, so the
+   *  note its promotion writes says so. */
+  heldForSession?: boolean;
 }
 
 /** The two admission lanes of ruling 152(b). */
@@ -473,11 +478,13 @@ export interface StartRunInput {
   /** Ruling 371/373: the anchor the run is handed back after a compaction
    *  (see `RunSpec.compactAnchor`). */
   compactAnchor?: string;
-  /** U39-30: told the run's answer is written, before the completion
-   *  compaction that holds its settle back. The completion callback still
-   *  fires afterwards; this never fires for a run that is not compacted at
-   *  completion, or that did not finish. Registered before the run launches,
-   *  so a run cannot finish ahead of it. */
+  /** U39-30: told a controller turn's answer is written, before the
+   *  completion compaction that holds its settle back. The completion
+   *  callback still fires afterwards; this never fires for a turn that is not
+   *  compacted at completion, or that did not finish, nor for any other kind
+   *  of run (ruling 701: a specialist's completion fires before its
+   *  compaction, and an operator's session is not compacted). Registered
+   *  before the run launches, so a run cannot finish ahead of it. */
   onAnswered?: RunAnsweredCallback;
   /** Ruling 527: see `RunSpec.steering`. */
   steering?: RunSteering;
@@ -896,12 +903,6 @@ export interface RunStartResult {
   refusal: string | null;
 }
 
-/**
- * Ruling 701: the step of a `queued` run that waits for its session, not for
- * a slot. The console's footer prints it in place of the cap's reason.
- */
-export const SESSION_SETTLING_STEP = "waiting for the summary of its last run";
-
 /** F21-13: the `meta` tag on the run's model-substitution disclosure line.
  *  A durable classified tag (no column, no migration), like `run·line_lost`. */
 export const MODEL_SUBSTITUTED_TAG = "run·model_substituted";
@@ -1246,8 +1247,8 @@ export async function startRun(
         if (row?.state === "running" || row?.state === "queued") return true;
         // Ruling 701: a specialist's run is over while its session is still
         // being compacted, and that request lists the run's servers.
-        for (const settling of state.settling.values()) {
-          if (settling.runId === runId) return true;
+        for (const settlingRunId of state.settling.values()) {
+          if (settlingRunId === runId) return true;
         }
         return false;
       },
@@ -1276,29 +1277,17 @@ export async function startRun(
     launchThunk();
     return { runId, outcome: "started", refusal: null };
   }
-  // Ruling 701: the session this run resumes is still being compacted after
-  // the run that left it. Two processes on one transcript is what ruling 376
-  // made the whole settle wait to prevent; now only this run waits. Its row is
-  // `queued`, as for the cap, with the reason as its step, and it is admitted
-  // the moment the compaction is over. (A reserved run above is always a
-  // fresh session: `resumeRun` carries no reservation.)
-  const settling = spec.resumeSessionId ? state.settling.get(spec.resumeSessionId) : undefined;
-  if (settling) {
-    patchRun(db, runId, { step: SESSION_SETTLING_STEP });
-    const admitHeld = carryCorrelation(() => {
-      const row = getRun(db, runId);
-      if (!row || row.state !== "queued") {
-        // Stopped while it waited: it never starts, so its gateway token dies.
-        revokeRunMcpGateway(runId);
-        return;
-      }
-      patchRun(db, runId, { step: null });
-      admitRun(db, runId, launchThunk, input.kind, input.dataRoot);
-    });
-    void settling.done.then(admitHeld);
-    return { runId, outcome: "queued", refusal: null };
-  }
-  const admitted = admitRun(db, runId, launchThunk, input.kind, input.dataRoot);
+  // Ruling 701: a run that resumes a session still being compacted is parked
+  // by the same admission, whatever the cap says. (A reserved run above is
+  // always a fresh session: `resumeRun` carries no reservation.)
+  const admitted = admitRun(
+    db,
+    runId,
+    launchThunk,
+    input.kind,
+    input.dataRoot,
+    spec.resumeSessionId ?? null,
+  );
   return { runId, outcome: admitted ? "started" : "queued", refusal: null };
 }
 
@@ -2013,8 +2002,12 @@ export async function resumeRun(
   // credential kind the prior run billed. A controller turn takes the same
   // rule; its per-turn digest carries the last stored turns.
   const nowIso = input.nowIso ?? new Date().toISOString();
+  // Ruling 701: a session still being compacted is neither idle nor, for
+  // long, large: the run below waits for the summary and replays that. Its
+  // row's finish and last prompt are the run's own, from before the summary.
+  const settling = prev.session_id !== null && getState().settling.has(prev.session_id);
   const stale =
-    continuity === "present"
+    continuity === "present" && !settling
       ? (() => {
           const contextTokens =
             prev.last_prompt_tokens > 0
@@ -2145,11 +2138,18 @@ function admitRun(
   launchThunk: () => void,
   kind: RunKind,
   dataRoot?: string,
+  /** Ruling 701: the session the run resumes, when it resumes one. */
+  resumeSessionId?: string | null,
 ): boolean {
   const state = getState();
   const cap = getMaxConcurrentRuns(db);
   const lane = laneOf(kind);
-  if (canAdmit(state, cap, lane)) {
+  // Ruling 701: the session is still being compacted after the run that left
+  // it. Two processes on one transcript is what ruling 376 made the whole
+  // settle wait to prevent; now only this run waits, parked like a run behind
+  // the cap, with the reason as its row's step.
+  const held = Boolean(resumeSessionId && state.settling.has(resumeSessionId));
+  if (!held && canAdmit(state, cap, lane)) {
     launchThunk();
     return true;
   }
@@ -2157,15 +2157,26 @@ function admitRun(
   // Ruling 458(d): a parked run is launched later by whichever run frees the
   // slot, inside that run's correlation. It carries the correlation of the
   // request that started it instead, so its records name that request and user.
-  queue.push({ runId, launch: carryCorrelation(launchThunk), dataRoot });
-  logger.info("run queued behind the concurrency cap", {
-    runId,
-    lane,
-    live: liveCount(state),
-    cap,
-    coordinationLane: coordinationLane(cap),
-    queuedAhead: queue.length - 1,
-  });
+  const parked: PendingRun = { runId, launch: carryCorrelation(launchThunk), dataRoot };
+  if (resumeSessionId) parked.sessionId = resumeSessionId;
+  if (held) {
+    parked.heldForSession = true;
+    patchRun(db, runId, { step: SESSION_SETTLING_STEP });
+  }
+  queue.push(parked);
+  logger.info(
+    held
+      ? "run queued until its session's compaction is over"
+      : "run queued behind the concurrency cap",
+    {
+      runId,
+      lane,
+      live: liveCount(state),
+      cap,
+      coordinationLane: coordinationLane(cap),
+      queuedAhead: queue.length - 1,
+    },
+  );
   return false;
 }
 
@@ -2204,7 +2215,7 @@ export function drainRunQueue(db: DatabaseSync): void {
       next.launch();
       // Ruling 311, the other half: the timeline said "Queued … Nothing is
       // streaming yet", and this is the one place that stops being true.
-      void noteRunStarted(db, row, next.dataRoot);
+      void noteRunStarted(db, row, next.dataRoot, next.heldForSession === true);
     }
   } finally {
     state.draining = false;
@@ -2219,7 +2230,12 @@ function nextPromotable(state: ServiceState, cap: number): PendingRun | null {
     const queue = state.pending[lane];
     if (queue.length === 0) continue;
     if (!canAdmit(state, cap, lane)) continue;
-    return queue.shift() ?? null;
+    // Ruling 701: a run whose session is still being compacted keeps its
+    // place and is passed over; the oldest run that can go, goes.
+    const index = queue.findIndex((run) => !run.sessionId || !state.settling.has(run.sessionId));
+    if (index === -1) continue;
+    const [next] = queue.splice(index, 1);
+    return next ?? null;
   }
   return null;
 }
@@ -2421,10 +2437,11 @@ function launch(
       // set here, synchronously, exactly as before ruling 376 made the rest
       // of the exit asynchronous.
       exited = true;
-      // Ruling 376: the exit may compact the session first, a provider round
-      // trip; everything after the exit — the finalize, the slot, the
-      // completion contract — waits for it, so no resume of the same session
-      // starts under a compaction still in flight.
+      // Ruling 376: the exit may compact the session, a provider round trip,
+      // so the settle is asynchronous. Ruling 701: for a specialist's run the
+      // finalize, the slot and the completion come first and only a resume of
+      // that session waits for the compaction; a controller turn's settle
+      // still waits for it whole.
       void settleRun(exit);
     },
   };
@@ -2590,6 +2607,52 @@ function launch(
               }
             }
           };
+          // Ruling 701: the compaction, bounded and never thrown. A throw is
+          // logged; no answer by the deadline stops waiting, says so on the
+          // run's console and stops the compaction's process, so nothing that
+          // waits on this session waits for good. (Before, a controller turn
+          // whose compaction threw was never finalized.)
+          const compactWithin = async (onPhase: CompactCallbacks["onPhase"]): Promise<void> => {
+            let timer: ReturnType<typeof setTimeout> | null = null;
+            const late = new Promise<"late">((resolve) => {
+              timer = setTimeout(() => resolve("late"), COMPLETION_COMPACT_DEADLINE_MS);
+              timer.unref?.();
+            });
+            const work = compactSession(onPhase).then(
+              () => "answered" as const,
+              (error) => {
+                // Never a failure of the run (ruling 376).
+                logger.error("run compaction at completion failed", {
+                  runId: spec.runId,
+                  err: toError(error),
+                });
+                return "failed" as const;
+              },
+            );
+            const ended = await Promise.race([work, late]);
+            if (timer) clearTimeout(timer);
+            if (ended !== "late") return;
+            const minutes = Math.round(COMPLETION_COMPACT_DEADLINE_MS / 60_000);
+            logger.warn("run compaction at completion gave no answer by its deadline", {
+              runId: spec.runId,
+              deadlineMs: COMPLETION_COMPACT_DEADLINE_MS,
+            });
+            const occurredAt = new Date().toISOString();
+            const text = `compaction at the end of the run did not happen: no answer within ${minutes} minutes`;
+            sink.line({
+              raw: JSON.stringify({ type: "notice", source: "viberr", reason: "compaction_deadline", message: text }),
+              display: { t: occurredAt.slice(11, 19), ev: "meta", tag: "run·compaction·failed", text },
+              facts: {},
+              occurredAt,
+            });
+            revokeRunMcpGateway(spec.runId);
+            await reapRunProcesses({ runIds: [compactionRunId(spec.runId)] }).catch((error) => {
+              logger.warn("compaction epilogue reap failed", {
+                runId: spec.runId,
+                err: toError(error),
+              });
+            });
+          };
           if (spec.kind === "controller") {
             // U39-30: the answer is written; only the housekeeping is left.
             // Live on ax-clone a controller turn's compaction held its reply off
@@ -2608,14 +2671,15 @@ function launch(
                 });
               }
             }
-            await compactSession((phase, step) => writePhase(phase, step));
+            await compactWithin((phase, step) => writePhase(phase, step));
           } else {
             // Ruling 701: a specialist's run ends when its answer is written.
             // Its report, its files and the operator's next turn do not wait
             // for a summary of a session that only a later comment or answer
-            // to this agent would resume (live, 136 s a run on average). No
-            // phase is written: the row is terminal by then.
-            housekeeping = () => compactSession(() => {});
+            // to this agent would resume (live, 136 s a run on average). The
+            // adapter's own phase writes are dropped: the row is terminal by
+            // then, and carries the marker written below instead.
+            housekeeping = () => compactWithin(() => {});
           }
         }
         if (!housekeeping) revokeRunMcpGateway(spec.runId);
@@ -2641,21 +2705,38 @@ function launch(
         if (spec.tmpDir) scheduleRunTmpRemoval(spec.tmpDir, spec.agent ?? null, spec.runId);
       };
       // Ruling 701: from here until the compaction is over, a run that resumes
-      // this session is held ({@link startRun}). Registered before the slot is
-      // handed on and before the completion fires, because either may start it.
+      // this session is parked ({@link admitRun}). Registered before the queue
+      // is drained and before the completion fires, because either may start
+      // one: a parked run the drain would promote, a comment the completion
+      // delivers.
       let release: (() => void) | null = null;
       if (housekeeping && exit.sessionId) {
         const heldSession = exit.sessionId;
-        let open: () => void = () => {};
-        const done = new Promise<void>((resolve) => {
-          open = resolve;
-        });
-        const entry: SettlingSession = { runId: spec.runId, done };
-        state.settling.set(heldSession, entry);
+        state.settling.set(heldSession, spec.runId);
         release = () => {
-          if (state.settling.get(heldSession) === entry) state.settling.delete(heldSession);
-          open();
+          if (state.settling.get(heldSession) === spec.runId) state.settling.delete(heldSession);
+          // The runs parked for this session take their turn under the cap
+          // now, and a row among them that still waits says so no longer.
+          try {
+            // A shutdown drain (F21-24): boot finalizes what is still queued.
+            if (runPersistDrained(db)) return;
+            for (const lane of [state.pending.coordination, state.pending.delivery]) {
+              for (const parked of lane) {
+                if (parked.sessionId !== heldSession || !parked.heldForSession) continue;
+                if (getRun(db, parked.runId)?.state === "queued") patchRun(db, parked.runId, { step: null });
+              }
+            }
+            drainRunQueue(db);
+          } catch (error) {
+            logger.error("run queue drain failed", {
+              runId: spec.runId,
+              err: toError(error),
+            });
+          }
         };
+        // The same fact on the row, for what a restart or another process
+        // must know: the run is over and its session's compaction is not.
+        markCompactingAfterRun(db, spec.runId, true);
       } else {
         tidy();
       }
@@ -2693,18 +2774,37 @@ function launch(
       if (housekeeping) {
         try {
           await housekeeping();
-        } catch (error) {
-          // Never a failure of the run (ruling 376): its record closed above.
-          logger.error("run compaction at completion failed", {
-            runId: spec.runId,
-            err: toError(error),
-          });
         } finally {
+          markCompactingAfterRun(db, spec.runId, false);
           revokeRunMcpGateway(spec.runId);
           tidy();
           release?.();
         }
       }
+  }
+}
+
+/**
+ * Ruling 701: write or clear, on a terminal run's row, that its session's
+ * completion compaction is in flight ({@link COMPACTING_AFTER_RUN_STEP}).
+ * Best-effort: a database closed for shutdown leaves the mark for boot.
+ */
+function markCompactingAfterRun(db: DatabaseSync, runId: string, compacting: boolean): void {
+  if (runPersistDrained(db)) return;
+  try {
+    patchRun(
+      db,
+      runId,
+      compacting
+        ? { phase: RUN_PHASE.compacting, step: COMPACTING_AFTER_RUN_STEP }
+        : { phase: null, step: null },
+    );
+  } catch (error) {
+    logger.error("the compaction mark of a finished run could not be written", {
+      runId,
+      compacting,
+      err: toError(error),
+    });
   }
 }
 
@@ -3021,14 +3121,19 @@ async function noteRunStarted(
   db: DatabaseSync,
   run: AgentRunRow,
   dataRoot?: string,
+  /** Ruling 701: it waited for its session's compaction, not for a slot. */
+  heldForSession = false,
 ): Promise<void> {
   if (run.kind === "controller") return;
   const backend = BACKEND_LABEL[run.backend];
+  const agent = run.agent_name ?? run.role;
   await noteOnRunTask(db, run, dataRoot, "run-started timeline note failed", {
     type: "note",
     actor: { kind: "system", systemId: "run-queue" },
     title: "Run started",
-    text: `The queued ${backend} run \`${run.id}\` for the ${run.agent_name ?? run.role} agent got a slot and started. It is streaming to the agent logs.`,
+    text: heldForSession
+      ? `The ${backend} run \`${run.id}\` for the ${agent} agent waited for the summary of its session's last run and has started. It is streaming to the agent logs.`
+      : `The queued ${backend} run \`${run.id}\` for the ${agent} agent got a slot and started. It is streaming to the agent logs.`,
   });
 }
 

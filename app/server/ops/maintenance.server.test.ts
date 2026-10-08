@@ -13,6 +13,7 @@ import {
   resetEnvCacheForTests,
 } from "~/server/config/env.server";
 import { taskDir } from "~/server/files/file-store-root.server";
+import { COMPACTING_AFTER_RUN_STEP, RUN_PHASE } from "~/server/runtimes/adapter.server";
 import { logger } from "~/server/logging/logger.server";
 import { rebuildAll } from "~/server/projections/rebuilder.server";
 import { formatBytes, measureDataRootSpace } from "./disk-space.server";
@@ -166,6 +167,27 @@ describe("runMaintenancePass (gaps 15 + 20)", () => {
       dataRoot: store.dataRoot,
     });
     expect(result.workspacesSkipped).toBeNull();
+    expect(existsSync(workspace)).toBe(false);
+  });
+
+  it("ruling 701: a finished run whose session is still being compacted holds its folder", () => {
+    // The compaction's CLI works in the run's folder after the run has
+    // ended. CANARY: count live rows alone and a pass removes it under that
+    // process.
+    const store = storeWithTerminalTask();
+    const workspace = seedWorkspace(store, "VIB-1");
+    insertRun(store, "run_done", "finished");
+    store.db
+      .prepare(`UPDATE agent_runs SET phase = ?, step = ? WHERE id = 'run_done'`)
+      .run(RUN_PHASE.compacting, COMPACTING_AFTER_RUN_STEP);
+    expect(activeRunCount(store.db)).toBe(1);
+    const held = runMaintenancePass(store.db, { reason: "interval", dataRoot: store.dataRoot });
+    expect(held.workspacesSkipped).toBe("active-runs");
+    expect(existsSync(workspace)).toBe(true);
+    // The mark goes when the compaction is over, and the folder with it.
+    store.db.prepare(`UPDATE agent_runs SET phase = NULL, step = NULL WHERE id = 'run_done'`).run();
+    expect(activeRunCount(store.db)).toBe(0);
+    runMaintenancePass(store.db, { reason: "interval", dataRoot: store.dataRoot });
     expect(existsSync(workspace)).toBe(false);
   });
 

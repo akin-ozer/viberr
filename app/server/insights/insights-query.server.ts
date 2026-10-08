@@ -522,6 +522,9 @@ const resumeRowSchema = z.object({
   prev_credential_kind: z.enum(["login", "api_key", "access_token"]).nullable(),
   started_at: z.string(),
   prev_finished_at: z.string().nullable(),
+  /** Ruling 701: the earlier run's last console line, which is the end of its
+   *  completion compaction when it had one. Null when its lines were pruned. */
+  prev_last_line_at: z.string().nullable(),
   first_call_warm: z.number().nullable(),
 });
 
@@ -1076,8 +1079,10 @@ function cacheSummary(db: DatabaseSync, filter: RunFilter): CacheSummary {
  * A resume is a run whose provider session an earlier run of the same backend
  * already used (`resumeRun` hands the stored id over and the sink keeps it; a
  * fresh session is a new id, and an operator's is never reused). Its idle time
- * runs from that earlier run's finish, which follows any completion compaction
- * (ruling 376, the last call that touched the cache), to its own start. The
+ * runs from the last call that touched the cache to its own start: the earlier
+ * run's finish, or the last line of that run's console when that is later,
+ * because a specialist's completion compaction (ruling 376) is written there
+ * after the run has finished (ruling 701). The
  * row is keyed by the kind the EARLIER run billed: its writes are what the
  * resume reads, and ruling 372 takes the TTL from it. Only resumes whose first
  * call landed are counted; the set-aside column counts the fresh starts
@@ -1110,7 +1115,8 @@ function resumeSummary(db: DatabaseSync, filter: RunFilter): ResumeSummary {
   const resumed = z.array(resumeRowSchema).parse(
     db
       .prepare(
-        `SELECT backend, prev_credential_kind, started_at, prev_finished_at, first_call_warm
+        `SELECT backend, prev_credential_kind, started_at, prev_finished_at, first_call_warm,
+                (SELECT MAX(l.occurred_at) FROM run_log_lines l WHERE l.run_id = prev_id) AS prev_last_line_at
          FROM (SELECT backend, started_at, first_call_warm,
                       LAG(id) OVER session AS prev_id,
                       LAG(finished_at) OVER session AS prev_finished_at,
@@ -1123,7 +1129,10 @@ function resumeSummary(db: DatabaseSync, filter: RunFilter): ResumeSummary {
       .all(...params),
   );
   for (const r of resumed) {
-    const idleMs = Date.parse(r.started_at) - Date.parse(r.prev_finished_at ?? "");
+    const finished = Date.parse(r.prev_finished_at ?? "");
+    const lastLine = r.prev_last_line_at ? Date.parse(r.prev_last_line_at) : Number.NaN;
+    const idleMs =
+      Date.parse(r.started_at) - (Number.isFinite(lastLine) ? Math.max(finished, lastLine) : finished);
     // An earlier run that never finished, or a clock that ran backwards, gives
     // no idle time to sort by.
     if (!Number.isFinite(idleMs) || idleMs < 0) continue;

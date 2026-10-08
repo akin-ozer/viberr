@@ -394,10 +394,13 @@ Every test under `app/shared/docs/`, and the ones elsewhere that read a doc or a
   CLI reports failed).
 - `app/server/runtimes/run-service.server.test.ts` (ruling 701) holds a completion
   compaction open (the hook `queueFakeCompaction` takes returns a promise the test
-  settles) and pins what is true meanwhile: the run's completion has fired on a finished
-  row with no compaction asked for, a run that resumes that session is `queued` with its
-  step and starts when the compaction answers or throws, another session takes the slot,
-  and an operator's session is not compacted at all.
+  settles, or never does) and pins what is true meanwhile, for a delivering and a
+  supporting agent: the run's completion has fired on a finished row with no compaction
+  asked for, the row carries the mark a restart reads, a run that resumes that session is
+  `queued` with its step and starts when the compaction answers, throws or passes its
+  deadline, the queue is drained for every other session, and an operator's session is
+  not compacted at all. `run-recovery.server.test.ts` pins the boot sweep for a
+  compaction a restart cut on a finished Codex run.
 - `app/routes/project.task.run-agent.server.test.ts` (ruling 375) POSTs the Run-an-agent
   intent with a prompt through the real route and pins the order that keeps a prompted
   dispatch to ONE run: the person's `@<agent>` comment predates the run, so ruling 203's

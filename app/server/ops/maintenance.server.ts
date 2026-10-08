@@ -2,6 +2,7 @@ import type { DatabaseSync } from "node:sqlite";
 import { getEnv } from "~/server/config/env.server";
 import { applyRetention, type RetentionResult } from "~/server/db/retention.server";
 import { logger } from "~/server/logging/logger.server";
+import { COMPACTING_AFTER_RUN_STEP, RUN_PHASE } from "~/server/runtimes/adapter.server";
 import {
   reclaimTerminalTaskWorkspaces,
   type WorkspaceReclamation,
@@ -111,16 +112,21 @@ const EMPTY_RETENTION: RetentionResult = {
   notifications: 0,
 };
 
-/** Runs that could be holding a working tree open right now. */
+/**
+ * Runs that could be holding a working tree open right now: the live ones, and
+ * (ruling 701) a finished specialist run whose session is still being
+ * compacted, whose CLI works in the run's folder until it is done.
+ */
 export function activeRunCount(db: DatabaseSync): number {
   try {
     // SAFETY: `SELECT count(*) AS c` is an aggregate with no GROUP BY — sqlite
     // answers it with exactly one row carrying the single integer column `c`.
     const row = db
       .prepare(
-        `SELECT count(*) AS c FROM agent_runs WHERE state IN ('queued', 'running')`,
+        `SELECT count(*) AS c FROM agent_runs
+          WHERE state IN ('queued', 'running') OR (phase = ? AND step = ?)`,
       )
-      .get() as { c: number };
+      .get(RUN_PHASE.compacting, COMPACTING_AFTER_RUN_STEP) as { c: number };
     return row.c;
   } catch {
     // Unreadable table → assume busy. Skipping a reclaim costs disk; doing one
