@@ -29,7 +29,7 @@ import type { PrCacheState } from "./pr-linker.server";
  * the task.
  */
 
-export type PrAdoptionRefusal =
+type PrAdoptionRefusal =
   /** MERGED — its work is already on the base branch, so a fresh delivery
    *  fast-forwards cleanly; the collision is only about the stale branch name,
    *  not a history conflict (F17-L4). */

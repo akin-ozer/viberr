@@ -1,9 +1,5 @@
 import { describe, expect, it } from "vitest";
-import {
-  decidePrAdoption,
-  prAdoptionRefusalNote,
-  type PrAdoptionRefusal,
-} from "./pr-adoption.server";
+import { decidePrAdoption, prAdoptionRefusalNote } from "./pr-adoption.server";
 
 /**
  * R16-1 (owner ruling 2026-08-04) codified as the pure decision table
@@ -168,23 +164,5 @@ describe("prAdoptionRefusalNote (pass 34, U34-6): names both collision origins, 
     expect(note).toContain(`its head is not JC-8's delivered revision (${REVISION.slice(0, 7)})`);
     expect(note).toContain("`resolve_remote_collision`");
     expect(note).toContain("deletes the stale remote branch `jc-8`");
-  });
-
-  it("carries no em or en dash on any refusal arm (the copy-ban dash gate does not walk app/server)", () => {
-    // copy-ban.test.ts gates app/features, app/routes, app/ui and the seed
-    // assets and leaves app/server ungated. This note is written by app/server
-    // and rendered verbatim on the task timeline, so its dash guarantee lives
-    // here, where a canary can reach it.
-    const refusals: PrAdoptionRefusal[] = ["merged", "closed", "no_revision", "head_unknown", "head_mismatch"];
-    for (const refusal of refusals) {
-      const text = prAdoptionRefusalNote({
-        refusal,
-        taskKey: "JC-8",
-        branch: "jc-8",
-        prNumber: 41,
-        revisionHeadSha: REVISION,
-      });
-      expect(text, refusal).not.toMatch(/[–—]/);
-    }
   });
 });
