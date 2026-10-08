@@ -4130,7 +4130,7 @@ describe("save_knowledge_base's reply carries the id the next call needs (U36-4)
    */
   it("ruling 678: copy_task_file_to_knowledge_base puts a task's file in a knowledge base, byte for byte, and names it to the runs given it", async () => {
     const { writeTaskAttachment } = await import("~/server/files/task-attachments.server");
-    const { readKbIndexDetailed } = await import("~/server/files/kb-injection.server");
+    const { readKbIndexes } = await import("~/server/files/kb-injection.server");
     const bytes = new Uint8Array([0x25, 0x50, 0x44, 0x46, 0x00, 0xff, 0x10, 0x80]);
     writeTaskAttachment(SLUG, "VIB-142", "Teklif Şablonu.pdf", bytes, app.dataRoot);
     writeTaskAttachment(SLUG, "VIB-142", "notes.md", new TextEncoder().encode("# Layout notes\n"), app.dataRoot);
@@ -4161,7 +4161,7 @@ describe("save_knowledge_base's reply carries the id the next call needs (U36-4)
         "No run is told to use it yet: name it in the rulings and in the skill of each agent that must follow it.",
     );
     expect(new Uint8Array(readFileSync(path.join(folder, "proposal-template.pdf")))).toEqual(bytes);
-    expect(readKbIndexDetailed("template-home", app.dataRoot).body).toContain("- `proposal-template.pdf` · under 10 KB");
+    expect(readKbIndexes(["template-home"], app.dataRoot).parts[0]?.body).toContain("- `proposal-template.pdf` · under 10 KB");
     expect(listAuditEvents(app.db, { action: "org.store.files_added" })[0]).toMatchObject({
       actorUserId: ids.orgAdmin,
       subjectId: kbId,

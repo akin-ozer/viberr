@@ -312,7 +312,7 @@ export interface KbInjection {
  * prompt instead of living in a server log nobody reads while every UI still
  * shows the grant attached.
  */
-export function readKbIndexDetailed(
+function readKbIndexDetailed(
   name: string,
   dataRoot?: string,
   reader: KbIndexReader = {},
