@@ -2,7 +2,8 @@ import type { DatabaseSync } from "node:sqlite";
 import { afterEach, describe, expect, it } from "vitest";
 import { createTestDbContext } from "../../../test-support/test-db";
 import { listAuditEvents } from "../../../test-support/audit-log";
-import { updateOrgUser, whitelistGithubUser } from "../org/org-users.server";
+import type { UserRole } from "~/shared/mapping/user.server";
+import { addDomain, updateOrgUser, whitelistGithubUser } from "../org/org-users.server";
 import { resolveGithubHandle } from "../github/pr-human-approval.server";
 import {
   applyOAuthUser,
@@ -23,11 +24,8 @@ afterEach(ctx.cleanup);
 
 const ACTOR = { userId: "u_admin", label: "admin@viberr.test" };
 
-function allowDomain(db: DatabaseSync, domain: string, role = "member") {
-  db.prepare(
-    `INSERT INTO google_domain_allowlist (id, domain, role, created_at)
-     VALUES (?, ?, ?, ?)`,
-  ).run(`dom_${domain}`, domain, role, new Date().toISOString());
+function allowDomain(db: DatabaseSync, domain: string, role: UserRole = "member") {
+  expect(addDomain(db, { domain, role }, ACTOR).status).toBe("added");
 }
 
 describe("isOAuthWhitelisted", () => {
