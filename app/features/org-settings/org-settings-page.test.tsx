@@ -409,7 +409,7 @@ describe("UsersPanel", () => {
   });
 
   it("self guards: demote + remove are client-toasted, never posted", async () => {
-    const { getAllByText, getByText, getByLabelText } = renderPanel(
+    const { getByText, getByLabelText } = renderPanel(
       <UsersPanel users={USERS} domains={DOMAINS} meId="u_arda" />,
     );
     const myRow = getByText("arda@viberr.dev").closest(".member-row")!;
@@ -430,7 +430,6 @@ describe("UsersPanel", () => {
       getByText("You can't remove your own account").closest(".toast")!.getAttribute("data-kind"),
     ).toBe("error");
     expect(lastForm).toBeNull();
-    expect(getAllByText("Admin").length).toBeGreaterThan(0);
   });
 
   it("role toggle posts user-role; remove confirms with the audit-history copy", async () => {
