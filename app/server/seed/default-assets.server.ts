@@ -625,6 +625,17 @@ export const PRIOR_SHIPPED_HASHES: PriorShippedHashes = {
     // cites their own records, and "I chose" on the strength of a record.
     "26b0210af906fd9b5495af1f5b343654422cee54986f86808e6285c3508cf253",
   ],
+  [path.join("skills", "diagrammer-expertise", "SKILL.md")]: [
+    // Ruling 699's note of 2026-10-08: before the manual judged how a diagram
+    // reads from a half-size look at the drawing, and stopped the run reading
+    // the writer's brief and proving by hash that the piece was unchanged.
+    "e9fc50d6d8b5faec3d5cc42c1769c1294f754b1c646e8b4a7bbd2149f9041cb4",
+  ],
+  [path.join("skills", "cover-designer-expertise", "SKILL.md")]: [
+    // Ruling 699's note of 2026-10-08: before the manual kept a first cover's
+    // look at their earlier covers to the covers themselves.
+    "2d5812d25c1d2a95b4dbc865c37fba3eec8c743bf4b0923fdcb51bf88940f5e0",
+  ],
   [path.join("skills", "reviewer-expertise", "SKILL.md")]: [
     // Ruling 690 (2026-10-07): before the guardrails said to check a claim
     // against the source kept on the task, and that a claim with no kept

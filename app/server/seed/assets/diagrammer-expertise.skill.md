@@ -30,7 +30,7 @@ Every box, every arrow and every label comes from the piece or from a source kep
 - **Use the piece's names**, spelled as it spells them. Where the piece and a source disagree, that is a finding for the operator, not something to settle in the picture.
 - A part that is in neither the piece nor a kept source is not in the picture, however likely.
 - When you open something the task does not hold yet, keep it (`keep_source`, as your workspace contract describes) and name its id in your report.
-- Open what the picture needs and no more. The piece's own facts were checked once already, and checking them again is its reviewer's work, not yours.
+- Open what the picture needs and no more. The piece's own facts were checked once already, and checking them again is its reviewer's work, not yours. Of what the writer left beside the piece you need two things: the note that says where a diagram would help, and the fields you bring up to date. Leave a brief or a list of sources alone unless the picture needs a fact from it.
 
 ## One question per diagram
 
@@ -60,6 +60,7 @@ Draw each diagram as an SVG file with its `width`, `height` and `viewBox` set, o
 - Keep coordinates on a grid, so edges line up.
 - **Render it and look:** `capture_page` with the drawing's name and its `width` and `height` returns the picture. Its reply says when a page is laid out past the box. It cannot see what a drawing's own canvas cuts off, or what a page that hides its overflow does: look at every edge.
 - Check what you see, not what you meant: nothing cut at an edge, no label outside its box, no arrow through a label, arrowheads on the right ends, even spacing, every word spelled as the piece spells it. Judge by eye, as a reader does: run no script over the picture's pixels.
+- **Then look at it small:** the same call with `scale` 0.5 is about how wide a phone shows a canvas of 700 to 800 px. If you cannot read a main label there, neither can the reader: fewer words, larger type, or turn the diagram to run down the page. A wider canvas a phone shrinks further than this look does, so keep to that width.
 - Fix and render again. Two to four rounds is normal. If it takes more, the diagram holds too much: take parts out.
 
 ## Saving and placing
@@ -68,8 +69,8 @@ Draw each diagram as an SVG file with its `width`, `height` and `viewBox` set, o
 2. Place it in the piece at the point where the reader needs the structure, usually just after the paragraph that introduces the parts. Never at the very top as an ornament. Read the piece again just before you do, and add your line to the file as it stands then: another agent may have changed it since you first read it. A picture the piece already carries stays where it is, and you draw nothing that repeats it.
 3. Use the form the destination takes: in Markdown an image line. Add a caption only where the destination shows one.
 4. Write alt text that works for someone who cannot see the picture: the parts and how they connect, in a sentence or two. "Architecture diagram" is not alt text. Where the rulings keep a piece's fields in a file beside it, the field that lists its pictures is yours to bring up to date: each of yours with its file, where it goes and its alt text, in place of a line that says there are none.
-5. Change nothing else in the piece or in the files beside it. If a sentence contradicts what you found, or your picture makes one elsewhere out of date (a word count, a publishing step), report it and leave the sentence to its writer.
-6. Look at it in place, once: `capture_page` on the piece at the phone width, starting a little above your picture (`view` and `from` choose the width and how far down the page). If you cannot read a main label in the phone picture, neither can the reader: fewer words, larger type, or turn the diagram to run down the page. Look again only when the picture itself changed.
+5. Change nothing else in the piece or in the files beside it. Make each change as an exact replacement of the lines it touches in the file as it stands, never a rewrite of the file: there is then nothing to prove about the rest, and no need to hash or compare it. If a sentence contradicts what you found, or your picture makes one elsewhere out of date (a word count, a publishing step), report it and leave the sentence to its writer.
+6. Look at it in place: `capture_page` on the piece at the phone width (`view` chooses the width), moving down the page with `from` until your picture is in the stretch. You are checking that the picture shows and sits where you meant: how it reads you judged at scale 0.5, and the desktop width needs no look. If a main label is plainly unreadable there all the same, fix it. Look again only when the picture itself changed.
 
 ## When it comes back
 
@@ -79,7 +80,7 @@ A review names what is wrong with a picture. Fix exactly that in the drawing, re
 
 1. Each diagram answers the one question you wrote for it.
 2. Every part and connection is in the piece or in a kept source you opened in this run.
-3. You looked at the rendered picture, and at the piece with the picture in it at the phone width.
+3. You looked at the rendered picture at its own size and at half size, and at the piece with the picture in it at the phone width.
 4. Each picture is on the task with its drawing beside it, and has alt text.
 5. Nothing in the piece changed but the lines that place your pictures.
 
