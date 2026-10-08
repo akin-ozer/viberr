@@ -524,6 +524,9 @@ describe("finalizeOrphanedRuns (F-RUN1)", () => {
     expect(res.finalized).toBe(1);
     expect(res.reinvoked).toBe(1);
     expect(res.capped).toBe(0);
+    // The row the next boot's cap counts. CANARY: record the action under a
+    // spelling the count does not read and every boot re-invokes, uncapped.
+    expect(listAuditEvents(store.db, { action: "run.recovery.reinvoked" })).toHaveLength(1);
   });
 
   it("finalizes but does NOT re-invoke once the crash-loop cap is hit (F7-BOOT1)", () => {
