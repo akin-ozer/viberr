@@ -225,7 +225,7 @@ describe("setTaskDependencies", () => {
     expect(file(store, "VIB-9").timeline[0]!.text).toBe("Waits on VIB-5 (added VIB-5). Held until every entry is done; Viberr releases it then.");
   });
 
-  it("keeps waiting when a packet or a running agent still owes something; refuses an archived task and a viewer", async () => {
+  it("keeps waiting when a running agent still owes something; refuses an archived task and a viewer", async () => {
     const store = setupTestStore(ctx);
     await seed(store);
     writeTask(store.dataRoot, store.slug, {
