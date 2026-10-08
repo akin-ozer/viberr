@@ -2219,7 +2219,11 @@ describe("P14-RT-01 — a FRESH run of an UNDEPLOYED profile is confined like a 
   });
 
   it("its prompt offers no delivery step it cannot perform (XS-4)", async () => {
-    undeployAll();
+    // Undeployed on a project WITH a repository: only a checkout's contract has
+    // delivery steps to offer (the clone fails offline and the contract stays).
+    const file = readProjectFile({ projectSlug: store.slug, dataRoot: store.dataRoot })!;
+    writeProject(store.dataRoot, { ...file.parsed.frontmatter, repo: "acme/widgets", agents: [] });
+    rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
 
     await startAgentRun(
       store.db,
@@ -2231,6 +2235,8 @@ describe("P14-RT-01 — a FRESH run of an UNDEPLOYED profile is confined like a 
     const prompt = specs.at(-1)!.prompt;
     expect(prompt).not.toContain("git checkout -B");
     expect(prompt).not.toContain("Commit your work locally");
+    // The delivery block is there, saying what the run may not do.
+    expect(prompt).toContain("do NOT run `git commit`");
   });
 
   /**
@@ -2893,7 +2899,7 @@ describe("buildAnalyzePrompt — server-side delivery contract (both backends)",
   it("ruling 185: no prompt claims an OS sandbox, on either backend", () => {
     // Ruling 184's section existed to explain an `EPERM` the CLI's own sandbox
     // produced; with the sandbox gone (owner Q36-14) the section would describe
-    // a confinement the run does not have. Canary: re-add it.
+    // a confinement the run does not have, in whatever words. Canary: re-add it.
     for (const delivers of [true, false]) {
       const prompt = buildAnalyzePrompt({
         ...base,
@@ -2902,8 +2908,7 @@ describe("buildAnalyzePrompt — server-side delivery contract (both backends)",
           ? { canBranch: true, canCommitPush: true, canOpenPr: true, repoWrite: true }
           : { canBranch: false, canCommitPush: false, canOpenPr: false, repoWrite: false },
       });
-      expect(prompt).not.toContain("This sandbox will not let you");
-      expect(prompt).not.toContain("sandbox denied the child process");
+      expect(prompt).not.toMatch(/sandbox/i);
     }
   });
 
@@ -3093,9 +3098,10 @@ describe("buildAnalyzePrompt — server-side delivery contract (both backends)",
       delivery: { canBranch: false, canCommitPush: false, canOpenPr: false, repoWrite: false },
       delivers: false,
     };
-    expect(buildAnalyzePrompt({ ...base, attachmentsDropDir: dir, taskFileReader: true })).toContain(
-      `(see "Files on the task thread").${OTHER_TASK_FILES_SENTENCE} Everything else`,
-    );
+    const reader = buildAnalyzePrompt({ ...base, attachmentsDropDir: dir, taskFileReader: true });
+    expect(reader).toContain(`(see "Files on the task thread").${OTHER_TASK_FILES_SENTENCE} Everything else`);
+    // The tool by its name, not only through the constant that carries it.
+    expect(reader).toContain("Another task's files are read with `read_task_attachment`");
     expect(buildAnalyzePrompt({ ...base, attachmentsReadDir: dir, taskFileReader: true })).toContain(
       `Never write into it.${OTHER_TASK_FILES_SENTENCE} Everything else`,
     );
@@ -3264,9 +3270,10 @@ describe("buildAnalyzePrompt — server-side delivery contract (both backends)",
       delivers: true,
       kbReadDirs: ["/data/kb/aws-migration-mapping"],
     };
-    expect(buildAnalyzePrompt({ ...base, kbCorrectionTool: true })).toContain(
-      `Never write, create or delete anything in it.${KB_CONTRACT_CORRECTION_SENTENCE}\n`,
-    );
+    const corrector = buildAnalyzePrompt({ ...base, kbCorrectionTool: true });
+    expect(corrector).toContain(`Never write, create or delete anything in it.${KB_CONTRACT_CORRECTION_SENTENCE}\n`);
+    // The tool by its name, not only through the constant that carries it.
+    expect(corrector).toContain("use `correct_knowledge_doc`");
     expect(buildAnalyzePrompt(base)).not.toContain("correct_knowledge_doc");
   });
 
@@ -3880,7 +3887,8 @@ describe("R18-1 — a reviewer inherits the delivering engagement's KBs", () => 
     // critic grants "bar"; dev grants nothing. Running dev (the deliverer) must
     // not gain the reviewer's KB — inheritance is one-directional.
     deployKbPair([], ["bar"]);
-    writeKb("bar", "# Bar\n\nSENTINEL-REVIEWER-ONLY-KB");
+    // In the heading: a knowledge base reaches a prompt as its index, never its body.
+    writeKb("bar", "# SENTINEL-REVIEWER-ONLY-KB\n\nbody");
     await assignSpecialist(store.db,
       { projectSlug: store.slug, taskKey: "VIB-1", profileId: "dev" },
       actorOf(store.users.arda), { dataRoot: store.dataRoot });
@@ -3894,7 +3902,9 @@ describe("R18-1 — a reviewer inherits the delivering engagement's KBs", () => 
     await interruptRun(store.db,
       { projectSlug: store.slug, taskKey: "VIB-1", runId: devRun.runId, dataRoot: store.dataRoot },
       actorOf(store.users.arda));
-    expect(joinedPrompt(lastRunSpec()?.systemPrompt ?? "")).not.toContain("SENTINEL-REVIEWER-ONLY-KB");
+    const sys = joinedPrompt(lastRunSpec()?.systemPrompt ?? "");
+    expect(sys).not.toContain("SENTINEL-REVIEWER-ONLY-KB");
+    expect(sys).not.toContain("bar (knowledge base)");
   });
 });
 
@@ -6704,13 +6714,14 @@ describe("ruling 186: a held task refuses every agent dispatch", () => {
     );
 
     queueFakeRun({ lines: [], backend: "claude" });
-    const runId = await startAgentRun(
+    const result = await startAgentRun(
       store.db,
       { projectSlug: store.slug, taskKey: "VIB-1" },
       actorOf(store.users.arda),
       { dataRoot: store.dataRoot },
     );
-    expect(runId).toBeTruthy();
+    expect(result.outcome).toBe("started");
+    expect(startedRunSpecs()).toHaveLength(1);
   });
 });
 
