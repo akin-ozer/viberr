@@ -4,7 +4,6 @@ import {
   revisionDriftNote,
   classifyRevisionDrift,
   headCarriesRevision,
-  refreshChainFrom,
   reviewSubjectSha,
 } from "./revision-drift";
 
@@ -331,6 +330,8 @@ describe("the refresh chain (ruling 439)", () => {
       { mergeSha: MERGED, onto: DELIVERED, commits: 1 },
       { mergeSha: DELIVERED, onto: MERGED, commits: 1 },
     ];
-    expect(refreshChainFrom(DELIVERED, cycle)?.links.map((l) => l.head)).toEqual([MERGED, DELIVERED]);
+    // Each record is followed once, so a head off the cycle is answered, not
+    // walked for ever.
+    expect(headCarriesRevision(DELIVERED, AUTHORED, cycle)).toBe(false);
   });
 });
