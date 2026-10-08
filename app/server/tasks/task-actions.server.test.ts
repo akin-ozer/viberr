@@ -19,6 +19,7 @@ import {
   type TestStore,
 } from "../../../test-support/test-store";
 import { listAuditEvents } from "../../../test-support/audit-log";
+import { waitFor } from "../../../test-support/polling";
 import { deriveValidation } from "~/schemas/task-file.schema";
 import type {
   Engagement,
@@ -4226,17 +4227,12 @@ describe("ruling 533: a task filed with its input", () => {
     const store = setupProjectedStore(ctx);
     deployOperatorOn(store);
     const seen: { files: string[]; claimed: string[] }[] = [];
-    let settle: (() => void) | null = null;
-    const observed = new Promise<void>((resolve) => {
-      settle = resolve;
-    });
     const runOperator = vi.fn((_db: DatabaseSync, input: RunOperatorInput) => {
       const file = readTaskFile({ projectSlug: input.projectSlug, taskKey: input.taskKey, dataRoot: store.dataRoot });
       seen.push({
         files: listTaskAttachments(input.projectSlug, input.taskKey, store.dataRoot).map((a) => a.name).sort(),
         claimed: (file?.parsed.timeline ?? []).flatMap((e) => (e.actor.kind === "human" ? (e.attachments ?? []) : [])).sort(),
       });
-      settle?.();
       return Promise.resolve({ runId: "run_filed", queued: false, backend: "claude" as const, autonomy: "supervised" as const });
     });
     const created = await createTask(
@@ -4253,10 +4249,7 @@ describe("ruling 533: a task filed with its input", () => {
       actorOf(store.users.arda),
       { dataRoot: store.dataRoot, deps: { runOperator } },
     );
-    await Promise.race([
-      observed,
-      new Promise((_, reject) => setTimeout(() => reject(new Error("the create trigger never fired")), 5_000)),
-    ]);
+    await waitFor(() => seen.length > 0, "the create trigger", 5_000);
     expect(seen).toEqual([{ files: ["inventory.csv", "portal.png"], claimed: ["inventory.csv", "portal.png"] }]);
     const parsed = readTaskFile({ projectSlug: store.slug, taskKey: created.key, dataRoot: store.dataRoot })!.parsed;
     const note = parsed.timeline.find((e) => e.title === "Attachment added")!;
@@ -4446,10 +4439,6 @@ describe("ruling 140(a): a named owner at creation", () => {
     // hand-off this case is about needs one on the project.
     deployOperatorOn(store);
     const seen: { ownerUserId: string | null; trigger: string | undefined }[] = [];
-    let settle: (() => void) | null = null;
-    const observed = new Promise<void>((resolve) => {
-      settle = resolve;
-    });
     const runOperator = vi.fn((_db: DatabaseSync, input: RunOperatorInput) => {
       const file = readTaskFile({
         projectSlug: input.projectSlug,
@@ -4460,7 +4449,6 @@ describe("ruling 140(a): a named owner at creation", () => {
         ownerUserId: file?.parsed.frontmatter.ownerUserId ?? null,
         trigger: input.trigger,
       });
-      settle?.();
       return Promise.resolve({
         runId: "run_seat",
         queued: false,
@@ -4475,12 +4463,7 @@ describe("ruling 140(a): a named owner at creation", () => {
       { dataRoot: store.dataRoot, deps: { runOperator } },
     );
     expect(created.task.owner).toMatchObject({ kind: "human", userId: store.users.murat.id });
-    await Promise.race([
-      observed,
-      new Promise((_, reject) =>
-        setTimeout(() => reject(new Error("the create trigger never fired")), 5_000),
-      ),
-    ]);
+    await waitFor(() => seen.length > 0, "the create trigger", 5_000);
     expect(seen).toEqual([{ ownerUserId: store.users.murat.id, trigger: "create" }]);
     const parsed = readTaskFile({
       projectSlug: store.slug,
@@ -4790,25 +4773,24 @@ describe("pass 35: operator and task actions", () => {
   const file = (store: TestStore) =>
     readTaskFile({ projectSlug: store.slug, taskKey: "VIB-1", dataRoot: store.dataRoot })!.parsed;
 
-  /** A recording `runOperator` seam that settles a promise on its first call. */
-  function operatorSeam() {
-    let settle: (() => void) | null = null;
-    const observed = new Promise<void>((resolve) => {
-      settle = resolve;
-    });
-    const runOperator = vi.fn((_db: DatabaseSync, _input: RunOperatorInput) => {
-      settle?.();
-      return Promise.resolve({
+  /** A recording `runOperator` seam. */
+  const operatorSeam = () =>
+    vi.fn((_db: DatabaseSync, _input: RunOperatorInput) =>
+      Promise.resolve({
         runId: "run_seam",
         queued: false,
         backend: "claude" as const,
         autonomy: "supervised" as const,
-      });
-    });
-    return { runOperator, observed };
-  }
+      }),
+    );
 
-  const tick = () => new Promise((r) => setTimeout(r, 120));
+  /** The acceptance card the fold files, once it has landed. */
+  const cardFiled = (store: TestStore) =>
+    waitFor(
+      () => file(store).frontmatter.recommendations.some((r) => r.kind === "accept_completion"),
+      "the acceptance fold",
+      5_000,
+    );
 
   describe("ruling 151 (F35-2): the boundary always wins in transitionStage", () => {
     it("an operator-authorized move across an approval boundary is refused, whatever the caller", async () => {
@@ -4848,7 +4830,12 @@ describe("pass 35: operator and task actions", () => {
       const store = setupProjectedStore(ctx);
       deployOperator(store);
       seed(store, { stage: "ready" });
-      const live = operatorSeam();
+      const liveRun: NonNullable<TaskMutationContext["operatorRun"]> = {
+        backend: "claude",
+        autonomy: "supervised",
+        reactDepth: 0,
+        transitionDepth: 0,
+      };
       await transitionStage(
         store.db,
         { projectSlug: store.slug, taskKey: "VIB-1", toStageId: "impl" },
@@ -4856,13 +4843,14 @@ describe("pass 35: operator and task actions", () => {
         {
           dataRoot: store.dataRoot,
           operatorAuthorized: true,
-          operatorRun: { backend: "claude", autonomy: "supervised", reactDepth: 0, transitionDepth: 0 },
-          deps: { runOperator: live.runOperator },
+          operatorRun: liveRun,
+          deps: { runOperator: operatorSeam() },
         },
       );
       expect(file(store).frontmatter.stage).toBe("impl");
-      await tick();
-      expect(live.runOperator).not.toHaveBeenCalled();
+      // The live run's arm took the move: it stamps the stage and launches
+      // nothing, while the re-trigger is the arm it excludes.
+      expect(liveRun.movedToStageId).toBe("impl");
 
       seed(store, { stage: "ready" });
       const direct = operatorSeam();
@@ -4870,14 +4858,11 @@ describe("pass 35: operator and task actions", () => {
         store.db,
         { projectSlug: store.slug, taskKey: "VIB-1", toStageId: "impl" },
         OPERATOR_TASK_ACTOR,
-        { dataRoot: store.dataRoot, operatorAuthorized: true, deps: { runOperator: direct.runOperator } },
+        { dataRoot: store.dataRoot, operatorAuthorized: true, deps: { runOperator: direct } },
       );
-      await Promise.race([
-        direct.observed,
-        new Promise((_, reject) => setTimeout(() => reject(new Error("the transition trigger never fired")), 5_000)),
-      ]);
-      expect(direct.runOperator).toHaveBeenCalledTimes(1);
-      expect(direct.runOperator.mock.calls[0]![1].trigger).toBe("transition");
+      await waitFor(() => direct.mock.calls.length > 0, "the transition trigger", 5_000);
+      expect(direct).toHaveBeenCalledTimes(1);
+      expect(direct.mock.calls[0]![1].trigger).toBe("transition");
     });
 
     it("ruling 357: a move after the drive's own delivery stamps `actedAfterDelivery`; a move without one stamps nothing", async () => {
@@ -4930,12 +4915,12 @@ describe("pass 35: operator and task actions", () => {
         store.db,
         { projectSlug: store.slug, taskKey: "VIB-1", toStageId: "review", recommendationAuthorized: true },
         actorOf(store.users.arda),
-        { dataRoot: store.dataRoot, deps: { runOperator: seam.runOperator } },
+        { dataRoot: store.dataRoot, deps: { runOperator: seam } },
       );
       expect(file(store).frontmatter.stage).toBe("review");
-      await tick();
+      await cardFiled(store);
       expect(file(store).frontmatter.recommendations.map((r) => r.kind)).toEqual(["accept_completion"]);
-      expect(seam.runOperator).not.toHaveBeenCalled();
+      expect(seam).not.toHaveBeenCalled();
       expect(
         listAuditEvents(store.db, { action: "task.operator.recommended_completion" }),
       ).toHaveLength(1);
@@ -4951,14 +4936,11 @@ describe("pass 35: operator and task actions", () => {
         store.db,
         { projectSlug: store.slug, taskKey: "VIB-1", toStageId: "review", recommendationAuthorized: true },
         actorOf(store.users.arda),
-        { dataRoot: store.dataRoot, deps: { runOperator: seam.runOperator } },
+        { dataRoot: store.dataRoot, deps: { runOperator: seam } },
       );
-      await Promise.race([
-        seam.observed,
-        new Promise((_, reject) => setTimeout(() => reject(new Error("the transition trigger never fired")), 5_000)),
-      ]);
+      await waitFor(() => seam.mock.calls.length > 0, "the transition trigger", 5_000);
       expect(file(store).frontmatter.recommendations).toHaveLength(0);
-      expect(seam.runOperator).toHaveBeenCalledTimes(1);
+      expect(seam).toHaveBeenCalledTimes(1);
     });
 
     it.each([
@@ -5004,19 +4986,16 @@ describe("pass 35: operator and task actions", () => {
         store.db,
         { projectSlug: store.slug, taskKey: "VIB-1", toStageId: "review", recommendationAuthorized: true },
         actorOf(store.users.arda),
-        { dataRoot: store.dataRoot, deps: { runOperator: seam.runOperator } },
+        { dataRoot: store.dataRoot, deps: { runOperator: seam } },
       );
       if (packetWritten) {
-        await tick();
+        await cardFiled(store);
         expect(file(store).frontmatter.recommendations.map((r) => r.kind)).toEqual(["accept_completion"]);
-        expect(seam.runOperator).not.toHaveBeenCalled();
+        expect(seam).not.toHaveBeenCalled();
       } else {
-        await Promise.race([
-          seam.observed,
-          new Promise((_, reject) => setTimeout(() => reject(new Error("the transition trigger never fired")), 5_000)),
-        ]);
+        await waitFor(() => seam.mock.calls.length > 0, "the transition trigger", 5_000);
         expect(file(store).frontmatter.recommendations).toHaveLength(0);
-        expect(seam.runOperator).toHaveBeenCalledTimes(1);
+        expect(seam).toHaveBeenCalledTimes(1);
       }
     });
   });
@@ -6057,9 +6036,7 @@ describe("pass 35 S15: rulings 162 and 163 at the merge stage", () => {
      * before it reaches `runOperator`, and the first load of those modules in a
      * test run is slower than any sleep worth writing.
      */
-    for (let i = 0; i < 100 && runOperator.mock.calls.length === 0; i += 1) {
-      await new Promise((r) => setTimeout(r, 20));
-    }
+    await waitFor(() => runOperator.mock.calls.length > 0, "the refusal to wake the operator");
     expect(runOperator, "the refusal woke nobody").toHaveBeenCalledTimes(1);
     expect(runOperator.mock.lastCall?.[1]).toMatchObject({
       taskKey: "VIB-1",
