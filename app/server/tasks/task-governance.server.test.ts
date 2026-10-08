@@ -2580,7 +2580,7 @@ describe("resolvePacket kind matrix", () => {
     const { requestPacketMaintainerDecision } = await import("./packet-resolution.server");
     const res = await requestPacketMaintainerDecision(
       store.db,
-      { projectSlug: store.slug, taskKey: "VIB-1", note: "please archive this" },
+      { projectSlug: store.slug, taskKey: "VIB-1" },
       actorOf(store.users.selin),
       { dataRoot: store.dataRoot },
     );
@@ -2594,11 +2594,9 @@ describe("resolvePacket kind matrix", () => {
       ).toHaveLength(1);
     }
     expect(listNotifications(store.db, store.users.selin.id).length).toBe(0);
-    // The ask lands on the timeline (with the owner's note) and is audited.
+    // The ask lands on the timeline and is audited.
     const texts = getTaskDetail(store.db, store.slug, "VIB-1")!.timeline.map((e) => e.text);
-    expect(
-      texts.some((t) => t.includes("asked a maintainer") && t.includes("please archive this")),
-    ).toBe(true);
+    expect(texts.some((t) => t.includes("asked a maintainer"))).toBe(true);
     expect(listAuditEvents(store.db, { action: "task.packet.escalated" })).toHaveLength(1);
     // The packet is NOT resolved — a maintainer still decides through the gate.
     const fm = readTaskFile({

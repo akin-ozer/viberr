@@ -984,15 +984,12 @@ export async function action({ request, params }: Route.ActionArgs) {
         // F20-18: a contributor-OWNER holds no option they can settle on this
         // packet — hand the decision UP. The server notifies the maintainers +
         // admins, records the ask on the timeline, and refuses (with a pointer)
-        // if the caller could actually resolve it themselves.
-        const note = String(formData.get("note") ?? "").slice(0, 2000);
-        const escalateInput: Parameters<
-          typeof requestPacketMaintainerDecision
-        >[1] = { projectSlug, taskKey };
-        if (note.trim()) escalateInput.note = note;
+        // if the caller could actually resolve it themselves. The button posts
+        // the intent alone: there is no note to read, so none can be cut
+        // (ruling 315).
         const { notified, to } = await requestPacketMaintainerDecision(
           db,
-          escalateInput,
+          { projectSlug, taskKey },
           actor,
         );
         return {
