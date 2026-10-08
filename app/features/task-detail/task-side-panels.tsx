@@ -14,6 +14,7 @@ import type { AcceptanceAffordance } from "~/server/tasks/task-acceptance.server
 import { gatesPill, prStatePill, type PillView } from "~/features/github/github-pills";
 import type { GatesView } from "~/shared/project-gates";
 import { useAttachmentLightbox } from "./attachment-lightbox";
+import { DELIVER_LABEL } from "./decision-packet";
 import { GateResults } from "./gate-results";
 import type { OwnerAction, TaskMemberView } from "./execution-profile";
 import {
@@ -626,7 +627,7 @@ function deliverButton({
           : PUSH_LABEL(pushOffer.rev, pushOffer.prNumber)
         : delivering
           ? "Delivering…"
-          : "Deliver branch & open PR"}
+          : DELIVER_LABEL}
     </button>
   );
 }
