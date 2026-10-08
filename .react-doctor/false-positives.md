@@ -192,12 +192,12 @@ scan run from inside an agent worktree under `.claude/` sees no files at all.
 
 ### Performance
 
-- `react-doctor/js-set-map-lookups` / `js-combine-iterations` — `.includes()` or
-  chained passes over bounded tiny arrays: project workflow stages (3–5 items,
-  agents-page/create-profile-modal chip rows, controller-toolkit, operator-moves stage
-  walk, settings-actions per-rule lookups), module-init constants built
-  once (capability-catalog.ts), the per-reviewer-row `activeReviewerIds.includes()` in
-  execution-profile.tsx and agent-select.tsx (bounded by reviewers actively running on ONE
+- `react-doctor/js-set-map-lookups` / `js-index-maps` / `js-combine-iterations` —
+  `.includes()`, `.find()` or chained passes over bounded tiny arrays: project workflow
+  stages (3–5 items, agents-page/create-profile-modal chip rows, controller-toolkit,
+  operator-moves stage walk, settings-actions per-rule lookups), module-init constants built
+  once (capability-catalog.ts), the per-agent-row `activeProfileIds.includes()` in
+  agent-select.tsx `toOptions` (bounded by agents actively running on ONE
   task — well under the rule's ~10-item threshold), and lists capped by a constant: one
   message's or comment's files (ATTACHMENT_BATCH_MAX = 10: controller-dock,
   controller-page, timeline-actions), event attachments (EVENT_ATTACHMENTS_MAX = 20,
@@ -205,9 +205,19 @@ scan run from inside an agent worktree under `.claude/` sees no files at all.
   resources.server.ts `sameNameSet`, both sides saved or checked), the `Fact` union (5
   members, revalidation-policy `overlaps`), `codexVendor().pathDirs` (0 or 1), and
   order-keeping de-duplication of one profile's grant list (`kbDirsOf`, `resolveOne`,
-  `nextList`, `difference`). Two more are small in practice, not by a constant. The MCP
-  editor's write-tool chips (mcp-modal-fields `marked.includes(tool)` in each chip's class
-  and `aria-pressed`) scan one server's own tools: the discovered `tools/list` names (no
+  `nextList`, `difference`). A `.find()` per item over one project's deployed agents
+  (settings-actions `validateRequiredReviewerRules`, one per submitted rule, stopping at the
+  first refusal), over one task's engagements (task-acceptance `refreshAndReview`, one per
+  reviewer it starts) and over the page renderer's two widths (page-capture.server.ts:
+  `render`'s `views.find` per reported shot, `captureReplyText`'s `page.shots.find` /
+  `page.ended.find` per width of PAGE_CAPTURE_VIEWS). Literal lists: a surface's live-update
+  scopes (use-live-updates `previous`, one to three per call site, compared once per stream
+  open) and the arguments a console row draws in full (runs-helpers `hiddenArguments`'s
+  `drawn`: edit-diff.ts and console-todos.ts pass one or two literal keys). One table's
+  columns, in the one-time rebuild of an old root's table (sqlite.server.ts
+  `ensureBackendAccountsTable`). Two more are small in practice, not by a constant. The
+  MCP editor's write-tool chips (mcp-modal-fields `marked.includes(tool)` in each chip's
+  class and `aria-pressed`) scan one server's own tools: the discovered `tools/list` names (no
   cap), the saved write tools and names typed in. `marked` starts as the discovery
   suggestion on a server nobody has reviewed, and MCP_WRITE_TOOLS_MAX caps it only on
   save (`checkedWriteTools`, whose own de-duplication runs before that check, over the
@@ -216,9 +226,11 @@ scan run from inside an agent worktree under `.claude/` sees no files at all.
   measurement. The org's GitHub connections, one chip per owner (boards-panel `owners`):
   each is a PAT an admin pasted, checked against GitHub behind the per-actor
   `patValidationThrottle` (connections.server.ts); no constant caps them, but they stay
-  a handful, on a settings panel. Verify the array is stages, a hardcoded catalog, one
-  task's/run's/profile's/MCP server's own list, the org's GitHub connections, or capped
-  by a named constant.
+  a handful, on a settings panel. Verify the array is stages, a hardcoded catalog or
+  literal list, one task's/run's/profile's/MCP server's own list, one project's deployed
+  agents, the renderer's widths, one table's columns, the org's GitHub connections, or
+  capped by a named constant. A `.find()` keeps the first match, which a `Map` built in
+  order would not: a renderer report that names one width twice yields two shots of it.
 
 - `react-doctor/js-set-map-lookups` — the live ledger's settle filter
   (revalidation-policy.ts `!due.includes(o)` in `flushLive`): both lists are the data
@@ -227,9 +239,9 @@ scan run from inside an agent worktree under `.claude/` sees no files at all.
   `Set` there cost 4 gzip bytes on every route against the bundle ratchet (ruling 457)
   for no measurable gain.
 
-- `react-doctor/js-set-map-lookups` — not an array scan at all: the receiver is a string
-  (`.includes` is a substring search; kb-corrections.server.ts `looseText()` /
-  `asDocText()`), a fresh array built from the loop variable with one lookup per
+- `react-doctor/js-set-map-lookups` / `js-index-maps` — not an array scan at all: the
+  receiver is a string (`.includes` is a substring search; kb-corrections.server.ts
+  `looseText()` / `asDocText()`), a fresh array built from the loop variable with one lookup per
   iteration (gagents `deployedProfileIds(row.…)`, resource-references per-profile
   `resources[kind]`, mention-notify `fullNameKeys(u.name)`, operator-moves
   `o.newTask?.blockedBy`), or code that runs once despite sitting in the loop's source (a
@@ -268,7 +280,11 @@ scan run from inside an agent worktree under `.claude/` sees no files at all.
   `changeProjectRepo`, its only GitHub call; the kind is in `NO_REQUEUE`, so no operator
   is re-invoked; and the fan-out is suppressed. The loop's in-order `answered` list feeds
   `carryOnAfterConnection` after it. Verify the arm still stops before
-  `changeProjectRepo` when `fanOutOrigin` is set.
+  `changeProjectRepo` when `fanOutOrigin` is set. And for org-users.server.ts
+  `deleteOrgUser`'s refresh of the projects it unbound (ruling 540): the user delete has
+  already cascaded their `project_github_credentials` rows, so each `refreshRepoAccess`
+  answers `no_pat_configured` without a GitHub call. Verify the loop still runs after
+  `DELETE FROM users`.
 
 - `react-doctor/async-await-in-loop` — loops whose iterations are ordered, dependent
   mutations: the operator decision-plan executors (operator-run.server.ts and
@@ -322,10 +338,35 @@ scan run from inside an agent worktree under `.claude/` sees no files at all.
   pre-flight's concurrency bound. Verify each loop body still awaits a start, and for
   `drainQueuedQuestions` that queued questions are still not de-duplicated by profile.
 
-- `react-doctor/server-sequential-independent-await` / `async-parallel` — awaits of cached
-  dynamic `import("~/…")` that break import cycles (controller-toolkit, run-recovery,
-  dependencies, schedule, specialist-run, reconcile-poller): the modules are already
-  loaded, so there is nothing to overlap. Verify every flagged await is an `import()`.
+- `react-doctor/async-await-in-loop` — removals, as the task's person, of what a cut-short
+  page render or gate run left: page-capture.server.ts `render` (the `.captures/` folders of
+  ended runs, then the asking run's own last render) and `removeCaptureHome`, and
+  project-gates.server.ts `prepareGateCheckout` (`.gates/`). Each iteration is one
+  `removeAgentTree`, an `rm` through the launcher (ruling 485), so this is process I/O and
+  not the governed-writer entry, but there is nothing to overlap: a gate run removes its
+  own checkout when it ends, a delivery's render its scratch after the task write,
+  `removeRunPageCaptures` a run's folder when the run ends, and each render empties its
+  run's folder before making its own, so a folder holds one entry or none unless a restart
+  cut a job short or a removal failed. Both queues run one job at a time. capturePage's
+  `["profile", "tmp"]` is a fixed pair removed before an agent's reply: `Promise.all` would
+  save the shorter `rm` (about 3 ms here, plus the launcher's start) on a call that waits
+  seconds for the browser. Verify each loop body is still one `removeAgentTree` per entry,
+  that `render` still empties its run's folder first and that the completion pipeline
+  still calls `removeRunPageCaptures` for every run that ends.
+
+- `react-doctor/server-sequential-independent-await` / `async-parallel` /
+  `async-await-in-loop` — awaits of cached dynamic `import("~/…")` that break import
+  cycles (controller-toolkit, run-recovery, dependencies, schedule, specialist-run, and
+  reconcile-poller's accepted-PR nudge, which awaits its `import()` inside the per-row
+  loop): the modules are already loaded, so there is nothing to overlap. Verify every
+  flagged await is an `import()`.
+
+- `react-doctor/server-sequential-independent-await` — org-users.server.ts `deleteOrgUser`
+  prunes the person from every project, then retires their agent accounts. The order is
+  the contract: UI-29 prunes first so a failure leaves the account whole, and a retirement
+  (vendor logout, credential file, row) cannot be taken back, so it must not run beside a
+  prune that may still throw. Verify `pruneUserFromProjects` is still awaited before
+  `retireUserBackends`.
 
 ### Security
 
@@ -463,6 +504,24 @@ scan run from inside an agent worktree under `.claude/` sees no files at all.
 - `react-doctor/js-hoist-intl` — `Intl.ListFormat` built once per request on cold paths
   (settings-actions remove-repo, board-import toast). If revisited, one shared `LIST_AND`
   should replace the per-file copies rather than adding another.
+
+- `react-doctor/server-sequential-independent-await` — two local git reads of one checkout
+  in a row: push-workspace.server.ts `commitsAheadOfDefault` (`rev-parse` of HEAD and of
+  `origin/<default>`) and workspace-refresh.server.ts (`rev-parse` of HEAD, then `status`).
+  Each is one short git process (about 3 to 4 ms here) on a path that pushes to or has just
+  fetched from GitHub; `Promise.all` would save one of them. Verify both are still local
+  reads, not a fetch or a push.
+
+- `react-doctor/exhaustive-deps` — changes-panel.tsx DiffLines' drag effect lists only
+  `dragging`: it adds the window's release, cancel and Escape listeners once per drag, and
+  the release calls the `path`, `onOpen` and `onMove` of the render that started it. `path`
+  is the file its FileDiff is keyed by, `onOpen` (ChangesBody's `openDraft`) writes only
+  refs and a setter, and the drag itself is read from `live`. `onMove` (`moveDraft`) reads
+  that render's `draft`, which nothing changes while the mouse button is held short of a
+  keyboard click on another line number (Tab, then Enter); the release would then put the
+  earlier draft back with the dragged lines. Listing them would re-add the listeners on
+  every row the pointer crosses: `moveDrag` is new on each render and `trackDrag` renders
+  once per row. Verify `moveDraft` is still the only captured handler that reads state.
 
 - `react-doctor/no-fetch-in-effect` — attention-watcher.tsx (a mount-once poll and
   subscription whose responses drive desktop-alert bookkeeping, serialised by
