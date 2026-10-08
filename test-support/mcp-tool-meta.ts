@@ -2,6 +2,7 @@ import type {
   McpSdkServerConfigWithInstance,
   SdkMcpToolDefinition,
 } from "@anthropic-ai/claude-agent-sdk";
+import type { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { expect } from "vitest";
 import { z } from "zod";
 import type { SpecialistMcpServerConfig } from "~/server/tasks/specialist-mcp.server";
@@ -108,7 +109,7 @@ export async function publishedInstructions(
 }
 
 /** A real MCP client, connected over an in-memory pair to a mount's live server. */
-async function connectedClient(server: McpSdkServerConfigWithInstance, name: string) {
+export async function connectedClient(server: McpSdkServerConfigWithInstance, name = "probe"): Promise<Client> {
   const { Client } = await import("@modelcontextprotocol/sdk/client/index.js");
   const { InMemoryTransport } = await import("@modelcontextprotocol/sdk/inMemory.js");
   const [clientEnd, serverEnd] = InMemoryTransport.createLinkedPair();

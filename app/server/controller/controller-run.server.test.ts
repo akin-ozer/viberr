@@ -1074,12 +1074,8 @@ describe("ruling 476(h): an epic a turn creates records the conversation it was 
     // The tool the turn was really handed, called the way the model calls it.
     const server = lastRunSpec()?.mcpServers?.["viberr_controller"];
     if (!inProcess(server)) throw new Error("the turn must mount viberr_controller in process");
-    const { Client } = await import("@modelcontextprotocol/sdk/client/index.js");
-    const { InMemoryTransport } = await import("@modelcontextprotocol/sdk/inMemory.js");
-    const [clientEnd, serverEnd] = InMemoryTransport.createLinkedPair();
-    await server.instance.connect(serverEnd);
-    const client = new Client({ name: "ruling-476", version: "1" }, { capabilities: {} });
-    await client.connect(clientEnd);
+    const { connectedClient } = await import("../../../test-support/mcp-tool-meta");
+    const client = await connectedClient(server, "ruling-476");
     const reply = JSON.stringify(
       (
         await client.callTool({
@@ -1159,12 +1155,8 @@ describe("ruling 685: a turn's tools know which message the turn answers", () =>
     // The tool the turn was really handed, called the way the model calls it.
     const server = lastRunSpec()?.mcpServers?.["viberr_controller"];
     if (!inProcess(server)) throw new Error("the turn must mount viberr_controller in process");
-    const { Client } = await import("@modelcontextprotocol/sdk/client/index.js");
-    const { InMemoryTransport } = await import("@modelcontextprotocol/sdk/inMemory.js");
-    const [clientEnd, serverEnd] = InMemoryTransport.createLinkedPair();
-    await server.instance.connect(serverEnd);
-    const client = new Client({ name: "ruling-685", version: "1" }, { capabilities: {} });
-    await client.connect(clientEnd);
+    const { connectedClient } = await import("../../../test-support/mcp-tool-meta");
+    const client = await connectedClient(server, "ruling-685");
     const reply = JSON.stringify(
       (
         await client.callTool({

@@ -4,9 +4,9 @@ import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 import { z } from "zod";
 import { createSdkMcpServer } from "@anthropic-ai/claude-agent-sdk";
-import { Client } from "@modelcontextprotocol/sdk/client/index.js";
-import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
+import type { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { strictTool } from "./strict-tool.server";
+import { connectedClient } from "../../../test-support/mcp-tool-meta";
 
 /**
  * Ruling 296. These drive a REAL MCP client against a REAL server, because
@@ -18,12 +18,7 @@ import { strictTool } from "./strict-tool.server";
 async function connect(
   tools: Parameters<typeof createSdkMcpServer>[0]["tools"],
 ): Promise<Client> {
-  const server = createSdkMcpServer({ name: "strict-probe", tools });
-  const [clientEnd, serverEnd] = InMemoryTransport.createLinkedPair();
-  await server.instance.connect(serverEnd);
-  const client = new Client({ name: "probe", version: "1" }, { capabilities: {} });
-  await client.connect(clientEnd);
-  return client;
+  return connectedClient(createSdkMcpServer({ name: "strict-probe", tools }));
 }
 
 /** The text an MCP call answered with, at the client's own result type. */
