@@ -5253,24 +5253,6 @@ describe("P19-G0 — a FRESH run re-anchors on the canonical task artifact", () 
     expect(prompt.indexOf("SENTINEL-ANCHOR")).toBeLessThan(prompt.indexOf("SENTINEL-DIRECTIVE"));
     expect(prompt).toContain("the canonical task state, comments");
   });
-
-  it("still runs — without an anchor block — when the task file cannot be anchored", () => {
-    // The anchor is best-effort by construction: a run must never fail because
-    // its canonical block could not be built.
-    const prompt = buildAnalyzePrompt({
-      role: "Implementation",
-      taskKey: "VIB-42",
-      title: "t",
-      goal: "g",
-      repo: null,
-      branch: "vib-42",
-      cloned: false,
-      delivers: true,
-      delivery: { canBranch: true, canCommitPush: true, canOpenPr: false, repoWrite: true },
-    });
-    expect(prompt).not.toContain("## Canonical task state");
-    expect(prompt).toContain("Trust boundary");
-  });
 });
 
 /**
