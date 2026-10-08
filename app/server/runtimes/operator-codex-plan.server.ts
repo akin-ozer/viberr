@@ -1414,7 +1414,7 @@ export function planRefusalOf(
  * lease action refuses" and was never told which paths those were: the note
  * naming them landed 46 ms after its run started.
  */
-export function withEarlierRefusals(
+function withEarlierRefusals(
   directive: string,
   refused: readonly { tool: string; message: string }[],
 ): string {

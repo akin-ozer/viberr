@@ -602,8 +602,6 @@ describe("Codex structured operator completion", () => {
     // The person reading the timeline sees the same directive the agent got.
     const handoff = task().timeline.find((e) => e.type === "comment" && e.text.includes(directive));
     expect(handoff?.text).toContain("- `transition_stage`: ");
-    // A plan with nothing refused before the dispatch passes the directive as written.
-    expect(operatorCodexPlan.withEarlierRefusals(directive, [])).toBe(directive);
   });
 
   it("F28-O1: a mid-plan abort is narrated even when append-typed-events is WITHHELD", async () => {
@@ -1424,6 +1422,11 @@ describe("Codex structured operator completion", () => {
     expect(body).toContain("The repo supports both.");
     expect(body).toContain("the operator prompted Dev on this task");
     expect(body).toContain("not by that agent");
+    // Ruling 446: nothing was refused before the dispatch, so Dev is handed
+    // the directive as written. CANARY: append the refusals paragraph whatever
+    // the plan collected and Dev reads about steps that were never refused.
+    await eventually(() => expect(adapter.pending?.spec.prompt).toContain("Which storage backend does the repo use?"));
+    expect(adapter.pending!.spec.prompt).not.toContain("Viberr did not carry out");
   });
 
   it("ruling 672: a plan that prompts an agent and then asks for a repository discloses the consultation on that packet too", async () => {
