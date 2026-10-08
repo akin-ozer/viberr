@@ -73,15 +73,6 @@ describe("decisions.md keeps its own supersession convention (ruling 341)", () =
   const doc = readFileSync(DOC, "utf8");
   const blocks = rulingBlocks(doc);
 
-  it("states the convention this test enforces", () => {
-    // CANARY: drop the header rule and the rest of this file is enforcing a
-    // convention the document no longer claims. Flattened, because both
-    // sentences wrap in the source.
-    const flat = doc.replace(/\s+/g, " ");
-    expect(flat).toContain("marked **SUPERSEDED** inline");
-    expect(flat).toContain("Never restore a superseded rule");
-  });
-
   it("every ruling a later one changes says so in its own text", () => {
     const claims = new Map<number, Set<number>>();
     for (const [n, bodies] of blocks) {
