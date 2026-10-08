@@ -6878,11 +6878,13 @@ a.card:active { transform: scale(.99); }
   .detail-side > * { flex: 1 1 280px; min-width: min(280px, 100%); max-width: 100%; }
   .kv-row { flex-wrap: wrap; }
   .kv-row .v { min-width: 0; flex-wrap: wrap; overflow-wrap: anywhere; }
-  /* agents: the profile rail becomes a horizontal strip. The group labels ride
-     along rather than hide: `.ag-group-label.ag-group-row` is not only a label,
-     it CONTAINS the `New specialist profile` button (agents-page.tsx), and
+  /* agents: the profile rail becomes a horizontal strip. The list's own
+     controls ride along in it rather than hide: the dashed `.ag-newbtn` rows,
+     `New agent profile` and `Add from library · N` (agents-page.tsx), and
      R19-12's contract is that no control is hidden at any width. The gate in
-     `app.css.test.ts` fails if a width query ever hides it again. */
+     `app.css.test.ts` fails if a width query ever hides one. (The group label
+     held a "+" button of its own until the 2026-09-08 design pass; it is a
+     plain label now.) */
   .agents-layout { grid-template-columns: 1fr; }
   /* Ruling 625 (d-controller #15): the strip wraps instead of scrolling, so
      no card and neither button sits off-screen (1032px of strip in a 744px

@@ -144,11 +144,12 @@ function RQPrPill({ pr }: { pr: ReviewRowView["pr"] }) {
  * F19-31: the last branch used to be a bare `else`, which collapsed "agent"
  * and "none". `review + none` is a LEGAL stored combination
  * (review-queue.server.ts lists it in "Still in review"), and for it the
- * board's WaitTag renders nothing at all (board-page.tsx) while this row
- * rendered the pulsing "agent working" — one stored value making opposite
- * claims one click apart, the exact defect R8-3 fixed for "human". Silence is
- * the board's answer, so it is this row's too; the subline carries the fact
- * in words (review-helpers.ts).
+ * board card's status chip names no wait at all (`cardStatus`, card-status.ts,
+ * drawn by `StatusChip` in board-page.tsx, gives the seat to the readiness
+ * word) while this row rendered the pulsing "agent working": one stored value
+ * making opposite claims one click apart, the exact defect R8-3 fixed for
+ * "human". No wait is the board's answer, so it is this row's too; the
+ * subline carries the fact in words (review-helpers.ts).
  */
 function RQWaitTag({
   waiting,
@@ -296,11 +297,13 @@ function RQRow({
             </Pill>
           </span>
         )}
-        {/* D4: the same continuity cue the board card carries (ContinuityTag,
-            board-page.tsx) — one vocabulary, one tone (risk), one glyph — so a
-            supervisor at the acceptance boundary sees the lost provider session
-            too, not only on the task page's Continuity Recovery panel. The row
-            has room for the tooltip the dense card cannot carry. */}
+        {/* D4: the same continuity cue the board card carries (its "degraded
+            continuity" problem chip: `cardProblems`, card-status.ts, drawn by
+            `ProblemChips` in board-page.tsx) — one vocabulary, one ink (the
+            `.chip.pb` problem chip's), one glyph — so a supervisor at the
+            acceptance boundary sees the lost provider session too, not only on
+            the task page's Continuity Recovery panel. The row has room for the
+            tooltip the dense card cannot carry. */}
         {t.continuity === "degraded" && (
           <span
             className="chip pb"
