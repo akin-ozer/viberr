@@ -274,7 +274,7 @@ function fileKb(bytes: number): string {
  * line naming the files they sent with it and the tool that reads them. The
  * transcript keeps the words alone; the files show under them.
  */
-export function withFilesNote(text: string, files: readonly MessageFile[] | undefined): string {
+function withFilesNote(text: string, files: readonly MessageFile[] | undefined): string {
   if (!files?.length) return text;
   const list = files.map((f) => `\`${f.name}\` (${fileKb(f.bytes)})`).join(", ");
   const one = files.length === 1;

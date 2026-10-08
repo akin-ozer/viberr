@@ -499,7 +499,7 @@ function proposalLine(p: KbProposal, rulingsKb: string | null): string {
  * person talks to it. Since ruling 498 an agent's correction is written as it
  * is made, so these are only the ones filed before, which documents still hold.
  */
-export function projectProposalsContextLine(
+function projectProposalsContextLine(
   db: DatabaseSync,
   projectSlug: string,
   dataRoot?: string,
