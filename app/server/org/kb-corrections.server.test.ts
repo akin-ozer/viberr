@@ -7,9 +7,8 @@ import { listAuditEvents } from "../../../test-support/audit-log";
 import { withLegacyProposals } from "../../../test-support/kb-legacy-proposals";
 import { resolveStoreTarget, saveKnowledgeBase } from "./resources.server";
 import { writeStoreDoc } from "./store-files.server";
-import { listKbProposals } from "./kb-proposals.server";
+import { parseKbProposals } from "./kb-proposals.server";
 import {
-  KB_CORRECTION_MAX_BYTES,
   editKbPassage,
   listKbCorrections,
   mergeKbCorrection,
@@ -132,7 +131,7 @@ describe("mergeKbCorrection", () => {
       "# Conventions\n\n- Quote every path.\n\n- Pass `--` before any argument a person supplies.\n\n## Proposed corrections (not binding)\n",
     )).toBe(true);
     // The unmerged proposal still reads back whole.
-    expect(listKbProposals(store.dataRoot).map((p) => p.correction)).toEqual(["Old one."]);
+    expect(parseKbProposals(kb, "conventions.md", body).map((p) => p.correction)).toEqual(["Old one."]);
   });
 
   it("refuses a passage that is not in the document exactly as sent, handing back its closest line, and writes nothing", async () => {
@@ -275,7 +274,8 @@ describe("mergeKbCorrection", () => {
 
   it("refuses a side over the cap, since the record carries both", async () => {
     const kb = await seedKb("dossier", "facts.md", "# Facts\n\n- A.\n");
-    const r = await merge(kb, { replaces: "- A.", text: "é".repeat(KB_CORRECTION_MAX_BYTES / 2 + 1) });
+    // 8,194 UTF-8 bytes: one two-byte character past the cap.
+    const r = await merge(kb, { replaces: "- A.", text: "é".repeat(4097) });
     expect(r.ok ? "" : r.message).toContain("at most 8192 bytes");
     expect(read(kb)).toBe("# Facts\n\n- A.\n");
   });

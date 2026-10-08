@@ -265,7 +265,7 @@ function docProposals(kb: string, rel: string, abs: string): KbProposal[] {
  * base, because a proposal may stand in any of them (ruling 483): the rulings,
  * or any base granted to a run on a task.
  */
-export function listKbProposals(dataRoot?: string): KbProposal[] {
+function listKbProposals(dataRoot?: string): KbProposal[] {
   const out: KbProposal[] = [];
   for (const kb of subDirNames(kbRootDir(dataRoot)).sort()) {
     if (kb.startsWith(".")) continue;
@@ -329,7 +329,7 @@ export function kbProposalCountsByProject(
 }
 
 /** One open proposal by id, wherever it stands. */
-export function findKbProposal(id: string, dataRoot?: string): KbProposal | null {
+function findKbProposal(id: string, dataRoot?: string): KbProposal | null {
   return listKbProposals(dataRoot).find((p) => p.id === id.trim()) ?? null;
 }
 
