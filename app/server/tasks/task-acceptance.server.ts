@@ -1715,7 +1715,7 @@ export function emptyBranchNote(
  * runs through `deriveValidation` (validation's ONE writer, F10-15) so the
  * comparison can never disagree with the pill the dialog rendered.
  */
-export function acceptanceDisclosureOf(
+function acceptanceDisclosureOf(
   fm: TaskFrontmatter,
 ): AcceptanceDisclosure {
   return {

@@ -63,7 +63,6 @@ import { manualDeliverForReview, performDelivery } from "./task-delivery.server"
 import {
   revisionDriftNote,
   refreshAndReview,
-  acceptanceDisclosureOf,
   forceAcceptCompletion,
 } from "./task-acceptance.server";
 import { releaseOwner, releaseTasksOwnedBy, setOwner } from "./task-ownership.server";
@@ -2794,6 +2793,15 @@ describe("U3: a concurrent double-submit writes ONE transition", () => {
   });
 });
 
+/** Ruling 88: the echo an accept dialog sends, built the way `ceremonyFacts`
+ *  builds it (accept-confirm-derive.ts) from the task the dialog renders, so a
+ *  door is proved against what a person read rather than against the
+ *  server's own reading of the file. */
+function renderedDisclosure(store: TestStore): AcceptanceDisclosure {
+  const task = getTaskDetail(store.db, store.slug, "VIB-1")!;
+  return { pr: task.pr?.state ?? "none", revision: task.workRevisionSha ?? "none", verdict: task.validation };
+}
+
 /**
  * F21-2 / ruling 88 (pass 21) — the acceptance ceremony, server-side.
  *
@@ -2846,13 +2854,7 @@ describe("F21-2 / ruling 88: the server-side acceptance disclosure", () => {
   }
 
   function live(store: TestStore): AcceptanceDisclosure {
-    return acceptanceDisclosureOf(
-      readTaskFile({
-        projectSlug: store.slug,
-        taskKey: "VIB-1",
-        dataRoot: store.dataRoot,
-      })!.parsed.frontmatter,
-    );
+    return renderedDisclosure(store);
   }
 
   function task(store: TestStore) {
@@ -5027,7 +5029,7 @@ describe("pass 35: operator and task actions", () => {
         },
         blocked,
       );
-      const ack = acceptanceDisclosureOf(file(store).frontmatter);
+      const ack = renderedDisclosure(store);
       await forceAcceptCompletion(
         store.db,
         { projectSlug: store.slug, taskKey: "VIB-1", ack },
@@ -5673,7 +5675,7 @@ describe("pass 35 S15: rulings 162 and 163 at the merge stage", () => {
     }));
     const rejected = transitionStage(
       store.db,
-      { projectSlug: store.slug, taskKey: "VIB-1", toStageId: "done", manual: true, ack: acceptanceDisclosureOf(taskFile(store).frontmatter) },
+      { projectSlug: store.slug, taskKey: "VIB-1", toStageId: "done", manual: true, ack: renderedDisclosure(store) },
       actorOf(store.users.arda),
       { dataRoot: store.dataRoot, deps: { mergeTaskPr: mergeMock, updateBranchFromBase: refreshMock } },
     );
@@ -5826,7 +5828,7 @@ describe("pass 35 S15: rulings 162 and 163 at the merge stage", () => {
     });
     await transitionStage(
       store.db,
-      { projectSlug: store.slug, taskKey: "VIB-1", toStageId: "done", manual: true, ack: acceptanceDisclosureOf(taskFile(store).frontmatter) },
+      { projectSlug: store.slug, taskKey: "VIB-1", toStageId: "done", manual: true, ack: renderedDisclosure(store) },
       actorOf(store.users.arda),
       { dataRoot: store.dataRoot, deps: { mergeTaskPr: mergeMock, updateBranchFromBase: refreshMock } },
     );
@@ -5904,7 +5906,7 @@ describe("pass 35 S15: rulings 162 and 163 at the merge stage", () => {
         taskKey: "VIB-1",
         toStageId: "done",
         manual: true,
-        ack: acceptanceDisclosureOf(taskFile(store).frontmatter),
+        ack: renderedDisclosure(store),
       },
       actorOf(store.users.arda),
       { dataRoot: store.dataRoot, deps: { mergeTaskPr: mergeMock } },
@@ -5948,7 +5950,7 @@ describe("pass 35 S15: rulings 162 and 163 at the merge stage", () => {
     await expect(
       transitionStage(
         store.db,
-        { projectSlug: store.slug, taskKey: "VIB-1", toStageId: "done", manual: true, ack: acceptanceDisclosureOf(taskFile(store).frontmatter) },
+        { projectSlug: store.slug, taskKey: "VIB-1", toStageId: "done", manual: true, ack: renderedDisclosure(store) },
         actorOf(store.users.arda),
         { dataRoot: store.dataRoot, deps: { mergeTaskPr: mergeMock, updateBranchFromBase: refreshMock } },
       ),
@@ -6011,7 +6013,7 @@ describe("pass 35 S15: rulings 162 and 163 at the merge stage", () => {
     await expect(
       transitionStage(
         store.db,
-        { projectSlug: store.slug, taskKey: "VIB-1", toStageId: "done", manual: true, ack: acceptanceDisclosureOf(taskFile(store).frontmatter) },
+        { projectSlug: store.slug, taskKey: "VIB-1", toStageId: "done", manual: true, ack: renderedDisclosure(store) },
         actorOf(store.users.arda),
         { dataRoot: store.dataRoot, deps: { updateBranchFromBase: refreshMock, runOperator } },
       ),
@@ -6097,7 +6099,7 @@ describe("pass 35 S15: rulings 162 and 163 at the merge stage", () => {
     await expect(
       transitionStage(
         store.db,
-        { projectSlug: store.slug, taskKey: "VIB-1", toStageId: "done", manual: true, ack: acceptanceDisclosureOf(taskFile(store).frontmatter) },
+        { projectSlug: store.slug, taskKey: "VIB-1", toStageId: "done", manual: true, ack: renderedDisclosure(store) },
         actorOf(store.users.arda),
         { dataRoot: store.dataRoot, fetchImpl, deps: { mergeTaskPr: mergeMock, updateBranchFromBase: refreshMock } },
       ),
