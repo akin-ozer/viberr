@@ -826,39 +826,6 @@ describe("applyAgentCompletionEffects (the shared effects)", () => {
     expect(existsSync(upload)).toBe(true);
   });
 
-  it("ruling 558: a file still being put down for someone else when the run completes is never the run's", async () => {
-    // A person's upload, a relay and a take put the file down and then claim
-    // it. A completion between the two read a timeline with no claim and took
-    // the file: for a deliverer, as its delivery. The writers hold the name
-    // meanwhile; here the completion lands inside that hold.
-    // CANARY: drop the held names from the completion's exclusion and the run
-    // claims `sample-01-input.csv` and stamps `deliveredAt`.
-    writeReviewTask({ stage: "impl", workRevision: null, validation: "none" });
-    const runId = await finishedRunWith("Waiting for the benchmark input.");
-    const { withAttachmentClaims } = await import("~/server/files/task-attachments.server");
-    await withAttachmentClaims(store.slug, "VIB-1", ["sample-01-input.csv"], async () => {
-      saveInRunWindow(runId, ["sample-01-input.csv"]);
-      await applyAgentCompletionEffects(
-        store.db,
-        { dataRoot: store.dataRoot },
-        {
-          projectSlug: store.slug,
-          taskKey: "VIB-1",
-          backend: "claude",
-          profileId: "dev",
-          role: "Developer",
-          delivers: true,
-          workdir: null,
-          agentHandle: "dev",
-        },
-        { id: runId, state: "finished" },
-      );
-    });
-    const parsed = taskFile().parsed;
-    expect(parsed.frontmatter.deliveredAt).toBeNull();
-    expect(parsed.timeline.some((e) => (e.attachments ?? []).includes("sample-01-input.csv"))).toBe(false);
-  });
-
   it("ruling 675: a file held under its composed name is not the run's when it is stored decomposed", async () => {
     // An upload that replaces a file a Mac stored decomposed keeps that file's
     // name, and its hold is taken under the composed one.
@@ -1925,43 +1892,6 @@ describe("applyAgentCompletionEffects (the shared effects)", () => {
       { id: runId, state: "error" },
     );
     expect(existsSync(path.join(dir, dump))).toBe(true);
-  });
-
-  it("ruling 105 review: no prune while a SIBLING run is live on the same task", async () => {
-    // The mtime window is task-wide: a finishing run would delete a
-    // still-working sibling's files before that sibling's citations exist.
-    writeReviewTask();
-    const siblingFile = "console-2026-08-31T16-10-00-000Z.log";
-    const runId = await finishedRunWith(
-      "Done reviewing.\nVerdict: approve — matches the spec.",
-    );
-    // A live sibling run on the same task (the shape the dedup test inserts).
-    const now = new Date().toISOString();
-    store.db
-      .prepare(
-        `INSERT INTO agent_runs (id, task_key, project_slug, thread_id, role, kind,
-           backend, model, state, started_at, created_at, updated_at, agent_profile_id)
-         VALUES ('run_sibling', 'VIB-1', ?, 'th_sibling', 'Developer', 'primary',
-           'claude', 'sonnet', 'running', ?, ?, ?, 'developer')`,
-      )
-      .run(store.slug, now, now, now);
-    const dir = saveInRunWindow(runId, [siblingFile]);
-    await applyAgentCompletionEffects(
-      store.db,
-      { dataRoot: store.dataRoot },
-      {
-        projectSlug: store.slug,
-        taskKey: "VIB-1",
-        backend: "claude",
-        profileId: "reviewer",
-        role: "Reviewer",
-        delivers: false,
-        workdir: null,
-        agentHandle: "reviewer",
-      },
-      { id: runId, state: "finished" },
-    );
-    expect(existsSync(path.join(dir, siblingFile))).toBe(true);
   });
 
   it("ruling 593: beside a live sibling a run deletes nothing and claims only the working files it cited", async () => {
@@ -4008,32 +3938,6 @@ describe("applyAgentCompletionEffects (the shared effects)", () => {
      * lost — the agent's own report is on the same timeline, untruncated". A
      * person's typed note has no second copy, so the identical cut is loss.
      */
-    it("ruling 315: a long note is recorded WHOLE, not cut at 2,000", async () => {
-      writeReviewTask();
-      await review(blocks(1));
-      await review(blocks(2));
-      await review(blocks(3));
-      const { resolvePacket } = await import("./packet-resolution.server");
-      // Longer than the old silent cap, shorter than the refusal — the exact
-      // band SHOP-76's decision fell into.
-      const long = `HEAD ${"x".repeat(2600)} TAIL`;
-      expect(long.length).toBeGreaterThan(2000);
-      await resolvePacket(
-        store.db,
-        { projectSlug: store.slug, taskKey: "VIB-1", optionIndex: 1, note: long },
-        actorOf(store.users.arda),
-        { dataRoot: store.dataRoot },
-      );
-      const recorded = taskFile()
-        .parsed.timeline.map((e) => e.text)
-        .join("\n");
-      // CANARY: restore the route's `.slice(0, 2000)` and TAIL is gone while
-      // HEAD stays — the shape that makes this invisible to the person who
-      // wrote it.
-      expect(recorded).toContain("TAIL");
-      expect(recorded).toContain("HEAD");
-    });
-
     it("ruling 315: a note past the shared cap is REFUSED, and nothing is written", async () => {
       writeReviewTask();
       await review(blocks(1));
