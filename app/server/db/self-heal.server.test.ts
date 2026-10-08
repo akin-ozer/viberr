@@ -16,11 +16,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import { z } from "zod";
 import { runMigrations } from "./migration-runner.server";
 import { openDatabase } from "./sqlite.server";
-import {
-  isCorruptionError,
-  projectionDbState,
-  selfHealProjectionDbIfCorrupt,
-} from "./self-heal.server";
+import { selfHealProjectionDbIfCorrupt } from "./self-heal.server";
 
 /**
  * Boot self-heal. The guarantees that matter: it heals ONLY on real corruption
@@ -135,51 +131,30 @@ function garbleMiddleLeafOf(dbPath: string, table: string): void {
   garblePageAt(dbPath, middle - 1);
 }
 
-describe("isCorruptionError", () => {
-  it("is true for SQLITE_CORRUPT / SQLITE_NOTADB and malformed messages", () => {
-    expect(isCorruptionError({ errcode: 11 })).toBe(true);
-    expect(isCorruptionError({ errcode: 26 })).toBe(true);
-    expect(isCorruptionError(new Error("database disk image is malformed"))).toBe(true);
-    expect(isCorruptionError(new Error("file is not a database"))).toBe(true);
-  });
-  it("is FALSE for I/O and permission errors (which must never heal)", () => {
-    expect(isCorruptionError({ errcode: 14 })).toBe(false); // SQLITE_CANTOPEN
-    expect(isCorruptionError(new Error("EACCES: permission denied, open"))).toBe(false);
-    expect(isCorruptionError(new Error("EMFILE: too many open files"))).toBe(false);
-  });
-});
-
-describe("projectionDbState", () => {
-  it("ok for a missing file (fresh boot) and a healthy database", () => {
-    expect(projectionDbState(tmpDb())).toBe("ok");
-    const p = tmpDb();
-    seedRealDb(p, { users: 1, filler: 10 });
-    expect(projectionDbState(p)).toBe("ok");
-  });
-  it("corrupt for garbage bytes and for a garbled btree page", () => {
-    const g = tmpDb();
-    writeFileSync(g, Buffer.from("this is not a sqlite database at all"));
-    expect(projectionDbState(g)).toBe("corrupt");
-    const b = tmpDb();
-    seedRealDb(b);
-    garblePage(b);
-    expect(projectionDbState(b)).toBe("corrupt");
-  });
-  it("does NOT call a permission-blocked file corrupt (would nuke a healthy DB)", () => {
-    const p = tmpDb();
-    seedRealDb(p, { users: 1, filler: 10 });
-    chmodSync(p, 0o000);
-    try {
-      // Either the owner can still read it ("ok") or it is "unreadable" — never
-      // "corrupt", so the heal never fires over a permissions blip.
-      expect(projectionDbState(p)).not.toBe("corrupt");
-    } finally {
-      chmodSync(p, 0o644);
-    }
-  });
-});
-
 describe("selfHealProjectionDbIfCorrupt", () => {
+  it("never heals a file it cannot open, nor one that is not there", () => {
+    // A permissions blip is not corruption, and a heal over it would replace a
+    // healthy database. The mode bites only for an unprivileged user, which is
+    // how CI runs the suite (ruling 622). CANARY: read every open failure as
+    // corruption and the blocked file no longer comes back unhealed.
+    const blocked = tmpDb();
+    seedRealDb(blocked, { users: 1, filler: 10 });
+    chmodSync(blocked, 0o000);
+    try {
+      expect(selfHealProjectionDbIfCorrupt(blocked)).toEqual({
+        healed: false,
+        salvaged: {},
+        skipped: {},
+      });
+    } finally {
+      chmodSync(blocked, 0o644);
+    }
+    // A fresh boot: nothing to heal, and nothing created in its place.
+    const absent = tmpDb();
+    expect(selfHealProjectionDbIfCorrupt(absent)).toEqual({ healed: false, salvaged: {}, skipped: {} });
+    expect(existsSync(absent)).toBe(false);
+  });
+
   it("leaves a HEALTHY database untouched (no false positive)", () => {
     const p = tmpDb();
     seedRealDb(p, { users: 3, filler: 10 });
@@ -206,8 +181,8 @@ describe("selfHealProjectionDbIfCorrupt", () => {
     // Some users survived, but NOT all — the whole-table drop bug would give 0.
     expect(result.salvaged.users).toBeGreaterThan(0);
     expect(result.salvaged.users).toBeLessThan(2000);
-    // The live file is valid again.
-    expect(projectionDbState(p)).toBe("ok");
+    // The live file is valid again: the next boot finds nothing to heal.
+    expect(selfHealProjectionDbIfCorrupt(p).healed).toBe(false);
     // The corrupt original is preserved.
     expect(existsSync(result.movedTo!)).toBe(true);
   });
@@ -246,6 +221,6 @@ describe("selfHealProjectionDbIfCorrupt", () => {
     expect(existsSync(result.movedTo! + "-wal")).toBe(true);
     // The stale live sidecar was cleared before the swap, so it cannot replay
     // into the fresh file: the healed DB opens clean.
-    expect(projectionDbState(p)).toBe("ok");
+    expect(selfHealProjectionDbIfCorrupt(p).healed).toBe(false);
   });
 });
