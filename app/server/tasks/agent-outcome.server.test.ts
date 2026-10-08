@@ -21,36 +21,23 @@ const grant = (capabilityId: string, mode: CapabilityGrant["mode"]): CapabilityG
 });
 
 describe("effectiveCollabMode — verdict gating (G2/R1/R2)", () => {
-  it("a legacy `recommend` verdict grant stays OFF", () => {
-    // main's seed gave the developer report-validation-verdict:recommend — a
-    // decorative no-op there. It must NOT coerce to `direct` here (that would
-    // arm verdict-veto on the builder against live pre-branch data — R1/R2).
-    const grants = [grant("report-validation-verdict", "recommend")];
-    expect(effectiveCollabMode(grants, "report-validation-verdict")).toBe("off");
-    expect(resolveAgentCollab(grants).verdict).toBe(false);
-  });
-
-  it("F10-14: no verdict grant means OFF (explicit-only)", () => {
-    // Verdict authority is explicit-only now — there is no implicit `direct`
-    // default for a non-delivering engagement. A reviewer gains gating verdict
-    // power ONLY via an explicit report-validation-verdict:direct grant.
-    expect(effectiveCollabMode([], "report-validation-verdict")).toBe("off");
-    expect(resolveAgentCollab([]).verdict).toBe(false);
-  });
-
-  it("F10-14: an explicit direct grant arms the verdict", () => {
-    const grants = [grant("report-validation-verdict", "direct")];
-    expect(effectiveCollabMode(grants, "report-validation-verdict")).toBe("direct");
-    expect(resolveAgentCollab(grants).verdict).toBe(true);
-  });
-
-  it("an explicit human/off grant disables the verdict", () => {
-    expect(
-      effectiveCollabMode([grant("report-validation-verdict", "off")], "report-validation-verdict"),
-    ).toBe("off");
-    expect(
-      effectiveCollabMode([grant("report-validation-verdict", "human")], "report-validation-verdict"),
-    ).toBe("human");
+  /**
+   * Verdict authority is explicit-only (F10-14): there is no implicit `direct`
+   * default for a non-delivering engagement, so a reviewer gains gating verdict
+   * power ONLY via an explicit report-validation-verdict:direct grant. main's
+   * seed gave the developer report-validation-verdict:recommend, a decorative
+   * no-op there: it must NOT coerce to `direct` (that would arm verdict-veto on
+   * the builder against live pre-branch data, R1/R2).
+   */
+  it.each([
+    { held: "a legacy `recommend` grant (R1/R2)", grants: [grant("report-validation-verdict", "recommend")], mode: "off", verdict: false },
+    { held: "no grant (F10-14, explicit-only)", grants: [], mode: "off", verdict: false },
+    { held: "an explicit direct grant (F10-14)", grants: [grant("report-validation-verdict", "direct")], mode: "direct", verdict: true },
+    { held: "an explicit off grant", grants: [grant("report-validation-verdict", "off")], mode: "off", verdict: false },
+    { held: "an explicit human grant", grants: [grant("report-validation-verdict", "human")], mode: "human", verdict: false },
+  ])("$held reads $mode, and arms the verdict: $verdict", ({ grants, mode, verdict }) => {
+    expect(effectiveCollabMode(grants, "report-validation-verdict")).toBe(mode);
+    expect(resolveAgentCollab(grants).verdict).toBe(verdict);
   });
 });
 
