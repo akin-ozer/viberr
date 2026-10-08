@@ -125,16 +125,16 @@ describe("ruling 502: every operator drive carries it, and its disclosure never 
     return text.split(part).length - 1;
   }
 
-  // The second value is `isolatedWritableRoot`: the Codex operator's posture.
-  const postures: Array<[string, boolean]> = [
-    ["Claude", false],
-    ["Codex", true],
+  // The third value is `isolatedWritableRoot`: the Codex operator's posture.
+  const postures: Array<[string, RealBackend, boolean]> = [
+    ["Claude", "claude", false],
+    ["Codex", "codex", true],
   ];
 
-  it.each(postures)("closes the static block of a %s drive, once, and stays out of the tail", (_backend, isolated) => {
+  it.each(postures)("closes the static block of a %s drive, once, and stays out of the tail", (_label, backend, isolated) => {
     const dataRoot = temp.make("viberr-humanizer-op-");
     const build = buildOperatorSystemPrompt(
-      authority(),
+      authority({ backend }),
       dataRoot,
       undefined,
       { kind: "none" },
