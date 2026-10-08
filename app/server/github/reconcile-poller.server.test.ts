@@ -196,20 +196,16 @@ describe("pollGithubReconcile (P11-14)", () => {
     expect(countNudges()).toBe(first);
   });
 
-  it("B9: the merge-pending scan reads pr.state structurally, not as a JSON substring", async () => {
+  it("B9: a PR still in review gets no merge-pending nudge, whatever nested `state` its file carries", async () => {
     // The scan was `pr_json LIKE '%\"state\":\"accepted\"%'` — a substring test
     // over a blob. `prRefSchema` is deliberately `.loose()` and task.md is
     // hand-editable, so any nested object carrying a `state` of "accepted"
     // (here: a note of what the PR used to be) matches the blob while the PR
-    // itself is plainly still in review.
-    //
-    // HONEST SCOPE: the loop re-parses and re-checks `pr.state`, so restoring
-    // the LIKE would not make this test fail — the substring scan costs wasted
-    // rows, not wrong nudges. What this pins is the QUERY's semantics (the two
-    // counts below diverge, and the poller follows the structural one), so the
-    // day the redundant re-check is refactored away the blob match cannot come
-    // back with it. `decisionsRequiring` (decisions.server.ts) already reads
-    // this column with json_extract — this makes the two agree.
+    // itself is plainly still in review. The scan now asks `$.state` with
+    // json_extract, as `decisionsRequiring` (decisions.server.ts) does, and the
+    // loop re-checks the parsed `pr.state`.
+    // CANARY: restore the LIKE and drop the loop's `pr.state` re-check, and this
+    // PR is nudged as accepted; either guard alone keeps it quiet.
     const store = setupTestStore(ctx);
     writeTask(store.dataRoot, store.slug, {
       frontmatter: baseTaskFrontmatter("VIB-1", {
@@ -228,29 +224,6 @@ describe("pollGithubReconcile (P11-14)", () => {
       }),
     });
     rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
-
-    // The fixture is real: the substring the old scan keyed on IS in the blob…
-    // SAFETY: as above — a COUNT(*) row always exists and carries `n`.
-    const naive = (
-      store.db
-        .prepare(
-          `SELECT COUNT(*) AS n FROM task_projections WHERE pr_json LIKE '%"state":"accepted"%'`,
-        )
-        .get() as { n: number }
-    ).n;
-    expect(naive).toBe(1);
-    // …while the PR's own state is not "accepted".
-    // SAFETY: as above — a COUNT(*) row always exists and carries `n`.
-    const structural = (
-      store.db
-        .prepare(
-          `SELECT COUNT(*) AS n FROM task_projections
-            WHERE pr_json IS NOT NULL AND json_valid(pr_json)
-              AND json_extract(pr_json, '$.state') = 'accepted'`,
-        )
-        .get() as { n: number }
-    ).n;
-    expect(structural).toBe(0);
 
     await pollGithubReconcile(store.db, { dataRoot: store.dataRoot });
     // SAFETY: as above — a COUNT(*) row always exists and carries `n`.
