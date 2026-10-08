@@ -1479,6 +1479,74 @@ describe("rulings 507 and 616: several accounts on one backend", () => {
     expect(lastSubmit).toEqual({ intent: "backend-disconnect", backend: "claude", account: id });
   });
 
+  // "Add another account" sits in the card's account-in-use region, so it
+  // goes when that region does: no account left, or a sign-in under way in
+  // the card's place. It stayed open in the card's state instead, and the
+  // next load that showed an account in use opened it again with nobody
+  // asking, over an account a sign-in in another tab had just added. It goes
+  // as its Cancel closes it, key form and all, so opening it again later
+  // starts from the ways to connect.
+  // CANARY: drop the reset of `adding` in `AgentAccountCard`
+  // (agent-accounts-panel.tsx) and every row ends with the section open
+  // (drop only its `running` and the sign-in rows do); drop the reset's
+  // `setPaste(null)` and every row opens it again on the key form.
+  it.each<[string, ClaudeOnServer[], string]>([
+    [
+      "another tab disconnects every account, then connects a new one",
+      [
+        { accounts: [], login: null },
+        { accounts: [account("ubc_fresh", "fresh@example.com", { active: true })], login: null },
+      ],
+      "fresh@example.com",
+    ],
+    [
+      "another tab adds an account through a sign-in",
+      [
+        { accounts: [WORK, PERSONAL, KEY], login: runningLogin("claude") },
+        {
+          accounts: [
+            account("ubc_new", "new@example.com", { active: true }),
+            { ...WORK, active: false },
+            PERSONAL,
+            KEY,
+          ],
+          login: runningLogin("claude", { state: "succeeded" }),
+        },
+      ],
+      "new@example.com",
+    ],
+    [
+      "another tab starts a sign-in, then cancels it",
+      [
+        { accounts: [WORK, PERSONAL, KEY], login: runningLogin("claude") },
+        { accounts: [WORK, PERSONAL, KEY], login: runningLogin("claude", { state: "cancelled" }) },
+      ],
+      "Work",
+    ],
+  ])("'Add another account' closes, and stays closed, when %s", async (_label, loads, inUse) => {
+    const server: ClaudeOnServer = { accounts: [WORK, PERSONAL, KEY], login: null };
+    const { view, reload } = await renderLoaded(server);
+    const adding = { name: "Add another Claude account" };
+    const keyField = () => view.container.querySelector("#agentacc-claude-api_key");
+    chooseAction(view, "Work", "Add another Claude account");
+    fireEvent.click(buttonIn(view.getByRole("group", adding), "Use an API key"));
+    // A load that still shows the account in use (a live event about
+    // something else) leaves the section where the person opened it.
+    await reload();
+    expect(view.getByRole("group", adding)).toBeTruthy();
+    expect(keyField()).toBeTruthy();
+
+    for (const [index, load] of loads.entries()) {
+      Object.assign(server, load);
+      await reload();
+      expect(view.queryByRole("group", adding), `after load ${index + 1}`).toBeNull();
+    }
+    // The card shows an account in use again, where the section would be,
+    // and the section opens again on the ways to connect.
+    chooseAction(view, inUse, "Add another Claude account");
+    expect(keyField(), "the key form, opened again").toBeNull();
+  });
+
   it("renames in place, and refuses a name too long in the store's own words (ruling 147)", () => {
     const view = renderPanel([claudeWith([WORK, PERSONAL]), backend("codex")]);
     const { container, getByLabelText, getByRole, queryByRole } = view;

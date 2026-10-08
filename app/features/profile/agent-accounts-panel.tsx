@@ -160,6 +160,18 @@ function AgentAccountCard({
   ) {
     setConfirmDisconnect(null);
   }
+  // "Add another account" sits beside the confirm, under the account in use,
+  // so it closes when that region goes: no account left, or a sign-in under
+  // way in its place. A sign-in that ends here connected closes it too (the
+  // poll's `onConnected`), but one ended in another tab, or seen first by a
+  // revalidation, left this state open, and the load that brought an account
+  // in use back opened the section with nobody asking. It closes as its Cancel
+  // does, key form and all, so opening it again starts from the ways to
+  // connect. Adjusted during render, as the confirm is.
+  if (adding && (running || !active)) {
+    setAdding(false);
+    setPaste(null);
+  }
 
   // A completed rename or saved key closes what the person had open for it.
   // Settled on the RESULT, so a refusal leaves the field as it was. Not the
