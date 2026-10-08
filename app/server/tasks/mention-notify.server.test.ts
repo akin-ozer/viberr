@@ -696,16 +696,19 @@ describe("every comment writer notifies the human it @tags (NEW-4)", () => {
   /**
    * Every writer that appends a `comment` timeline event, each driven through the
    * function a run/route actually calls. `roster` is only about what the writer
-   * needs to exist, never about the fan-out.
+   * needs to exist, never about the fan-out; `from` is the author its
+   * notification row must name.
    */
   const WRITERS: {
     name: string;
     roster: boolean;
+    from: Partial<ActorRender>;
     write: (store: TestStore, tag: string) => Promise<void>;
   }[] = [
     {
       name: "appendComment (a human comment)",
       roster: false,
+      from: { kind: "human" },
       // Authored by Selin so the tag is not the author's own (never self-notify).
       write: async (store, tag) => {
         await appendComment(
@@ -723,6 +726,7 @@ describe("every comment writer notifies the human it @tags (NEW-4)", () => {
     {
       name: "postAgentReplyComment (an interrupted/errored agent reply)",
       roster: false,
+      from: { kind: "agent", backend: "claude" },
       write: async (store, tag) => {
         await postAgentReplyComment(
           store.db,
@@ -740,6 +744,7 @@ describe("every comment writer notifies the human it @tags (NEW-4)", () => {
     {
       name: "recordAgentCompletion (the FINISHED run — the common case)",
       roster: false,
+      from: { kind: "agent", backend: "claude" },
       write: async (store, tag) => {
         await recordAgentCompletion(
           store.db,
@@ -760,6 +765,7 @@ describe("every comment writer notifies the human it @tags (NEW-4)", () => {
     {
       name: "operatorPostComment (operator narration)",
       roster: true,
+      from: OPERATOR_FROM,
       write: async (store, tag) => {
         const result = await operatorPostComment(
           store.db,
@@ -781,6 +787,7 @@ describe("every comment writer notifies the human it @tags (NEW-4)", () => {
     {
       name: "addRecommendation (the operator's recommendation reasoning)",
       roster: true,
+      from: OPERATOR_FROM,
       write: async (store, tag) => {
         const result = await operatorDispatchAgent(
           store.db,
@@ -801,6 +808,7 @@ describe("every comment writer notifies the human it @tags (NEW-4)", () => {
     {
       name: "postAgentComment (an agent's mid-run comment tool)",
       roster: false,
+      from: { kind: "agent", backend: "claude" },
       write: async (store, tag) => {
         await postAgentComment(
           store.db,
@@ -818,6 +826,7 @@ describe("every comment writer notifies the human it @tags (NEW-4)", () => {
       // Ruling 488: a relay from another task lands on VIB-1 as a comment.
       name: "relayToTask (another task's relay, the operator's or an agent's)",
       roster: false,
+      from: OPERATOR_FROM,
       write: async (store, tag) => {
         writeTask(store.dataRoot, store.slug, {
           frontmatter: baseTaskFrontmatter("VIB-2", { stage: "impl", ownerUserId: store.users.arda.id }),
@@ -837,6 +846,7 @@ describe("every comment writer notifies the human it @tags (NEW-4)", () => {
       // Ruling 557: a take lands on VIB-1 as the operator's claiming comment.
       name: "takeFromTask (files taken from another task, with a line on why)",
       roster: false,
+      from: OPERATOR_FROM,
       write: async (store, tag) => {
         writeTask(store.dataRoot, store.slug, {
           frontmatter: baseTaskFrontmatter("VIB-2", { stage: "impl", ownerUserId: store.users.arda.id }),
@@ -874,9 +884,11 @@ describe("every comment writer notifies the human it @tags (NEW-4)", () => {
       expect(mentions).toHaveLength(1);
       expect(mentions[0]!.user_id).toBe(store.users.arda.id);
       expect(mentions[0]!.text).toContain("mentioned you");
-      // …and it says WHO tagged them: a bare row with no author is how a
-      // machine-authored ping reads as a system notice instead of an answer.
-      expect(mentions[0]!.actor_json).toBeTruthy();
+      // …and it says WHO tagged them, as that writer's author: a bare row is
+      // how a machine-authored ping reads as a system notice instead of an
+      // answer. CANARY: send an agent reply's ping `from` the Operator and
+      // postAgentReplyComment's row fails.
+      expect(JSON.parse(String(mentions[0]!.actor_json))).toMatchObject(writer.from);
       // Ruling 382 (F39-9): the EVENT records who the fan-out reached, so
       // compaction can never fold a comment somebody was told about. Asserted
       // here, on the same enumerated table, because a writer that notifies but

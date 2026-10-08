@@ -729,36 +729,6 @@ describe("appendComment", () => {
     ).toMatchObject({ c: 0 });
   });
 
-  // NEW-4: an AGENT reply that tags a human must fan out the same `mention`
-  // notification a human comment would — otherwise the tag the agents are now
-  // instructed to write pings no one. The `from` chip is the agent, not a human.
-  it("an agent reply that @tags a human notifies them, attributed to the agent", async () => {
-    const store = setupProjectedStore(ctx);
-    withTask(store);
-    await postAgentReplyComment(store.db, { dataRoot: store.dataRoot }, {
-      projectSlug: store.slug,
-      taskKey: "VIB-1",
-      runId: "run_test",
-      actorRef: REVIEWER_REF,
-      replyText: `@${store.users.arda.name.split(" ")[0]} the review is clean — over to you for acceptance.`,
-    });
-
-    const rows = selectRows(
-      store.db,
-      `SELECT user_id, kind, actor_json FROM notifications`,
-      z.object({
-        user_id: z.string(),
-        kind: z.string(),
-        actor_json: z.string().nullable(),
-      }),
-    );
-    expect(rows).toHaveLength(1);
-    expect(rows[0]!.user_id).toBe(store.users.arda.id);
-    expect(rows[0]!.kind).toBe("mention");
-    // Attributed to the reviewer agent (kind agent + backend), NOT a human.
-    expect(JSON.parse(rows[0]!.actor_json!)).toMatchObject({ kind: "agent", backend: "claude" });
-  });
-
   // G7/B-FD9: the compression-threshold guardrail must fire on a pure
   // agent-reply flood — the case it exists for. It ran only on operator/human
   // comment writes, so a run of agent replies accreted with no compaction.
