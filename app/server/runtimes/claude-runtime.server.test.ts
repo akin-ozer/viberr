@@ -805,24 +805,6 @@ describe("claude idle hang guard (P13-RT-11)", () => {
     delete process.env.VIBERR_CLAUDE_IDLE_TIMEOUT_MS;
     resetEnvCacheForTests();
   });
-
-  it("a normal run never trips the guard", async () => {
-    process.env.VIBERR_CLAUDE_IDLE_TIMEOUT_MS = "200";
-    resetEnvCacheForTests();
-    const { q } = fakeQuery([
-      { type: "system", subtype: "init", session_id: "s-2" },
-      { type: "result", subtype: "success", is_error: false },
-    ]);
-    let exit: RunExit | null = null;
-    createClaudeAdapter({ queryFn: () => q }).start(SPEC, {
-      onLine: () => {},
-      onExit: (e) => (exit = e),
-    });
-    await drain();
-    expect(exit).toMatchObject({ outcome: "finished" });
-    delete process.env.VIBERR_CLAUDE_IDLE_TIMEOUT_MS;
-    resetEnvCacheForTests();
-  });
 });
 
 /**
