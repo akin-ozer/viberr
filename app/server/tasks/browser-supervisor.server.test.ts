@@ -7,6 +7,7 @@ import { createInterface } from "node:readline";
 import { PassThrough } from "node:stream";
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { z } from "zod";
+import { alive } from "../../../test-support/process-liveness";
 import { BROWSER_CALL_DEADLINE_MS as DEADLINE } from "./browser-deadline.server";
 import { superviseBrowserServer } from "./browser-supervisor.server";
 
@@ -149,15 +150,6 @@ function session() {
   return { open, call, send, answer, answers, answered, said, text, close, done };
 }
 
-const alive = (pid: string) => {
-  try {
-    process.kill(Number(pid), 0);
-    return true;
-  } catch {
-    return false;
-  }
-};
-
 describe("ruling 554: the browser runs under a supervisor", () => {
   it("passes a call answered in time through to the client, on the one server", async () => {
     const s = session();
@@ -170,7 +162,7 @@ describe("ruling 554: the browser runs under a supervisor", () => {
     s.call(3, "look");
     expect(s.text(await s.answer(3))).toBe(`look answered by ${pid}`);
     expect(await s.close()).toBe(0);
-    await vi.waitFor(() => expect(alive(pid)).toBe(false), { timeout: 10_000 });
+    await vi.waitFor(() => expect(alive(Number(pid))).toBe(false), { timeout: 10_000 });
   });
 
   it("answers every request waiting on a stuck browser, ends it and serves the next call from a fresh one", async () => {
@@ -199,7 +191,7 @@ describe("ruling 554: the browser runs under a supervisor", () => {
     // CANARY: replay only `initialize` and the fresh server never hears the
     // client's `notifications/initialized`.
     await s.said(`initialized ${fresh}`);
-    await vi.waitFor(() => expect(alive(stuck)).toBe(false), { timeout: 10_000 });
+    await vi.waitFor(() => expect(alive(Number(stuck))).toBe(false), { timeout: 10_000 });
     expect(await s.close()).toBe(0);
     // Each request the client made is answered once, and nothing else is.
     // CANARY: pass on what an ended server still writes and call 2 is answered
