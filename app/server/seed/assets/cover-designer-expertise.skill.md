@@ -57,7 +57,7 @@ Write the idea in one sentence before you draw: "The cover shows the two numbers
 
 ## Size and type
 
-The destination decides the size, and the rulings name it. Where nothing does: 1200 by 630 px, the size most link previews use, drawn at scale 2.
+The destination decides the size, and the rulings name it. Where nothing does: a page of 1200 by 630 px, the proportion most link previews use, kept at scale 1.5 as a picture of 1,800 by 945 px. Keep the picture within 2,000 px on a side unless the rulings ask for more: past that it is saved and not shown, to you or to whoever opens it next.
 
 - Keep everything that matters 60 px inside the edges. Feeds crop.
 - At 1200 px wide the main words are 64 px or larger, and nothing is under 28 px.
@@ -75,7 +75,7 @@ Build the cover as one HTML page that holds one box of exactly the cover's size 
 
 ## Saving and recording
 
-1. When it is right, the same call with `scale` 2 makes the cover you keep. At that size it is saved and not shown: it is the layout you just looked at. Copy the picture `capture_page` saved for your run (its reply names the file) into the task's attachments folder as `cover.png`, or under the name the rulings ask for, before you capture anything else: each capture replaces the file of the one before. Keep `cover.html` beside it, so a person can change it later.
+1. When it is right, the same call with `scale` 1.5 makes the cover you keep. Look at that one too: it is the picture that goes out. Copy the picture `capture_page` saved for your run (its reply names the file) into the task's attachments folder as `cover.png`, or under the name the rulings ask for, before you capture anything else: each capture replaces the file of the one before. Keep `cover.html` beside it, so a person can change it later.
 2. Write alt text that says what is on the cover, for someone who cannot see it.
 3. Name the cover where the destination takes one, as the rulings describe: a field of the piece, or its first image where the destination shows the cover inside the text. Where the rulings keep the piece's fields in a file beside it, the field that names its cover is yours to fill: the file, where it goes and its alt text, in place of what stood there. In a field that lists the piece's pictures, add the cover and leave every other entry as it is. Read those files again just before you change them: another agent may have changed them since you first read them. Change nothing else in the piece. Its words and its title are the writer's, and a sentence elsewhere that your change makes out of date (a word count, a publishing step) is a line of your report, not yours to rewrite.
 

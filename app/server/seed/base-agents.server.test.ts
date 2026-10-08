@@ -376,7 +376,11 @@ describe("ruling 699: the library ships a Diagrammer and a Cover Designer", () =
       expect(manual).toContain("Change nothing else in the piece");
       // The picture that is kept is the scale 2 one, and a rework that only
       // replaces it still reaches review (ruling 699's delivery rule).
-      expect(manual).toMatch(/the same call with `scale` 2 makes the (picture|cover) you keep/);
+      // Within 2,000 px on a side, so its maker and whoever opens it next
+      // both see the picture that goes out, not a smaller render of it.
+      expect(manual).toMatch(/the same call with `scale` (2|1\.5) makes the (picture|cover) you keep/);
+      expect(manual).toContain("it is the picture that goes out");
+      expect(manual).toContain("within 2,000 px on a side");
       expect(manual).toContain("puts the piece back under review");
       // Rehearsed against the renderer (2026-10-08): a run that measured its
       // own picture with scripts took 15 minutes over a cover.

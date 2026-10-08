@@ -17,6 +17,7 @@ import type { FileLease } from "~/shared/file-leases";
 import { isRelayComment } from "./task-relay.server";
 import type { DatabaseSync } from "node:sqlite";
 import {
+  activeWorkRevision,
   currentVerdicts,
   deliveringEngagement,
   type ParsedTaskFile,
@@ -509,9 +510,44 @@ export function stampNonCommitDelivery(
  * held by the delivery, and saving it again moves the delivery as the
  * deliverer's own file does. Its first save of a new name still moves
  * nothing, and a verdict-capable agent's files never count.
+ *
+ * Only where the delivery is the files themselves. Where it is a revision
+ * the review binds to the commit, and a supporting agent's file on the task
+ * is beside the delivery, not in it: counted there, its re-save would stamp
+ * and keep a copy of the whole folder and change nothing anybody reviews.
  */
-function deliveryMakers(fm: Pick<TaskFrontmatter, "engagements">): Set<string> {
-  return new Set(fm.engagements.filter((e) => e.delivers || !e.verdictCapable).map((e) => e.profileId));
+function deliveryMakers(fm: Pick<TaskFrontmatter, "engagements" | "workRevision">): Set<string> {
+  const revision = activeWorkRevision(fm.workRevision) !== null;
+  return new Set(
+    fm.engagements.filter((e) => e.delivers || (!revision && !e.verdictCapable)).map((e) => e.profileId),
+  );
+}
+
+/** The names an agent's own entries claim: what it saved on the task, as the
+ *  timeline has it, less the browser's working files and what a relay carried. */
+export function filesClaimedBy(timeline: readonly TaskFileEvent[], profileIds: ReadonlySet<string>): Set<string> {
+  const names = new Set<string>();
+  for (const e of timeline) {
+    if (e.actor.kind !== "agent" || !profileIds.has(e.actor.profileId)) continue;
+    if (isRelayComment(e)) continue;
+    for (const name of e.attachments ?? []) {
+      if (!isBrowserWorkingArtifact(name)) names.add(name);
+    }
+  }
+  return names;
+}
+
+/**
+ * The files the task's deliverer itself saved: ruling 587's first set, which
+ * two readers still need apart from the makers' files ruling 699 added. The
+ * page order puts the deliverer's own pages first, and a picture's drawing
+ * must not go ahead of the piece; and beside another specialist run a maker
+ * may claim its own earlier file but never the deliverer's (ruling 627).
+ */
+export function deliverersOwnFileNames(fm: TaskFrontmatter, timeline: readonly TaskFileEvent[]): Set<string> {
+  const deliverer = deliveringEngagement(fm);
+  if (!fm.deliveredAt || !deliverer) return new Set();
+  return filesClaimedBy(timeline, new Set([deliverer.profileId]));
 }
 
 /**
@@ -531,18 +567,9 @@ function deliveryMakers(fm: Pick<TaskFrontmatter, "engagements">): Set<string> {
  * on vouching for content its reviewer never read.
  */
 export function deliveredFileNames(fm: TaskFrontmatter, timeline: readonly TaskFileEvent[]): Set<string> {
-  const names = new Set<string>();
   const deliverer = deliveringEngagement(fm);
-  if (!fm.deliveredAt || !deliverer) return names;
-  const makers = deliveryMakers(fm);
-  for (const e of timeline) {
-    if (e.actor.kind !== "agent" || !makers.has(e.actor.profileId)) continue;
-    if (isRelayComment(e)) continue;
-    for (const name of e.attachments ?? []) {
-      if (!isBrowserWorkingArtifact(name)) names.add(name);
-    }
-  }
-  return names;
+  if (!fm.deliveredAt || !deliverer) return new Set();
+  return filesClaimedBy(timeline, deliveryMakers(fm));
 }
 
 /**

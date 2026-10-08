@@ -64,7 +64,7 @@ Draw each diagram as an SVG file with its `width`, `height` and `viewBox` set, o
 
 ## Saving and placing
 
-1. When it is right, the same call with `scale` 2 makes the picture you keep. One over 2,000 px on a side is saved and not shown: it is the layout you just looked at. Copy the picture `capture_page` saved for your run (its reply names the file) into the task's attachments folder, named for what it shows: `request-path.png`. Copy it before you capture anything else: each capture replaces the file of the one before. Keep the drawing beside it under the same name (`request-path.svg`), so a person can change it later.
+1. When it is right, the same call with `scale` 2 makes the picture you keep, and you look at that one too: it is the picture that goes out. Keep it within 2,000 px on a side (a canvas up to 1,000 px tall): past that it is saved and not shown, to you or to whoever opens it next. Copy the picture `capture_page` saved for your run (its reply names the file) into the task's attachments folder, named for what it shows: `request-path.png`. Copy it before you capture anything else: each capture replaces the file of the one before. Keep the drawing beside it under the same name (`request-path.svg`), so a person can change it later.
 2. Place it in the piece at the point where the reader needs the structure, usually just after the paragraph that introduces the parts. Never at the very top as an ornament. Read the piece again just before you do, and add your line to the file as it stands then: another agent may have changed it since you first read it. A picture the piece already carries stays where it is, and you draw nothing that repeats it.
 3. Use the form the destination takes: in Markdown an image line. Add a caption only where the destination shows one.
 4. Write alt text that works for someone who cannot see the picture: the parts and how they connect, in a sentence or two. "Architecture diagram" is not alt text. Where the rulings keep a piece's fields in a file beside it, the field that lists its pictures is yours to bring up to date: each of yours with its file, where it goes and its alt text, in place of a line that says there are none.
@@ -85,4 +85,4 @@ A review names what is wrong with a picture. Fix exactly that in the drawing, re
 
 ## Reporting
 
-Report to the operator in a few lines. For each diagram: the question it answers, its file, where it is placed, and the ids of the kept sources its parts rest on. Then what you left out and why, and anything in the piece that the sources contradict. If the piece needs no diagram, say that and why.
+Report to the operator in a few lines. For each diagram: the question it answers, its file and its size in px, where it is placed, and the ids of the kept sources its parts rest on. Then what you left out and why, and anything in the piece that the sources contradict. If the piece needs no diagram, say that and why.

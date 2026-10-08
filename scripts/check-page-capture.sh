@@ -378,10 +378,10 @@ if (command === "verify-sized") {
   // them up, as the server's Math.round does.
   check(odd?.width === 1802 && odd?.height === 947, "a 1201 by 631 box at scale 1.5 is a PNG of exactly 1802 by 947, each side rounded by itself", size(odd));
   if (twice && half && odd) {
-    check(twice.at(100, 100) === "255,0,0" && half.at(25, 25) === "255,0,0", "the box is cut from the page's top left", `${twice.at(100, 100)} / ${half.at(25, 25)}`);
+    check(twice.at(100, 100) === "255,0,0" && half.at(25, 25) === "255,0,0", "the page's top left corner is the picture's top left corner", `${twice.at(100, 100)} / ${half.at(25, 25)}`);
     check(twice.at(2000, 1000) === "0,128,0", "at scale 2 the page is drawn for a 2x screen (devicePixelRatio 2), not enlarged", twice.at(2000, 1000));
     check(half.at(500, 250) === "0,0,255", "under 1 the page is drawn for a 1x screen and the picture scaled down", half.at(500, 250));
-    check(odd.at(1500, 800) === "128,128,128", "at scale 1.5 the page is drawn for a 1.5x screen", odd.at(1500, 800));
+    check(odd.at(1500, 800) === "128,128,128", "at scale 1.5 the page is told a device ratio that is neither 1 nor 2", odd.at(1500, 800));
   }
   const reported = ["twice", "half", "odd"].map((view) => shot(sized, view)).every((s) => s?.contentWidth === 1400 && s?.contentHeight === 900 && s?.cut === true);
   check(reported, "a layout larger than the box is reported at its own size, 1400 by 900 CSS px, at every scale", JSON.stringify(sized.shots.map((s) => [s.view, s.contentWidth, s.contentHeight, s.cut])));
@@ -392,7 +392,7 @@ if (command === "verify-sized") {
 
   check(drawing.error === null && drawing.shots.length === 3, "an SVG drawing is pictured at each exact size asked", drawing.error ?? `${drawing.shots.length} picture(s)`);
   const drawn = picture("2-twice.png");
-  check(drawn?.width === 2400 && drawn?.height === 1260 && picture("2-half.png")?.width === 600, "as PNGs of exactly the box times the scale", size(drawn));
+  check(drawn?.width === 2400 && drawn?.height === 1260 && picture("2-half.png")?.width === 600, "as a PNG of exactly 2400 by 1260 at scale 2, and 600 wide at scale 0.5", size(drawn));
   if (drawn) {
     check(drawn.at(0, 0) === "0,0,255" && drawn.at(2399, 1259) === "0,0,255", "the drawing fills its box from the top left: no margin, and a percent height is the box's", `${drawn.at(0, 0)} / ${drawn.at(2399, 1259)}`);
     check(drawn.at(300, 300) === "255,0,0", "the picture saved beside the drawing is drawn in it", drawn.at(300, 300));

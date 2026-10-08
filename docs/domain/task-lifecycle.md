@@ -302,8 +302,8 @@ run does not (ruling 216).
   never move it: they are tool transport, not a delivery (ruling 570). A run not
   dispatched to deliver moves it when it saves again a file the delivery already holds
   (`deliveredFileNames`: the names the delivering engagement's entries claim, and, ruling
-  699, those of every supporting agent engaged on the task that holds no verdict, such as
-  the picture a piece shows), because the
+  699, where the delivery is files and not a revision, those of every supporting agent
+  engaged on the task that holds no verdict, such as the picture a piece shows), because the
   delivered content changed under the verdicts bound to it; a file of its own moves
   nothing (ruling 587). Beside another specialist run, live or finished inside its window,
   such a run claims only the files its own words name and never one the delivery holds, since

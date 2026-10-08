@@ -2298,7 +2298,9 @@ gives it: the piece stays its writer's delivery, the agent saves its picture on 
 saves the piece again with the picture placed, and that save moves the review to the
 assembled piece (ruling 587). A rework that only replaces a picture moves it too: a delivery
 holds the files of every supporting agent engaged on the task that holds no verdict
-(`deliveryMakers`, ruling 699), while a reviewer's own files still move nothing. Their manuals (`diagrammer-expertise`,
+(`deliveryMakers`, ruling 699, where the delivery is files and not a revision), while a
+reviewer's own files still move nothing; beside another specialist run a maker still
+claims the file it saved before, and never the deliverer's (ruling 627). Their manuals (`diagrammer-expertise`,
 `cover-designer-expertise`) hold the rest. A diagram is drawn only where the piece needs
 one, and none is a result; every box, arrow and label comes from the piece or from a kept
 source the run opened. A cover shows something from the piece (its command, its number, its
@@ -2306,8 +2308,9 @@ real screen) in the look of the person's earlier covers, with no generated or st
 no decoration and nothing invented. Each agent draws its picture as an SVG or an HTML page
 among the task's files, renders it at the size it names with `capture_page` (ruling 698),
 looks at the picture the tool returns (a cover also at a quarter of its size, as a feed
-shows it), fixes what it sees, makes the picture it keeps with one last call at scale 2,
-and copies that PNG onto the task. Neither asks the person
+shows it), fixes what it sees, makes the picture it keeps with one last call (scale 2 for a diagram,
+1.5 for a cover, within 2,000 px a side so it is still shown), looks at that one too, and
+copies that PNG onto the task. Neither asks the person
 anything: `ask-human` is withheld by name, because an absent grant resolves to granted, and
 what only the person can supply is a line of the report. The Editor's manual has it open
 every picture the piece carries and judge a diagram against the kept sources and a cover

@@ -76,7 +76,7 @@ import {
 } from "~/shared/page-capture";
 import { noSuchAttachment } from "./board-read.server";
 import { reprojectTask, taskRef, type TaskMutationContext } from "./task-mutation.server";
-import { deliveredFileNames } from "./task-replies.server";
+import { deliverersOwnFileNames } from "./task-replies.server";
 import { isRelayComment } from "./task-relay.server";
 
 /**
@@ -950,7 +950,9 @@ function deliveryPages(
       if (event.actor.kind === "human" || isRelayComment(event)) inputs.add(name);
     }
   }
-  const delivered = deliveredFileNames(fm, timeline);
+  // The deliverer's own, not every maker's (ruling 699): a picture's drawing
+  // is a page too, and must not be pictured ahead of the piece or in its place.
+  const delivered = deliverersOwnFileNames(fm, timeline);
   const pages = files
     .filter((name) => pageKindOf(name) !== null && !inputs.has(name))
     .sort((a, b) => Number(delivered.has(b)) - Number(delivered.has(a)) || (a < b ? -1 : a > b ? 1 : 0));
