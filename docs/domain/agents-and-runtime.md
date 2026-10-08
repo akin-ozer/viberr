@@ -1692,12 +1692,16 @@ occurrence pending for the tick while the same profile has a live run on the tas
 `run-agent` entry with no profile, starts the agent (`400` → failed, `409` → back to
 pending) or runs the operator with `trigger: scheduled` and `scheduleId`, and audits
 `task.schedule.fired`. The outcomes a `run-operator` occurrence can end with: `claimed`
-(the claim-time row), `skipped-done` (terminal stage), `skipped-held` (ruling 131(d)),
-`skipped-packet` (ruling 141: a decision packet is open, the same refusal a person's Run
-operator gets), the three skips carrying `refusedAtStart: true` when the operator refused
-at start, and `queued-behind-drive` (the run waits behind a live drive; a refusal at the
-front of the lease queue then writes the final `skipped-*` row with `atDrain: true` and a
-"Scheduled action skipped" note). A `run-agent` occurrence fired into a backend the
+(the claim-time row), `skipped-done` (terminal stage), `skipped-archived` (the task or its
+project is archived), `skipped-held` (ruling 131(d)), `skipped-packet` (ruling 141: a
+decision packet is open, the same refusal a person's Run operator gets), each skip carrying
+`refusedAtStart: true` when the operator refused at start, and `queued-behind-drive` (the
+run waits behind a live drive; a refusal at the front of the lease queue then writes the
+final `skipped-*` row with `atDrain: true` and a "Scheduled action skipped" note). A
+closed task's note names the closure the run met, the board's own name for its terminal
+stage or the archive, at claim time and at start alike (ruling 177). An occurrence that an
+archive or a person cancelled while it was being driven gets no final row: the cancel
+wrote its last record. A `run-agent` occurrence fired into a backend the
 instance knows is out of quota (ruling 152(c)) retires `fired` with outcome `held-quota`
 and `rescheduledAs: <the hold's own schedule id>`: the dispatcher already wrote the
 "Dispatch held" note and put the retry on the schedule, so the occurrence spends no retry

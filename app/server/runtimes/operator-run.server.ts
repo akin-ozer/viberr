@@ -817,14 +817,13 @@ async function noteQueuedTriggerRefused(
     taskKey: queued.taskKey,
     dataRoot: queued.dataRoot,
   };
-  const outcome =
-    refused === "open-packet"
-      ? "skipped-packet"
-      : refused === "closed"
-        ? "skipped-done"
-        : "skipped-held";
+  // Read under the note's lock: the closure the note names is the one the
+  // outcome records, and an archived task is not Done (the schedule runner's
+  // split).
+  const found = { archived: false };
   try {
     await updateTaskFile(ref, (parsed) => {
+      found.archived = parsed.frontmatter.archived === true;
       const packetTitle = parsed.packet?.title ?? null;
       const cause =
         refused === "open-packet"
@@ -868,6 +867,14 @@ async function noteQueuedTriggerRefused(
     });
     reprojectTask(db, { dataRoot: ref.dataRoot }, ref.projectSlug, ref.taskKey);
     if (queued.scheduleId) {
+      const outcome =
+        refused === "open-packet"
+          ? "skipped-packet"
+          : refused === "closed"
+            ? found.archived
+              ? "skipped-archived"
+              : "skipped-done"
+            : "skipped-held";
       recordAudit(db, {
         action: "task.schedule.fired",
         actor: { userId: null, label: "system:schedule-runner" },

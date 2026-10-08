@@ -37,6 +37,7 @@ import {
   disconnectFakeBackend,
 } from "../../../test-support/backend-credentials";
 import { assertStrictSchema } from "../../../test-support/strict-schema";
+import type { ParsedTaskFile } from "~/schemas/task-file.schema";
 import { RUN_INPUTS_TAG } from "~/features/runtime/runtime-types";
 import {
   getRun,
@@ -5587,41 +5588,56 @@ describe("runOperator — authority, ordering, orphans", () => {
     });
   });
 
-  it("ruling 141: a queued SCHEDULED occurrence refused at the front of the lease queue says so on the task and writes its final row", async () => {
+  it.each([
+    {
+      meanwhile: "opens a packet",
+      change: (parsed: ParsedTaskFile) => {
+        parsed.packet = {
+          type: "blocked",
+          kind: "Blocked decision",
+          from: "operator",
+          title: "Branch conflicts with main",
+          body: "",
+          observations: [],
+          options: [{ kind: "redirect", t: "Have the developer resolve it", d: "", rec: true }],
+        };
+        parsed.frontmatter.waiting = "human";
+      },
+      said: /Scheduled action skipped:.*reached the front of the queue, but a decision packet is open on VIB-1 \("Branch conflicts with main"\)/,
+      outcome: "skipped-packet",
+      waiting: "human", // the packet owns it; the refusal settles nothing
+    },
+    {
+      meanwhile: "archives the task",
+      change: (parsed: ParsedTaskFile) => {
+        parsed.frontmatter.archived = true;
+      },
+      said: /Scheduled action skipped:.*reached the front of the queue, but VIB-1 is closed \(archived\)/,
+      // The schedule runner's split: an archived task is not Done.
+      outcome: "skipped-archived",
+    },
+  ])("ruling 141: a queued SCHEDULED occurrence refused at the front of the lease queue because the live drive $meanwhile says so on the task and writes its final row", async ({ change, said, outcome, waiting }) => {
     // Canary: restore the bare `.catch(...)` at the drain site (drop the
     // `.then` that chains on the result) — the refusal exists only in the log.
+    // Write `skipped-done` for every closed refusal and the archived row
+    // records a task that was never Done.
     deployAgents([operatorAgent()]);
     seed("impl");
     await drive({ trigger: "manual" });
     expect(adapter5.pending).not.toBeNull();
     const queued = await drive({ trigger: "scheduled", scheduleId: "sch_1" });
     expect(queued.queued).toBe(true);
-    // The live drive opens a packet before the queued turn gets its chance.
-    await updateTaskFile({ projectSlug: store5.slug, taskKey: "VIB-1", dataRoot: store5.dataRoot }, (parsed) => {
-      parsed.packet = {
-        type: "blocked",
-        kind: "Blocked decision",
-        from: "operator",
-        title: "Branch conflicts with main",
-        body: "",
-        observations: [],
-        options: [{ kind: "redirect", t: "Have the developer resolve it", d: "", rec: true }],
-      };
-      parsed.frontmatter.waiting = "human";
-    });
+    // The live drive changes the task before the queued turn gets its chance.
+    await updateTaskFile({ projectSlug: store5.slug, taskKey: "VIB-1", dataRoot: store5.dataRoot }, change);
     rebuildAll(store5.db, { dataRoot: store5.dataRoot, force: true });
     adapter5.finish(store5, JSON.stringify({ reasoning: "done", actions: [] }), "finished");
     await eventually(() => {
-      expect(
-        task().timeline.some((e) =>
-          /Scheduled action skipped:.*reached the front of the queue, but a decision packet is open on VIB-1 \("Branch conflicts with main"\)/.test(e.text),
-        ),
-      ).toBe(true);
+      expect(task().timeline.some((e) => said.test(e.text))).toBe(true);
     });
     expect(operatorRuns()).toHaveLength(1); // the live drive only — no second run
-    expect(task().frontmatter.waiting).toBe("human"); // the packet owns it; the refusal settles nothing
+    if (waiting !== undefined) expect(task().frontmatter.waiting).toBe(waiting);
     const rows = listAuditEvents(store5.db).filter((e) => e.action === "task.schedule.fired");
-    expect(rows[0]!.details).toMatchObject({ scheduleId: "sch_1", outcome: "skipped-packet", refusedAtStart: true, atDrain: true });
+    expect(rows[0]!.details).toMatchObject({ scheduleId: "sch_1", outcome, refusedAtStart: true, atDrain: true });
   });
 
   it("ruling 141: a queued human @operator turn refused at the front of the queue gets the note, settling nothing", async () => {

@@ -371,10 +371,11 @@ function claimLeaseMs(): number {
 const MAX_SCHEDULE_RETRIES = 3;
 
 /**
- * Fire every pending schedule whose `dueAt` has passed. A schedule on a task
- * that reached its terminal stage is retired (`fired`, outcome `skipped-done`)
- * WITHOUT running the operator — the re-check is moot once Done. Fire-and-forget
- * per operator run; one failure never blocks the others.
+ * Fire every pending schedule whose `dueAt` has passed. A schedule on a closed
+ * task (ruling 177) is retired (`fired`, outcome `skipped-done` at the terminal
+ * stage, `skipped-archived` when archived) WITHOUT running the operator — the
+ * re-check is moot once the task is closed. Fire-and-forget per operator run;
+ * one failure never blocks the others.
  */
 export async function fireDueSchedules(
   db: DatabaseSync,
@@ -596,10 +597,11 @@ export async function fireDueSchedules(
       const { isDispatchHeld, startAgentRun } = await import("./specialist-run.server");
       for (const t of toRun) {
         let ok = false;
-        /** F19-20: the run was refused at FIRE time (the task reached its
-         *  terminal stage after this occurrence was claimed). Not a failure —
-         *  nothing to retry — but the timeline already announced the start, so
-         *  the retirement has to say what actually happened. */
+        /** F19-20: the run was refused at FIRE time (the task closed after
+         *  this occurrence was claimed: it reached its terminal stage or was
+         *  archived, ruling 177). Not a failure — nothing to retry — but the
+         *  timeline already announced the start, so the retirement has to say
+         *  what actually happened. */
         let refusedTerminal = false;
         /** Ruling 131(d): the task waits on other work; the operator trigger
          *  was refused at fire time. Retired `fired` with a note, outcome
@@ -757,6 +759,12 @@ export async function fireDueSchedules(
         // Finalize the claimed occurrence — never leave it stuck in `claimed`.
         // Success → fired. Failure → bounded retry (back to pending) or terminal
         // `failed` once the retry cap is hit (F10-16).
+        // What the finalize found, read under its lock. `retired` is false when
+        // the occurrence was no longer claimed: an archive (which cancels the
+        // task's schedules) or a person's cancel got there first and wrote its
+        // last record, so no row below may claim this occurrence fired.
+        // `archived` names the closure a fire-time refusal met (ruling 177).
+        const finalized = { retired: false, archived: false };
         try {
           await updateTaskFile(
             taskRef(ctx, t.projectSlug, t.taskKey),
@@ -765,6 +773,8 @@ export async function fireDueSchedules(
                 (x) => x.id === t.scheduleId,
               );
               if (!target || target.status !== "claimed") return;
+              finalized.retired = true;
+              finalized.archived = parsed.frontmatter.archived === true;
               if (deferredConflict) {
                 // Back to pending, retries untouched: the agent is simply
                 // still busy, and three 60s ticks must not spend the whole
@@ -795,11 +805,14 @@ export async function fireDueSchedules(
                 if (refusedTerminal) {
                   // The claim note said "Scheduled action starting"; nothing
                   // started. Say so on the task rather than leaving a `fired`
-                  // occurrence whose only trace claims a run happened.
+                  // occurrence whose only trace claims a run happened, and
+                  // name the closure the run met, as the claim-time note does
+                  // (U36-9): the board's own name for its terminal stage, or
+                  // the archive.
                   parsed.timeline.unshift(
                     scheduleEvent(
                       { kind: "system", systemId: "schedule-runner" },
-                      `**Scheduled action skipped:** ${t.taskKey} reached Done before its scheduled run started; no run was started.`,
+                      `**Scheduled action skipped:** ${t.taskKey} ${finalized.archived ? "was archived" : `reached ${terminalNameFor(t.projectSlug)}`} before its scheduled run started; no run was started.`,
                     ),
                   );
                 } else if (refusedHeld) {
@@ -837,7 +850,9 @@ export async function fireDueSchedules(
             },
           );
           reprojectTask(db, ctx, t.projectSlug, t.taskKey);
-          if (heldQuota) {
+          // The occurrence's last row is written only by the finalize that
+          // retired it (see `finalized`).
+          if (finalized.retired && heldQuota) {
             recordAudit(db, {
               action: "task.schedule.fired",
               actor: SYSTEM_ACTOR,
@@ -851,7 +866,7 @@ export async function fireDueSchedules(
                 rescheduledAs: heldQuota.rescheduledAs,
               },
             });
-          } else if (refusedTerminal || refusedHeld || refusedPacket) {
+          } else if (finalized.retired && (refusedTerminal || refusedHeld || refusedPacket)) {
             recordAudit(db, {
               action: "task.schedule.fired",
               actor: SYSTEM_ACTOR,
@@ -861,15 +876,18 @@ export async function fireDueSchedules(
               taskKey: t.taskKey,
               details: {
                 scheduleId: t.scheduleId,
+                // The claim-time branch's split: an archived task is not Done.
                 outcome: refusedPacket
                   ? "skipped-packet"
                   : refusedHeld
                     ? "skipped-held"
-                    : "skipped-done",
+                    : finalized.archived
+                      ? "skipped-archived"
+                      : "skipped-done",
                 refusedAtStart: true,
               },
             });
-          } else if (queuedBehindDrive) {
+          } else if (finalized.retired && queuedBehindDrive) {
             // Ruling 141: the run did not start here — it waits behind a live
             // drive. The final row is written when the trigger reaches the
             // front of the queue (a refusal there says so on the task).
