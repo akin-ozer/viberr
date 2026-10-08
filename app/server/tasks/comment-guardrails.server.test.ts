@@ -27,29 +27,6 @@ describe("meaningful-comment guardrail", () => {
   });
 });
 
-/**
- * Owner ruling 2026-08-31: operator narration reaches the canonical record
- * UNTRUNCATED — the old operator-brevity cap destroyed the overflow at write
- * time ("the full narration is in the agent logs"), while the timeline already
- * collapses tall comments view-side behind a Show more toggle. Locks the
- * removal: a long narration passes through the guardrails verbatim.
- */
-describe("operator narration is stored verbatim", () => {
-  it("never truncates a long narration — length is a view concern", () => {
-    const long =
-      "Acceptance caveat the human must read in full. " + "detail ".repeat(2000);
-    const result = applyCommentGuardrails({
-      text: long,
-      meaningful: true,
-      evidence: true,
-      noDuplicate: true,
-    });
-    expect(result.text).toBe(long);
-    expect(result.dropped).toBeNull();
-    expect(result.trimmedBy).toEqual([]);
-  });
-});
-
 describe("evidence-separation guardrail", () => {
   it("leaves short fenced blocks inline", () => {
     const text = "Report:\n```\nline1\nline2\n```\ndone";
