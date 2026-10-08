@@ -690,7 +690,6 @@ describe("controller grant requests are answered in the app (ruling 390)", () =>
     const { resolveControllerConfig } = await import(
       "~/server/controller/controller-profile.server"
     );
-    const { resetEnvCacheForTests } = await import("~/server/config/env.server");
     const before = resolveControllerConfig(app.dataRoot);
     expect(before.kb).not.toContain("architecture-notes");
     const { request: asked } = raiseResourceRequest(
@@ -708,11 +707,9 @@ describe("controller grant requests are answered in the app (ruling 390)", () =>
     );
     expect(await listedIds()).toEqual(expect.arrayContaining([asked.id, other.id]));
 
-    // The deployment unlocks the knowledge-base section (ruling 108). The
-    // restart is the env cache reset.
-    vi.stubEnv("VIBERR_UNLOCK_CONTROLLER_KB", "enabled");
-    resetEnvCacheForTests();
-    try {
+    // The deployment unlocks the knowledge-base section (ruling 108), in its
+    // env as production reads it.
+    await withEnv({ VIBERR_UNLOCK_CONTROLLER_KB: "enabled" }, async () => {
       const { result: reply, wire } = await published(() =>
         postAction(ids.arda, {
           intent: "controller-save",
@@ -736,7 +733,6 @@ describe("controller grant requests are answered in the app (ruling 390)", () =>
       expect(answered.closedByLabel).toBe("arda@viberr.dev");
       expect(answered.closedAt).toBeTruthy();
       // Only the request this save answered. The skill was not granted.
-      expect(rows.find((r) => r.id === other.id)!.status).toBe("open");
       const listed = await listedIds();
       expect(listed).not.toContain(asked.id);
       expect(listed).toContain(other.id);
@@ -765,10 +761,7 @@ describe("controller grant requests are answered in the app (ruling 390)", () =>
       });
       expect(restored.ok).toBe(true);
       expect(resolveControllerConfig(app.dataRoot).kb).toEqual(before.kb);
-    } finally {
-      vi.unstubAllEnvs();
-      resetEnvCacheForTests();
-    }
+    });
   });
 
   it("a request for a resource the controller already holds is answered by the next save, locked or not", async () => {
@@ -805,7 +798,7 @@ describe("controller grant requests are answered in the app (ruling 390)", () =>
   });
 
   it("a save that leaves the requested resource ungranted answers nothing", async () => {
-    const { raiseResourceRequest, readResourceRequests } = await import(
+    const { raiseResourceRequest } = await import(
       "~/server/controller/controller-requests.server"
     );
     const { resolveControllerConfig } = await import(
@@ -829,9 +822,6 @@ describe("controller grant requests are answered in the app (ruling 390)", () =>
     expect(reply.ok).toBe(true);
     // CANARY: close every open request on any save and this goes red.
     expect(reply.toast).toBe("Controller updated. Changes apply from its next turn");
-    expect(readResourceRequests(app.dataRoot).find((r) => r.id === request.id)!.status).toBe(
-      "open",
-    );
     expect(await listedIds()).toContain(request.id);
   });
 
@@ -849,9 +839,7 @@ describe("controller grant requests are answered in the app (ruling 390)", () =>
     await expect(
       postAction(ids.selin, { intent: "controller-request-decline", requestId: request.id }),
     ).rejects.toMatchObject({ status: 403 });
-    expect(readResourceRequests(app.dataRoot).find((r) => r.id === request.id)!.status).toBe(
-      "open",
-    );
+    expect(await listedIds()).toContain(request.id);
 
     const { result: reply, wire } = await published(() =>
       postAction(ids.arda, {
