@@ -515,13 +515,21 @@ scan run from inside an agent worktree under `.claude/` sees no files at all.
 - `react-doctor/exhaustive-deps` — changes-panel.tsx DiffLines' drag effect lists only
   `dragging`: it adds the window's release, cancel and Escape listeners once per drag, and
   the release calls the `path`, `onOpen` and `onMove` of the render that started it. `path`
-  is the file its FileDiff is keyed by, `onOpen` (ChangesBody's `openDraft`) writes only
-  refs and a setter, and the drag itself is read from `live`. `onMove` (`moveDraft`) reads
-  that render's `draft`, which nothing changes while the mouse button is held short of a
-  keyboard click on another line number (Tab, then Enter); the release would then put the
-  earlier draft back with the dragged lines. Listing them would re-add the listeners on
-  every row the pointer crosses: `moveDrag` is new on each render and `trackDrag` renders
-  once per row. Verify `moveDraft` is still the only captured handler that reads state.
+  is the file its FileDiff is keyed by, `onOpen` (ChangesBody's `openDraft`) reads no render
+  state (it writes refs and a setter), and the drag itself is read from `live`. `onMove`
+  (`moveDraft`) re-ranges the note the drag began on only while it is still the one open:
+  it returns when `opened` has counted a newer note and sets the draft through an updater
+  that keeps a closed one closed. So a key pressed during the drag that saves, closes or
+  replaces the note (Ctrl/Cmd+Enter, the editor's Add note, Save note or Cancel, Discard
+  notes, the stale notice's re-read, another line number) stays done when the drag is let
+  go. The `moveDraft` the release calls differs from the current one only in pointing
+  `opener` at the drag's button after the note closed, which the next note to open
+  replaces before anything reads it (changes-panel.test.tsx, "a key that … stays done").
+  Listing `onMove`, `onOpen` and `path` would re-add the listeners only when ChangesBody
+  renders, not as the pointer crosses rows, but React Doctor then reports
+  `prefer-use-effect-event` twice on the same line, and the repo uses no
+  `useEffectEvent`. Verify `moveDraft` still checks `opened` and sets the draft through
+  an updater, and that `openDraft` still reads no render state.
 
 - `react-doctor/no-fetch-in-effect` — attention-watcher.tsx (a mount-once poll and
   subscription whose responses drive desktop-alert bookkeeping, serialised by

@@ -152,10 +152,14 @@ export function ChangesBody({ url, revisionSha, githubHost }: ChangesBodyProps) 
     opened.current += 1;
     setDraft({ ...next, id: opened.current });
   };
+  // A drag's release calls the moveDraft of the render the drag began in, and
+  // a key pressed during the drag may have saved, closed or replaced that note
+  // since. The note is re-ranged only while it is still the one open: a note
+  // opened since has a newer id, and one closed since stays closed.
   const moveDraft = (start: NoteRow, end: NoteRow, anchor: number, button: HTMLButtonElement) => {
-    if (!draft) return;
+    if (draft?.id !== opened.current) return;
     opener.current = button;
-    setDraft({ ...draft, anchor, start, end, text: typed.current });
+    setDraft((open) => open && { ...open, anchor, start, end, text: typed.current });
   };
 
   const send = useFetcher<SendResult>();
