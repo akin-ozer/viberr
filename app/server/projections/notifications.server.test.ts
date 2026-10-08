@@ -4,10 +4,10 @@ import { createTestDbContext } from "../../../test-support/test-db";
 import {
   baseTaskFrontmatter,
   insertTestUser,
+  OPEN_DECISION,
   setupTestStore,
   writeTask,
 } from "../../../test-support/test-store";
-import type { TaskPacket } from "~/schemas/task-file.schema";
 import { insertUser } from "~/server/auth/user-store.server";
 import { rebuildAll } from "./rebuilder.server";
 import { setupProjectedStore } from "../../../test-support/projected-store";
@@ -41,17 +41,6 @@ import {
 
 const ctx = createTestDbContext();
 afterEach(ctx.cleanup);
-
-/** An open decision packet: what "waiting on you" reconciles a row against. */
-const PACKET: TaskPacket = {
-  type: "input",
-  kind: "Decision required",
-  from: "operator",
-  title: "Pick one",
-  body: "",
-  observations: [],
-  options: [{ kind: "request_edit", t: "Send back", d: "", rec: true }],
-};
 
 describe("notifications", () => {
   it("lists per-user rows sorted by real timestamp DESC (ruling 9)", () => {
@@ -478,7 +467,7 @@ describe("waitingOnYou — live decision reconciliation (F7-NOTIF1)", () => {
     const uid = store.users.murat.id;
     writeTask(store.dataRoot, store.slug, {
       frontmatter: baseTaskFrontmatter("VIB-101", { stage: "review" }),
-      packet: PACKET,
+      packet: OPEN_DECISION,
     });
     rebuildAll(store.db, { dataRoot: store.dataRoot });
     createNotification(store.db, { id: "p", userId: uid, kind: "packet", ptype: "input", text: "t", projectSlug: store.slug, taskKey: "VIB-101" });
@@ -521,7 +510,7 @@ describe("waitingOnYou — live decision reconciliation (F7-NOTIF1)", () => {
     const store = setupTestStore(ctx);
     writeTask(store.dataRoot, store.slug, {
       frontmatter: baseTaskFrontmatter("VIB-104", { stage: "review" }),
-      packet: PACKET,
+      packet: OPEN_DECISION,
     });
     rebuildAll(store.db, { dataRoot: store.dataRoot });
     // Foreign/deleted soft ref — no local task row to reconcile against.
@@ -670,7 +659,7 @@ describe("E6: 'waiting on you' reads the same on the inbox and on Home", () => {
     const store = setupTestStore(ctx);
     writeTask(store.dataRoot, store.slug, {
       frontmatter: baseTaskFrontmatter("VIB-140", { stage: "review" }),
-      packet: PACKET,
+      packet: OPEN_DECISION,
     });
     rebuildAll(store.db, { dataRoot: store.dataRoot });
     const outsideAdmin = insertUser(store.db, {

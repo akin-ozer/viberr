@@ -2,13 +2,13 @@ import { afterEach, describe, expect, it } from "vitest";
 import { createTestDbContext } from "../../../test-support/test-db";
 import {
   baseTaskFrontmatter,
+  OPEN_DECISION,
   setupTestStore,
   writeTask,
 } from "../../../test-support/test-store";
 import { rebuildAll } from "./rebuilder.server";
 import { upsertRun } from "~/server/runtimes/run-store.server";
 import { listAgentDeployments } from "./agent-deployments.server";
-import type { TaskPacket } from "~/schemas/task-file.schema";
 
 /**
  * Live-deployment projection (agents spec §3.3 + ruling 7): derivation from
@@ -23,17 +23,6 @@ import type { TaskPacket } from "~/schemas/task-file.schema";
 const ctx = createTestDbContext();
 afterEach(ctx.cleanup);
 
-/** An open decision packet — what "packet open" is allowed to mean. */
-const PACKET: TaskPacket = {
-  type: "input",
-  kind: "Decision required",
-  from: "operator",
-  title: "Pick one",
-  body: "",
-  observations: [],
-  options: [{ kind: "request_edit", t: "Send back", d: "", rec: true }],
-};
-
 function seedTasks(dataRoot: string, slug: string) {
   // review + waiting human + an OPEN PACKET, no runs → operator "packet open",
   // primary AND reviewer "waiting on human" (F34-5: one rule for every kind).
@@ -47,7 +36,7 @@ function seedTasks(dataRoot: string, slug: string) {
         { profileId: "reviewer", backend: "claude", role: "Reviewer", delivers: false, verdictCapable: false },
       ],
     }),
-    packet: PACKET,
+    packet: OPEN_DECISION,
   });
   // impl + waiting agent, NO run rows → every engagement "on call". The flag
   // says the task is on the agents' side, not that any thread is executing
@@ -458,7 +447,7 @@ describe("an operator is only 'packet open' when a packet is actually open", () 
         waiting: "human",
         operator: { assignedAtStageId: "triage" },
       }),
-      packet: PACKET,
+      packet: OPEN_DECISION,
     });
     rebuildAll(store.db, { dataRoot: store.dataRoot });
 

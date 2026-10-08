@@ -5,6 +5,7 @@ import { z } from "zod";
 import { createTestDbContext } from "../../../test-support/test-db";
 import {
   baseTaskFrontmatter,
+  OPEN_DECISION,
   setupTestStore,
   writeProject,
   writeTask,
@@ -1495,17 +1496,6 @@ describe("ruling 225: a task resting on a clock", () => {
     verdicts: [],
   };
 
-  /** An open decision a human can act on, in the shape `decisions.server` counts. */
-  const OPEN_PACKET: TaskPacket = {
-    type: "input",
-    kind: "Decision required",
-    from: "operator",
-    title: "Pick one",
-    body: "",
-    observations: [],
-    options: [{ kind: "request_edit", t: "Send back", d: "", rec: true }],
-  };
-
   const pending = (dueAt: string, patch: Partial<TaskSchedule> = {}): TaskSchedule => ({
     id: `sch_${dueAt}`,
     action: "run-operator" as const,
@@ -1587,7 +1577,7 @@ describe("ruling 225: a task resting on a clock", () => {
           readiness: "input_required",
           schedules: [pending("2026-09-14T02:28:00.000Z")],
         }),
-        packet: OPEN_PACKET,
+        packet: OPEN_DECISION,
       });
       rebuildAll(store.db, { dataRoot: store.dataRoot });
 

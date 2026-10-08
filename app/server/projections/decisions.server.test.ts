@@ -3,6 +3,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import { createTestDbContext } from "../../../test-support/test-db";
 import {
   baseTaskFrontmatter,
+  OPEN_DECISION,
   setupTestStore,
   writeTask,
 } from "../../../test-support/test-store";
@@ -16,20 +17,10 @@ import {
 import { rebuildAll } from "./rebuilder.server";
 import { decisionsRequiring } from "./decisions.server";
 import { getReviewQueue } from "./review-queue.server";
-import type { TaskFrontmatter, TaskPacket } from "~/schemas/task-file.schema";
+import type { TaskFrontmatter } from "~/schemas/task-file.schema";
 
 const ctx = createTestDbContext();
 afterEach(ctx.cleanup);
-
-const PACKET: TaskPacket = {
-  type: "input",
-  kind: "Decision required",
-  from: "operator",
-  title: "Pick one",
-  body: "",
-  observations: [],
-  options: [{ kind: "request_edit", t: "Send back", d: "", rec: true }],
-};
 
 /** A task at a non-terminal stage carrying an open packet. */
 function seedOpenDecision(
@@ -39,7 +30,7 @@ function seedOpenDecision(
 ) {
   writeTask(store.dataRoot, store.slug, {
     frontmatter: baseTaskFrontmatter(key, { stage: "review", ...patch }),
-    packet: PACKET,
+    packet: OPEN_DECISION,
   });
   rebuildAll(store.db, { dataRoot: store.dataRoot });
 }
@@ -163,7 +154,7 @@ describe("decisionsRequiring (R8-3 single member-scoped source)", () => {
     const store = setupTestStore(ctx);
     writeTask(store.dataRoot, store.slug, {
       frontmatter: baseTaskFrontmatter("VIB-204", { stage: "done", waiting: "none" }),
-      packet: PACKET,
+      packet: OPEN_DECISION,
     });
     rebuildAll(store.db, { dataRoot: store.dataRoot });
     expect(decisionsRequiring(store.db, store.users.arda.id).mine).toHaveLength(0);
@@ -290,7 +281,7 @@ describe("decisionsRequiring — acceptance-ready tasks (B-FD5)", () => {
           },
         ],
       }),
-      packet: PACKET,
+      packet: OPEN_DECISION,
     });
     rebuildAll(store.db, { dataRoot: store.dataRoot });
     const mine = decisionsRequiring(store.db, store.users.murat.id).mine;
@@ -538,7 +529,7 @@ describe("decisionsRequiring — acceptance-ready tasks (B-FD5)", () => {
             },
           ],
         }),
-        packet: { ...PACKET, type: "blocked", kind: "Blocked decision" },
+        packet: { ...OPEN_DECISION, type: "blocked", kind: "Blocked decision" },
       });
       rebuildAll(store.db, { dataRoot: store.dataRoot });
 

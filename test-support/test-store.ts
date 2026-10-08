@@ -18,6 +18,7 @@ import type {
 import type {
   ParsedTaskFile,
   TaskFrontmatter,
+  TaskPacket,
 } from "~/schemas/task-file.schema";
 import { GOVERNED_TEMPLATE } from "~/shared/workflow/templates";
 import { defaultTransitionBy } from "~/shared/workflow/transitions";
@@ -185,6 +186,18 @@ export const REVIEW_STAGE_REVIEWER = {
   extras: [],
   definition: { kind: "specialist", name: "Rev", role: "Code review", backends: ["claude"], model: "sonnet", stages: ["review"] },
 } satisfies AgentDeployment;
+
+/** An open decision a person can act on: the operator's input packet with
+ *  one `request_edit` option, the shape `decisions.server` counts. */
+export const OPEN_DECISION: TaskPacket = {
+  type: "input",
+  kind: "Decision required",
+  from: "operator",
+  title: "Pick one",
+  body: "",
+  observations: [],
+  options: [{ kind: "request_edit", t: "Send back", d: "", rec: true }],
+};
 
 export function baseTaskFrontmatter(
   key: string,
