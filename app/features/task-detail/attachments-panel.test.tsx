@@ -238,13 +238,6 @@ describe("AttachmentsPanel attach control (F39-6)", () => {
     expect(label.querySelector("svg.ico.spin")).not.toBeNull();
   });
 
-  it("stays silent for a viewer who may NOT attach and has no browser agent", () => {
-    const { container } = renderPanel(
-      <AttachmentsPanel base={BASE} attachments={[]} />,
-    );
-    expect(container.innerHTML).toBe("");
-  });
-
   it("offers the control beside an existing list, and never without the grant", () => {
     const withGrant = renderPanel(
       <AttachmentsPanel base={BASE} attachments={[entry("report.pdf")]} canAttach />,

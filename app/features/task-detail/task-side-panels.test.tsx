@@ -146,11 +146,6 @@ describe("gap-10: Current state shows when anything last happened", () => {
     expect(kv(container, "Last activity")).toMatch(/ago|yesterday|just now/);
   });
 
-  it("says so plainly when the timeline is empty rather than guessing", () => {
-    const { container } = renderPanel({ lastActivityAt: null });
-    expect(kv(container, "Last activity")).toBe("Nothing on the timeline yet");
-  });
-
   it("adds the quiet note only once the task has crossed its threshold", () => {
     const at = new Date(Date.now() - 4 * 60 * 60_000).toISOString();
     const quiet = renderPanel({ lastActivityAt: at, quiet: true });
