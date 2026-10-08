@@ -1,6 +1,7 @@
 // @vitest-environment jsdom
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { describeRevisionDrift } from "~/shared/revision-drift";
+import type { ComponentProps } from "react";
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { AcceptConfirm, type AcceptConfirmTask } from "./accept-confirm";
 import type { AcceptanceDisclosure } from "~/shared/acceptance-disclosure";
@@ -34,29 +35,38 @@ function detail(patch: Partial<AcceptConfirmTask> = {}): AcceptConfirmTask {
   };
 }
 
-function open(props: {
+/** What a case sets on the ordinary accept's render: the task as a patch, and
+ *  any of the dialog's other props. */
+type ConfirmOverrides = Omit<Partial<ComponentProps<typeof AcceptConfirm>>, "task"> & {
   task?: Partial<AcceptConfirmTask>;
-  noChanges?: boolean;
-  workRevisionSha?: string | null;
-}): string {
-  const { container } = render(
+};
+
+/** Render the dialog with the ordinary accept's props and the case's own on
+ *  top. `dialog` is the one THIS call mounted, when a test renders two. */
+function renderConfirm(over: ConfirmOverrides = {}) {
+  const { task, ...props } = over;
+  const utils = render(
     <AcceptConfirm
-      task={detail(props.task ?? {})}
-      workRevisionSha={props.workRevisionSha ?? null}
-      noChanges={props.noChanges ?? false}
+      workRevisionSha={null}
+      noChanges={false}
       defaultBranch="main"
       ceremony={{ mode: "accept" }}
       blockedReason={null}
       busy={false}
       onCancel={() => {}}
       onConfirm={() => {}}
+      {...props}
+      task={detail(task)}
     />,
   );
-  return (
-    container.ownerDocument.querySelector(
-      'dialog[data-screen-label="Accept completion dialog"]',
-    )?.textContent ?? ""
-  );
+  const dialog = utils.container.querySelector<HTMLDialogElement>(
+    'dialog[data-screen-label="Accept completion dialog"]',
+  )!;
+  return { ...utils, dialog, text: dialog.textContent ?? "" };
+}
+
+function open(over: ConfirmOverrides): string {
+  return renderConfirm(over).text;
 }
 
 /**
@@ -68,27 +78,14 @@ function open(props: {
  */
 describe("F32-11 (pass 32): the ceremony names the open decision it withdraws", () => {
   function withPacket(title: string | null, force = false, answersWith: string | null = null): string {
-    const { container } = render(
-      <AcceptConfirm
-        task={detail({ stage: force ? "triage" : "review" })}
-        workRevisionSha={null}
-        noChanges={false}
-        defaultBranch="main"
-        ceremony={{ mode: force ? "force" : "accept" }}
-        atBoundary={!force}
-        blockedReason={force ? "An open blocked decision is holding this task." : null}
-        openPacketTitle={title}
-        answersWith={answersWith}
-        busy={false}
-        onCancel={() => {}}
-        onConfirm={() => {}}
-      />,
-    );
-    // Two dialogs render in one test; read the one THIS call mounted.
-    const dialogs = container.ownerDocument.querySelectorAll(
-      'dialog[data-screen-label="Accept completion dialog"]',
-    );
-    return dialogs[dialogs.length - 1]?.textContent ?? "";
+    return renderConfirm({
+      task: { stage: force ? "triage" : "review" },
+      ceremony: { mode: force ? "force" : "accept" },
+      atBoundary: !force,
+      blockedReason: force ? "An open blocked decision is holding this task." : null,
+      openPacketTitle: title,
+      answersWith,
+    }).text;
   }
 
   it("renders a Withdraws row naming the packet, on accept and on force-accept", () => {
@@ -119,24 +116,11 @@ describe("F32-11 (pass 32): the ceremony names the open decision it withdraws", 
       "Waiting on 1 required reviewer approval of the current revision.",
       "Required reviewer Reviewer (project rule at Review) has not approved revision 76dabee.",
     ];
-    const { container } = render(
-      <AcceptConfirm
-        task={detail({})}
-        workRevisionSha={null}
-        noChanges={false}
-        defaultBranch="main"
-        ceremony={{ mode: "force" }}
-        blockedReason={gates[0]!}
-        blockedGates={gates}
-        busy={false}
-        onCancel={() => {}}
-        onConfirm={() => {}}
-      />,
-    );
-    const text =
-      container.ownerDocument.querySelector(
-        'dialog[data-screen-label="Accept completion dialog"]',
-      )?.textContent ?? "";
+    const { text } = renderConfirm({
+      ceremony: { mode: "force" },
+      blockedReason: gates[0]!,
+      blockedGates: gates,
+    });
     // CANARY: drop `blockedGates` from the Bypassing row and the second gate
     // is invisible to the person authorizing the override, while the audit row
     // records it.
@@ -149,23 +133,11 @@ describe("F32-11 (pass 32): the ceremony names the open decision it withdraws", 
 
   it("ruling 393: a single gate still reads as one sentence, not a list", () => {
     const only = "Waiting on 1 required reviewer approval of the current revision.";
-    const { container } = render(
-      <AcceptConfirm
-        task={detail({})}
-        workRevisionSha={null}
-        noChanges={false}
-        defaultBranch="main"
-        ceremony={{ mode: "force" }}
-        blockedReason={only}
-        blockedGates={[only]}
-        busy={false}
-        onCancel={() => {}}
-        onConfirm={() => {}}
-      />,
-    );
-    const dialog = container.ownerDocument.querySelector(
-      'dialog[data-screen-label="Accept completion dialog"]',
-    )!;
+    const { dialog } = renderConfirm({
+      ceremony: { mode: "force" },
+      blockedReason: only,
+      blockedGates: [only],
+    });
     expect(dialog.textContent).toContain(only);
     expect(dialog.querySelector("ul")).toBeNull();
     expect(dialog.textContent).toContain("The bypassed gate is recorded to the audit log.");
@@ -238,27 +210,8 @@ describe("the no-change row states what is true of THIS task", () => {
  * either (the probe decides) — so it states exactly what the click will do.
  */
 describe("F20-6: the no-PR auto-detect arm", () => {
-  const openAutoDetect = (task: Partial<AcceptConfirmTask>) => {
-    const { container } = render(
-      <AcceptConfirm
-        task={detail(task)}
-        workRevisionSha={null}
-        noChanges={false}
-        noPullRequest
-        defaultBranch="main"
-        ceremony={{ mode: "accept" }}
-        blockedReason={null}
-        busy={false}
-        onCancel={() => {}}
-        onConfirm={() => {}}
-      />,
-    );
-    return (
-      container.ownerDocument.querySelector(
-        'dialog[data-screen-label="Accept completion dialog"]',
-      )?.textContent ?? ""
-    );
-  };
+  const openAutoDetect = (task: Partial<AcceptConfirmTask>) =>
+    renderConfirm({ task, noPullRequest: true }).text;
 
   it("states the branch re-check and promises no merge", () => {
     const text = openAutoDetect({ branch: "vib-151" });
@@ -290,23 +243,10 @@ describe("ruling 550: a task delivered as files", () => {
   it("names the files as the delivery and promises no merge and no re-check", () => {
     // CANARY: drop the `filesDeliveredAt` arms and the rows read "No linked
     // pull request" and "No delivered revision recorded."
-    const { container } = render(
-      <AcceptConfirm
-        task={detail({ branch: null })}
-        workRevisionSha={null}
-        noChanges={false}
-        filesDeliveredAt="2026-09-28T08:44:13.751Z"
-        defaultBranch="main"
-        ceremony={{ mode: "accept" }}
-        blockedReason={null}
-        busy={false}
-        onCancel={() => {}}
-        onConfirm={() => {}}
-      />,
-    );
-    const text =
-      container.ownerDocument.querySelector('dialog[data-screen-label="Accept completion dialog"]')
-        ?.textContent ?? "";
+    const { text } = renderConfirm({
+      task: { branch: null },
+      filesDeliveredAt: "2026-09-28T08:44:13.751Z",
+    });
     expect(text).toContain("the delivery is the files saved on this task, so no pull request merges");
     expect(text).toContain("The files delivered on this task at 2026-09-28 08:44 UTC.");
     expect(text).not.toContain("never opened a branch");
@@ -368,26 +308,15 @@ describe("the confirmed click carries the disclosure it just made", () => {
     mode?: "accept" | "force";
   }): AcceptanceDisclosure | null {
     let got: AcceptanceDisclosure | null = null;
-    const { container } = render(
-      <AcceptConfirm
-        task={detail(props.task ?? {})}
-        workRevisionSha={props.workRevisionSha ?? null}
-        defaultBranch="main"
-        ceremony={{ mode: props.mode ?? "accept" }}
-        blockedReason={null}
-        busy={false}
-        onCancel={() => {}}
-        onConfirm={(disclosure) => {
-          got = disclosure;
-        }}
-      />,
-    );
-    const confirm = [
-      ...container.ownerDocument.querySelectorAll<HTMLButtonElement>(
-        'dialog[data-screen-label="Accept completion dialog"] .foot-actions button',
-      ),
-    ].at(-1);
-    confirm?.click();
+    const { dialog } = renderConfirm({
+      task: props.task,
+      workRevisionSha: props.workRevisionSha ?? null,
+      ceremony: { mode: props.mode ?? "accept" },
+      onConfirm: (disclosure) => {
+        got = disclosure;
+      },
+    });
+    [...dialog.querySelectorAll<HTMLButtonElement>(".foot-actions button")].at(-1)?.click();
     return got;
   }
 
@@ -445,21 +374,11 @@ describe("F21-23: an already-merged PR is not promised a merge", () => {
     pr: AcceptConfirmTask["pr"];
     mode?: "accept" | "apply-recommendation" | "complete-merge" | "stage-move";
   }) {
-    const { container } = render(
-      <AcceptConfirm
-        task={detail({ pr: props.pr })}
-        workRevisionSha={"a".repeat(40)}
-        defaultBranch="main"
-        ceremony={{ mode: props.mode ?? "apply-recommendation", label: "Accept completion" }}
-        blockedReason={null}
-        busy={false}
-        onCancel={() => {}}
-        onConfirm={() => {}}
-      />,
-    );
-    const dialog = container.ownerDocument.querySelector(
-      'dialog[data-screen-label="Accept completion dialog"]',
-    )!;
+    const { dialog } = renderConfirm({
+      task: { pr: props.pr },
+      workRevisionSha: "a".repeat(40),
+      ceremony: { mode: props.mode ?? "apply-recommendation", label: "Accept completion" },
+    });
     return {
       text: dialog.textContent ?? "",
       confirm:
@@ -539,27 +458,12 @@ describe("ruling 162: the ceremony discloses the base refresh it performs", () =
     mode?: "accept" | "complete-merge";
     baseBehindBy?: number | null;
   }): string {
-    const { container } = render(
-      <AcceptConfirm
-        task={detail({
-          pr: props.pr,
-          branch: props.branch === undefined ? "vib-151" : props.branch,
-        })}
-        workRevisionSha={"a".repeat(40)}
-        baseBehindBy={props.baseBehindBy ?? null}
-        defaultBranch="main"
-        ceremony={{ mode: props.mode ?? "accept" }}
-        blockedReason={null}
-        busy={false}
-        onCancel={() => {}}
-        onConfirm={() => {}}
-      />,
-    );
-    return (
-      container
-        .querySelector('dialog[data-screen-label="Accept completion dialog"]')
-        ?.textContent?.replace(/\s+/g, " ") ?? ""
-    );
+    return renderConfirm({
+      task: { pr: props.pr, branch: props.branch === undefined ? "vib-151" : props.branch },
+      workRevisionSha: "a".repeat(40),
+      baseBehindBy: props.baseBehindBy ?? null,
+      ceremony: { mode: props.mode ?? "accept" },
+    }).text.replace(/\s+/g, " ");
   }
 
   it("names the branch, the base and the merge head the refresh creates", () => {
@@ -606,20 +510,14 @@ describe("ruling 162: the ceremony discloses the base refresh it performs", () =
 describe("ruling 449: update the branch and re-review first", () => {
   const OPEN_PR = { number: 16, state: "review" as const, title: "[VIB-151] t" };
   function dialog(props: { baseBehindBy: number | null; onRefreshFirst?: () => void; onConfirm?: () => void; mode?: "accept" | "force" }) {
-    return render(
-      <AcceptConfirm
-        task={detail({ pr: OPEN_PR, branch: "vib-151" })}
-        workRevisionSha={"a".repeat(40)}
-        baseBehindBy={props.baseBehindBy}
-        defaultBranch="main"
-        ceremony={{ mode: props.mode ?? "accept" }}
-        blockedReason={null}
-        busy={false}
-        onCancel={() => {}}
-        onConfirm={props.onConfirm ?? (() => {})}
-        {...(props.onRefreshFirst ? { onRefreshFirst: props.onRefreshFirst } : {})}
-      />,
-    );
+    return renderConfirm({
+      task: { pr: OPEN_PR, branch: "vib-151" },
+      workRevisionSha: "a".repeat(40),
+      baseBehindBy: props.baseBehindBy,
+      ceremony: { mode: props.mode ?? "accept" },
+      onConfirm: props.onConfirm ?? (() => {}),
+      onRefreshFirst: props.onRefreshFirst,
+    });
   }
   const offer = () => screen.queryByRole("button", { name: /Update the branch and re-review first/ });
 
@@ -663,21 +561,13 @@ describe("ruling 162: a standing refusal disables the confirm", () => {
   const REFUSAL =
     "VIB-151's review PR #16 conflicts with the base branch. GitHub can't merge it, so it can't be accepted. Resolve the conflict on the branch by merging the base INTO it (never by rebasing, which rewrites commits the pull request already published), then re-review, or archive the task.";
   function confirmButton(mode: "accept" | "force", blockedReason: string | null) {
-    const { container } = render(
-      <AcceptConfirm
-        task={detail({ stage: mode === "force" ? "triage" : "review", pr: { number: 16, state: "review", title: "[VIB-151] t" } })}
-        workRevisionSha={"a".repeat(40)}
-        noChanges={false}
-        defaultBranch="main"
-        ceremony={{ mode }}
-        atBoundary={mode !== "force"}
-        blockedReason={blockedReason}
-        busy={false}
-        onCancel={() => {}}
-        onConfirm={() => {}}
-      />,
-    );
-    const dialog = container.querySelector('dialog[data-screen-label="Accept completion dialog"]')!;
+    const { dialog } = renderConfirm({
+      task: { stage: mode === "force" ? "triage" : "review", pr: { number: 16, state: "review", title: "[VIB-151] t" } },
+      workRevisionSha: "a".repeat(40),
+      ceremony: { mode },
+      atBoundary: mode !== "force",
+      blockedReason,
+    });
     const buttons = Array.from(dialog.querySelectorAll("button"));
     return { dialog, button: buttons[buttons.length - 1]! };
   }
@@ -718,25 +608,7 @@ describe("ruling 304: the accept ceremony states the checks it merges past", () 
   const PR = { number: 41, state: "review" as const, title: "[VIB-151] work" };
 
   function ceremonyText(prChecks: AcceptConfirmTask["prChecks"]): string {
-    const { container } = render(
-      <AcceptConfirm
-        task={detail({ pr: PR, prChecks })}
-        workRevisionSha="abc1234"
-        noChanges={false}
-        defaultBranch="main"
-        ceremony={{ mode: "accept" }}
-        atBoundary
-        blockedReason={null}
-        openPacketTitle={null}
-        busy={false}
-        onCancel={() => {}}
-        onConfirm={() => {}}
-      />,
-    );
-    const dialogs = container.ownerDocument.querySelectorAll(
-      'dialog[data-screen-label="Accept completion dialog"]',
-    );
-    return dialogs[dialogs.length - 1]?.textContent ?? "";
+    return renderConfirm({ task: { pr: PR, prChecks }, workRevisionSha: "abc1234" }).text;
   }
 
   it("names failing checks, and says plainly that they do not block this merge", () => {
@@ -796,20 +668,12 @@ describe("ruling 475: the ceremony names the open pull requests this merge will 
     }[];
     pr?: AcceptConfirmTask["pr"];
   }): HTMLElement | null {
-    const { container } = render(
-      <AcceptConfirm
-        task={detail({ pr: props.pr === undefined ? OPEN_PR : props.pr })}
-        workRevisionSha={"a".repeat(40)}
-        defaultBranch="main"
-        ceremony={{ mode: "accept" }}
-        blockedReason={null}
-        mergeCollisions={props.collisions}
-        busy={false}
-        onCancel={() => {}}
-        onConfirm={() => {}}
-      />,
-    );
-    return container.ownerDocument.querySelector<HTMLElement>("[data-merge-collisions]");
+    const { container } = renderConfirm({
+      task: { pr: props.pr === undefined ? OPEN_PR : props.pr },
+      workRevisionSha: "a".repeat(40),
+      mergeCollisions: props.collisions,
+    });
+    return container.querySelector<HTMLElement>("[data-merge-collisions]");
   }
 
   it("names the one other PR and the shared file, and what happens after the merge", () => {
@@ -873,20 +737,11 @@ describe("ruling 482: the Gates row", () => {
 
   it("names the run, the failing gate, and disables the plain confirm on the gate's refusal", () => {
     // CANARY: drop the Gates row from AcceptConfirm.
-    const { container } = render(
-      <AcceptConfirm
-        task={detail()}
-        workRevisionSha={"a95c337".padEnd(40, "0")}
-        defaultBranch="main"
-        ceremony={{ mode: "accept" }}
-        gates={failed}
-        blockedReason={refusal}
-        busy={false}
-        onCancel={() => {}}
-        onConfirm={() => {}}
-      />,
-    );
-    const dialog = container.ownerDocument.querySelector("dialog")!;
+    const { dialog } = renderConfirm({
+      workRevisionSha: "a95c337".padEnd(40, "0"),
+      gates: failed,
+      blockedReason: refusal,
+    });
     const row = Array.from(dialog.querySelectorAll(".obs")).find(
       (r) => r.querySelector(".k")?.textContent === "Gates",
     )!;
@@ -898,20 +753,13 @@ describe("ruling 482: the Gates row", () => {
   });
 
   it("lets force proceed and says what it bypasses", () => {
-    render(
-      <AcceptConfirm
-        task={detail()}
-        workRevisionSha={"a95c337".padEnd(40, "0")}
-        defaultBranch="main"
-        ceremony={{ mode: "force" }}
-        gates={failed}
-        blockedReason={refusal}
-        blockedGates={[refusal]}
-        busy={false}
-        onCancel={() => {}}
-        onConfirm={() => {}}
-      />,
-    );
+    renderConfirm({
+      workRevisionSha: "a95c337".padEnd(40, "0"),
+      ceremony: { mode: "force" },
+      gates: failed,
+      blockedReason: refusal,
+      blockedGates: [refusal],
+    });
     expect(screen.getByText(/Bypassing/)).toBeTruthy();
     expect(screen.getByRole("button", { name: /Force-accept VIB-151/ }).hasAttribute("disabled")).toBe(false);
   });
