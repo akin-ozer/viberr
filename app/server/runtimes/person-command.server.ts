@@ -57,7 +57,7 @@ export function taskOwnerLaunch(
 
 /** The combined output of one command, bounded: the head and the tail are
  *  kept, the middle is cut with a marker saying how much. */
-export class BoundedLog {
+class BoundedLog {
   private head: Buffer[] = [];
   private headBytes = 0;
   private tail: Buffer[] = [];
