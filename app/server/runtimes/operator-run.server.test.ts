@@ -3169,46 +3169,52 @@ describe("stranded auto-stage resume", () => {
      * drive ACTED, which is what "held" was always meant to deny.
      */
     it("ruling 406: a nudged drive that CARRIED OUT its action is not a deliberate hold", async () => {
-      const held = (taskKey: string) =>
-        readTaskFile({ projectSlug: store2.slug, taskKey, dataRoot: store2.dataRoot })!.parsed;
-
-      writeTask(store2.dataRoot, store2.slug, {
-        frontmatter: baseTaskFrontmatter("VIB-9", {
-          title: "refresh the branch Viberr asked for",
-          stage: "triage",
-          readiness: "ready",
-          waiting: "agent",
-          ownerUserId: store2.users.arda.id,
-        }),
-        goal: "Do the thing the refusal named.",
-      });
-      rebuildAll(store2.db, { dataRoot: store2.dataRoot, force: true });
-      finishedRun("run_acted", "VIB-9");
-
-      // CANARY: drop `|| ref.ownRun?.carriedOutAction === true` from
-      // nudgeMadeProgress and this returns false, `heldAtStage` is stamped,
-      // and the note lands on a drive that did exactly what Viberr asked.
-      const resumedAfterAction = await maybeResumeStrandedOperator(store2.db, {
+      await runOperator(store2.db, {
         projectSlug: store2.slug,
-        taskKey: "VIB-9",
+        taskKey: "VIB-1",
+        backend: "codex",
+        autonomy: "supervised",
+        trigger: "create",
         dataRoot: store2.dataRoot,
-        runId: "run_acted",
-        stageAtStart: "triage",
-        strandedResume: true,
-        ownRun: {
-          backend: "codex",
-          autonomy: "supervised",
-          reactDepth: 0,
-          // The drive ended where it started and delivered nothing -- exactly
-          // AX-18's shape. The only thing that distinguishes it is that it
-          // ACTED.
-          movedToStageId: "triage",
-          carriedOutAction: true,
-        },
       });
-      expect(resumedAfterAction).toBe(true);
-      expect(held("VIB-9").frontmatter.heldAtStage).toBeNull();
-      expect(held("VIB-9").timeline.some((ev) => ev.text.includes("deliberate hold"))).toBe(false);
+      // Drive 1 strands (no actions) → the backstop fires the nudge (drive 2).
+      adapter2.finish(store2, JSON.stringify({ reasoning: "", actions: [] }), "finished");
+      await eventually(() => {
+        expect(operatorRuns()).toHaveLength(2);
+        expect(adapter2.pending).not.toBeNull();
+      });
+      // The nudge ends where it started and delivers nothing -- AX-18's shape.
+      // The only thing that distinguishes it is that it ACTED: a comment is the
+      // cheapest step that moves, dispatches, delivers and opens nothing.
+      adapter2.finish(
+        store2,
+        JSON.stringify({
+          reasoning: "",
+          actions: [
+            {
+              tool: "post_comment",
+              profileId: null,
+              delivers: null,
+              toStageId: null,
+              packetType: null,
+              text: "Checked the goal; nothing to advance yet.",
+              reason: null,
+              packetOptions: null,
+            },
+          ],
+        }),
+        "finished",
+      );
+      // CANARY: drop the `carriedOutAction` stamp from executeCodexPlan's
+      // `record` (or its clause in nudgeMadeProgress) and the nudge is recorded
+      // as a deliberate hold: `heldAtStage` is stamped and no third drive starts.
+      await eventually(() => {
+        expect(operatorRuns()).toHaveLength(3);
+        expect(adapter2.pending).not.toBeNull();
+      });
+      const parsed = readTaskFile({ projectSlug: store2.slug, taskKey: "VIB-1", dataRoot: store2.dataRoot })!.parsed;
+      expect(parsed.frontmatter.heldAtStage).toBeNull();
+      expect(parsed.timeline.some((ev) => ev.text.includes("deliberate hold"))).toBe(false);
     });
 
     /**
