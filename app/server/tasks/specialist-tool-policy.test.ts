@@ -194,22 +194,6 @@ describe("resolveSpecialistDisallowedTools", () => {
     ).not.toContain("Edit");
   });
 
-  it("does NOT blanket-deny git checkout/switch — a granted create-task-branch can create its own branch (F11)", () => {
-    // The removed `edit-other-task-branch` rule denied `Bash(git checkout:*)`,
-    // which (deny wins under bypassPermissions) also blocked the specialist's own
-    // `git checkout -B <task-branch>` and defeated create-task-branch. With the
-    // rule gone, a fully-granted developer has NO git-checkout/switch denies.
-    const denied = resolveSpecialistDisallowedTools([
-      grant("create-task-branch", "direct"),
-      grant("commit-push-branch", "direct"),
-      grant("open-review-pr", "direct"),
-      grant("edit-other-task-branch", "off"), // orphan grant: ignored, no rule
-    ]);
-    expect(denied).not.toContain("Bash(git checkout:*)");
-    expect(denied).not.toContain("Bash(git switch:*)");
-    expect(denied).not.toContain("Bash(git checkout -b:*)");
-  });
-
   it("commit-push withheld also denies git commit (a reviewer can't commit — D4)", () => {
     const denied = resolveSpecialistDisallowedTools([
       grant("commit-push-branch", "human"),
@@ -233,27 +217,13 @@ describe("resolveSpecialistDisallowedTools", () => {
       grant("commit-push-branch", "direct"),
       grant("open-review-pr", "direct"),
     ];
+    // F11: deny wins under bypassPermissions, so a `Bash(git checkout:*)` on any
+    // rule this developer is withheld from (the retired `edit-other-task-branch`
+    // rule had one) blocks its own `git checkout -B <task-branch>`. CANARY: add
+    // it to the merge rule and the list grows.
     expect(resolveSpecialistDisallowedTools(grants)).toEqual([
       "Bash(gh pr merge:*)",
     ]);
-  });
-
-  it("a withheld-everything specialist is denied branch, push, and PR commands", () => {
-    const grants = [
-      grant("create-task-branch", "human"),
-      grant("commit-push-branch", "human"),
-      grant("open-review-pr", "human"),
-    ];
-    const denied = resolveSpecialistDisallowedTools(grants);
-    expect(denied).toEqual(
-      expect.arrayContaining([
-        "Bash(git checkout -b:*)",
-        "Bash(git switch -c:*)",
-        "Bash(git push:*)",
-        "Bash(gh pr create:*)",
-        "Bash(gh pr merge:*)",
-      ]),
-    );
   });
 
   it("withheld create-task-branch also denies the force-create variants (XS-4)", () => {
@@ -309,18 +279,13 @@ describe("resolveDeliveryPermissions", () => {
 /* --------------------------------------------- web egress (P13-LV-18) */
 
 describe("web egress capability", () => {
-  it("withholding use-web-search-fetch denies WebFetch + WebSearch", () => {
-    const denied = resolveSpecialistDisallowedTools([
-      grant("use-web-search-fetch", "off"),
-    ]);
-    expect(denied).toContain("WebFetch");
-    expect(denied).toContain("WebSearch");
-  });
-
-  it("human-only mode withholds it from the agent too", () => {
-    expect(
-      resolveSpecialistDisallowedTools([grant("use-web-search-fetch", "human")]),
-    ).toEqual(expect.arrayContaining(["WebFetch", "WebSearch"]));
+  it("withholding use-web-search-fetch, off or human-only, denies the agent WebFetch + WebSearch", () => {
+    for (const mode of ["off", "human"] as const) {
+      expect(
+        resolveSpecialistDisallowedTools([grant("use-web-search-fetch", mode)]),
+        mode,
+      ).toEqual(expect.arrayContaining(["WebFetch", "WebSearch"]));
+    }
   });
 });
 
