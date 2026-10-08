@@ -1156,7 +1156,7 @@ describe("openTaskPr", () => {
     expect(fm.pr).toMatchObject({ number: 51, state: "review" });
   });
 
-  it("degrades cleanly when no repo/PAT is configured (no throw, typed result)", async () => {
+  it("passes the project's context failure through when no PAT is bound (no throw, typed result)", async () => {
     const store = setupTestStore(ctx);
     writeTask(store.dataRoot, store.slug, {
       frontmatter: baseTaskFrontmatter("VIB-9", { stage: "review", branch: "vib-9-x" }),
@@ -1169,7 +1169,7 @@ describe("openTaskPr", () => {
       { ...ACTOR, userId: store.users.arda.id },
       { dataRoot: store.dataRoot },
     );
-    expect(["no_pat_configured", "no_repo_configured"]).toContain(res.status);
+    expect(res).toEqual({ status: "no_pat_configured", repo: "akin-ozer/viberr" });
   });
 });
 
