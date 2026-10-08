@@ -3059,7 +3059,8 @@ describe("completeTaskMerge (S2 — finish a merge-pending PR)", () => {
       { dataRoot: store.dataRoot },
     );
     expect(result.merged).toBe(false);
-    expect(result.message).toMatch(/credential|scope|merge/i);
+    // The sentence for this cause, not any of the other three failures'.
+    expect(result.message).toBe("Configure a GitHub credential for this project first, then try again.");
     // The PR stays "accepted" — never silently flipped to "merged".
     const fm = readTaskFile({
       projectSlug: store.slug,
