@@ -1544,21 +1544,29 @@ describe("the project's open knowledge-base proposals (ruling 483)", () => {
     expect(posted[0]).toContain("resolve_kb_proposal");
   });
 
-  it("Dismiss confirms first, then asks; a member who is not an org admin is told who decides", async () => {
+  it("Dismiss confirms first, then asks, and its exit leaves the focus on the row; a member who is not an org admin is told who decides", async () => {
     const posted: string[] = [];
+    let answer!: () => void;
+    const answered = new Promise<void>((resolve) => (answer = resolve));
     renderPage(view({ proposals: [proposal] }), "", async ({ request }) => {
       posted.push(String((await request.formData()).get("text")));
+      await answered;
       return { ok: true, conversationId: "cnv_b" };
     });
     const panel = await screen.findByRole("region", { name: "Knowledge base" });
-    fireEvent.click(within(panel).getByRole("button", { name: "Dismiss" }));
+    // A keyboard user's press: fireEvent.click moves no focus by itself.
+    const opener = within(panel).getByRole<HTMLButtonElement>("button", { name: "Dismiss" });
+    opener.focus();
+    fireEvent.click(opener);
     expect(posted).toEqual([]);
     const dialog = await screen.findByRole("alertdialog", { name: "Dismiss kp-0123456789?" });
     // The sheet's `dialog[data-closing]` clock, which jsdom has no stylesheet
     // to read: the exit plays until its transitionend.
     dialog.style.transitionDuration = "10s";
+    const confirm = within(dialog).getByRole("button", { name: "Dismiss proposal" });
+    confirm.focus();
     await act(async () => {
-      fireEvent.click(within(dialog).getByRole("button", { name: "Dismiss proposal" }));
+      fireEvent.click(confirm);
     });
     await waitFor(() => expect(posted).toHaveLength(1));
     expect(posted[0]).toContain("Dismiss knowledge-base proposal kp-0123456789");
@@ -1567,8 +1575,14 @@ describe("the project's open knowledge-base proposals (ruling 483)", () => {
     // the click's own commit, with no exit.
     expect(dialog.isConnected).toBe(true);
     expect(dialog.hasAttribute("data-closing")).toBe(true);
+    // The exit ends with the ask still on its way, so Dismiss is disabled and
+    // cannot take the focus back. CANARY: drop useDialog's fallback for a
+    // disabled opener and the focus falls to <body>.
+    expect(opener.disabled).toBe(true);
     fireEvent.transitionEnd(dialog);
     expect(dialog.isConnected).toBe(false);
+    expect(document.activeElement).toBe(panel.querySelector("#proposal-kp-0123456789"));
+    await act(async () => answer());
     cleanup();
 
     renderPage(view({ viewerIsOrgAdmin: false, proposals: [{ ...proposal, docHref: null }] }));

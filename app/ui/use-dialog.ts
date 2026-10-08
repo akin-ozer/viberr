@@ -7,8 +7,9 @@ import { pinLivePose } from "./live-pose";
  * trap, initial focus, Escape (cancel event), top-layer stacking and the
  * ::backdrop scrim. This hook adds what the platform doesn't: body scroll
  * lock, backdrop-click close (the old `.confirm-scrim` affordance), focus
- * restore on unmount, keeping React's imperative autoFocus (showModal
- * would otherwise move focus off it), and an animated close — `close()`
+ * restore on unmount (to the opener, or around it while it is disabled),
+ * keeping React's imperative autoFocus (showModal would otherwise move
+ * focus off it), and an animated close — `close()`
  * marks the dialog with [data-closing] so CSS can play the exit transition
  * (a softer, shorter pop-center in reverse), then invokes onClose to unmount.
  *
@@ -164,7 +165,19 @@ export function useDialog(
       dialog.removeEventListener("cancel", onCancel);
       dialog.removeEventListener("click", onClick);
       document.body.style.overflow = previousOverflow;
-      if (opener?.isConnected) opener.focus();
+      if (!opener?.isConnected) return;
+      // A confirm's exit ends after its action (ruling 459), so the request
+      // the action started can have disabled the opener by now (a row's Undo
+      // while its post is in flight). A disabled button takes no focus, so
+      // the nearest focusable container around it, such as a list row with
+      // tabIndex={-1}, takes it instead of <body>.
+      if (opener.matches(":disabled")) {
+        opener.parentElement
+          ?.closest<HTMLElement>("[tabindex]")
+          ?.focus({ preventScroll: true });
+      } else {
+        opener.focus();
+      }
     };
   }, [close, opener]);
 
