@@ -91,7 +91,11 @@ export function HumanAccess({
   // an action, and the ghost can perform none of them.
   const live = members.filter((m) => !m.missing);
   const stale = members.filter((m) => m.missing);
-  for (const m of live) counts[m.role] += 1;
+  // Nor can a disabled account, which cannot sign in. It is still a member, so
+  // the panel head counts it as Settings → Members does, but no role header
+  // does: the last-admin mirror below reads these counts, and the server's
+  // guard (`countLiveAdmins`) and Settings' own skip a disabled admin too.
+  for (const m of live) if (!m.disabled) counts[m.role] += 1;
 
   const setRole = (m: MembershipView, r: ProjectRole) => {
     if (m.role === r) return;

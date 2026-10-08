@@ -176,20 +176,34 @@ describe("HumanAccess", () => {
     expect(onSetRole).toHaveBeenCalledWith(MEMBERS[3], "viewer");
   });
 
-  it("blocks demoting the last admin client-side (server re-checks)", () => {
+  it.each([
+    {
+      who: "the last admin",
+      members: MEMBERS.map((m) => (m.userId === "u_elif" ? { ...m, role: "maintainer" as const } : m)),
+      heads: ["Admin 1", "Maintainer 2"],
+    },
+    {
+      // A disabled account cannot sign in, so the server's guard
+      // (`countLiveAdmins`) does not count it, and neither do the headers.
+      // CANARY: count every non-missing member again and Elif's disabled
+      // account reads "Admin 2" and lets Arda's demotion through to the 409.
+      who: "the last admin who can sign in, beside a disabled one",
+      members: MEMBERS.map((m) => (m.userId === "u_elif" ? { ...m, disabled: true } : m)),
+      heads: ["Admin 1", "Maintainer 1"],
+    },
+  ])("blocks demoting $who client-side (server re-checks)", ({ members, heads }) => {
     const onSetRole = vi.fn();
-    const oneAdmin = MEMBERS.map((m) =>
-      m.userId === "u_elif" ? { ...m, role: "maintainer" as const } : m,
-    );
     const { container } = render(
       <HumanAccess
         projectName="Viberr Core"
-        members={oneAdmin}
+        members={members}
         canManage
         busy={false}
         onSetRole={onSetRole}
       />,
     );
+    const shown = [...container.querySelectorAll(".rbac-table thead th")].map((th) => th.textContent);
+    expect(shown.slice(1, 3)).toEqual(heads);
     const ardaSeg = container.querySelectorAll(".mini-seg")[1]!;
     fireEvent.click(Array.from(ardaSeg.querySelectorAll("button")).find((b) => b.textContent === "Viewer")!);
     expect(onSetRole).not.toHaveBeenCalled();
