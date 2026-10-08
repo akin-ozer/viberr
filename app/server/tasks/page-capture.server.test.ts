@@ -43,7 +43,6 @@ import { getRun } from "~/server/runtimes/run-store.server";
 import { applyAgentCompletionEffects } from "./agent-completion.server";
 import { readAgentTaskAttachment } from "./board-read.server";
 import {
-  PAGE_CAPTURE_WAIT_MS,
   captureTaskPage,
   removeRunPageCaptures,
   requestDeliveryCaptures,
@@ -706,7 +705,7 @@ describe("a delivered page is pictured (ruling 691)", () => {
       // the render is stopped, past a Codex tool call's 60 seconds.
       await vi.advanceTimersByTimeAsync(1_000);
       expect(answer.text).toBe("[busy] The renderer is working on other pages. Call again in a moment.");
-      await vi.advanceTimersByTimeAsync(PAGE_CAPTURE_WAIT_MS - 20_000);
+      await vi.advanceTimersByTimeAsync(25_000); // 40 s in; the bound is 45 s (ruling 691(d))
       expect(settled).toBe(false);
       // CANARY: await the capture promise without the bound in
       // applyAgentCompletionEffects and the operator's run never starts while
