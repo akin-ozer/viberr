@@ -20,7 +20,6 @@ import {
   recoverStrandedOperatorPlans,
   recoverUnreactedAgentRuns,
   settleAbandonedWaits,
-  RECOVERY_REINVOKE_CAP,
 } from "./run-recovery.server";
 import { getRun, insertRunLine, patchRun, upsertRun } from "./run-store.server";
 import { COMPACTING_AFTER_RUN_STEP, RUN_PHASE, SESSION_SETTLING_STEP } from "./adapter.server";
@@ -33,6 +32,10 @@ import {
 import { loginTargetFor, recordBackendLogin } from "./backend-credentials.server";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import path from "node:path";
+
+/** The crash-loop cap (F7-BOOT1): three re-invokes per task, and three replays
+ *  per run, within 30 minutes (docs/domain/operator.md, agents-and-runtime.md). */
+const CAP = 3;
 
 let ctx: TestDbContext;
 let store: TestStore;
@@ -526,7 +529,7 @@ describe("finalizeOrphanedRuns (F-RUN1)", () => {
   it("finalizes but does NOT re-invoke once the crash-loop cap is hit (F7-BOOT1)", () => {
     // Simulate CAP prior recovery re-invokes for this task (a boot→orphan→crash
     // loop): each real boot recorded a `run.recovery.reinvoked` audit row.
-    for (let i = 0; i < RECOVERY_REINVOKE_CAP; i++) {
+    for (let i = 0; i < CAP; i++) {
       recordAudit(store.db, {
         action: "run.recovery.reinvoked",
         actor: SYSTEM_ACTOR,
@@ -557,7 +560,7 @@ describe("finalizeOrphanedRuns (F-RUN1)", () => {
         )
         .get() as { n: number }
     ).n;
-    expect(n).toBe(RECOVERY_REINVOKE_CAP);
+    expect(n).toBe(CAP);
   });
 
   /**
@@ -577,7 +580,7 @@ describe("finalizeOrphanedRuns (F-RUN1)", () => {
         ownerUserId: "u-arda",
       }),
     });
-    for (let i = 0; i < RECOVERY_REINVOKE_CAP; i++) {
+    for (let i = 0; i < CAP; i++) {
       recordAudit(store.db, {
         action: "run.recovery.reinvoked",
         actor: SYSTEM_ACTOR,
@@ -1085,7 +1088,7 @@ describe("recoverUnreactedAgentRuns (NFR17/B9 crash-loop backstop)", () => {
     // Simulate CAP prior replays for THIS run within the window (a boot→recover→
     // crash loop where the reply write kept failing so `task.agent.replied` never
     // landed and the run was re-selected every boot).
-    for (let i = 0; i < RECOVERY_REINVOKE_CAP; i++) {
+    for (let i = 0; i < CAP; i++) {
       recordAudit(store.db, {
         action: "run.recovery.reply_replayed",
         actor: SYSTEM_ACTOR,
@@ -1101,7 +1104,7 @@ describe("recoverUnreactedAgentRuns (NFR17/B9 crash-loop backstop)", () => {
     expect(res.capped).toBe(1);
     expect(res.recovered).toBe(0);
     // No NEW attempt audit was written (count stays exactly at the cap).
-    expect(countReplayAudits("run_loop")).toBe(RECOVERY_REINVOKE_CAP);
+    expect(countReplayAudits("run_loop")).toBe(CAP);
     // The run was NEVER reacted to: no reply audit landed.
     expect(
       listAuditEvents(store.db, { action: "task.agent.replied" }).filter(
@@ -1112,7 +1115,7 @@ describe("recoverUnreactedAgentRuns (NFR17/B9 crash-loop backstop)", () => {
 
   it("caps per run — a distinct run on the same task is still recovered", async () => {
     // The capped run's prior replays must NOT starve a sibling run on the task.
-    for (let i = 0; i < RECOVERY_REINVOKE_CAP; i++) {
+    for (let i = 0; i < CAP; i++) {
       recordAudit(store.db, {
         action: "run.recovery.reply_replayed",
         actor: SYSTEM_ACTOR,
@@ -1143,7 +1146,7 @@ describe("recoverUnreactedAgentRuns (NFR17/B9 crash-loop backstop)", () => {
     expect(res.capped).toBe(1); // run_capped skipped
     expect(res.recovered).toBe(1); // run_fresh recovered
     expect(countReplayAudits("run_fresh")).toBe(1);
-    expect(countReplayAudits("run_capped")).toBe(RECOVERY_REINVOKE_CAP);
+    expect(countReplayAudits("run_capped")).toBe(CAP);
   });
 });
 

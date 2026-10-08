@@ -38,7 +38,7 @@ import { toError } from "~/shared/errors";
  * operator re-invoke. A restart that lands after the window has elapsed sees a
  * clean count and re-invokes normally (the common single-boot case).
  */
-export const RECOVERY_REINVOKE_CAP = 3;
+const RECOVERY_REINVOKE_CAP = 3;
 const RECOVERY_WINDOW_MS = 30 * 60 * 1000;
 const RECOVERY_REINVOKE_ACTION = "run.recovery.reinvoked";
 /** Same crash-loop backstop for the reply-recovery re-invoke path (below). */
