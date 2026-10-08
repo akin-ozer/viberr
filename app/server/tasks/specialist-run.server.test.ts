@@ -4255,8 +4255,7 @@ describe("granted skills reach a Claude run NATIVELY (pass-18)", () => {
 
     // The project mirror, as GitHub would hold it: main ADVANCED by a merge the
     // delivering checkout never fetched.
-    const { projectRepoMirrorDir } = await import("./repo-mirror.server");
-    const mirror = projectRepoMirrorDir(store.slug, "acme/widgets", store.dataRoot)!;
+    const mirror = path.join(store.dataRoot, "projects", store.slug, ".repo-mirror", "acme__widgets.git");
     mkdirSync(path.dirname(mirror), { recursive: true });
     await exec("git", ["clone", "-q", "--bare", ws, mirror]);
     // Point it at GitHub like a real mirror (the refresh's network fetch fails

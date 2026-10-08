@@ -119,7 +119,7 @@ const execFileAsync = promisify(execFile);
  * file watcher from walking a 100 MB object store (`shouldIgnoreWatchPath`
  * ignores any dot-prefixed path segment).
  */
-export function projectRepoMirrorDir(
+function projectRepoMirrorDir(
   projectSlug: string,
   repo: string,
   dataRoot?: string,

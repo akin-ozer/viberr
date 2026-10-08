@@ -16,7 +16,7 @@ import {
   readDefaultBranchFile,
   readProjectDefaultBranchFile,
 } from "./operator-repo-read.server";
-import { cloneWorkspaceRepo, projectRepoMirrorDir } from "./repo-mirror.server";
+import { cloneWorkspaceRepo } from "./repo-mirror.server";
 
 /** A Go-shaped file of `lines` lines, each about 30 characters. */
 function goLines(lines: number): string {
@@ -191,7 +191,7 @@ describe("readDefaultBranchFile", () => {
     // No mirror ⇒ no network, no fetch, and an honest `refreshed: false` for the
     // tool's prose to report. Canary: pass `create: true` from the read and this
     // recreates the mirror instead of degrading.
-    rmSync(projectRepoMirrorDir(SLUG, REPO, dataRoot)!, {
+    rmSync(path.join(dataRoot, "projects", SLUG, ".repo-mirror", "acme__widgets.git"), {
       recursive: true,
       force: true,
     });
@@ -264,8 +264,7 @@ describe("readProjectDefaultBranchFile (ruling 299)", () => {
     });
   });
   afterEach(() => {
-    const dir = projectRepoMirrorDir(SLUG, REPO, dataRoot);
-    if (dir) rmSync(dir, { recursive: true, force: true });
+    rmSync(path.join(dataRoot, "projects", SLUG, ".repo-mirror", "acme__widgets.git"), { recursive: true, force: true });
     ctx.cleanup();
   });
 
