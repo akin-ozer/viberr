@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { createTestDbContext, type TestDbContext } from "../../../test-support/test-db";
 import {
   baseTaskFrontmatter,
+  REVIEWER_ENGAGEMENT,
   setupTestStore,
   writeProject,
   writeTask,
@@ -141,13 +142,6 @@ function deployAgents(withOperator = false): void {
   });
 }
 
-const REVIEWER: Engagement = {
-  profileId: "reviewer",
-  backend: "claude",
-  role: "Review & validation",
-  delivers: false,
-  verdictCapable: true,
-};
 const DEVELOPER: Engagement = {
   profileId: "developer",
   backend: "claude",
@@ -190,7 +184,7 @@ function seedVerificationTask(
       waiting: "agent",
       ownerUserId: store.users.arda.id,
       title: "Confirm the smoke file exists on main",
-      engagements: [REVIEWER],
+      engagements: [REVIEWER_ENGAGEMENT],
       ...patch,
     }),
     goal: "Confirm qa/smoke/pass19.md exists on main; NO changes are expected.",
@@ -295,7 +289,7 @@ describe("the verdict binds — a verification revision is minted at review time
     // as never. CANARY: drop the `deliveringEngagement(pre) === null`
     // precondition and an in-flight delivery gets marked "no changes".
     deployAgents();
-    seedVerificationTask({ engagements: [DEVELOPER, REVIEWER] });
+    seedVerificationTask({ engagements: [DEVELOPER, REVIEWER_ENGAGEMENT] });
     await reviewerApproves();
 
     const fm = task().frontmatter;
@@ -374,7 +368,7 @@ describe("the verdict binds — a verification revision is minted at review time
     // revision to bind the verdict to yet" beside a healthy validation.
     // CANARY: branch the note on `rev` again instead of the review subject.
     deployAgents();
-    seedVerificationTask({ engagements: [DEVELOPER, REVIEWER], deliveredAt: "2026-09-28T08:00:00.000Z" });
+    seedVerificationTask({ engagements: [DEVELOPER, REVIEWER_ENGAGEMENT], deliveredAt: "2026-09-28T08:00:00.000Z" });
     await reviewerApproves();
 
     const fm = task().frontmatter;
@@ -392,8 +386,8 @@ describe("the verdict binds — a verification revision is minted at review time
     // never read. CANARY: drop `mintedSince` and the second approval binds to
     // nothing, its note saying it started before the base sha was delivered.
     deployAgents();
-    const verifier: Engagement = { ...REVIEWER, profileId: "verifier", role: "Verification" };
-    seedVerificationTask({ engagements: [REVIEWER, verifier] });
+    const verifier: Engagement = { ...REVIEWER_ENGAGEMENT, profileId: "verifier", role: "Verification" };
+    seedVerificationTask({ engagements: [REVIEWER_ENGAGEMENT, verifier] });
     await reviewerApproves();
     upsertRun(store.db, {
       id: "run_verifier",
@@ -504,7 +498,7 @@ describe("acceptance closes it — with its OWN completion event, and no merge",
     // CANARY: drop `deliveredAsFiles(fm)` from acceptanceNoChangeCheck and the
     // task closes as "Completed with no changes" with `noChanges: true`.
     deployAgents();
-    seedVerificationTask({ engagements: [DEVELOPER, REVIEWER], deliveredAt: "2026-09-28T08:44:13.751Z" });
+    seedVerificationTask({ engagements: [DEVELOPER, REVIEWER_ENGAGEMENT], deliveredAt: "2026-09-28T08:44:13.751Z" });
     await reviewerApproves();
     remote();
 
@@ -904,7 +898,7 @@ describe("OBS-11 / OBS-13 — the empty branch a no-change acceptance leaves beh
         readiness: "ready",
         waiting: "human",
         ownerUserId: store.users.arda.id,
-        engagements: [REVIEWER],
+        engagements: [REVIEWER_ENGAGEMENT],
         branch: "vib-1",
         noChanges: true,
         workRevision: {

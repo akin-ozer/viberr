@@ -13,6 +13,7 @@ import { createTestDbContext, type TestDbContext } from "../../../test-support/t
 import {
   actorOf,
   baseTaskFrontmatter,
+  REVIEWER_ENGAGEMENT,
   setupTestStore,
   writeProject,
   writeTask,
@@ -102,13 +103,6 @@ const DEV: Engagement = {
   delivers: true,
   verdictCapable: false,
 };
-const REVIEWER: Engagement = {
-  profileId: "reviewer",
-  backend: "claude",
-  role: "Review & validation",
-  delivers: false,
-  verdictCapable: true,
-};
 
 /** VIB-1 at Review, delivered on `revisionSha` with an open PR and an
  *  approving verdict: every gate but the project's gates is clear. */
@@ -118,7 +112,7 @@ function writeDeliveredTask(patch: Partial<TaskFrontmatter> = {}): void {
       stage: "review",
       ownerUserId: store.users.arda.id,
       branch: "vib-1-work",
-      engagements: [DEV, REVIEWER],
+      engagements: [DEV, REVIEWER_ENGAGEMENT],
       workRevision: {
         id: "rev_1",
         headSha: revisionSha,

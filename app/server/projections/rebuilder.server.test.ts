@@ -6,6 +6,7 @@ import { createTestDbContext } from "../../../test-support/test-db";
 import {
   baseTaskFrontmatter,
   OPEN_DECISION,
+  REVIEWER_ENGAGEMENT,
   setupTestStore,
   writeProject,
   writeTask,
@@ -710,15 +711,7 @@ describe("R16-3: the projected acceptance block names the terminal GitHub fact f
         noChanges: true,
         branch: null,
         pr: null,
-        engagements: [
-          {
-            profileId: "reviewer",
-            backend: "claude",
-            role: "Review & validation",
-            delivers: false,
-            verdictCapable: true,
-          },
-        ],
+        engagements: [REVIEWER_ENGAGEMENT],
         workRevision: {
           id: "rev_v1",
           headSha: "e".repeat(40),

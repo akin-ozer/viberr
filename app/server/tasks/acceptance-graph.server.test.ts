@@ -3,11 +3,11 @@ import { createTestDbContext } from "../../../test-support/test-db";
 import {
   actorOf,
   baseTaskFrontmatter,
+  REVIEWER_ENGAGEMENT,
   writeTask,
   type TestStore,
 } from "../../../test-support/test-store";
 import type {
-  Engagement,
   TaskPacket,
   WorkRevision,
 } from "~/schemas/task-file.schema";
@@ -53,14 +53,6 @@ const ACCEPT_PACKET: TaskPacket = {
     { kind: "accept_completion", t: "Accept completion", d: "", rec: true },
     { kind: "request_edit", t: "Request one edit", d: "", rec: false },
   ],
-};
-
-const REVIEWER: Engagement = {
-  profileId: "reviewer",
-  backend: "claude",
-  role: "Review & validation",
-  delivers: false,
-  verdictCapable: true,
 };
 
 function revision(): WorkRevision {
@@ -292,7 +284,7 @@ describe("P14-LV-02: acceptance respects the workflow graph", () => {
     seed(store, {
       stage: "review",
       waiting: "human",
-      engagements: [REVIEWER],
+      engagements: [REVIEWER_ENGAGEMENT],
       workRevision: revision(),
       verdicts: [approval()],
       validation: "healthy",

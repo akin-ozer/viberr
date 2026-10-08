@@ -6,6 +6,7 @@ import {
   actorOf,
   approveReviewEntry,
   baseTaskFrontmatter,
+  REVIEWER_ENGAGEMENT,
   setupTestStore,
   writeProject,
   writeTask,
@@ -133,15 +134,6 @@ const DEV_DELIVERS_ENGAGEMENT: Engagement = {
   role: "Reviewer",
   delivers: true,
   verdictCapable: false,
-};
-/** The verdict-capable reviewer engagement whose profileId matches the effects'
- *  `profileId: "reviewer"` — so the resolved verdict binds + derives validation. */
-const REVIEWER_ENGAGEMENT: Engagement = {
-  profileId: "reviewer",
-  backend: "claude",
-  role: "Review & validation",
-  delivers: false,
-  verdictCapable: true,
 };
 /** An immutable delivered revision under review. */
 function workRev(id = "rev_1"): WorkRevision {

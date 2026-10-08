@@ -7,6 +7,7 @@ import {
   approveReviewEntry,
   baseTaskFrontmatter,
   MERGE_STAGE_BOARD,
+  REVIEWER_ENGAGEMENT,
   setupTestStore,
   writeProject,
   writeTask,
@@ -2650,15 +2651,7 @@ describe("operatorAcceptCompletion", () => {
           createdAt: "2026-07-25T09:00:00.000Z",
           sourceProfileId: "dev",
         },
-        engagements: [
-          {
-            profileId: "reviewer",
-            backend: "claude",
-            role: "Review & validation",
-            delivers: false,
-            verdictCapable: true,
-          },
-        ],
+        engagements: [REVIEWER_ENGAGEMENT],
         verdicts: [
           {
             profileId: "reviewer",
@@ -2740,15 +2733,7 @@ describe("operatorAcceptCompletion", () => {
         },
         // R15-1: delivered work needs an approving verdict, or the gate refuses
         // before the write this test is about is ever reached.
-        engagements: [
-          {
-            profileId: "reviewer",
-            backend: "claude",
-            role: "Review & validation",
-            delivers: false,
-            verdictCapable: true,
-          },
-        ],
+        engagements: [REVIEWER_ENGAGEMENT],
         verdicts: [
           {
             profileId: "reviewer",
@@ -7518,15 +7503,7 @@ describe("ruling 193: the snapshot counts a reviewer's successive request_change
           createdAt: "2026-09-13T09:00:00.000Z",
           sourceProfileId: "dev",
         },
-        engagements: [
-          {
-            profileId: "reviewer",
-            backend: "claude",
-            role: "Review & validation",
-            delivers: false,
-            verdictCapable: true,
-          },
-        ],
+        engagements: [REVIEWER_ENGAGEMENT],
         verdicts: verdicts.map((v) => ({
           profileId: "reviewer",
           revisionId: v.revisionId,

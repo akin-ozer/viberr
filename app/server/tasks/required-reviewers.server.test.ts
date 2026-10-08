@@ -3,6 +3,7 @@ import { createTestDbContext } from "../../../test-support/test-db";
 import {
   actorOf,
   baseTaskFrontmatter,
+  REVIEWER_ENGAGEMENT,
   setupTestStore,
   writeProject,
   writeTask,
@@ -86,16 +87,6 @@ const QA_BOT: Engagement = {
   profileId: "qa-bot",
   backend: "claude",
   role: "QA",
-  delivers: false,
-  verdictCapable: true,
-};
-
-/** The project's required reviewer, engaged on the task the way the operator's
- *  `run_agent` engages it before it can write a verdict. */
-const REVIEWER: Engagement = {
-  profileId: "reviewer",
-  backend: "claude",
-  role: "Review & validation",
   delivers: false,
   verdictCapable: true,
 };
@@ -324,7 +315,7 @@ describe("ruling 178: a required reviewer the project declares gates acceptance"
         // Ruling 531: engaged as every real review is. Without the reviewer's
         // engagement this passed while the engaged-reviewer gate still said
         // "No reviewed revision yet" to every files-only delivery.
-        engagements: [DEVELOPER, REVIEWER],
+        engagements: [DEVELOPER, REVIEWER_ENGAGEMENT],
         verdicts: [
           {
             profileId: "reviewer",
@@ -545,7 +536,7 @@ describe("ruling 556: the project's required reviewer cannot deliver", () => {
     ["with nothing recorded as delivered", {}],
   ])("tells a task its own required reviewer delivers that the review cannot count, %s", (_case, delivered) => {
     const store = prepared([{ stageId: "review", profileId: "reviewer" }]);
-    seed(store, { stage: "review", waiting: "human", ...delivered, engagements: [{ ...REVIEWER, delivers: true }] });
+    seed(store, { stage: "review", waiting: "human", ...delivered, engagements: [{ ...REVIEWER_ENGAGEMENT, delivers: true }] });
     // CANARY: drop the deliverer branch from `requiredReviewerRefusals` and the
     // gate says "Run the review at Review", which no run of the deliverer
     // meets; move it below the "nothing delivered" return and the second row
@@ -569,7 +560,7 @@ describe("ruling 556: the project's required reviewer cannot deliver", () => {
     ],
     [
       "once it is engaged again to review",
-      [DEVELOPER, REVIEWER],
+      [DEVELOPER, REVIEWER_ENGAGEMENT],
       "A required reviewer made the work delivered on this task, so its approval of it cannot count. Have " +
         "another agent deliver its own work, then run the review, or an admin can force-accept.",
     ],

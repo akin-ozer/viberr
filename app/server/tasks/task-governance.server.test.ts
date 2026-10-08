@@ -10,6 +10,7 @@ import {
   actorOf,
   approveReviewEntry,
   baseTaskFrontmatter,
+  REVIEWER_ENGAGEMENT,
   writeProject,
   writeTask,
   type TestStore,
@@ -81,16 +82,6 @@ const DEV_ENGAGEMENT: Engagement = {
   role: "developer",
   delivers: true,
   verdictCapable: false,
-};
-/** A verdict-capable reviewer whose profileId matches recordReviewerReply's
- *  actorRef ("reviewer") — so its verdict binds to the current revision AND
- *  gates acceptance (F10-15). */
-const REVIEWER_ENGAGEMENT: Engagement = {
-  profileId: "reviewer",
-  backend: "claude",
-  role: "Review & validation",
-  delivers: false,
-  verdictCapable: true,
 };
 /** An immutable delivered revision under review. */
 function workRev(id = "rev_1"): WorkRevision {

@@ -6,6 +6,7 @@ import { taskDir } from "~/server/files/file-store-root.server";
 import {
   actorOf,
   baseTaskFrontmatter,
+  REVIEWER_ENGAGEMENT,
   setupTestStore,
   writeTask,
   type TestStore,
@@ -93,14 +94,6 @@ function fm() {
     dataRoot: store.dataRoot,
   })!.parsed;
 }
-
-const REVIEWER: Engagement = {
-  profileId: "reviewer",
-  backend: "claude",
-  role: "Review & validation",
-  delivers: false,
-  verdictCapable: true,
-};
 
 function revision(id = "rev_1", sha = "a".repeat(40)): WorkRevision {
   return {
@@ -1177,7 +1170,7 @@ describe("R15-1 gate 2 (F15-15): the PR head must contain the delivered revision
     seed({
       stage: "review",
       branch: "vib-1",
-      engagements: [REVIEWER],
+      engagements: [REVIEWER_ENGAGEMENT],
       workRevision: revision(),
       verdicts: [approval()],
       pr: { number: 114, state: "review", title: "[VIB-1] t" },
@@ -1219,7 +1212,7 @@ describe("R15-1 gate 2 (F15-15): the PR head must contain the delivered revision
     seed({
       stage: "review",
       branch: "vib-1",
-      engagements: [REVIEWER],
+      engagements: [REVIEWER_ENGAGEMENT],
       workRevision: revision(),
       verdicts: [approval()],
       pr: {
@@ -1369,7 +1362,7 @@ describe("R15-1 gate 2 (F15-15): the PR head must contain the delivered revision
     seed({
       stage: "done",
       branch: "vib-1",
-      engagements: [REVIEWER],
+      engagements: [REVIEWER_ENGAGEMENT],
       workRevision: revision(),
       verdicts: [approval()],
       pr: { number: 114, state: "accepted", title: "[VIB-1] t" },
@@ -1761,7 +1754,7 @@ describe("B-WF1: the in-lock re-check after the merge await", () => {
     seed({
       stage: "review",
       branch: "vib-1",
-      engagements: [REVIEWER],
+      engagements: [REVIEWER_ENGAGEMENT],
       workRevision: revision(),
       verdicts: [approval()],
       pr: { number: 7, state: "review", title: "[VIB-1] t" },
@@ -1801,7 +1794,7 @@ describe("F15-13: already-merged honesty in the acceptance event", () => {
     seed({
       stage: "review",
       branch: "vib-1",
-      engagements: [REVIEWER],
+      engagements: [REVIEWER_ENGAGEMENT],
       workRevision: revision(),
       verdicts: [approval()],
       pr: { number: 7, state: "merged", title: "[VIB-1] t" },
@@ -1867,7 +1860,7 @@ describe("gap 1: resolvePacket's accept_completion is the THIRD Done writer and 
     seedWithPacket({
       stage: "review",
       branch: "vib-1",
-      engagements: [REVIEWER],
+      engagements: [REVIEWER_ENGAGEMENT],
       workRevision: revision(),
       verdicts: [approval()],
       pr: { number: 7, state: "review", title: "[VIB-1] t" },
@@ -1923,7 +1916,7 @@ describe("gap 1: resolvePacket's accept_completion is the THIRD Done writer and 
     seedWithPacket({
       stage: "review",
       branch: "vib-1",
-      engagements: [REVIEWER],
+      engagements: [REVIEWER_ENGAGEMENT],
       workRevision: revision(),
       verdicts: [approval()],
       pr: { number: 7, state: "review", title: "[VIB-1] t" },
@@ -1953,7 +1946,7 @@ describe("gap 1: resolvePacket's accept_completion is the THIRD Done writer and 
     seedWithPacket({
       stage: "review",
       branch: "vib-1",
-      engagements: [REVIEWER],
+      engagements: [REVIEWER_ENGAGEMENT],
       workRevision: revision(),
       verdicts: [approval()],
       pr: { number: 7, state: "merged", title: "[VIB-1] t" },
@@ -1978,7 +1971,7 @@ describe("gap 1: resolvePacket's accept_completion is the THIRD Done writer and 
     seedWithPacket({
       stage: "review",
       branch: "vib-1",
-      engagements: [REVIEWER],
+      engagements: [REVIEWER_ENGAGEMENT],
       workRevision: revision(),
       verdicts: [approval()],
       pr: { number: 7, state: "review", title: "[VIB-1] t" },

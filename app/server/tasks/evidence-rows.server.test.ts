@@ -3,6 +3,7 @@ import { createTestDbContext, type TestDbContext } from "../../../test-support/t
 import { pollUntil } from "../../../test-support/polling";
 import {
   baseTaskFrontmatter,
+  REVIEWER_ENGAGEMENT,
   setupTestStore,
   writeTask,
   type TestStore,
@@ -162,15 +163,7 @@ describe("recordAgentCompletion attaches evidence to the outcome event", () => {
     writeTask(store.dataRoot, store.slug, {
       frontmatter: baseTaskFrontmatter("VIB-1", {
         stage: "review",
-        engagements: [
-          {
-            profileId: "reviewer",
-            backend: "claude",
-            role: "Review & validation",
-            delivers: false,
-            verdictCapable: true,
-          },
-        ],
+        engagements: [REVIEWER_ENGAGEMENT],
         workRevision: {
           id: "rev_1",
           headSha: "a".repeat(40),
@@ -314,15 +307,7 @@ describe("end-to-end: a staged report_outcome envelope lands its evidence", () =
         title: "Attach execution workspace",
         branch: "vib-1-work",
         validation: "changed",
-        engagements: [
-          {
-            profileId: "reviewer",
-            backend: "claude",
-            role: "Review & validation",
-            delivers: false,
-            verdictCapable: true,
-          },
-        ],
+        engagements: [REVIEWER_ENGAGEMENT],
         workRevision: {
           id: "rev_1",
           headSha: "a".repeat(40),

@@ -14,6 +14,7 @@ import {
   baseTaskFrontmatter,
   MERGE_STAGE_BOARD,
   REVIEW_STAGE_REVIEWER,
+  REVIEWER_ENGAGEMENT,
   writeProject,
   writeTask,
   type TestStore,
@@ -199,15 +200,6 @@ const DEV_ENGAGEMENT: Engagement = {
   role: "developer",
   delivers: true,
   verdictCapable: false,
-};
-/** A verdict-capable reviewer engagement whose profileId matches REVIEWER_REF,
- *  so recordReviewerReply's verdict binds AND gates acceptance (F10-15). */
-const REVIEWER_ENGAGEMENT: Engagement = {
-  profileId: "reviewer",
-  backend: "claude",
-  role: "Review & validation",
-  delivers: false,
-  verdictCapable: true,
 };
 /** A second verdict-capable reviewer engagement (pairs with QA_REVIEWER_REF). */
 const QA_REVIEWER_ENGAGEMENT: Engagement = {

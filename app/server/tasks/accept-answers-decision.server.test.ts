@@ -3,6 +3,7 @@ import { createTestDbContext, type TestDbContext } from "../../../test-support/t
 import {
   actorOf,
   baseTaskFrontmatter,
+  REVIEWER_ENGAGEMENT,
   writeTask,
   type TestStore,
 } from "../../../test-support/test-store";
@@ -110,13 +111,6 @@ const DEV: Engagement = {
   delivers: true,
   verdictCapable: false,
 };
-const REVIEWER: Engagement = {
-  profileId: "reviewer",
-  backend: "claude",
-  role: "Review & validation",
-  delivers: false,
-  verdictCapable: true,
-};
 const REVISION: WorkRevision = {
   id: "rev_1",
   headSha: "a".repeat(40),
@@ -145,7 +139,7 @@ function wedged(packet: TaskPacket): void {
       stage: "impl",
       ownerUserId: store.users.arda.id,
       branch: "vib-1-work",
-      engagements: [DEV, REVIEWER],
+      engagements: [DEV, REVIEWER_ENGAGEMENT],
       workRevision: REVISION,
       verdicts: [
         {
