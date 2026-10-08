@@ -1208,6 +1208,41 @@ describe("the run picker speaks the same vocabulary as the panel around it", () 
   });
 });
 
+describe("a queued run's footer says what it waits for (ruling 701)", () => {
+  const queued = (step: string | null) =>
+    mkRun({
+      id: "c0",
+      kind: "reviewer",
+      who: { kind: "agent", backend: "claude", name: "Diagrammer", role: "Diagrams" },
+      state: "idle",
+      lifecycle: "queued",
+      step,
+    });
+
+  it("a slot behind the cap, or the summary of its session's last run when its row names that", () => {
+    // Canary: print the slot sentence for every queued run and the second
+    // expectation fails.
+    const { container, rerender } = render(
+      <Logs runtime={[queued(null)]} sel="c0" onSel={() => {}} linesByThread={{ c0: [] }} />,
+    );
+    expect(container.textContent).toContain(
+      "queued: waiting for a runtime slot; output appears once it starts",
+    );
+    rerender(
+      <Logs
+        runtime={[queued("waiting for the summary of its last run")]}
+        sel="c0"
+        onSel={() => {}}
+        linesByThread={{ c0: [] }}
+      />,
+    );
+    expect(container.textContent).toContain(
+      "queued: waiting for the summary of its last run; output appears once it starts",
+    );
+    expect(container.textContent).not.toContain("runtime slot");
+  });
+});
+
 describe("AgentPicker dismissal (shared useDismiss)", () => {
   function openPicker() {
     const op = mkRun({ id: "op", op: true, who: { kind: "agent", name: "Operator" }, state: "idle", lifecycle: "finished" });

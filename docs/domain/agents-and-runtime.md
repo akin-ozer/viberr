@@ -377,22 +377,28 @@ card until one of the person's runs has made a model call (ruling 604). A readin
   `context-policy.server.ts` if an entry were non-null). Instead, a run that finishes or
   errors with a session whose last prompt is above `COMPACT_AT_COMPLETION_TOKENS` (100k)
   is compacted at the END of the run, while its cache is warm. Not an interrupted run,
-  and not one its provider refused (ruling 599: `classifyRunEndOf` reads it as
+  not one its provider refused (ruling 599: `classifyRunEndOf` reads it as
   `failedBackendUnavailable`, and the compaction would be one more request to that
-  provider on that account). The compaction's lines are never the run's failure
+  provider on that account), and never an operator's session, which nothing resumes
+  (ruling 701). The compaction's lines are never the run's failure
   (`runFailureReason` skips `run·compaction…` and `run·compacted…`): the adapter's `compact()`
   sends `/compact <COMPLETION_COMPACT_INSTRUCTIONS>` as a one-turn query that resumes the
   session, built by the same options builder as the run so it reads the run's cached
-  prefix; the exit is asynchronous (`settleRun`) so the finalize and the completion contract
-  wait for it, except the run's answered callback, which fires first on a finished run so
-  the reply is not held behind the housekeeping (U39-30); the boundary is the run's
+  prefix. For a `primary` or `reviewer` run it comes after the run has ended (ruling 701):
+  `settleRun` finalizes the row, frees the slot and fires the completion first, so the
+  report and the operator's next turn do not wait for the summary, and only a run that
+  resumes that session is held until it is written (§3.4). A controller turn's settle
+  still waits for it, after the run's answered callback has put the reply on the page
+  (U39-30), because the conversation's next turn resumes the same session. Either way the
+  boundary is the run's
   compaction fact with trigger `completion`, the request's cost and tokens add to the run's
   totals (`costAddUsd`, `usageAdd`) and `last_prompt_tokens` becomes the post size. The
   console reads
   `run·compacted·completion` ("context compacted at the end of the run · 111k → 9k
   tokens"), `run·compaction·request` (its cost and tokens) or `run·compaction·failed`;
-  "Not enough messages to compact." is an outcome, never a failure. The phase is
-  "Compacting context", step "at the end of the run". The compaction's child carries its
+  "Not enough messages to compact." is an outcome, never a failure. On a controller turn
+  the phase is "Compacting context", step "at the end of the run"; a specialist's row is
+  terminal by then and gets none. The compaction's child carries its
   own process marker (`compactionMarkerEnv`, `<runId>:compaction`) so the run's settle
   sweep does not kill it; the run service reaps it afterwards. An interrupted run is left
   alone. A run with a `compactAnchor` (every specialist and
@@ -986,9 +992,18 @@ session exists, and otherwise that there is no thread to resume and a re-run sta
 runs through `interruptRunOnClosure` under the system actor, audited with `reason:
 "task-closed"` (ruling 177).
 
-When the adapter exits, `launch`'s `settleRun` runs the completion compaction when it is
-due (§2.4, ruling 376), then the sink's `finalize`, then releases the slot, drains the
-pending queue and fires the registered completion callback. `finalize` lets the first
+When the adapter exits, `launch`'s `settleRun` runs the sink's `finalize`, releases the
+slot, drains the pending queue and fires the registered completion callback. A completion
+compaction that is due (§2.4, ruling 376) runs after all of that for a `primary` or
+`reviewer` run (ruling 701), as the session's housekeeping. The session id is kept in the
+run service's `settling` map from before the slot is handed on until the compaction is
+over, whatever it answered. A run that resumes that session meanwhile (a comment or an
+answer to that agent) stays `queued` with the step "waiting for the summary of its last
+run" (`SESSION_SETTLING_STEP`, which the console's footer prints) and is then admitted
+under the cap like any other, unless it was stopped while it waited. The run's gateway
+token, skill plugin and temporary directory go when the compaction is over. The
+compaction itself holds no slot. On a controller turn the compaction still runs before the
+finalize, and an operator's session is never compacted. `finalize` lets the first
 terminal writer win (only that writer stamps `finishedAt`) and, on `finished`, clears the
 backend's quota-exhaustion and credential-refusal records. A callback that throws goes
 through `noteCompletionEffectsLost`: waiting flips to human, a `continuity` timeline event
@@ -1151,9 +1166,10 @@ updated" (ruling 130(c)). A reason clause is terminated exactly once.
   controller follows the same rule; its fresh turn's preamble points at the
   recent-conversation digest every controller prompt carries, and it notes nothing on a
   task. The size is the LAST call's prompt, not the run's peak, on purpose: a run that
-  compacted and finished at 20k replays 20k, which is what every run that ended above
-  100k leaves behind (ruling 376), so this rule is the backstop for a session that never
-  got compacted (an interrupted run, a refused compaction).
+  compacted and finished at 20k replays 20k, which is what every specialist run and
+  controller turn that ended above 100k leaves behind (ruling 376), so this rule is the
+  backstop for a session that never got compacted (an interrupted run, a refused
+  compaction).
 - Transcripts: Claude
   `runtimes/users/<principal>/claude-home/projects/<cwd-dashes>/<sid>.jsonl`; Codex
   `runtimes/users/<principal>/codex-home/sessions/YYYY/MM/DD/rollout-<ts>-<sid>.jsonl`
@@ -1876,7 +1892,8 @@ runtime's answer for a missing grant.
   and revokes it once a completion compaction, which lists the same servers to keep the
   cached prefix, is done — an interrupt with or without a live handle,
   a queued run the drain drops, a launch that throws) and dies with the process, and the
-  gateway also refuses it once the run's row is no longer running or queued. An unknown,
+  gateway also refuses it once the run's row is no longer running or queued and no
+  compaction of its session is in flight (ruling 701). An unknown,
   revoked or wrong-server token gets a 401 with a JSON-RPC error and nothing is
   forwarded. A run that sends one call and gets one answer (an error included) 100 times
   within 60 seconds is stopped (ruling 598, `repeatedCallStop`): the hundredth call is

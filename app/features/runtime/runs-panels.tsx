@@ -1807,7 +1807,9 @@ export const AgentLogsPanel = memo(function AgentLogsPanel({
         ? // UI-57: a QUEUED run is not an idle thread. The strip renders only for
           // `running`, so a queued run used to show a "queued" pill next to the
           // footer "thread alive — no run executing", which contradicted it.
-          "queued: waiting for a runtime slot; output appears once it starts"
+          // Ruling 701: a queued run's step, when it has one, is what it waits
+          // for in place of a slot (the summary of its session's last run).
+          `queued: ${cur.step ?? "waiting for a runtime slot"}; output appears once it starts`
         : cur.lifecycle === "interrupted"
           ? // Pass 35 U35-7: a restart is a reason, not a person. Boot
             // recovery re-invokes the operator for a task run it interrupted

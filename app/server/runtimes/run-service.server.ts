@@ -35,6 +35,7 @@ import {
 } from "~/server/settings/instance-settings.server";
 import {
   RUN_PHASE,
+  type CompactCallbacks,
   type CompactOutcome,
   type EmittedLine,
   type RunCallbacks,
@@ -202,6 +203,23 @@ interface ServiceState {
    *  fires onExit (→ drain) during its own launch; the outer drain loop handles
    *  the freed slot, so the nested call returns immediately. */
   draining?: boolean;
+  /**
+   * Ruling 701: the sessions a completion compaction (ruling 376) is still
+   * summarizing after their run has ended, by session id. The run's record is
+   * closed and its completion has fired; what is left is the session's own
+   * housekeeping. A run that resumes one of these sessions is held, `queued`,
+   * until `done` settles ({@link startRun}), and the gateway keeps answering
+   * the listings of `runId` meanwhile. In-process only, like the queues.
+   */
+  settling: Map<string, SettlingSession>;
+}
+
+/** A session being compacted after the run that used it ended (ruling 701). */
+interface SettlingSession {
+  /** The run that just left the session. */
+  runId: string;
+  /** Settles when the compaction is over, whatever it answered. Never rejects. */
+  done: Promise<void>;
 }
 
 /** A live adapter and the admission lane its slot is counted in. */
@@ -287,6 +305,7 @@ function getState(): ServiceState {
       completions: new Map(),
       answered: new Map(),
       pending: emptyQueues(),
+      settling: new Map(),
     };
     cache[SERVICE_KEY] = state;
   }
@@ -389,6 +408,7 @@ export function configureRunServiceForTests(adapters: AdapterSet): void {
     completions: new Map(),
     answered: new Map(),
     pending: emptyQueues(),
+    settling: new Map(),
   };
 }
 
@@ -876,6 +896,12 @@ export interface RunStartResult {
   refusal: string | null;
 }
 
+/**
+ * Ruling 701: the step of a `queued` run that waits for its session, not for
+ * a slot. The console's footer prints it in place of the cap's reason.
+ */
+export const SESSION_SETTLING_STEP = "waiting for the summary of its last run";
+
 /** F21-13: the `meta` tag on the run's model-substitution disclosure line.
  *  A durable classified tag (no column, no migration), like `run·line_lost`. */
 export const MODEL_SUBSTITUTED_TAG = "run·model_substituted";
@@ -1217,7 +1243,13 @@ export async function startRun(
       taskKey: input.taskKey,
       isLive: () => {
         const row = getRun(db, runId);
-        return row?.state === "running" || row?.state === "queued";
+        if (row?.state === "running" || row?.state === "queued") return true;
+        // Ruling 701: a specialist's run is over while its session is still
+        // being compacted, and that request lists the run's servers.
+        for (const settling of state.settling.values()) {
+          if (settling.runId === runId) return true;
+        }
+        return false;
       },
     });
   }
@@ -1243,6 +1275,28 @@ export async function startRun(
     state.reserved.delete(reservation.runId);
     launchThunk();
     return { runId, outcome: "started", refusal: null };
+  }
+  // Ruling 701: the session this run resumes is still being compacted after
+  // the run that left it. Two processes on one transcript is what ruling 376
+  // made the whole settle wait to prevent; now only this run waits. Its row is
+  // `queued`, as for the cap, with the reason as its step, and it is admitted
+  // the moment the compaction is over. (A reserved run above is always a
+  // fresh session: `resumeRun` carries no reservation.)
+  const settling = spec.resumeSessionId ? state.settling.get(spec.resumeSessionId) : undefined;
+  if (settling) {
+    patchRun(db, runId, { step: SESSION_SETTLING_STEP });
+    const admitHeld = carryCorrelation(() => {
+      const row = getRun(db, runId);
+      if (!row || row.state !== "queued") {
+        // Stopped while it waited: it never starts, so its gateway token dies.
+        revokeRunMcpGateway(runId);
+        return;
+      }
+      patchRun(db, runId, { step: null });
+      admitRun(db, runId, launchThunk, input.kind, input.dataRoot);
+    });
+    void settling.done.then(admitHeld);
+    return { runId, outcome: "queued", refusal: null };
   }
   const admitted = admitRun(db, runId, launchThunk, input.kind, input.dataRoot);
   return { runId, outcome: admitted ? "started" : "queued", refusal: null };
@@ -2423,6 +2477,10 @@ function launch(
       // a server it cannot list is a different prefix that misses the cache
       // ruling 376 compacts to read (R-gateway-4, 2026-09-25).
       closeRunMcpGatewayCalls(spec.runId);
+      // Ruling 701: the compaction a specialist's session is still owed once
+      // the run's own record is closed. Null when the settle below is the end
+      // of it: nothing to compact, or a controller turn, whose settle waits.
+      let housekeeping: (() => Promise<void>) | null = null;
       try {
         // Ruling 369: a Codex run's per-call prompt sizes and compactions are
         // in the rollout the CLI wrote, never in its SDK stream; read once the
@@ -2461,88 +2519,110 @@ function launch(
           !drained &&
           exit.outcome === "error" &&
           classifyRunEndOf(db, { id: spec.runId, state: "error" }).failedBackendUnavailable;
+        const compact = adapter.compact;
+        const sessionId = exit.sessionId;
         if (
-          adapter.compact &&
-          exit.sessionId &&
+          compact &&
+          sessionId &&
           exit.outcome !== "interrupted" &&
           !refused &&
+          // Ruling 701: nor an operator's session. Every operator turn starts
+          // a fresh one (`runOperator` passes no session to resume), so the
+          // summary would have no reader: 39 of them on one instance, none
+          // ever resumed.
+          spec.kind !== "operator" &&
           replaySize > COMPACT_AT_COMPLETION_TOKENS
         ) {
-          // U39-30: the answer is written; only the housekeeping is left.
-          // Live on ax-clone a controller turn's compaction held its reply off
-          // the page for 27 seconds, and ruling 371 measured one at 131.
-          const answered = getState().answered.get(spec.runId);
-          getState().answered.delete(spec.runId);
-          if (answered && exit.outcome === "finished") {
+          const compactSession = async (onPhase: CompactCallbacks["onPhase"]): Promise<void> => {
+            const compactionsBefore = stats?.compactionEvents.length ?? 0;
+            let outcome: CompactOutcome;
             try {
-              answered(spec.runId);
-            } catch (error) {
-              logger.error("run answered callback failed", {
+              outcome = await compact.call(adapter, spec, sessionId, {
+                onLine: (line) => sink.line(line),
+                onPhase,
+              });
+            } finally {
+              revokeRunMcpGateway(spec.runId);
+            }
+            logger.info("run compaction at completion", {
+              runId: spec.runId,
+              backend: exit.effectiveBackend,
+              replaySize,
+              ...outcome,
+            });
+            // The epilogue's process carries its own marker (the settle sweep
+            // must not reap it mid-compaction); it is reaped here, once done.
+            void reapRunProcesses({ runIds: [compactionRunId(spec.runId)] }).catch((error) => {
+              logger.warn("compaction epilogue reap failed", {
                 runId: spec.runId,
                 err: toError(error),
               });
-            }
-          }
-          const compactionsBefore = stats?.compactionEvents.length ?? 0;
-          let outcome: CompactOutcome;
-          try {
-            outcome = await adapter.compact(spec, exit.sessionId, {
-              onLine: (line) => sink.line(line),
-              onPhase: (phase, step) => writePhase(phase, step),
             });
-          } finally {
-            revokeRunMcpGateway(spec.runId);
-          }
-          logger.info("run compaction at completion", {
-            runId: spec.runId,
-            backend: exit.effectiveBackend,
-            replaySize,
-            ...outcome,
-          });
-          // The epilogue's process carries its own marker (the settle sweep
-          // must not reap it mid-compaction); it is reaped here, once done.
-          void reapRunProcesses({ runIds: [compactionRunId(spec.runId)] }).catch((error) => {
-            logger.warn("compaction epilogue reap failed", {
-              runId: spec.runId,
-              err: toError(error),
-            });
-          });
-          if (exit.effectiveBackend === "codex") {
-            // The rollout is the truth on Codex, whatever the app-server said:
-            // its reply carries no sizes, and a compaction it did not announce
-            // in time (live, 2026-09-21) is still on disk. The rollout's
-            // newest compaction, when there is a new one, is this one.
-            stats = rolloutStats();
-            const event = stats?.compactionEvents.at(-1) ?? null;
-            if (stats && stats.compactionEvents.length > compactionsBefore && event) {
-              const occurredAt = new Date().toISOString();
-              // Ruling 414: the CLI writes this compaction's own size line
-              // between its two spellings, so the rollout has measured it.
-              // Ruling 403: when it has not (a marker with nothing after it),
-              // the figure is unknown rather than zero. Say so.
-              const post =
-                event.postTokens === null
-                  ? "a summary"
-                  : `${wholeThousands(event.postTokens)} tokens`;
-              sink.line({
-                raw: JSON.stringify({ type: "compacted", source: "viberr", trigger: "completion", ...event }),
-                display: {
-                  t: occurredAt.slice(11, 19),
-                  ev: "meta",
-                  tag: "run·compacted·completion",
-                  text: `context compacted at the end of the run · ${wholeThousands(event.preTokens)} → ${post}`,
-                },
-                facts: { compaction: { trigger: "completion", ...event } },
-                occurredAt,
-              });
-              sink.foldRolloutStats(stats);
+            if (exit.effectiveBackend === "codex") {
+              // The rollout is the truth on Codex, whatever the app-server said:
+              // its reply carries no sizes, and a compaction it did not announce
+              // in time (live, 2026-09-21) is still on disk. The rollout's
+              // newest compaction, when there is a new one, is this one.
+              stats = rolloutStats();
+              const event = stats?.compactionEvents.at(-1) ?? null;
+              if (stats && stats.compactionEvents.length > compactionsBefore && event) {
+                const occurredAt = new Date().toISOString();
+                // Ruling 414: the CLI writes this compaction's own size line
+                // between its two spellings, so the rollout has measured it.
+                // Ruling 403: when it has not (a marker with nothing after it),
+                // the figure is unknown rather than zero. Say so.
+                const post =
+                  event.postTokens === null
+                    ? "a summary"
+                    : `${wholeThousands(event.postTokens)} tokens`;
+                sink.line({
+                  raw: JSON.stringify({ type: "compacted", source: "viberr", trigger: "completion", ...event }),
+                  display: {
+                    t: occurredAt.slice(11, 19),
+                    ev: "meta",
+                    tag: "run·compacted·completion",
+                    text: `context compacted at the end of the run · ${wholeThousands(event.preTokens)} → ${post}`,
+                  },
+                  facts: { compaction: { trigger: "completion", ...event } },
+                  occurredAt,
+                });
+                sink.foldRolloutStats(stats);
+              }
             }
+          };
+          if (spec.kind === "controller") {
+            // U39-30: the answer is written; only the housekeeping is left.
+            // Live on ax-clone a controller turn's compaction held its reply off
+            // the page for 27 seconds, and ruling 371 measured one at 131. The
+            // turn's settle still waits for the compaction: the conversation's
+            // next turn resumes this same session, so nothing would start sooner.
+            const answered = getState().answered.get(spec.runId);
+            getState().answered.delete(spec.runId);
+            if (answered && exit.outcome === "finished") {
+              try {
+                answered(spec.runId);
+              } catch (error) {
+                logger.error("run answered callback failed", {
+                  runId: spec.runId,
+                  err: toError(error),
+                });
+              }
+            }
+            await compactSession((phase, step) => writePhase(phase, step));
+          } else {
+            // Ruling 701: a specialist's run ends when its answer is written.
+            // Its report, its files and the operator's next turn do not wait
+            // for a summary of a session that only a later comment or answer
+            // to this agent would resume (live, 136 s a run on average). No
+            // phase is written: the row is terminal by then.
+            housekeeping = () => compactSession(() => {});
           }
         }
-        revokeRunMcpGateway(spec.runId);
+        if (!housekeeping) revokeRunMcpGateway(spec.runId);
         sink.finalize(exit);
       } catch (error) {
         revokeRunMcpGateway(spec.runId);
+        housekeeping = null;
         logger.error("run finalize persist failed", {
           runId: spec.runId,
           err: toError(error),
@@ -2551,13 +2631,34 @@ function launch(
       state.handles.delete(spec.runId);
       // U39-30: an answered callback the settle never needed goes with it.
       state.answered.delete(spec.runId);
-      // Ruling 180: the settled run's skill plugin goes with it — the CLI
-      // that read it has exited, and nothing else names the path.
-      removeSkillPlugin(spec.skillPlugin);
-      // Ruling 636: and its temporary directory, after the completion
-      // compaction above (which wrote it too) and once the settle sweep has
-      // had its grace, so no process of the run is still writing it.
-      if (spec.tmpDir) scheduleRunTmpRemoval(spec.tmpDir, spec.agent ?? null, spec.runId);
+      const tidy = () => {
+        // Ruling 180: the settled run's skill plugin goes with it — the CLI
+        // that read it has exited, and nothing else names the path.
+        removeSkillPlugin(spec.skillPlugin);
+        // Ruling 636: and its temporary directory, after the completion
+        // compaction (which wrote it too) and once the settle sweep has
+        // had its grace, so no process of the run is still writing it.
+        if (spec.tmpDir) scheduleRunTmpRemoval(spec.tmpDir, spec.agent ?? null, spec.runId);
+      };
+      // Ruling 701: from here until the compaction is over, a run that resumes
+      // this session is held ({@link startRun}). Registered before the slot is
+      // handed on and before the completion fires, because either may start it.
+      let release: (() => void) | null = null;
+      if (housekeeping && exit.sessionId) {
+        const heldSession = exit.sessionId;
+        let open: () => void = () => {};
+        const done = new Promise<void>((resolve) => {
+          open = resolve;
+        });
+        const entry: SettlingSession = { runId: spec.runId, done };
+        state.settling.set(heldSession, entry);
+        release = () => {
+          if (state.settling.get(heldSession) === entry) state.settling.delete(heldSession);
+          open();
+        };
+      } else {
+        tidy();
+      }
       // This run's slot is now free — promote the oldest queued run behind the
       // concurrency cap. Before the completion callback, so a chain of queued
       // runs keeps flowing even if the callback throws.
@@ -2587,6 +2688,21 @@ function launch(
           // C4: the completion effects are lost — stamp the task so it isn't
           // stuck on "agent working" with no live run until the next restart.
           if (finished) void noteCompletionEffectsLost(db, finished);
+        }
+      }
+      if (housekeeping) {
+        try {
+          await housekeeping();
+        } catch (error) {
+          // Never a failure of the run (ruling 376): its record closed above.
+          logger.error("run compaction at completion failed", {
+            runId: spec.runId,
+            err: toError(error),
+          });
+        } finally {
+          revokeRunMcpGateway(spec.runId);
+          tidy();
+          release?.();
         }
       }
   }

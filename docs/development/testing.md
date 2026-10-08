@@ -392,6 +392,12 @@ Every test under `app/shared/docs/`, and the ones elsewhere that read a doc or a
   notification that settles it, and the ways it ends without one (a refusal on any step,
   a dead server, the timeout, a spawn that throws, and, ruling 599, a compaction turn the
   CLI reports failed).
+- `app/server/runtimes/run-service.server.test.ts` (ruling 701) holds a completion
+  compaction open (the hook `queueFakeCompaction` takes returns a promise the test
+  settles) and pins what is true meanwhile: the run's completion has fired on a finished
+  row with no compaction asked for, a run that resumes that session is `queued` with its
+  step and starts when the compaction answers or throws, another session takes the slot,
+  and an operator's session is not compacted at all.
 - `app/routes/project.task.run-agent.server.test.ts` (ruling 375) POSTs the Run-an-agent
   intent with a prompt through the real route and pins the order that keeps a prompted
   dispatch to ONE run: the person's `@<agent>` comment predates the run, so ruling 203's
