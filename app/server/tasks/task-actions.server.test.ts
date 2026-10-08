@@ -4828,6 +4828,7 @@ describe("pass 35: operator and task actions", () => {
         reactDepth: 0,
         transitionDepth: 0,
       };
+      const live = operatorSeam();
       await transitionStage(
         store.db,
         { projectSlug: store.slug, taskKey: "VIB-1", toStageId: "impl" },
@@ -4836,7 +4837,7 @@ describe("pass 35: operator and task actions", () => {
           dataRoot: store.dataRoot,
           operatorAuthorized: true,
           operatorRun: liveRun,
-          deps: { runOperator: operatorSeam() },
+          deps: { runOperator: live },
         },
       );
       expect(file(store).frontmatter.stage).toBe("impl");
@@ -4855,6 +4856,9 @@ describe("pass 35: operator and task actions", () => {
       await waitFor(() => direct.mock.calls.length > 0, "the transition trigger", 5_000);
       expect(direct).toHaveBeenCalledTimes(1);
       expect(direct.mock.calls[0]![1].trigger).toBe("transition");
+      // The live move's re-trigger, had there been one, started first and would
+      // have landed before this one. CANARY: queue the turn beside the stamp.
+      expect(live).not.toHaveBeenCalled();
     });
 
     it("ruling 357: a move after the drive's own delivery stamps `actedAfterDelivery`; a move without one stamps nothing", async () => {

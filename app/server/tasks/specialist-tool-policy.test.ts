@@ -216,11 +216,15 @@ describe("resolveSpecialistDisallowedTools", () => {
       grant("create-task-branch", "direct"),
       grant("commit-push-branch", "direct"),
       grant("open-review-pr", "direct"),
+      // A profile stored before F11 still carries the retired rule's grant: it
+      // denies nothing.
+      grant("edit-other-task-branch", "off"),
     ];
     // F11: deny wins under bypassPermissions, so a `Bash(git checkout:*)` on any
     // rule this developer is withheld from (the retired `edit-other-task-branch`
     // rule had one) blocks its own `git checkout -B <task-branch>`. CANARY: add
-    // it to the merge rule and the list grows.
+    // it to the merge rule, or re-add a rule for the retired id, and the list
+    // grows.
     expect(resolveSpecialistDisallowedTools(grants)).toEqual([
       "Bash(gh pr merge:*)",
     ]);

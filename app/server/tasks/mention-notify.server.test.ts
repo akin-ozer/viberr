@@ -53,14 +53,14 @@ describe("notifyMentionedUsers", () => {
     const store = setupTestStore(ctx);
     const selinLocal = store.users.selin.email.split("@")[0]!; // e.g. selin7
     const matched = notifyMentionedUsers(store.db, {
-      text: `@ARDA the review is clean; @${selinLocal} please take acceptance.`,
+      text: `@${selinLocal} please take acceptance; @ARDA the review is clean.`,
       projectSlug: store.slug,
       taskKey: "VIB-1",
       from: OPERATOR_FROM,
     });
-    expect(new Set(matched)).toEqual(
-      new Set([store.users.arda.id, store.users.selin.id]),
-    );
+    // Users-table order, not mention order: the order `stampNotifiedRecipients`
+    // writes into the event (ruling 382).
+    expect(matched).toEqual([store.users.arda.id, store.users.selin.id]);
     const rows = notificationRows(store);
     expect(rows).toHaveLength(2);
     for (const row of rows) {

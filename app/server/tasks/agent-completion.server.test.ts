@@ -1901,6 +1901,41 @@ describe("applyAgentCompletionEffects (the shared effects)", () => {
     expect(note!.text).toContain("Clear what the refusal names");
   });
 
+  it("ruling 362 over 258: an approve at the cap on an ACCEPTABLE task resets the depth, and the operator acts now", async () => {
+    deployOperator();
+    writeReviewTask({
+      validation: "healthy",
+      pr: { number: 7, state: "review", title: "[VIB-1] Task VIB-1" },
+    });
+    const summary = "Approved. Everything in the done signal is proven.";
+    const runId = await finishedRunWith(summary);
+    stageOutcome(store.db, `oc-${runId}`, { summary, verdict: "approve" });
+    const operatorRuns = () =>
+      // SAFETY: COUNT(*) over this store's own table is always an integer.
+      (
+        store.db
+          .prepare(
+            `SELECT COUNT(*) AS n FROM agent_runs WHERE project_slug = ? AND kind = 'operator'`,
+          )
+          .get(store.slug) as { n: number }
+      ).n;
+    const before = operatorRuns();
+    await complete(runId, {
+      outcomeKey: `oc-${runId}`,
+      operatorRun: { backend: "claude", autonomy: "full", reactDepth: 99 },
+    });
+
+    // The premise: the approve made the task acceptable.
+    expect(
+      acceptanceRefusalFor({ projectSlug: store.slug, taskKey: "VIB-1" }, { dataRoot: store.dataRoot }),
+    ).toBeNull();
+    expect(taskFile().parsed.packet).toBeNull();
+    // CANARY: gate the ruling 362 reset on the task not being acceptable, and
+    // the chain parks at 258's skip arm with no operator turn.
+    await pollUntil(() => operatorRuns() > before);
+    expect(operatorRuns()).toBe(before + 1);
+  });
+
   it("ruling 258: no stuck-loop packet when the task is acceptable — the boundary IS the boundary", async () => {
     // An operator that CAN open packets, so the absence below is a decision
     // rather than a missing grant.
