@@ -1,10 +1,6 @@
 import { afterEach, describe, expect, it } from "vitest";
 import { createTestDbContext } from "../../../test-support/test-db";
-import {
-  DEFAULT_DISK_CRITICAL_FREE_MB,
-  DEFAULT_DISK_LOW_FREE_MB,
-  resetEnvCacheForTests,
-} from "~/server/config/env.server";
+import { resetEnvCacheForTests } from "~/server/config/env.server";
 import {
   classifyFreeBytes,
   dfReading,
@@ -21,8 +17,8 @@ import {
  */
 
 const MB = 1024 * 1024;
-const DEFAULT_DISK_LOW_FREE_BYTES = DEFAULT_DISK_LOW_FREE_MB * MB;
-const DEFAULT_DISK_CRITICAL_FREE_BYTES = DEFAULT_DISK_CRITICAL_FREE_MB * MB;
+const DEFAULT_DISK_LOW_FREE_BYTES = 2048 * MB;
+const DEFAULT_DISK_CRITICAL_FREE_BYTES = 512 * MB;
 
 /** The thresholds are read through `getEnv()`, which parses once per process:
  *  a case that sets them drops the cached parse (ruling 458(c)). */

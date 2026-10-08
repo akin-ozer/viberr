@@ -8,10 +8,7 @@ import {
   writeTask,
   type TestStore,
 } from "../../../test-support/test-store";
-import {
-  DEFAULT_MAINTENANCE_INTERVAL_SECONDS,
-  resetEnvCacheForTests,
-} from "~/server/config/env.server";
+import { resetEnvCacheForTests } from "~/server/config/env.server";
 import { taskDir } from "~/server/files/file-store-root.server";
 import { COMPACTING_AFTER_RUN_STEP, RUN_PHASE } from "~/server/runtimes/adapter.server";
 import { COMPLETION_COMPACT_DEADLINE_MS } from "~/server/runtimes/context-policy.server";
@@ -235,7 +232,7 @@ describe("runMaintenancePass (gaps 15 + 20)", () => {
     const state = maintenanceState();
     expect(state.lastPassAt).not.toBeNull();
     expect(state.lastPassReason).toBe("interval");
-    expect(state.intervalMs).toBe(DEFAULT_MAINTENANCE_INTERVAL_SECONDS * 1000);
+    expect(state.intervalMs).toBe(6 * 60 * 60 * 1000);
   });
 });
 

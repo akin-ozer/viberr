@@ -2,11 +2,7 @@ import { existsSync, mkdirSync, utimesSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { createTestDbContext } from "../../../test-support/test-db";
-import {
-  DEFAULT_SESSION_HOME_RETENTION_DAYS,
-  DEFAULT_TRANSCRIPT_RETENTION_DAYS,
-  resetEnvCacheForTests,
-} from "~/server/config/env.server";
+import { resetEnvCacheForTests } from "~/server/config/env.server";
 import { ensureDataRootDirs } from "~/server/files/file-store-root.server";
 import { pruneRuntimeTranscripts } from "./transcript-retention.server";
 
@@ -62,7 +58,7 @@ describe("pruneRuntimeTranscripts (gap 20)", () => {
     const old = writeAged(
       path.join(root, "runtimes", "claude", "run_old.jsonl"),
       '{"a":1}\n'.repeat(50),
-      DEFAULT_TRANSCRIPT_RETENTION_DAYS + 5,
+      30 + 5,
     );
     const recent = writeAged(
       path.join(root, "runtimes", "codex", "run_recent.jsonl"),
@@ -89,7 +85,7 @@ describe("pruneRuntimeTranscripts (gap 20)", () => {
         "sess-old.jsonl",
       ),
       "{}\n",
-      DEFAULT_SESSION_HOME_RETENTION_DAYS + 1,
+      30 + 1,
     );
     const codexRollout = writeAged(
       path.join(
@@ -101,7 +97,7 @@ describe("pruneRuntimeTranscripts (gap 20)", () => {
         "rollout-2026-01-02T03-04-05-abc.jsonl",
       ),
       "{}\n",
-      DEFAULT_SESSION_HOME_RETENTION_DAYS + 1,
+      30 + 1,
     );
     const fresh = writeAged(
       path.join(
@@ -135,7 +131,7 @@ describe("pruneRuntimeTranscripts (gap 20)", () => {
     const stray = writeAged(
       path.join(root, "runtimes", "users", "..evil", "claude-home", "x.jsonl"),
       "{}\n",
-      DEFAULT_SESSION_HOME_RETENTION_DAYS + 400,
+      30 + 400,
     );
     expect(pruneRuntimeTranscripts({ dataRoot: root }).sessions).toBe(0);
     expect(existsSync(stray)).toBe(true);
@@ -197,7 +193,7 @@ describe("pruneRuntimeTranscripts (gap 20)", () => {
     writeAged(
       path.join(root, "runtimes", "claude", "old.jsonl"),
       "{}\n",
-      DEFAULT_TRANSCRIPT_RETENTION_DAYS + 1,
+      30 + 1,
     );
     expect(pruneRuntimeTranscripts({ dataRoot: root }).transcripts).toBe(1);
     expect(pruneRuntimeTranscripts({ dataRoot: root }).transcripts).toBe(0);

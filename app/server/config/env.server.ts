@@ -27,15 +27,15 @@ const MAX_PERIOD_SECONDS = 24 * HOUR_S;
  *  pass is cheap and rarely finds anything; the point is that a 90-day uptime
  *  gets ~360 passes instead of zero. `VIBERR_MAINTENANCE_INTERVAL_SECONDS`
  *  overrides it. */
-export const DEFAULT_MAINTENANCE_INTERVAL_SECONDS = 6 * HOUR_S;
+const DEFAULT_MAINTENANCE_INTERVAL_SECONDS = 6 * HOUR_S;
 /** Free-space check cadence. Five minutes: disks fill over hours, and this is
  *  the signal that must arrive BEFORE the volume is full, not after. */
 const DEFAULT_DISK_CHECK_INTERVAL_SECONDS = 5 * MINUTE_S;
 /** Free space on the data root, in MB, below which the deployment is degraded
  *  but still working (why absolute sizes: `disk-space.server.ts`). */
-export const DEFAULT_DISK_LOW_FREE_MB = 2048;
+const DEFAULT_DISK_LOW_FREE_MB = 2048;
 /** Free space, in MB, below which a single run can plausibly fill the volume. */
-export const DEFAULT_DISK_CRITICAL_FREE_MB = 512;
+const DEFAULT_DISK_CRITICAL_FREE_MB = 512;
 
 /** Turn cap for a Claude run — a RUNAWAY guard, not a work budget. The old
  *  hard-coded 50 cut off legitimate dev runs mid-delivery (observed live: a
@@ -50,9 +50,9 @@ const DEFAULT_RUN_IDLE_TIMEOUT_MS = 15 * MINUTE_MS;
 const DEFAULT_GIT_CLONE_TIMEOUT_MS = 15 * MINUTE_MS;
 /** Raw run transcripts: aligned with RUN_LOG_RETENTION_DAYS so the file and its
  *  projection disappear together instead of contradicting each other. */
-export const DEFAULT_TRANSCRIPT_RETENTION_DAYS = 30;
+const DEFAULT_TRANSCRIPT_RETENTION_DAYS = 30;
 /** Provider session homes: the window the providers themselves keep. */
-export const DEFAULT_SESSION_HOME_RETENTION_DAYS = 30;
+const DEFAULT_SESSION_HOME_RETENTION_DAYS = 30;
 
 /**
  * Ruling 458(c): a knob that must be a positive number. `Number()` coercion,
