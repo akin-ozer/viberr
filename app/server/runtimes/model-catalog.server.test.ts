@@ -590,7 +590,7 @@ describe("R20-3 (F20-4): the catalog stamps provider-refused models unavailable"
     ).toBeUndefined();
   });
 
-  it("stamps the LIVE-enhanced claude catalog too", async () => {
+  it("stamps the curated Claude catalog served to a viewer with no credential", async () => {
     const db = dbCtx.makeDb();
     noteModelAvailabilityFromFailure(db, {
       runId: "run_1",
