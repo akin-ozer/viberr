@@ -30,6 +30,7 @@ describe("the closed controller dock's static import closure (ruling 457, FL-1)"
       "features/controller/controller-page.tsx",
       "features/controller/controller-dock-panel.tsx",
       "features/runtime/runs-panels.tsx",
+      "features/runtime/runs-panels-derive.ts",
       "features/runtime/console-blocks.tsx",
       "features/runtime/use-run-log-stream.ts",
       "features/runtime/run-log-store.ts",

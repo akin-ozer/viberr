@@ -5,7 +5,7 @@
  * `server/interpretation/` and forbids duplicating interpretation logic in UI
  * components — yet two live "older than an hour reads as stale" rules had
  * grown their own private 1-hour constants, one of them inside a React
- * component (`org-settings/resources-panel.tsx`).
+ * component (the MCP health dot, now in `org-settings/resource-rows.tsx`).
  *
  * The values live HERE rather than in `freshness-policy.server.ts` for one
  * hard reason: the MCP-health rule is evaluated in a client component, and a

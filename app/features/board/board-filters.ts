@@ -111,10 +111,15 @@ export function matchesBoardFilter(
       task.urgent ||
       // P14-WL-03: a PR closed without merging is a DIVERGENCE the review queue
       // files under "Decision required" — the work was declined and the task
-      // needs a rework/reopen/archive call from a human. It carries none of the
-      // signals above (readiness stays `in_review`, validation stays healthy,
-      // urgent is off), so the board's own attention filter hid the single class
-      // of task that most needs a person.
+      // needs a rework/reopen/archive call from a human. Until the operator's
+      // recovery packet opens (the packet arm above), it carries none of the
+      // signals above: nothing on the closure path writes readiness or urgent
+      // (the reconciler records the PR in the `pr`/`github` cache, withdraws
+      // the moot transition and acceptance recommendations and notes the
+      // divergence on the timeline), so a delivered task in review keeps
+      // `ready`, an approved one keeps a healthy validation, and urgent stays
+      // off. The board's own attention filter hid the single class of task
+      // that most needs a person.
       task.pr?.state === "closed"
     );
   }

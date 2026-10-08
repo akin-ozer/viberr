@@ -805,7 +805,7 @@ export async function resolvePacket(
         }
       }
       // Backend-failure recovery (D4): the run restarts below on the option's
-      // target backend; startSpecialistRun/startReviewerRun set the engagement's
+      // target backend; startAgentRun sets the engagement's
       // `pinnedBackend` (F27-B1) so the switch STICKS — every later prompt on this
       // task follows the pin over the live profile until another retry re-pins it.
       const targetLabel = BACKEND_LABEL[option.backend ?? "claude"];

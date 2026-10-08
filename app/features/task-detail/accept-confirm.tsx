@@ -1,14 +1,30 @@
-import { describeRevisionDrift } from "~/shared/revision-drift";
 import type { PrRef, Validation } from "~/schemas/task-file.schema";
 import type { AcceptanceDisclosure } from "~/shared/acceptance-disclosure";
 import type { PrOverlap } from "~/shared/pr-overlaps";
 import type { PrChecksRender } from "~/shared/mapping/task.server";
-import { checksPill, gatesPill, prStatePill } from "~/features/github/github-pills";
 import type { GatesView } from "~/shared/project-gates";
 import { Icon } from "~/ui/icon";
-import { Pill, ValidationPill } from "~/ui/pill";
 import { useDialog } from "~/ui/use-dialog";
-import { GateResults } from "./gate-results";
+import {
+  ceremonyFacts,
+  ceremonyLabel,
+  confirmLabel,
+  footHint,
+  headingFor,
+} from "./accept-confirm-derive";
+import {
+  BranchRow,
+  CeremonyFoot,
+  CeremonyVerdictRow,
+  CollidesRow,
+  GatesRow,
+  MergeHeadRow,
+  MergesRow,
+  OpenDecisionRow,
+  RefusalRow,
+  RevisionRow,
+  SkipsRow,
+} from "./accept-confirm-regions";
 
 /**
  * R15-1/F15-10 — the ONE acceptance ceremony.
@@ -98,144 +114,18 @@ export interface AcceptConfirmTask {
   prChecks: PrChecksRender | null;
 }
 
-function headingFor(mode: AcceptCeremonyMode, terminalName: string): string {
-  switch (mode) {
-    case "force":
-      return "Force-accept this completion?";
-    // The task is already accepted here (merge pending, R16-6) — what is left,
-    // and what this button does, is the merge itself.
-    case "complete-merge":
-      return "Run the merge now?";
-    case "apply-recommendation":
-      return "Apply this recommendation?";
-    // F19-37: the human asked for a stage move; the heading has to name what a
-    // move to the LAST stage actually is, in the project's own stage name.
-    case "stage-move":
-      return `Moving to ${terminalName} accepts this completion`;
-    default:
-      return "Accept this completion?";
-  }
-}
-
-/** Row key for the clicked affordance — only the indirect paths have one, so
- *  the direct modes answer with nothing and the row does not render. */
-function subjectKeyFor(mode: AcceptCeremonyMode): string | undefined {
-  switch (mode) {
-    case "apply-recommendation":
-      return "Applying";
-    // Ruling 164 (pass 35, F35-14): force-accepting is an indirect path now
-    // too. The task page's own button passes no label, so the row still does
-    // not render for it; a `force_accept` packet option passes its title.
-    case "force":
-      return "Decision";
-    case "packet":
-      return "Decision";
-    case "stage-move":
-      return "Moving";
-    default:
-      return undefined;
-  }
-}
-
-/** The Blocked row's id, so the disabled confirm can be described by it. */
-const BLOCKED_ROW_ID = "accept-confirm-blocked";
-
-/** Paths named per colliding PR before the rest are counted. */
-const COLLIDES_PATHS_SHOWN = 3;
+/** Ruling 700(e): the two list defaults, each the same array on every render.
+ *  The rows that read them live in accept-confirm-regions.tsx now; none of
+ *  them is memoised, but from here a `[]` built per render would read as one
+ *  that defeats a memo (react-doctor's rerender-memo-with-default-value). */
+const NO_BLOCKED_GATES: readonly string[] = [];
+const NO_MERGE_COLLISIONS: readonly PrOverlap[] = [];
 
 /**
- * Ruling 475 (F40-55 (c)): "Merging this will likely put WEB-2's PR #3 in
- * conflict on `package.json`." Live on akinozer-com the owner accepted WEB-4
- * while WEB-2's open PR changed the same file; Viberr knew, the dialog was
- * silent, and WEB-2's acceptance was refused a minute later. The row names
- * each PR and the shared paths, and what Viberr does after the merge.
+ * Ruling 700(e): the ceremony's props, declared apart from the destructuring
+ * that gives them their defaults, so the component body is the ceremony.
  */
-function CollidesRow({ collisions }: { collisions: readonly PrOverlap[] }) {
-  const partial = collisions.some((c) => c.partial);
-  const one = collisions.length === 1;
-  return (
-    <div className="obs warn" data-merge-collisions>
-      <span className="k">Collides</span>
-      <span>
-        {one
-          ? "Merging this will likely put "
-          : `Merging this will likely put ${collisions.length} open pull requests in conflict: `}
-        {collisions.map((c, i) => {
-          const shown = c.paths.slice(0, COLLIDES_PATHS_SHOWN);
-          const more = c.paths.length - shown.length;
-          return (
-            <span key={c.taskKey}>
-              {i > 0 ? "; " : ""}
-              {c.taskKey}'s PR #{c.prNumber}
-              {one ? " in conflict" : ""} on{" "}
-              {shown.map((path, j) => (
-                <span key={path}>
-                  {j > 0 ? ", " : ""}
-                  <span className="mono">{path}</span>
-                </span>
-              ))}
-              {more > 0 ? ` and ${more === 1 ? "1 more file" : `${more} more files`}` : ""}
-            </span>
-          );
-        })}
-        . Viberr re-checks {one ? "it" : "them"} right after the merge, and the operator hands a
-        conflict to the delivering agent.
-        {partial ? " A changed-file list was capped, so the overlap may be larger." : ""}
-      </span>
-    </div>
-  );
-}
-
-export function AcceptConfirm({
-  task,
-  workRevisionSha,
-  noChanges = false,
-  noPullRequest = false,
-  filesDeliveredAt = null,
-  defaultBranch,
-  atBoundary = true,
-  ceremony,
-  /** R19-B: when a HUMAN's GitHub approval cleared the verdict gate, the
-   *  sentence naming them and the commit they approved — rendered on the verdict
-   *  row so the human accepting knows whose judgement they stand on (ruling 19:
-   *  a chip is evidence, never a pseudo-check). Null when an agent verdict
-   *  cleared the gate, or nothing has. */
-  verdictSatisfiedBy = null,
-  /** The refusal a force-accept bypasses (null for a clean accept). For the
-   *  packet mode the page passes `blockedReasonViaPacket` here — the refusal a
-   *  packet resolution would hit, never the open packet it clears (F19-7). */
-  blockedReason,
-  /**
-   * Ruling 393 (F39-20): EVERY gate a force-accept would bypass, in gate order.
-   *
-   * U35-3 made the audit row and the forced completion event name all of them
-   * so the record could not under-report an override; its docstring says "the
-   * timeline, the audit log and the confirm dialog list the same bypasses", and
-   * the dialog was the one that never got the list. Live on ax-clone AX-12 a
-   * human confirmed one bypassed gate and the audit recorded two. Empty (or
-   * absent, for the packet mode, which has its own single refusal) falls back
-   * to `blockedReason` alone.
-   */
-  blockedGates = [],
-  blockedReasonAuthoritative = true,
-  /** F32-11 (pass 32): the OPEN decision packet this acceptance closes (its
-   *  title), or null. Accepting a task with an open packet used to clear
-   *  it silently — no row here, no timeline note, no audit — so the human
-   *  never learned a question died with the acceptance. */
-  openPacketTitle = null,
-  /** Ruling 471: the title of the option this acceptance ANSWERS that
-   *  decision with, or null when it withdraws it. The loader decides
-   *  (`acceptAnswersWith` / `forceAnswersWith` on the packet render, from the
-   *  predicate the server's write uses); this component only says which. */
-  answersWith = null,
-  baseBehindBy = null,
-  mergeCollisions = [],
-  gates = null,
-  onRefreshFirst,
-  busy,
-  onCancel,
-  onConfirm,
-}: {
+interface AcceptConfirmProps {
   task: AcceptConfirmTask;
   /** Ruling 475 (F40-55 (c)): the other open pull requests that change a
    *  path this one changes, so merging it will likely put them in conflict.
@@ -304,120 +194,90 @@ export function AcceptConfirm({
    *  disclosure contract (the packet resolution, an applied recommendation)
    *  simply ignore the argument. */
   onConfirm: (disclosure: AcceptanceDisclosure) => void;
-}) {
+}
+
+export function AcceptConfirm({
+  task,
+  workRevisionSha,
+  noChanges = false,
+  noPullRequest = false,
+  filesDeliveredAt = null,
+  defaultBranch,
+  atBoundary = true,
+  ceremony,
+  /** R19-B: when a HUMAN's GitHub approval cleared the verdict gate, the
+   *  sentence naming them and the commit they approved — rendered on the verdict
+   *  row so the human accepting knows whose judgement they stand on (ruling 19:
+   *  a chip is evidence, never a pseudo-check). Null when an agent verdict
+   *  cleared the gate, or nothing has. */
+  verdictSatisfiedBy = null,
+  /** The refusal a force-accept bypasses (null for a clean accept). For the
+   *  packet mode the page passes `blockedReasonViaPacket` here — the refusal a
+   *  packet resolution would hit, never the open packet it clears (F19-7). */
+  blockedReason,
+  /**
+   * Ruling 393 (F39-20): EVERY gate a force-accept would bypass, in gate order.
+   *
+   * U35-3 made the audit row and the forced completion event name all of them
+   * so the record could not under-report an override; its docstring says "the
+   * timeline, the audit log and the confirm dialog list the same bypasses", and
+   * the dialog was the one that never got the list. Live on ax-clone AX-12 a
+   * human confirmed one bypassed gate and the audit recorded two. Empty (or
+   * absent, for the packet mode, which has its own single refusal) falls back
+   * to `blockedReason` alone.
+   */
+  blockedGates = NO_BLOCKED_GATES,
+  blockedReasonAuthoritative = true,
+  /** F32-11 (pass 32): the OPEN decision packet this acceptance closes (its
+   *  title), or null. Accepting a task with an open packet used to clear
+   *  it silently — no row here, no timeline note, no audit — so the human
+   *  never learned a question died with the acceptance. */
+  openPacketTitle = null,
+  /** Ruling 471: the title of the option this acceptance ANSWERS that
+   *  decision with, or null when it withdraws it. The loader decides
+   *  (`acceptAnswersWith` / `forceAnswersWith` on the packet render, from the
+   *  predicate the server's write uses); this component only says which. */
+  answersWith = null,
+  baseBehindBy = null,
+  mergeCollisions = NO_MERGE_COLLISIONS,
+  gates = null,
+  onRefreshFirst,
+  busy,
+  onCancel,
+  onConfirm,
+}: AcceptConfirmProps) {
   // Ruling 459: both commits leave the way Cancel does (`commit`), and the
   // callers leave the unmount to onCancel.
   const { ref: panelRef, close, commit } = useDialog(onCancel);
-  const mode = ceremony.mode;
-  const force = mode === "force";
-  // Ruling 162's interlock, and only where the quoted refusal is the one the
-  // server will re-decide (see `blockedReasonAuthoritative`).
-  const interlocked = blockedReason !== null && blockedReasonAuthoritative;
-  const mergeOnly = mode === "complete-merge";
-  const terminalName =
-    task.stages.length > 0 ? task.stages[task.stages.length - 1]!.name : "Done";
-  const subjectKey = subjectKeyFor(mode);
-  // R19-5: force-accept MAY skip the remaining stages AND the review gate — the
-  // owner ruled the skip legal and the SILENCE about it the defect. So enumerate
-  // exactly what is being jumped: every stage between where the task stands and
-  // the terminal one, by name, in order.
-  //
-  // `force && !atBoundary` — and the `force` half is not decoration. FORCE is
-  // the ONLY mode that jumps, so it is the only one that may say so: it is the
-  // one path where the server skips the gate stack outright (`acceptCompletion`
-  // runs `acceptanceRefusalReason` under `if (!input.force)`, and only
-  // `forceAcceptCompletion` ever passes `force: true`). On every OTHER mode an
-  // off-boundary task is REFUSED, not jumped — the "Blocked" row below is what
-  // actually happens — so claiming a skip would promise a power the click does
-  // not have. Two earlier rounds got this wrong in two different ways, both of
-  // them false in 100% of the cases they fired:
-  // - `mode === "stage-move" && !atBoundary`: a stage move READS like a jump and
-  //   is not one. `transitionStage` routes a manual move into the LAST stage to
-  //   `acceptCompletion` WITHOUT `force`, so `acceptanceStageBlockedReason`
-  //   refuses any off-boundary stage with a 409 and the task stays where it was
-  //   (proven by the standing server test `acceptance-graph.server.test.ts` →
-  //   "refuses a manual board move from Triage straight to Done"). `atBoundary`
-  //   is literally that same predicate (`acceptanceStanding` sets it
-  //   from `acceptanceStageBlockedReason === null`), so the disjunct rendered
-  //   "goes straight to Done" directly beside the "Blocked" row quoting the
-  //   refusal that contradicts it.
-  // - a bare `!atBoundary`: `complete-merge` is the sharpest case, because
-  //   `acceptanceStanding` returns its `denied` shape (`atBoundary:
-  //   false`) for a task ALREADY at the terminal stage — which every
-  //   merge-pending task is (accepted, merge pending, R16-6). So it announced
-  //   "goes straight to Done" about a task already at Done, on the dialog that
-  //   authorizes the irreversible merge. `packet` / `apply-recommendation` carry
-  //   no override either — both run the same refusal helper unforced.
-  const stageIndex = task.stages.findIndex((s) => s.id === task.stage);
-  const skipsStages = force && !atBoundary;
-  // stageIndex < 0 = the task sits on a stage this workflow no longer has; the
-  // gate is still skipped, but naming stages it never passes would be a guess.
-  const skippedStages =
-    skipsStages && stageIndex >= 0
-      ? task.stages
-          .slice(stageIndex + 1, Math.max(task.stages.length - 1, 0))
-          .map((s) => s.name)
-      : [];
+  // What the dialog reads off these props (accept-confirm-derive.ts): the
+  // writer asking, the stages a force jumps, the PR's state, the branch the
+  // click refreshes, and the disclosure the confirmed click echoes (ruling 88).
+  const facts = ceremonyFacts({
+    task,
+    ceremony,
+    atBoundary,
+    blockedReason,
+    blockedReasonAuthoritative,
+    workRevisionSha,
+    baseBehindBy,
+    onRefreshFirst,
+  });
+  const { force, terminalName, subjectKey, drift } = facts;
   const pr = task.pr;
-  // Ruling 132: the one canonical sentence for what moved on the PR head.
-  const drift = describeRevisionDrift(pr?.revisionDrift);
-  // F19-14: the raw internal token ("accepted", "review") leaked into this
-  // dialog while every other surface renders the canonical label through the one
-  // PR-state map (ruling 12). "PR #12 accepted" and "PR #12 merge pending" are
-  // the same fact under two vocabularies, on the screen that decides the merge.
-  const prPill = pr ? prStatePill(pr.state) : null;
-  // F21-23 (live, UC-15): a human merged PR #172 on GitHub, the poller adopted
-  // `state: merged`, the reviewer verdict still ran and the ceremony correctly
-  // showed "PR #172 · merged into main" — while the button underneath still read
-  // "Apply → Done & merge" and the footer "Merging is one-way". The dialog KNEW
-  // the merge had already happened and promised to perform it anyway. Nothing
-  // merges on this path. Every disclosure row stays; only the two lines that
-  // predict a merge change.
-  //
-  // F21-23 residual: relabelling the button was half a fix — `completeTaskMerge`
-  // still threw a 409 ("This PR is already merged.") at the click "Finish
-  // accepting VIB-x" invites, so the dialog promised what the server refused.
-  // That door now settles an already-merged PR as a no-op success, and the
-  // footer here says what the click really does: nothing merges, and nothing is
-  // written either — the acceptance that stamped this PR "accepted" put the
-  // completion on the timeline already (applyAcceptanceWrite), and the only
-  // ceremony that reaches `complete-merge` opens from that state.
-  const alreadyMerged = pr?.state === "merged";
-  // The exact shape `refreshBranchForAcceptance` acts on: an open (or
-  // accepted-pending) pull request on a branch. A no-change completion and a
-  // merged PR reach the ceremony with nothing to refresh.
-  const refreshedPr = pr !== null && (pr.state === "review" || pr.state === "accepted");
-  // Ruling 88 (F21-2): exactly what the three rows below state — the PR behind
-  // the "Merges" pill, the sha on the "Revision" row, the value the "Verdict"
-  // pill renders. Built here, from the rendered props, so the acknowledgment
-  // the server verifies is the disclosure the human actually read.
-  const disclosure: AcceptanceDisclosure = {
-    pr: pr?.state ?? "none",
-    revision: workRevisionSha ?? "none",
-    verdict: task.validation,
-  };
   return (
     <dialog
       className="modal-card release-card"
       role="alertdialog"
-      aria-label={
-        (force
-          ? "Force-accept "
-          : mergeOnly
-            ? "Complete the merge for "
-            : mode === "stage-move"
-              ? `Accept by moving to ${terminalName}: `
-              : "Accept ") + task.key
-      }
+      aria-label={ceremonyLabel(facts, task.key)}
       data-screen-label="Accept completion dialog"
       ref={panelRef}
     >
       <div className="modal-head">
         <span className={"agent-glyph lg" + (force ? " warn" : "")}>
-          <Icon name={force ? "shield" : mergeOnly ? "github" : "check"} />
+          <Icon name={facts.glyph} />
         </span>
         <div className="mh-main">
-          <h2>{headingFor(mode, terminalName)}</h2>
+          <h2>{headingFor(facts.mode, terminalName)}</h2>
           <div className="mh-sub">
             <span className="key">{task.key}</span> · {task.title}
           </div>
@@ -439,89 +299,15 @@ export function AcceptConfirm({
               <span>{ceremony.label}</span>
             </div>
           )}
-          <div className="obs">
-            <span className="k">Merges</span>
-            <span>
-              {pr && prPill ? (
-                <>
-                  <Pill kind={prPill.kind} sm>
-                    PR #{pr.number} · {prPill.label}
-                  </Pill>{" "}
-                  into <span className="mono">{defaultBranch}</span>
-                  {/* Ruling 304: this row names the door; ruling 246's rule is
-                      that it also says whether the door is open. The checks
-                      pill was one panel up on the page and absent from the
-                      dialog that authorizes an irreversible merge. */}
-                  {task.prChecks && task.prChecks.state !== "passing" ? (
-                    <>
-                      {" "}
-                      <Pill kind={checksPill(task.prChecks).kind} sm>
-                        {checksPill(task.prChecks).label}
-                      </Pill>{" "}
-                      <span className="pol-note">
-                        {task.prChecks.state === "failing"
-                          ? "Checks are not a gate here, the review verdicts are, so this merge is not blocked by them. Merging anyway is your call."
-                          : task.prChecks.state === "pending"
-                            ? "Checks have not finished. Merging now does not wait for them."
-                            : "GitHub reported no conclusive check result for this head."}
-                      </span>
-                    </>
-                  ) : null}
-                </>
-              ) : noChanges ? (
-                // F19-21 opened a SECOND no-change shape and this row asserted
-                // the first one's cause at both: a verification-only task never
-                // had a branch to be empty, so "the branch is empty" was simply
-                // false on the dialog that authorizes the close. Say what is
-                // true of the task in hand — the branch when there is one, its
-                // absence when there is not. Ruling 576: and no outcome name,
-                // since "no changes" is false of a task that corrected a
-                // knowledge base; this row says only what merges.
-                <>
-                  Nothing.{" "}
-                  {task.branch ? (
-                    <>
-                      <span className="mono">{task.branch}</span> carries no
-                      commits, so no pull request was opened.
-                    </>
-                  ) : (
-                    <>
-                      {task.key} never opened a branch or a pull request.
-                      Nothing merges.
-                    </>
-                  )}
-                </>
-              ) : filesDeliveredAt ? (
-                <>
-                  Nothing: the delivery is the files saved on this task, so no
-                  pull request merges.
-                </>
-              ) : noPullRequest && !force ? (
-                // F20-6 (R20-2): no PR, and the completion never claimed "no
-                // changes" — the server auto-detects it by re-probing the branch
-                // AT acceptance. State what the click actually does; a loader-
-                // time GitHub probe on every task open is unaffordable, so this
-                // honest sentence is the alternative (it promises no merge).
-                // Not on the FORCE path — force bypasses the very refusal this
-                // sentence describes (its own Skips/Bypassing rows say what it
-                // does), so the "refused if commits" clause would contradict it.
-                <>
-                  <strong>Nothing to merge yet.</strong> This task has no review
-                  pull request. Accepting re-checks{" "}
-                  {task.branch ? (
-                    <span className="mono">{task.branch}</span>
-                  ) : (
-                    "the branch"
-                  )}{" "}
-                  on GitHub: if it carries no commits the task closes with
-                  nothing merged; if it carries work the acceptance is refused
-                  and says how many commits.
-                </>
-              ) : (
-                <>No linked pull request. The task closes without a merge.</>
-              )}
-            </span>
-          </div>
+          <MergesRow
+            task={task}
+            prPill={facts.prPill}
+            defaultBranch={defaultBranch}
+            noChanges={noChanges}
+            filesDeliveredAt={filesDeliveredAt}
+            noPullRequest={noPullRequest}
+            force={force}
+          />
           {/* Ruling 162 / G35-5(d): the acceptance ceremony now runs the base
               refresh itself (`refreshBranchForAcceptance`) immediately before
               the gate re-check and the merge — the same workspace merge
@@ -531,69 +317,22 @@ export function AcceptConfirm({
               about it, and the "Merge head" row below is the sha the refresh
               supersedes when the base has moved. `complete-merge` is excluded
               because its path (`completeTaskMerge`) merges the PR without the
-              ceremony, so nothing refreshes there. */}
-          {!mergeOnly && task.branch && refreshedPr && (
-            <div className="obs">
-              <span className="k">Branch</span>
-              <span>
-                {/* U39-32: the reconciler's last compare says which case this
-                    click is. Live on ax-clone the same conditional sentence
-                    sat over a branch that already carried main (AX-28) and one
-                    four commits behind it (AX-29), and the person had to go to
-                    GitHub to learn which, and whether the head that would
-                    merge had ever been reviewed. */}
-                {baseBehindBy === 0 ? (
-                  <>
-                    <span className="mono">{task.branch}</span> carried{" "}
-                    <span className="mono">{defaultBranch}</span> at the last
-                    GitHub check, so the reviewed head merges as it is. If{" "}
-                    <span className="mono">{defaultBranch}</span> moves before
-                    you confirm, the merge that brings it in is pushed to the
-                    branch first.
-                  </>
-                ) : baseBehindBy !== null && baseBehindBy > 0 ? (
-                  <>
-                    <span className="mono">{task.branch}</span> is{" "}
-                    {baseBehindBy === 1 ? "1 commit" : `${baseBehindBy} commits`}{" "}
-                    behind <span className="mono">{defaultBranch}</span> at the
-                    last GitHub check. Accepting merges{" "}
-                    {baseBehindBy === 1 ? "it" : "them"} into the branch first
-                    and pushes that merge commit, which becomes the merge head.
-                    No review has run on that combination.
-                    {onRefreshFirst && !force && !mergeOnly
-                      ? " Update the branch and re-review first runs the review on it before anything merges."
-                      : ""}
-                  </>
-                ) : (
-                  <>
-                    <span className="mono">{task.branch}</span> is brought up to
-                    date with <span className="mono">{defaultBranch}</span> first.
-                    If the base has moved, that merge commit is pushed to the
-                    branch and becomes the merge head.
-                  </>
-                )}
-              </span>
-            </div>
+              ceremony, so nothing refreshes there (`refreshedBranch`). */}
+          {facts.refreshedBranch && (
+            <BranchRow
+              branch={facts.refreshedBranch}
+              defaultBranch={defaultBranch}
+              baseBehindBy={baseBehindBy}
+              refreshFirstOffered={facts.refreshFirst !== null}
+            />
           )}
           {/* Ruling 475 (F40-55 (c)): the pull requests this merge will
               likely put in conflict, named before the click rather than found
               by the next person's refused Accept. Only where a merge happens. */}
-          {pr && !alreadyMerged && mergeCollisions.length > 0 && (
+          {pr && !facts.alreadyMerged && mergeCollisions.length > 0 && (
             <CollidesRow collisions={mergeCollisions} />
           )}
-          <div className="obs">
-            <span className="k">Revision</span>
-            <span>
-              {workRevisionSha ? (
-                <span className="mono">{workRevisionSha.slice(0, 12)}</span>
-              ) : filesDeliveredAt ? (
-                // The stored ISO instant, as `formatAbsoluteUTC` writes it.
-                `The files delivered on this task at ${filesDeliveredAt.slice(0, 16).replace("T", " ")} UTC.`
-              ) : (
-                "No delivered revision recorded."
-              )}
-            </span>
-          </div>
+          <RevisionRow workRevisionSha={workRevisionSha} filesDeliveredAt={filesDeliveredAt} />
           {/* R17-1 (F17-L12): the PR head moved AHEAD of the reviewed revision
               since the review — accepting still merges an ahead head, but the
               human must see that those extra commits ship unreviewed and that
@@ -601,197 +340,50 @@ export function AcceptConfirm({
               the disclosure the bare "Complete merge" click never made, on the
               path that merges LAST — the one most likely to have drifted. */}
           {drift.kind !== "none" && pr?.revisionDrift && (
-            // Ruling 132 (pass 34, F34-14): ONE sentence, printed verbatim from
-            // `describeRevisionDrift` — a base refresh reads as a base refresh
-            // (`obs`, not `warn`), only authored commits read as unreviewed.
-            <div className={drift.unreviewed ? "obs warn" : "obs"}>
-              <span className="k">Merge head</span>
-              <span>
-                <span className="mono">
-                  {pr.revisionDrift.headSha.slice(0, 12)}
-                </span>{" "}
-                · {drift.sentence}
-              </span>
-            </div>
+            <MergeHeadRow headSha={pr.revisionDrift.headSha} drift={drift} />
           )}
-          <div className="obs">
-            <span className="k">Verdict</span>
-            <span>
-              <ValidationPill value={task.validation} />
-              {/* R19-B: the R15-1 verdict gate can be cleared by a human's
-                  GitHub approval rather than an agent verdict. The pill goes
-                  green either way, so name the person and the commit they
-                  approved — a gate a human satisfied cannot pass silently
-                  (ruling 19). */}
-              {verdictSatisfiedBy && (
-                <span className="fine"> · {verdictSatisfiedBy}</span>
-              )}
-            </span>
-          </div>
+          <CeremonyVerdictRow validation={task.validation} verdictSatisfiedBy={verdictSatisfiedBy} />
           {/* Ruling 482 (F40-52): the owner accepted two production deploys on
               agents' reports of the gate exit codes. This row is the server's
               own run, bound to the sha on the Revision row above. A failure
               also stands in the Blocked row below, because it refuses a plain
               acceptance; force accept records it as bypassed. */}
-          {gates && (
-            <div className={gates.state === "passed" ? "obs" : "obs warn"}>
-              <span className="k">Gates</span>
-              <div>
-                <Pill kind={gatesPill(gates.state).kind} sm>
-                  {gatesPill(gates.state).label}
-                </Pill>{" "}
-                {gates.line}
-                {gates.rows.some((r) => !r.ok) && (
-                  <GateResults rows={gates.rows.filter((r) => !r.ok)} compact />
-                )}
-              </div>
-            </div>
-          )}
+          {gates && <GatesRow gates={gates} />}
           {/* R19-5: the skip is allowed — being quiet about it is not. Name the
               stages this jump goes past, in order, plus the review gate; the
               Force accept button that opened this dialog says the same thing in
               short form ("skips the remaining stages and the review gate").
-              Force-only by construction (see `skipsStages` above): no other mode
-              can jump, so no other mode may print this row. */}
-          {skipsStages && (
-            <div className="obs warn">
-              <span className="k">Skips</span>
-              <span>
-                {skippedStages.length > 0 && (
-                  <>
-                    <strong>{skippedStages.join(" → ")}</strong>, and{" "}
-                  </>
-                )}
-                {skippedStages.length > 0 ? "the" : "The"} review gate:{" "}
-                {task.key} goes straight to {terminalName}
-                {pr ? " and the pull request merges" : ""}.
-              </span>
-            </div>
+              Force-only by construction (see `skipsStages` in
+              accept-confirm-derive.ts): no other mode can jump, so no other mode
+              may print this row. */}
+          {facts.skipsStages && (
+            <SkipsRow
+              skippedStages={facts.skippedStages}
+              taskKey={task.key}
+              terminalName={terminalName}
+              pr={pr}
+            />
           )}
           {blockedReason && (
-            <div className="obs" id={BLOCKED_ROW_ID}>
-              {/* Only force-accept BYPASSES a refusal. On every other path a
-                  standing refusal means the server will refuse this click —
-                  saying "Bypassing" there would promise an override nobody has.
-                  Ruling 162 (pass 35): that click is not offered either; the
-                  confirm below is disabled and described by this row. */}
-              <span className="k">{force ? "Bypassing" : "Blocked"}</span>
-              {/* Ruling 393: on the FORCE path every gate, because that is what
-                  the audit row and the completion event will say it bypassed.
-                  Everywhere else the first one is the refusal, and a list would
-                  be noise about a click the server is going to refuse anyway. */}
-              {force && blockedGates.length > 1 ? (
-                <ul>
-                  {blockedGates.map((gate) => (
-                    <li key={gate}>{gate}</li>
-                  ))}
-                </ul>
-              ) : (
-                <span>{blockedReason}</span>
-              )}
-            </div>
+            <RefusalRow force={force} blockedReason={blockedReason} blockedGates={blockedGates} />
           )}
-          {openPacketTitle &&
-            (answersWith ? (
-              <div className="obs">
-                {/* Ruling 471: the decision offers the option this acceptance
-                    performs, so the acceptance IS its answer, recorded the way
-                    the packet's own confirm records it. */}
-                <span className="k">Answers</span>
-                <span>
-                  the open decision "{openPacketTitle}" with "{answersWith}". The
-                  answer is recorded on the timeline and in the audit trail.
-                </span>
-              </div>
-            ) : (
-              <div className="obs warn">
-                {/* F32-11: a decision that offers neither acceptance option is
-                    withdrawn unanswered when the acceptance closes the task.
-                    Said here, and recorded on the timeline and in the audit
-                    trail when it happens. */}
-                <span className="k">Withdraws</span>
-                <span>
-                  the open decision "{openPacketTitle}". It closes unanswered with the
-                  task; a timeline note and an audit row record the withdrawal.
-                </span>
-              </div>
-            ))}
+          {openPacketTitle && <OpenDecisionRow title={openPacketTitle} answersWith={answersWith} />}
         </div>
       </div>
-      <div className="modal-foot">
-        <span className="foot-hint">
-          {force
-            ? // Ruling 638: the count the Bypassing row above lists.
-              blockedGates.length > 1
-              ? "Admin override. The bypassed gates are recorded to the audit log."
-              : "Admin override. The bypassed gate is recorded to the audit log."
-            : // F21-23: before the one-way warning, because a PR GitHub already
-              // merged is not one-way from HERE — there is nothing left to do
-              // that could be undone, and warning about it invents a decision.
-              alreadyMerged
-              ? // The `complete-merge` arm is the one where nothing at all is
-                // left: its task was already accepted (that is what stamped the
-                // PR "accepted"), so the completion is already on the timeline
-                // and the server settles this click as a no-op. Every OTHER mode
-                // still performs the acceptance itself — it just performs it
-                // without a merge — so only this arm may say nothing is written.
-                mergeOnly
-                ? "Nothing merges: the pull request was already merged on GitHub. Nothing is written either, because this task's completion is already on the timeline."
-                : "Nothing merges: the pull request was already merged on GitHub. The completion event is recorded on the timeline."
-              : mergeOnly
-                ? "Merging is one-way. The merge and its result are recorded on the timeline."
-                : pr
-                  ? "Merging is one-way. The completion event and the merge are recorded on the timeline."
-                  : "The completion event is recorded on the timeline. Nothing is merged: this task has no pull request."}
-        </span>
-        <div className="foot-actions">
-          <button type="button" className="btn ghost" onClick={close}>
-            Not yet
-          </button>
-          {onRefreshFirst && !force && !mergeOnly && baseBehindBy !== null && baseBehindBy > 0 && (
-            // Ruling 449 (O39-c): the head that merges would be one no review
-            // ran on. This runs the review on it first; acceptance comes after.
-            <button type="button" className="btn" disabled={busy} onClick={() => commit(onRefreshFirst)}>
-              <Icon name="refresh" />
-              Update the branch and re-review first
-            </button>
-          )}
-          <button
-            type="button"
-            className={"btn " + (force ? "danger" : "primary")}
-            // Ruling 162 (pass 35, F35-12 (c)): no surface offers an acceptance
-            // the gate will refuse. A standing refusal disables the confirm on
-            // every mode but force (the one that bypasses it); the reason sits
-            // in the Blocked row above and describes the control. This is a
-            // server-side interlock, not form validation, so ruling 147's
-            // enabled-until-busy rule does not apply — which is exactly why it
-            // needs the refusal to BE the server's own (`blockedReasonAuthoritative`).
-            disabled={busy || (interlocked && !force)}
-            aria-describedby={blockedReason && !force ? BLOCKED_ROW_ID : undefined}
-            onClick={() => commit(() => onConfirm(disclosure))}
-          >
-            <Icon name={force ? "shield" : mergeOnly ? "github" : "check"} />
-            {force
-              ? `Force-accept ${task.key}`
-              : mergeOnly
-                ? // F21-23: the merge-pending path can find the PR merged out of
-                  // band between the recommendation and this click. "Merge PR
-                  // #172 into main" would name work GitHub has already done.
-                  alreadyMerged
-                  ? `Finish accepting ${task.key}`
-                  : pr
-                    ? `Merge PR #${pr.number} into ${defaultBranch}`
-                    : "Run the merge"
-                : `${
-                    mode === "apply-recommendation"
-                      ? "Apply"
-                      : mode === "stage-move"
-                        ? "Move"
-                        : "Accept"
-                  } → ${terminalName}${pr && !alreadyMerged ? " & merge" : ""}`}
-          </button>
-        </div>
-      </div>
+      <CeremonyFoot
+        hint={footHint(facts, blockedGates, pr)}
+        confirmLabel={confirmLabel(facts, task.key, pr, defaultBranch)}
+        glyph={facts.glyph}
+        force={force}
+        interlocked={facts.interlocked}
+        blockedReason={blockedReason}
+        busy={busy}
+        refreshFirst={facts.refreshFirst}
+        disclosure={facts.disclosure}
+        onConfirm={onConfirm}
+        close={close}
+        commit={commit}
+      />
     </dialog>
   );
 }

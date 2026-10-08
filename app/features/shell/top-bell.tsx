@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type RefObject } from "react";
 import { useFetcher, useLocation, useMatches, useNavigate } from "react-router";
 import { Icon } from "~/ui/icon";
 import { useCsrfToken } from "~/ui/csrf-input";
@@ -192,78 +192,24 @@ export function TopBell({
   return (
     <div className="home-user-wrap">
       {open && (
-        <>
-          <div
-            className="menu-scrim"
-            aria-hidden="true"
-            onClick={() => setOpen(false)}
-          />
-          {/* Declarative non-modal <dialog open>: native dialog semantics
-              without showModal()'s top-layer centering — the popover stays
-              anchored to the bell via .ntf-pop's absolute positioning. */}
-          <dialog
-            open
-            ref={popRef}
-            tabIndex={-1}
-            className="ntf-pop"
-            aria-label="Notifications"
-            data-screen-label="Notifications popover"
-          >
-            <div className="ntf-pop-head">
-              <h3>Notifications</h3>
-              <span className="ct">
-                {shownUnread > 0 ? shownUnread + " unread" : "caught up"}
-              </span>
-              {shownUnread > 0 && (
-                <button type="button" className="btn ghost sm" onClick={markAllRead}>
-                  Mark all read
-                </button>
-              )}
-            </div>
-            <div className="ntf-pop-list" aria-busy={list.state !== "idle"}>
-              {loading ? (
-                <div className="empty">Loading notifications…</div>
-              ) : failed ? (
-                <div className="empty">
-                  Couldn't load notifications.
-                  <button type="button" className="btn ghost sm empty-cta" onClick={load}>
-                    Try again
-                  </button>
-                </div>
-              ) : notifications.length === 0 ? (
-                <div className="empty">Nothing yet. You're caught up.</div>
-              ) : null}
-              {notifications.map((n) => (
-                <NotificationItem key={n.id} notification={n} onOpen={openItem} />
-              ))}
-            </div>
-            <div className="ntf-pop-foot">
-              {/* UI-14: the head can claim "150 unread" while this list holds
-                  the newest 100 (the list route caps at `BELL_LIST_CAP`).
-                  Disclose the cap instead of letting the count silently
-                  disagree with the rows — the same truncation notice
-                  /notifications already got. */}
-              {notifications.length >= BELL_LIST_CAP && (
-                <span className="sub pull">
-                  Showing the newest {notifications.length}
-                </span>
-              )}
-              <button
-                type="button"
-                className="btn ghost sm"
-                onClick={() => {
-                  setOpen(false);
-                  navigate("/notifications", {
-                    state: { returnTo: location.pathname + location.search },
-                  });
-                }}
-              >
-                See all
-                <Icon name="arrow" className="ico-end" />
-              </button>
-            </div>
-          </dialog>
-        </>
+        <BellPopover
+          popRef={popRef}
+          shownUnread={shownUnread}
+          listBusy={list.state !== "idle"}
+          loading={loading}
+          failed={failed}
+          notifications={notifications}
+          onClose={() => setOpen(false)}
+          onMarkAllRead={markAllRead}
+          onRetry={load}
+          onOpenItem={openItem}
+          onSeeAll={() => {
+            setOpen(false);
+            navigate("/notifications", {
+              state: { returnTo: location.pathname + location.search },
+            });
+          }}
+        />
       )}
       <button
         type="button"
@@ -292,5 +238,108 @@ export function TopBell({
         )}
       </button>
     </div>
+  );
+}
+
+/**
+ * The open popover (ruling 700(e), split out of `TopBell` on the task page's
+ * recipe; it calls no hook): its head and Mark all read, the list or what
+ * stands for it, and the foot. The bell owns the list, the reads and focus,
+ * and renders this only while it is open.
+ */
+function BellPopover({
+  popRef,
+  shownUnread,
+  listBusy,
+  loading,
+  failed,
+  notifications,
+  onClose,
+  onMarkAllRead,
+  onRetry,
+  onOpenItem,
+  onSeeAll,
+}: {
+  popRef: RefObject<HTMLDialogElement | null>;
+  /** The head's count: `unread` plus the orphan rows (F19-25). */
+  shownUnread: number;
+  listBusy: boolean;
+  loading: boolean;
+  failed: boolean;
+  notifications: NotificationView[];
+  onClose: () => void;
+  onMarkAllRead: () => void;
+  onRetry: () => void;
+  onOpenItem: (n: NotificationView) => void;
+  onSeeAll: () => void;
+}) {
+  return (
+    <>
+      <div
+        className="menu-scrim"
+        aria-hidden="true"
+        onClick={onClose}
+      />
+      {/* Declarative non-modal <dialog open>: native dialog semantics
+          without showModal()'s top-layer centering — the popover stays
+          anchored to the bell via .ntf-pop's absolute positioning. */}
+      <dialog
+        open
+        ref={popRef}
+        tabIndex={-1}
+        className="ntf-pop"
+        aria-label="Notifications"
+        data-screen-label="Notifications popover"
+      >
+        <div className="ntf-pop-head">
+          <h3>Notifications</h3>
+          <span className="ct">
+            {shownUnread > 0 ? shownUnread + " unread" : "caught up"}
+          </span>
+          {shownUnread > 0 && (
+            <button type="button" className="btn ghost sm" onClick={onMarkAllRead}>
+              Mark all read
+            </button>
+          )}
+        </div>
+        <div className="ntf-pop-list" aria-busy={listBusy}>
+          {loading ? (
+            <div className="empty">Loading notifications…</div>
+          ) : failed ? (
+            <div className="empty">
+              Couldn't load notifications.
+              <button type="button" className="btn ghost sm empty-cta" onClick={onRetry}>
+                Try again
+              </button>
+            </div>
+          ) : notifications.length === 0 ? (
+            <div className="empty">Nothing yet. You're caught up.</div>
+          ) : null}
+          {notifications.map((n) => (
+            <NotificationItem key={n.id} notification={n} onOpen={onOpenItem} />
+          ))}
+        </div>
+        <div className="ntf-pop-foot">
+          {/* UI-14: the head can claim "150 unread" while this list holds
+              the newest 100 (the list route caps at `BELL_LIST_CAP`).
+              Disclose the cap instead of letting the count silently
+              disagree with the rows — the same truncation notice
+              /notifications already got. */}
+          {notifications.length >= BELL_LIST_CAP && (
+            <span className="sub pull">
+              Showing the newest {notifications.length}
+            </span>
+          )}
+          <button
+            type="button"
+            className="btn ghost sm"
+            onClick={onSeeAll}
+          >
+            See all
+            <Icon name="arrow" className="ico-end" />
+          </button>
+        </div>
+      </dialog>
+    </>
   );
 }

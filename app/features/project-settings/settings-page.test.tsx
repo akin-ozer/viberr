@@ -15,9 +15,8 @@ import {
   RequiredReviewersPanel,
   SettingsPage,
   StagesPanel,
-  resolveStageOrder,
-  stageMoveOptions,
 } from "./settings-page";
+import { resolveStageOrder, stageMoveOptions } from "./stage-order";
 import { roleCan, type ProjectRole } from "~/shared/rbac";
 import type { RequiredReviewerView } from "~/server/tasks/required-reviewers.server";
 import { ToastProvider } from "~/ui/toast";
@@ -1123,6 +1122,46 @@ describe("RepoPanel", () => {
     expect(unbound).toContain("binds that connection to this project");
   });
 
+  it("the Change dialog closes on its own change's ok, not on another answer of the repository fetcher", () => {
+    // CANARY: drop the changeSent check and the branch cleanup's ok closes the
+    // dialog the admin is typing in, and the typed repository is gone; drop the
+    // trigger's reset of it and a cancelled opening's change, answered after
+    // the next opening began, closes that one instead.
+    const onChangeRepo = vi.fn();
+    const { getByText, rerender } = render(
+      repoPanel({ repoBusy: true, inFlight: "set-branch-cleanup", onChangeRepo }),
+    );
+    fireEvent.click(getByText("Change…"));
+    const field = () =>
+      document.querySelector<HTMLInputElement>('input[aria-label="New repository, owner/name"]');
+    fireEvent.change(field()!, { target: { value: "akin-ozer/other" } });
+    const cleanupOk = { ok: true, toast: "Merged task branches will be kept on GitHub" };
+    rerender(repoPanel({ changeResult: cleanupOk, onChangeRepo }));
+    expect(field()?.value).toBe("akin-ozer/other");
+
+    fireEvent.click(getByText("Change repository", { selector: ".confirm-actions button" }));
+    expect(onChangeRepo).toHaveBeenCalledWith("akin-ozer/other", false);
+    rerender(
+      repoPanel({ repoBusy: true, inFlight: "change-repo", changeResult: cleanupOk, onChangeRepo }),
+    );
+    rerender(
+      repoPanel({ changeResult: { ok: true, toast: "Repository changed" }, onChangeRepo }),
+    );
+    expect(field()).toBeNull();
+
+    // A change sent, then Cancelled while it is checked, belongs to that opening.
+    fireEvent.click(getByText("Change…"));
+    fireEvent.change(field()!, { target: { value: "akin-ozer/wrong" } });
+    fireEvent.click(getByText("Change repository", { selector: ".confirm-actions button" }));
+    rerender(repoPanel({ repoBusy: true, inFlight: "change-repo", onChangeRepo }));
+    fireEvent.click(getByText("Cancel", { selector: ".confirm-actions button" }));
+    expect(field()).toBeNull();
+    fireEvent.click(getByText("Change…"));
+    fireEvent.change(field()!, { target: { value: "akin-ozer/right" } });
+    rerender(repoPanel({ changeResult: { ok: true, toast: "Repository changed" }, onChangeRepo }));
+    expect(field()?.value).toBe("akin-ozer/right");
+  });
+
   it("a configured credential offers Rotate + a confirmed Remove (finding #13)", () => {
     const onSet = vi.fn();
     const onClear = vi.fn();
@@ -1935,7 +1974,8 @@ describe("ProjectGatesPanel (ruling 482)", () => {
  * Ruling 652(b): the File leases panel's save answers like every other panel's.
  * Its fetcher was the one of nine on the page without `useActionToast`, so a
  * saved table said nothing and a refusal vanished. Canary: drop
- * `useActionToast(leaseFetcher)` from SettingsPage and the refusal is never read.
+ * `useActionToast(fetcher)` from `useListSave` (settings-page-actions.ts), the
+ * hook the lease save goes through, and the refusal is never read.
  */
 describe("ruling 652(b): a file-lease save answers on the page", () => {
   it("toasts what the action answers, a refusal included", async () => {

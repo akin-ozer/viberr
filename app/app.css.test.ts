@@ -912,9 +912,9 @@ describe("app.css breakpoints (P16-F8)", () => {
   /**
    * U7 / U35-2 — the task detail's three regions are ordered in the MARKUP
    * (task-detail-page.tsx: `.detail-head`, then `.detail-side`, then
-   * `.detail-main`, asserted in task-disposition.test.tsx) and placed by grid
-   * cell here, so the sighted stack and the screen-reader/focus order are the
-   * same order at every width.
+   * `TaskMainColumn`'s `.detail-main`, asserted in task-disposition.test.tsx)
+   * and placed by grid cell here, so the sighted stack and the
+   * screen-reader/focus order are the same order at every width.
    *
    * Pass 20 did it with `order: -1` in the 1100px block instead, which fixed the
    * paint and left a keyboard user tabbing to "Accept completion → Done" LAST,
@@ -2140,7 +2140,7 @@ const HIDDEN_BY_DESIGN = {
  *  that are already there. */
 const VIEWPORT_READS = {
   "app/ui/stage-menu.tsx": "clamps the stage popover's left edge into the window with an 8px gutter after `getBoundingClientRect()`, and (interface review 2026-09-24, layo-8) flips it above its trigger or caps its height when the room below runs out. It positions an element that is already open and already rendered — no branch of the tree depends on the number.",
-  "app/features/profile/agent-accounts-panel.tsx": "ruling 616: the account picker clips the box its menu shows in (the overlay's scrolling body) to the window, then opens the menu above its trigger or caps its height when the room below runs out, as the stage menu does. It positions a menu that is already open and already rendered — no branch of the tree depends on the number.",
+  "app/features/profile/agent-account-picker.tsx": "ruling 616: the account picker clips the box its menu shows in (the overlay's scrolling body) to the window, then opens the menu above its trigger or caps its height when the room below runs out, as the stage menu does. It positions a menu that is already open and already rendered — no branch of the tree depends on the number.",
 } satisfies Record<string, string>;
 
 type Hidden = {
@@ -5698,8 +5698,8 @@ describe("app.css ruling 459: the better-ui pass — contextual icon motion", ()
         // Ruling 651: Archive tasks, and an epic task row's Archive and
         // Restore, trade their mark for the loader while their request runs.
         "features/epics/epic-parts.tsx: archive → loader (spins)",
-        "features/epics/epic-page.tsx: archive → loader (spins)",
-        "features/epics/epic-page.tsx: refresh → loader (spins)",
+        "features/epics/epic-page-regions.tsx: archive → loader (spins)",
+        "features/epics/epic-page-regions.tsx: refresh → loader (spins)",
         // Ruling 368's 2026-09-24 extension: every in-flight starter's loader
         // takes its icon's place, and through the cell it trades rather than
         // replacing it in one frame. Home's re-scan, Interrupt, Retry, Force
@@ -5721,14 +5721,14 @@ describe("app.css ruling 459: the better-ui pass — contextual icon motion", ()
         "features/github/github-view.tsx: check → loader (spins)",
         "features/github/github-view.tsx: refresh → loader (spins)",
         "features/project-settings/settings-page.tsx: check → loader (spins)",
-        "features/profile/profile-page.tsx: github → loader (spins)",
+        "features/profile/profile-github.tsx: github → loader (spins)",
         "features/org-settings/users-panel.tsx: lock → loader (spins)",
         "features/org-settings/resource-rows.tsx: refresh → loader (spins)",
         "features/org-settings/resource-rows.tsx: refresh → loader (spins)",
         // Ruling 469: the MCP editor's Sign in and Sign out.
-        "features/org-settings/resource-modals.tsx: user → loader (spins)",
-        "features/org-settings/resource-modals.tsx: x → loader (spins)",
-        "features/task-detail/decision-packet.tsx: message → loader (spins)",
+        "features/org-settings/mcp-sign-in.tsx: user → loader (spins)",
+        "features/org-settings/mcp-sign-in.tsx: x → loader (spins)",
+        "features/task-detail/decision-packet-regions.tsx: message → loader (spins)",
         "features/policy/policy-page.tsx: x → loader (spins)",
         // Ruling 463: a GitHub connection's Re-check.
         "features/org-settings/connections-panel.tsx: refresh → loader (spins)",
@@ -5743,7 +5743,7 @@ describe("app.css ruling 459: the better-ui pass — contextual icon motion", ()
         "features/task-detail/changes-panel.tsx: file → loader (spins)",
         "features/task-detail/changes-panel.tsx: send → loader (spins)",
         // Ruling 503: an epic task row's Remove.
-        "features/epics/epic-page.tsx: x → loader (spins)",
+        "features/epics/epic-page-regions.tsx: x → loader (spins)",
         // Ruling 638: a library row's Add while its deploy is in flight.
         "features/agents/agents-page.tsx: plus → loader (spins)",
         // Ruling 653: the board file's drop while the server reads it, a

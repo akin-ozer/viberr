@@ -250,8 +250,12 @@ characters; last 8 lines, 600 characters.
   was made. Audit `project.repository.created {repo, private}` under the acting person,
   recorded as soon as GitHub is known to have made it.
 - **Changing the repo later** (**Change…** in project settings, `change-repo`,
-  `edit-policy`; ruling 539 renamed it from "repair"): normalizes `owner/name` or a URL,
-  demands `confirmFootprint` when tasks already carry GitHub records, and writes nothing
+  `edit-policy`; ruling 539 renamed it from "repair"): normalizes `owner/name` or a URL
+  and refuses, before anything is read or probed, a name GitHub does not allow, with
+  "Enter the repository as owner/name (a pasted GitHub URL works too)." (ruling 700(a):
+  `normalizeRepoInput` holds it to `REPO_SLUG_RE`, the pattern `project.md`'s `repo` is
+  read with, so `owner/..` is refused here and reads as no repository there). It demands
+  `confirmFootprint` when tasks already carry GitHub records, and writes nothing
   it has not checked (ruling 669). The bound credential probes the new repository; a
   project with none bound (cleared since) is checked with the new owner's connection,
   else the instance default, exactly as an attach is, and leaves bound to it; with no

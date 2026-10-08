@@ -303,7 +303,8 @@ describe("useLiveUpdates", () => {
         for (let i = 0; i < 5; i += 1) FakeEventSource.last().emit("controller.updated", String(i));
         vi.advanceTimersByTime(REVALIDATE_DEBOUNCE_MS);
       });
-      // CANARY: route `controller.updated` to `scheduleRevalidate` again.
+      // CANARY: drop the `SSE_CONVERSATION_EVENTS` branch, so `controller.updated`
+      // goes to `recordLive` like a data event.
       expect(loaderRunCount()).toBe(0);
       expect(notices).toHaveLength(1);
       cleanup();
@@ -338,7 +339,8 @@ describe("useLiveUpdates", () => {
       }
       vi.advanceTimersByTime(4_000);
     });
-    // CANARY: route `run.log-appended` to `scheduleRevalidate`.
+    // CANARY: drop the `SSE_STREAM_EVENTS` branch, so `run.log-appended` goes
+    // to `recordLive` like a data event.
     expect(loaderRunCount(), "the board refetched per console line").toBe(0);
     cleanup();
 
@@ -375,7 +377,8 @@ describe("useLiveUpdates", () => {
       { wrapper: DataRouter },
     );
     const es = FakeEventSource.last();
-    // CANARY: route `run.log-appended` to `scheduleRevalidate` again.
+    // CANARY: drop the `SSE_STREAM_EVENTS` branch, so `run.log-appended` goes
+    // to `recordLive` like a data event.
     act(() => {
       for (let seq = 1; seq <= 42; seq += 1) {
         emitRunLine(es, "viberr-core", "VIB-42", seq);

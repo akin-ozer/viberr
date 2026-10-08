@@ -93,7 +93,8 @@ describe("audit panel — Phase 10 action kinds render readably", () => {
     expect(entry.kind).toBe("audit");
     // E32-8 (pass 32): the actor reads as its display name ("Operator", not
     // the stored `operator` token); the fixed words after it are the fold key
-    // the Activity page matches on (activity-page.tsx), unchanged.
+    // the Activity page matches on (`isRuntimeSessionOpen`, feed-helpers.ts),
+    // unchanged.
     expect(entry.text).toBe(
       "Operator opened the Developer runtime session. Recorded per audit policy on",
     );

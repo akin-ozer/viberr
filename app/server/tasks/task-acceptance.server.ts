@@ -876,8 +876,9 @@ export function acceptanceTerminallyBlocked(fm: TaskFrontmatter): boolean {
  * Force-accept MAY skip the remaining stages AND the review gate — that is what
  * the override is for. The burden it carries is HONESTY, not refusal: the
  * affordance says it skips them and the confirm dialog enumerates exactly which
- * stages are being skipped (`accept-confirm.tsx`). A server 409 here would have
- * turned the one escape hatch for a wedged board into another wall.
+ * stages are being skipped (`skippedStages`, accept-confirm-derive.ts). A
+ * server 409 here would have turned the one escape hatch for a wedged board
+ * into another wall.
  *
  * Everything else `acceptanceRefusalReason` returns stays force-bypassable.
  */

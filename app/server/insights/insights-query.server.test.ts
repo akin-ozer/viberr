@@ -659,13 +659,15 @@ describe("coordination share (F31-D6, rulings 190 and 635)", () => {
     insertRun(db, { backend: "codex", kind: "primary", inTok: 5000, outTok: 1000, turns: 3 });
     insertRun(db, { backend: "codex", kind: "reviewer", inTok: 2000, outTok: 200, turns: 2 });
     // F35-1: a live estimate is not a total. Counted as silent, not summed —
-    // on BOTH sides, because the numerator has its own guard and a fixture that
-    // only strands a delivery row would let that guard rot untested.
+    // on BOTH sides: `coordinationShare`'s one guarded tokens SUM serves both,
+    // and a stranded row on each side shows the guard and the silent count
+    // hold for each.
     insertRun(db, { backend: "codex", kind: "primary", inTok: 900_000, outTok: 900_000, usageFinal: 0, turns: 7 });
     insertRun(db, { backend: "codex", kind: "operator", inTok: 900_000, outTok: 900_000, usageFinal: 0, turns: 7 });
     const c = runsOf(db, { backend: "codex" }).coordination;
-    // CANARY: drop the `usage_final = 1` guard from `coordination_tokens` and
-    // the numerator swallows 1.8M of estimate while the denominator stays 9.4K.
+    // CANARY: drop the `usage_final = 1` guard from the tokens SUM in
+    // `coordinationShare` and both sides swallow their 1.8M of estimate
+    // (coordination 1,801,200 of 3,609,400).
     expect(c).toMatchObject({ measure: "tokens", coordination: 1200, total: 9400 });
     expect(c.share).toBeCloseTo(1200 / 9400, 5);
     expect(c.silent).toEqual({ delivery: 1, coordination: 1 });
@@ -1084,7 +1086,7 @@ describe("backend quota readings (pass 29)", () => {
    *
    * Canary: return `false` from `readingWindowReset`.
    */
-  it("marks a reading whose window reset before generatedAt (ruling 481)", async () => {
+  it("marks a reading whose window reset before the summary's `nowIso` (ruling 481)", async () => {
     const db = ctx.makeDb();
     const { recordBackendRateLimit } = await import("~/server/runtimes/backend-quota.server");
     recordBackendRateLimit(db, "claude", {

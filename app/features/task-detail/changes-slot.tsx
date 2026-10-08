@@ -38,6 +38,21 @@ function loadBody(): Promise<typeof import("./changes-panel")> {
   return bodyModule;
 }
 
+/** The toggle's words: Show or Hide, "changes" on the panel and "the diff"
+ *  inline (ruling 521), and Try again while the open reader's chunk failed
+ *  to arrive. */
+function toggleLabel(open: boolean, failed: boolean, inline: boolean): string {
+  return !open
+    ? inline
+      ? "Show the diff"
+      : "Show changes"
+    : failed
+      ? "Try again"
+      : inline
+        ? "Hide the diff"
+        : "Hide changes";
+}
+
 export function ChangesPanel({
   prNumber,
   revisionSha,
@@ -94,15 +109,7 @@ export function ChangesPanel({
         }}
       >
         <GlyphSwap rest="chevron" alt="loader" on={loading} spinAlt />
-        {!open
-          ? inline
-            ? "Show the diff"
-            : "Show changes"
-          : chunk === "failed"
-            ? "Try again"
-            : inline
-              ? "Hide the diff"
-              : "Hide changes"}
+        {toggleLabel(open, chunk === "failed", inline)}
       </button>
       <div id={`${id}-body`} className="chg-slot" hidden={!open}>
         {Body ? (

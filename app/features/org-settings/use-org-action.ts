@@ -13,10 +13,11 @@ import { useFetcherResult } from "~/ui/use-fetcher-result";
 
 /**
  * What the org-settings action hands back on success. `toast` is the
- * server-computed copy the default handler pushes; the credential pair is the
- * one payload a panel reads beyond it — `user-invite` and `user-reset-password`
- * mint a local password that is shown ONCE, so the account it belongs to rides
- * along with it.
+ * server-computed copy the default handler pushes; the rest are per-intent
+ * payloads a panel reads beyond it. The credential pair: `invite-local` and
+ * `user-reset-password` mint a local password that is shown ONCE, and
+ * `invite-local` returns the new account's `email` with it (a reset is pressed
+ * in that account's own edit modal, which already knows it).
  */
 export interface OrgActionSuccess {
   ok: true;

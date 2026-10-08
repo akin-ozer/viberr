@@ -113,8 +113,9 @@ export async function runReconcile(
 }
 
 /**
- * Re-check scopes (settings spec §5.4, surfaced here until Phase 9
- * ships the Settings card): revalidateProjectCredential resolves every open
+ * Re-check scopes (settings spec §5.4), behind the `grant-scope` intent of
+ * both the GitHub view and the project settings page's Repository panel
+ * (RepoCredentialSlot): revalidateProjectCredential resolves every open
  * violation the fresh validation clears and writes the typed `policy`
  * event to each violation's own task — this wrapper only picks the toast.
  */

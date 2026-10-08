@@ -7,8 +7,9 @@ import { pinLivePose } from "./live-pose";
  * trap, initial focus, Escape (cancel event), top-layer stacking and the
  * ::backdrop scrim. This hook adds what the platform doesn't: body scroll
  * lock, backdrop-click close (the old `.confirm-scrim` affordance), focus
- * restore on unmount, keeping React's imperative autoFocus (showModal
- * would otherwise move focus off it), and an animated close — `close()`
+ * restore on unmount (to the opener, or its list row once it is disabled or
+ * gone), keeping React's imperative autoFocus (showModal would otherwise move
+ * focus off it), and an animated close — `close()`
  * marks the dialog with [data-closing] so CSS can play the exit transition
  * (a softer, shorter pop-center in reverse), then invokes onClose to unmount.
  *
@@ -25,6 +26,12 @@ import { pinLivePose } from "./live-pose";
  * it). A caller with an inner layer (store-browser's new-folder row) passes
  * onDismissRequest: return true to consume the Escape/backdrop dismiss
  * without closing (no exit animation plays); explicit close() always closes.
+ *
+ * onClose also runs when the dialog unmounts mid-exit (a revalidation took
+ * it away): the fallback timer is not cleared on unmount, because that call
+ * settles a parent whose state still holds the dialog open. A close that
+ * does more than reset state checks that its dialog is still mounted
+ * (PageOverlay).
  */
 
 export function useDialog(
@@ -112,6 +119,10 @@ export function useDialog(
   useEffect(() => {
     const dialog = dialogRef.current;
     if (!dialog) return;
+    // The opener's list row, read while the opener is still on the page: one
+    // the action has taken away by the time the dialog unmounts has no
+    // ancestors left to find it from (the cleanup below).
+    const row = opener?.closest<HTMLElement>("li[tabindex]");
     const focused =
       document.activeElement instanceof HTMLElement
         ? document.activeElement
@@ -158,7 +169,21 @@ export function useDialog(
       dialog.removeEventListener("cancel", onCancel);
       dialog.removeEventListener("click", onClick);
       document.body.style.overflow = previousOverflow;
-      if (opener?.isConnected) opener.focus();
+      // A confirm's exit ends after its action (ruling 459), so the action
+      // can have taken the opener away by now: disabled while the request it
+      // started is in flight (a row's Undo), or off the page once the
+      // revalidation has landed (the Undo replaced by "Undone by …"). Neither
+      // takes focus, so the list row it sat in (`li` with tabIndex={-1}, a
+      // reveal target) takes it instead of <body>, while that row is still on
+      // the page. Only a row: a focusable region or landmark (Home's <main>,
+      // the task page's .detail) would read the whole page out and send the
+      // next Tab to its top, so an opener outside a row, or one whose row
+      // went with it, still leaves focus on <body>.
+      if (opener?.isConnected && !opener.matches(":disabled")) {
+        opener.focus();
+      } else if (row?.isConnected) {
+        row.focus({ preventScroll: true });
+      }
     };
   }, [close, opener]);
 

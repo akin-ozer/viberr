@@ -1950,11 +1950,10 @@ describe("ruling 320 — the loader-to-page wire", () => {
     const loaderKeys = Object.keys(await runLoader("VIB-142", ids.arda));
     expect(loaderKeys.length).toBeGreaterThan(20);
 
-    // The page's declared props: the `}: {` … `}) {` block of its signature.
-    const propsBlock = pageSrc.slice(
-      pageSrc.indexOf("}: {"),
-      pageSrc.indexOf("\n}) {"),
-    );
+    // The page's declared props: the `interface TaskDetailPageProps` block its
+    // signature names (ruling 700(d) moved it out of the signature).
+    const propsAt = pageSrc.indexOf("interface TaskDetailPageProps {");
+    const propsBlock = pageSrc.slice(propsAt, pageSrc.indexOf("\n}\n", propsAt));
     const props = new Set(
       [...propsBlock.matchAll(/^ {2}([a-zA-Z][a-zA-Z0-9]*)\??:/gm)].map((m) => m[1]!),
     );

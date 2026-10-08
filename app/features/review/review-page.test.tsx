@@ -248,9 +248,9 @@ describe("ReviewQueuePage", () => {
   it("F19-31: a `waiting: none` row shows NO wait tag — the board's answer for the same value", () => {
     // `review + none` is legal and listed (review-queue.server.ts puts it in
     // "Still in review"). The wait-tag ladder used to end in a bare `else`, so
-    // this row rendered the pulsing "agent working" while the board's WaitTag
-    // renders nothing at all for the identical stored value — the same defect
-    // R8-3 fixed for "human", one branch further down.
+    // this row rendered the pulsing "agent working" while the board card's
+    // status chip (`cardStatus`) names no wait for the identical stored value —
+    // the same defect R8-3 fixed for "human", one branch further down.
     const noneRow: ReviewRowView = {
       ...rowAgent,
       key: "VIB-160",

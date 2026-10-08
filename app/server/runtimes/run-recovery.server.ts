@@ -1139,11 +1139,12 @@ export async function recoverStrandedOperatorPlans(
   });
   const stale = rows.length - fresh.length;
   if (stale > 0) {
+    const replayed = new Set(fresh);
     logger.warn("stranded codex operator plans are too old to replay safely", {
       stale,
       maxAgeMs: STRANDED_PLAN_MAX_AGE_MS,
       taskKeys: rows
-        .filter((r) => !fresh.includes(r))
+        .filter((r) => !replayed.has(r))
         .map((r) => r.task_key),
     });
   }

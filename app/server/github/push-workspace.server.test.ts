@@ -42,7 +42,7 @@ beforeEach(() => {
     }),
   });
   rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
-  // A workspace repo dir so findRepoDir resolves (contents don't matter — exec is faked).
+  // A workspace repo dir so findWorkspaceRepoDir resolves (contents don't matter — exec is faked).
   mkdirSync(path.join(taskDir(store.slug, "VIB-1", store.dataRoot), "workspace", "viberr", ".git"), {
     recursive: true,
   });

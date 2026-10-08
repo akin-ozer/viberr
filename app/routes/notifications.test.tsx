@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
-import { afterEach, describe, expect, it } from "vitest";
-import { cleanup, fireEvent, render, waitFor } from "@testing-library/react";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import { act, cleanup, fireEvent, render, waitFor } from "@testing-library/react";
 import { createRoutesStub } from "react-router";
 import type { Route } from "./+types/notifications";
 import { ToastProvider } from "~/ui/toast";
@@ -155,8 +155,10 @@ describe("notifications overlay: row destinations come from href", () => {
     ...over,
   });
 
+  /** `opened`, when given, holds the row's destination until it settles. */
   function renderRows(
     notifications: (typeof LOADER_DATA)["notifications"],
+    opened?: Promise<null>,
   ) {
     // SAFETY: same contract as `renderOverlay` above — the component reads only
     // `loaderData`, and that value is checked against the route's loader type.
@@ -175,9 +177,18 @@ describe("notifications overlay: row destinations come from href", () => {
       },
       {
         path: "/projects/:slug",
+        loader: () => opened ?? null,
         Component: () => {
           path = "/projects/board";
           return <div>board</div>;
+        },
+      },
+      {
+        // Where the overlay's close goes back to: the shell set no returnTo.
+        path: "/",
+        Component: () => {
+          path = "/";
+          return <div>home</div>;
         },
       },
       { path: "/notifications/read", action: () => ({ ok: true }) },
@@ -201,6 +212,68 @@ describe("notifications overlay: row destinations come from href", () => {
     expect(link.textContent).toBe("Viberr Core"); // no trailing separator
     fireEvent.click(link);
     await waitFor(() => expect(wentTo()).toBe("/projects/board"));
+  });
+
+  /**
+   * Ruling 657: PageOverlay's close goes back where the shell opened it from,
+   * once useDialog's exit ends. The exit can end after the overlay is gone,
+   * when a row's page replaced it mid-fade.
+   */
+  describe("the overlay's close against a row's page", () => {
+    afterEach(() => {
+      vi.useRealTimers();
+    });
+
+    /** One project row, whose board loads until `land()`. */
+    function overlayWithRow() {
+      vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+      let land = () => {};
+      const opened = new Promise<null>((resolve) => {
+        land = () => resolve(null);
+      });
+      const utils = renderRows(
+        [rowWith({ id: "n-proj", taskKey: null, href: "/projects/viberr-core", unread: false })],
+        opened,
+      );
+      const overlay = utils.getByRole("dialog", { name: "Notifications" });
+      // The sheet's `dialog[data-closing]` clock, which jsdom has no
+      // stylesheet to read.
+      overlay.style.transitionDuration = "0.15s";
+      // The browser's Escape, which jsdom does not fire itself.
+      const dismiss = () => fireEvent(overlay, new Event("cancel", { cancelable: true }));
+      return { ...utils, overlay, land, dismiss };
+    }
+
+    it("goes back where it came from when the overlay is still up as the exit ends", async () => {
+      // CANARY: make PageOverlay's close return before its navigate and the
+      // person is left on the overlay.
+      const { overlay, dismiss, wentTo } = overlayWithRow();
+      dismiss();
+      await act(async () => {
+        fireEvent.transitionEnd(overlay);
+      });
+      expect(wentTo()).toBe("/");
+    });
+
+    it("keeps the person on the page a row opened when it replaced the overlay mid-fade", async () => {
+      // CANARY: drop PageOverlay's `if (!panelRef.current) return`: the
+      // exit's fallback timer, still due after the board replaced the
+      // overlay, runs the close's navigate and takes the person to "/".
+      const { container, overlay, land, dismiss, wentTo } = overlayWithRow();
+      // The row is opened, and the overlay dismissed while its page loads.
+      fireEvent.click(container.querySelector(".ntf-ev .ntf-where button")!);
+      dismiss();
+      expect(overlay.hasAttribute("data-closing")).toBe(true);
+      // The board lands mid-fade and replaces the overlay, so no
+      // transitionend comes: the exit ends on its fallback timer.
+      await act(async () => land());
+      expect(wentTo()).toBe("/projects/board");
+      expect(overlay.isConnected).toBe(false);
+      await act(async () => {
+        vi.advanceTimersByTime(200);
+      });
+      expect(wentTo()).toBe("/projects/board");
+    });
   });
 
   it("a row with no destination is marked non-navigable rather than looking live", () => {

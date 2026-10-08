@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { Icon } from "./icon";
+import { fromISODate, toISODate } from "./iso-date";
 
 /**
  * A dependency-free month calendar (the shadcn/react-day-picker model, rebuilt
@@ -19,23 +20,6 @@ const MONTHS_LONG = [
 ];
 const WEEKDAYS = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
 const WEEKDAY_ABBR = ["Su", "Mo", "Tu", "We", "Th", "Fr", "Sa"];
-
-/** `YYYY-MM-DD` → a LOCAL-midnight Date, or null when malformed/impossible. */
-export function fromISODate(iso: string | null): Date | null {
-  if (!iso) return null;
-  const parts = iso.split("-").map(Number);
-  const [y, m, d] = parts;
-  if (!y || !m || !d) return null;
-  const dt = new Date(y, m - 1, d);
-  return dt.getFullYear() === y && dt.getMonth() === m - 1 && dt.getDate() === d
-    ? dt
-    : null;
-}
-
-/** A LOCAL Date → `YYYY-MM-DD` (from local parts, never UTC). */
-export function toISODate(d: Date): string {
-  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
-}
 
 function isSameDay(a: Date, b: Date): boolean {
   return (
@@ -195,13 +179,14 @@ export function Calendar({
                 if (isToday) cls.push("today");
                 if (isSelected) cls.push("sel");
                 return (
-                  <td key={iso} role="gridcell">
+                  // The selected state belongs to the cell: `gridcell` supports
+                  // `aria-selected`, a `button` ignores it.
+                  <td key={iso} role="gridcell" aria-selected={isSelected || undefined}>
                     <button
                       type="button"
                       className={cls.join(" ")}
                       data-iso={iso}
                       tabIndex={isFocused ? 0 : -1}
-                      aria-selected={isSelected || undefined}
                       aria-label={dayLabel(day)}
                       onClick={() => onSelect(iso)}
                       onFocus={() => {

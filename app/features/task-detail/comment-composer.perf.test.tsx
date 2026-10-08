@@ -17,6 +17,10 @@ import { expectWithinBudget } from "../../../test-support/perf-ratchet";
 import { createRenderCounter, settle } from "../../../test-support/render-counter";
 import { $setParagraphPlainText } from "./lexical-mention-plugin";
 import { Timeline } from "./timeline";
+// The lazy editor's chunk, compiled while this file loads, where no deadline
+// runs: on a loaded machine the compile alone took seconds. The slot still
+// imports it on the press (mountComposer) and finds it ready.
+import "./comment-composer";
 
 /**
  * Ruling 457 (CS-7): what typing costs. The draft lives in a ref, so a plain
@@ -89,12 +93,17 @@ async function mountComposer() {
       <Stub initialEntries={["/t"]} />
     </Profiler>,
   );
-  fireEvent.pointerDown(view.container.querySelector(".composer-ce")!);
-  const host = await waitFor(() => {
-    const el = view.container.querySelector<LexicalHost>("[data-lexical-editor]");
-    if (!el) throw new Error("the editor has not replaced the stand-in yet");
-    return el;
+  // Ruling 457: the editor is lazy and every mount starts as its stand-in.
+  // Pressing it imports the editor's chunk; act() awaits that same import and
+  // commits the swap once it resolves, so no deadline races the host. Polled
+  // against waitFor's one-second deadline while Lexical compiled, the file's
+  // first test failed under a loaded suite.
+  await act(async () => {
+    fireEvent.pointerDown(view.container.querySelector(".composer-ce")!);
+    await import("./comment-composer");
   });
+  const host = view.container.querySelector<LexicalHost>("[data-lexical-editor]");
+  if (!host) throw new Error("the editor did not replace the stand-in");
   const editor = host.__lexicalEditor;
   const registrations = vi.spyOn(editor, "registerUpdateListener");
   counter.attach(view.container);

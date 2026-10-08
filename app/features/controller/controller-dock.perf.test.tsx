@@ -5,6 +5,10 @@ import type { ControllerDockView } from "./controller-dock-query.server";
 import { mountDock } from "../../../test-support/controller-dock-stub";
 import { expectWithinBudget } from "../../../test-support/perf-ratchet";
 import { FakeEventSource } from "../../../test-support/fake-event-source";
+// The open panel's chunk, compiled while this file loads, where no deadline
+// runs: on a loaded machine the compile alone took seconds. The dock still
+// imports it when it opens (openDock) and finds it ready.
+import "./controller-dock-panel";
 
 /**
  * Ruling 457, the controller journey: what the dock costs the page under it.
@@ -105,8 +109,23 @@ function dockRequests(m: { loads: URL[]; unseenLoads: URL[] }): number {
   return m.loads.length + m.unseenLoads.length;
 }
 
+/** Opens the dock with its body on screen. The open panel's body is its own
+ *  chunk (ruling 457, FL-1): act() awaits the import the click starts and
+ *  commits the body once it resolves, so no deadline races the host (inside
+ *  act, React reveals a resolved boundary at once, with no 300 ms throttle).
+ *  Polled against findBy's one-second deadline while the chunk compiled, the
+ *  send test met the "Loading…" stand-in, not the composer, under a loaded
+ *  suite. */
 async function openDock() {
-  fireEvent.click(await screen.findByRole("button", { name: /^Controller · / }));
+  // The stub's first navigation and the dock's mount loads are promise
+  // chains that act() runs to their end. Polled against findBy's one-second
+  // deadline instead, a loaded suite found the page still empty.
+  await settle();
+  const button = screen.getByRole("button", { name: /^Controller · / });
+  await act(async () => {
+    fireEvent.click(button);
+    await import("./controller-dock-panel");
+  });
   await screen.findByRole("dialog", { name: "Controller dock" });
   await settle();
 }
@@ -156,7 +175,7 @@ describe("one dock send (ruling 457, CTL-4)", () => {
       action: () => ({ ok: true, conversationId: "cnv_a" }),
     });
     await openDock();
-    const composer = await screen.findByLabelText<HTMLTextAreaElement>("Message to the controller");
+    const composer = screen.getByLabelText<HTMLTextAreaElement>("Message to the controller");
     await waitFor(() => expect(composer.disabled).toBe(false));
     const views = m.loads.length;
     const pages = m.pageLoads.length;
@@ -176,8 +195,9 @@ describe("a controller event on a page that shows no conversation (ruling 457, C
     vi.stubGlobal("EventSource", FakeEventSource);
     FakeEventSource.instances = [];
     const m = mountDock({ path: "/projects/viberr/board", view: viewFor, live: true });
-    await screen.findByText("board page");
+    // The first navigation, run to its end inside act() (see openDock).
     await settle();
+    expect(screen.getByText("board page")).toBeTruthy();
     const pages = m.pageLoads.length;
     const unseen = m.unseenLoads.length;
     act(() => {

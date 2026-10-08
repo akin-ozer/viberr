@@ -116,7 +116,7 @@ describe("revisionDriftNote — the completion record's suffix", () => {
  * Ruling 132: the classifier. Base commits are the ones the branch's own
  * compare does not list; a two-parent commit Viberr recorded is a clean merge;
  * everything else is authored. Fail-closed on any incomplete compare. Canary:
- * drop the `notOnBase` membership test (every base commit reads as authored).
+ * drop the `branchOwn` membership test (every base commit reads as authored).
  */
 describe("classifyRevisionDrift (ruling 132)", () => {
   const c = (fullSha: string, parents: string[] = ["p"]) => ({ fullSha, parents });

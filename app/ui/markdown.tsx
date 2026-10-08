@@ -26,6 +26,7 @@ import { Icon } from "./icon";
 const MarkdownInsideLink = createContext(false);
 import remarkGfm from "remark-gfm";
 import { findMentionSpans } from "./mention-spans";
+import { useCopied } from "./use-copied";
 
 /**
  * Real GFM markdown renderer for MULTI-LINE comment content (agent replies AND
@@ -333,7 +334,7 @@ const fenceProps = z.object({ className: z.string().optional(), children: z.stri
  * recognise renders as it came.
  */
 function MarkdownCodeBlock({ children }: { children?: ReactNode }) {
-  const [copied, setCopied] = useState(false);
+  const [copied, setCopied] = useCopied(false);
   const fence = isValidElement(children) ? fenceProps.safeParse(children.props) : null;
   if (!fence?.success) return <pre>{children}</pre>;
   const text = fence.data.children.replace(/\n$/, "");
@@ -343,7 +344,6 @@ function MarkdownCodeBlock({ children }: { children?: ReactNode }) {
     try {
       await navigator.clipboard.writeText(text);
       setCopied(true);
-      window.setTimeout(() => setCopied(false), 1400);
     } catch {
       // Clipboard denied: the code is on screen and selectable.
     }

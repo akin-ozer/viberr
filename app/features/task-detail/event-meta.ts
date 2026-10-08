@@ -63,7 +63,7 @@ const EVENT_META: EventMetaTable = {
 
 /**
  * UI-57: an UNKNOWN event type used to fall back to the comment meta, but
- * `timeline.tsx` renders the typed branch whenever `type !== "comment"` — so an
+ * `timeline-entry.tsx` renders the typed branch whenever `type !== "comment"` — so an
  * unrecognized type rendered a pill literally labelled "commented". A tolerant
  * renderer must stay tolerant AND honest: the fallback now names the raw type.
  */

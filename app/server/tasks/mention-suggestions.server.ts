@@ -67,10 +67,12 @@ export interface Mentionables {
 const ROLE_LABEL = {
   operator: "Operator",
   // F19-12: the picker subline is rendered copy, so it uses the SHIPPED
-  // vocabulary — "delivering agent" (execution-profile.tsx's "Assign delivering
-  // agent" / "Delivering agent" header). "Primary specialist" is retired
-  // vocabulary (D9/Q17-5, INTENT §6.5): the model is `engagements[]` with one
-  // `delivers: true`, and `@agent` resolves to exactly that engagement.
+  // vocabulary — "delivering agent" (the task page's "Runs as the delivering
+  // agent" posture line, execution-profile-derive.ts, and the Continuity
+  // recovery panel's "Delivering agent" role, continuity-loss.ts). "Primary
+  // specialist" is retired vocabulary (D9/Q17-5, INTENT §6.5): the model is
+  // `engagements[]` with one `delivers: true`, and `@agent` resolves to
+  // exactly that engagement.
   agent: "Delivering agent",
 } satisfies Record<RoleMentionHandle, string>;
 

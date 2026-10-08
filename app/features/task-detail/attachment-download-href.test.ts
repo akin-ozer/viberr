@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { attachmentDownloadHref } from "./attachment-lightbox";
+import { attachmentDownloadHref } from "./attachment-download-href";
 
 /**
  * D04-U11 (pass 32): the download URL's query flag is joined by ONE function

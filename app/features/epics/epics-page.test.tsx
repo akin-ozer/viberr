@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { afterEach, describe, expect, it } from "vitest";
-import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { createRoutesStub, useLoaderData, useLocation, useParams, type ActionFunction } from "react-router";
 import { ToastProvider } from "~/ui/toast";
 import type { EpicProgress, EpicSummary } from "~/server/projections/epic-query.server";
@@ -93,15 +93,22 @@ function renderEpics(
     ),
   };
   if (opts.action) page.action = opts.action;
+  // The root loader runs again after every post, as the app's loaders do: a
+  // test that must know an answer has landed waits on the count.
+  let rootLoads = 0;
   const Stub = createRoutesStub([
     {
       id: "root",
       path: "/",
-      loader: () => ({ csrf: "tok", theme: "system" }),
+      loader: () => {
+        rootLoads += 1;
+        return { csrf: "tok", theme: "system" };
+      },
       children: [page, { path: "projects/:slug/epics/:epicId", Component: EpicStandIn }],
     },
   ]);
-  return render(<Stub initialEntries={[`/projects/viberr-core/epics${opts.search ?? ""}`]} />);
+  render(<Stub initialEntries={[`/projects/viberr-core/epics${opts.search ?? ""}`]} />);
+  return { rootLoads: () => rootLoads };
 }
 
 /** The head's count line ("5 epics · 3 open"). The toast host is a status
@@ -377,8 +384,8 @@ describe("ruling 503(e): New epic, for manage-epics", () => {
     fireEvent.change(within(dialog).getByLabelText(/Name/), { target: { value: "Launch" } });
     fireEvent.change(within(dialog).getByLabelText("Lead"), { target: { value: "u_selin" } });
     fireEvent.click(within(dialog).getByRole("button", { name: "Create epic" }));
-    // CANARY: drop `onCreated` from EpicsPage's dialog and the page stays on
-    // the list after the epic is made.
+    // CANARY: drop the `navigate` from useCreateEpic's result handler and the
+    // page stays on the list after the epic is made.
     expect(await screen.findByText("Epic page for epic-7")).toBeTruthy();
     expect(posted).toEqual([
       {
@@ -392,6 +399,64 @@ describe("ruling 503(e): New epic, for manage-epics", () => {
         targetDate: "",
       },
     ]);
+  });
+});
+
+describe("ruling 700(c): each opening of New epic is a create of its own", () => {
+  /** Opens New epic, names the epic and presses Create epic. */
+  async function create(title: string): Promise<HTMLElement> {
+    fireEvent.click(await screen.findByRole("button", { name: "New epic" }));
+    const dialog = await screen.findByRole("dialog", { name: "New epic" });
+    fireEvent.change(within(dialog).getByLabelText(/Name/), { target: { value: title } });
+    fireEvent.click(within(dialog).getByRole("button", { name: "Create epic" }));
+    return dialog;
+  }
+
+  it("drops the answer to a create cancelled while it posted, and the next opening makes its own epic", async () => {
+    const posted: string[] = [];
+    let release = () => {};
+    const held = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const { rootLoads } = renderEpics({
+      epics: [epic()],
+      action: async ({ request }) => {
+        const title = String((await request.formData()).get("title"));
+        posted.push(title);
+        const id = `epic-${6 + posted.length}`;
+        // The first create answers only once its dialog has been cancelled.
+        if (posted.length === 1) await held;
+        return { ok: true, epicId: id, toast: `Created ${id} (${title}).` };
+      },
+    });
+    const first = await create("Launch");
+    await waitFor(() => expect(posted).toEqual(["Launch"]));
+    fireEvent.click(within(first).getByRole("button", { name: "Cancel" }));
+    expect(screen.queryByRole("dialog", { name: "New epic" })).toBeNull();
+    release();
+    // The answer has landed once the list has reloaded for it.
+    await waitFor(() => expect(rootLoads()).toBe(2));
+    // CANARY: key useCreateEpic's fetcher by a constant instead of the opening
+    // (or drop the key) and a cancelled create still opens its epic: the page
+    // leaves for epic-7, and the next opening, handed that made answer, posts
+    // nothing.
+    await create("Beta");
+    expect(await screen.findByText("Epic page for epic-8")).toBeTruthy();
+    expect(posted).toEqual(["Launch", "Beta"]);
+  });
+
+  it("opens again with the foot's own sentence, not the last opening's refusal", async () => {
+    renderEpics({ epics: [epic()], action: async () => ({ ok: false, error: "No such lead." }) });
+    const refused = await create("Launch");
+    // The refusal stays in the dialog's foot, beside the form it refuses.
+    expect((await within(refused).findByRole("alert")).textContent).toBe("No such lead.");
+    fireEvent.click(within(refused).getByRole("button", { name: "Cancel" }));
+    fireEvent.click(screen.getByRole("button", { name: "New epic" }));
+    const again = await screen.findByRole("dialog", { name: "New epic" });
+    // CANARY: key useCreateEpic's fetcher by a constant instead of the opening
+    // (or drop the key) and a reopened dialog shows the old refusal.
+    expect(within(again).queryByRole("alert")).toBeNull();
+    expect(within(again).getByText("The epic id is assigned automatically.")).toBeTruthy();
   });
 });
 

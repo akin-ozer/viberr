@@ -907,9 +907,9 @@ describe("F18-14: the govern/governance copy ban holds on every surface a human 
 const BANNED_DASH = /[–—]|\\u(?:201[34]|\{0*201[34]\})|&(?:[mn]dash|#821[12]|#x201[34]);/i;
 
 /**
- * Empty on purpose, same contract as CLASSLESS_BY_DESIGN: an entry here is a
- * dash a human reads, which is the exact defect this gate exists to catch. Do
- * NOT grow it to keep a red build green — reword the sentence instead.
+ * Empty on purpose: an entry here is a dash a human reads, which is the exact
+ * defect this gate exists to catch. Do NOT grow it to keep a red build green —
+ * reword the sentence instead.
  */
 const DASH_ALLOW: readonly string[] = [];
 

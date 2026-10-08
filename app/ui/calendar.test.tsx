@@ -1,7 +1,8 @@
 // @vitest-environment jsdom
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { cleanup, fireEvent, render } from "@testing-library/react";
-import { Calendar, fromISODate, toISODate } from "./calendar";
+import { Calendar } from "./calendar";
+import { fromISODate, toISODate } from "./iso-date";
 
 afterEach(cleanup);
 
@@ -38,7 +39,9 @@ describe("Calendar", () => {
     const sel = container.querySelector('.cal-day.sel[data-iso="2026-08-10"]');
     const today = container.querySelector('.cal-day.today[data-iso="2026-08-23"]');
     expect(sel).toBeTruthy();
-    expect(sel!.getAttribute("aria-selected")).toBe("true");
+    // On the gridcell, which supports it; a button ignores `aria-selected`.
+    expect(sel!.closest('[role="gridcell"]')!.getAttribute("aria-selected")).toBe("true");
+    expect(sel!.hasAttribute("aria-selected")).toBe(false);
     expect(today).toBeTruthy();
   });
 

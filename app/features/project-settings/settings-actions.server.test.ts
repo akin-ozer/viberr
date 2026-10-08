@@ -945,14 +945,23 @@ describe("changeProjectRepo — the one door that changes a project's repository
     );
     expect(noop.changed).toBe(false);
 
-    await expect(
-      changeProjectRepo(
-        store.db,
-        { projectSlug: store.slug, repo: "not a repo" },
-        admin(store),
-        { dataRoot: store.dataRoot },
-      ),
-    ).rejects.toMatchObject({ status: 400 });
+    // Ruling 700(a): `owner/..` is a name GitHub does not allow, and a
+    // checkout path built from it is the task directory itself. CANARY: go
+    // back to `normalizeRepoInput`'s own `[A-Za-z0-9._-]+` name and it reaches
+    // the probe, refused there only for want of a connection.
+    for (const repo of ["not a repo", "akin-ozer/.."]) {
+      await expect(
+        changeProjectRepo(
+          store.db,
+          { projectSlug: store.slug, repo },
+          admin(store),
+          { dataRoot: store.dataRoot },
+        ),
+      ).rejects.toMatchObject({
+        status: 400,
+        userMessage: "Enter the repository as owner/name (a pasted GitHub URL works too).",
+      });
+    }
   });
 });
 

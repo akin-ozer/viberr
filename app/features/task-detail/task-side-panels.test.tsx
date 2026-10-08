@@ -5,7 +5,7 @@ import { createRoutesStub, useLoaderData } from "react-router";
 import type { TaskDetail } from "~/server/projections/task-query.server";
 import type { AcceptanceAffordance } from "~/server/tasks/task-acceptance.server";
 import { ToastProvider } from "~/ui/toast";
-import { toISODate } from "~/ui/calendar";
+import { toISODate } from "~/ui/iso-date";
 import type { DependencyCandidatesView } from "~/routes/task-dependency-candidates";
 import { CurrentStatePanel } from "./task-side-panels";
 import { TaskDetailsPanel } from "./task-details-panel";

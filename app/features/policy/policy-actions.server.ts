@@ -84,7 +84,8 @@ function userName(db: DatabaseSync, userId: string): string {
 // ---------------------------------------------------------------- set role
 
 /**
- * updateMemberRole (policy spec §5.1). Live-role reads: permission checks
+ * Change one member's project role: the Policy page's `set-role` intent and
+ * the controller's `set_member_role`. Live-role reads: permission checks
  * always parse project.md, so the change is "enforced on the next action"
  * with no session-cached role anywhere.
  */
@@ -176,7 +177,8 @@ const LOCKED_BOUNDARY_MESSAGE =
   "Completion is human-authorized in V1, so this boundary can't be delegated";
 
 /**
- * updateTransitionBoundary (policy spec §5.2): validates the rule exists,
+ * Set who decides one workflow move: the Policy page's `set-boundary` intent
+ * and the controller's `set_transition_boundary`. Validates the rule exists,
  * hard-rejects locked rows (review→done) AND any non-human boundary into
  * the project's final stage, persists to project.md, reprojects, audits.
  * "Applies to future transitions" — in-flight requests are untouched.

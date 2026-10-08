@@ -500,7 +500,8 @@ describe("ruling 503(e): the board's epic filter", () => {
   ];
 
   it("shows one epic's tasks, and names the epic when it hides them all", () => {
-    // CANARY: drop `matchesEpicFilter` from the board's visible-task filter.
+    // CANARY: drop `matchesEpicFilter` from the board's visible-task filter
+    // (`visibleIn`, board-page-derive.ts).
     const { container } = renderBoard(three(), { search: "epic=epic-1", epics: EPICS });
     expect(subtitle(container)).toBe("1 of 3 tasks · 0 waiting on a human in this project");
     const select = container.querySelector<HTMLSelectElement>(".board-epic-filter select")!;
@@ -1138,9 +1139,10 @@ describe("F19-8: an archived card is inert and honest", () => {
   });
 
   it("every card wrapper names its card for the drag slot rule", () => {
-    // `laneBlocks` reads a lane's flow from the DOM and keys each block by this
-    // attribute; dnd-kit's placeholder clone inherits it, so the hole a lifted
-    // card leaves stands in the flow under the card's own key.
+    // `laneBlocks` (board-page-actions.tsx) reads a lane's flow from the DOM
+    // and keys each block by this attribute; dnd-kit's placeholder clone
+    // inherits it, so the hole a lifted card leaves stands in the flow under
+    // the card's own key.
     const { container } = renderBoard([task({ key: "VIB-1" }), task({ key: "VIB-2" })]);
     const wraps = [...container.querySelectorAll(".card-wrap")];
     expect(wraps.map((w) => w.getAttribute("data-card-key"))).toEqual(["VIB-1", "VIB-2"]);
@@ -1291,7 +1293,7 @@ describe("F19-27: the board confirm asks the server's own refusal questions", ()
   });
 
   it("ruling 135: names an unpushed delivered revision ABOVE the conflict, through the server's own predicate", () => {
-    // Canary: drop `unpushedRevisionBlockedReason` from `acceptanceCeremonyRefusal`.
+    // Canary: drop `unpushedRevisionBlockedReason` from `boardAcceptRefusal` (board-accept-confirm.tsx).
     const text = openConfirm({
       blockReason: null,
       workRevisionSha: "9".repeat(40),
@@ -1820,7 +1822,8 @@ describe("gap-10: the board says when a task has gone quiet", () => {
  * dialog". The board now renders the ONE shared `AcceptConfirm` in its
  * `stage-move` mode.
  *
- * Canary: point the call site back at a board-only dialog and every assertion
+ * Canary: point the call site (`AcceptOnBoardConfirm`,
+ * board-accept-confirm.tsx) back at a board-only dialog and every assertion
  * that reads a shared-ceremony row (the merge target, the delivered-revision
  * row, the `data-screen-label`) goes red.
  */
@@ -1870,7 +1873,8 @@ describe("D3: the board renders the shared acceptance ceremony", () => {
     // ruling 88 made the confirmed click echo that disclosure back, the server
     // refused the resulting `"none"` against any task that HAD delivered. The
     // summary carries the sha now (TaskSummary.workRevisionSha).
-    // CANARY: put `workRevisionSha={null}` back in AcceptOnBoardConfirm.
+    // CANARY: put `workRevisionSha={null}` back in AcceptOnBoardConfirm
+    // (board-accept-confirm.tsx).
     const text = openConfirm({ workRevisionSha: "a4c790ce63ef" + "0".repeat(28) })
       .container.querySelector("dialog")!
       .textContent!.replace(/\s+/g, " ");
@@ -1879,8 +1883,9 @@ describe("D3: the board renders the shared acceptance ceremony", () => {
   });
 
   it("ruling 471: a decision the move answers reads Answers, from the card the loader built", () => {
-    // CANARY: stop passing `answersWith` from AcceptOnBoardConfirm and this
-    // reads "Withdraws … closes unanswered".
+    // CANARY: stop passing `answersWith` from AcceptOnBoardConfirm
+    // (board-accept-confirm.tsx) and this reads "Withdraws … closes
+    // unanswered".
     const answered = openConfirm({
       packet: { type: "input", title: "Ready to accept?", acceptAnswersWith: "Accept VIB-1" },
     })
@@ -1893,7 +1898,8 @@ describe("D3: the board renders the shared acceptance ceremony", () => {
 
   it("ruling 475: names the other open PR on the board that shares a changed path, as the task page does", () => {
     // CANARY: stop passing `mergeCollisions` to the board's AcceptOnBoardConfirm
-    // and the board's door is silent where the task page's names the collision.
+    // (`useMoveConfirms`, board-page-actions.tsx) and the board's door is
+    // silent where the task page's names the collision.
     const r = renderBoard(
       [
         task({
@@ -1920,8 +1926,9 @@ describe("D3: the board renders the shared acceptance ceremony", () => {
     // F21-2: the board's ceremony was client architecture — the reorder POST
     // behind it carried nothing back from the dialog, so the server accepted
     // (and merged) a drop whose confirmation was never rendered. CANARY: drop
-    // the disclosure argument from `submitReorder` and the three ack fields
-    // vanish from the body while every other assertion here still passes.
+    // the disclosure argument from `submitReorder` (`useBoardMoves`,
+    // board-page-actions.tsx) and the three ack fields vanish from the body
+    // while every other assertion here still passes.
     const submitted: Record<string, string>[] = [];
     const r = renderBoard(
       [
@@ -1966,7 +1973,8 @@ describe("D3: the board renders the shared acceptance ceremony", () => {
     // whose live head was a real sha — the server compares the echo against the
     // task and refused it as stale, so a drop onto Done could never accept
     // delivered work (proved on the door in task-actions.server.test.ts).
-    // CANARY: put `workRevisionSha={null}` back in AcceptOnBoardConfirm.
+    // CANARY: put `workRevisionSha={null}` back in AcceptOnBoardConfirm
+    // (board-accept-confirm.tsx).
     const sha = "a4c790ce63ef" + "0".repeat(28);
     const submitted: Record<string, string>[] = [];
     const r = renderBoard(
@@ -2003,14 +2011,15 @@ describe("D3: the board renders the shared acceptance ceremony", () => {
   it("discloses a refusal without dead-ending the drop: the server still answers", async () => {
     // Ruling 162's interlock (a standing refusal disables the confirm) belongs
     // to the dialog quoting the refusal the SERVER re-decides. The board's is
-    // composed from a projection summary on purpose (`boardAcceptRefusal`,
-    // belt-and-braces so a stale row fails closed) and the board has no
-    // force-accept, so disabling it here turns the disclose-then-let-the-server
-    // -answer flow into a dialog with no way forward — and a stale row would
-    // block a move the server would take. The refusal is still disclosed.
+    // composed from a projection summary on purpose (`boardAcceptRefusal` in
+    // board-accept-confirm.tsx, belt-and-braces so a stale row fails closed)
+    // and the board has no force-accept, so disabling it here turns the
+    // disclose-then-let-the-server-answer flow into a dialog with no way
+    // forward — and a stale row would block a move the server would take. The
+    // refusal is still disclosed.
     // CANARY: drop `blockedReasonAuthoritative={false}` from
-    // AcceptOnBoardConfirm — the confirm renders disabled, the click does
-    // nothing and this POST never happens.
+    // AcceptOnBoardConfirm (board-accept-confirm.tsx) — the confirm renders
+    // disabled, the click does nothing and this POST never happens.
     const refusal = "Waiting on 1 required reviewer approval of the current revision.";
     const submitted: Record<string, string>[] = [];
     const r = renderBoard(
@@ -2054,8 +2063,9 @@ describe("D3: the board renders the shared acceptance ceremony", () => {
  * server's 409 on an off-boundary move). A polite `aria-live` region owned by
  * the board now speaks all three.
  *
- * Canary: delete `announceMove` / the effect's `setAnnounce` calls and these
- * outcome/request assertions go red.
+ * Canary: delete `announceMove` / the effect's `setAnnounce` calls
+ * (`useBoardMoves`, board-page-actions.tsx) and these outcome/request
+ * assertions go red.
  */
 describe("D9: the board announces moves to a screen reader", () => {
   // Scope to the board's own region — the ToastProvider host is also a polite

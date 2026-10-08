@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { REPO_SLUG_RE } from "~/shared/repo-ref";
 import { stageColorSchema } from "~/shared/workflow/stage-colors";
 import {
   diagError,
@@ -204,7 +205,8 @@ const projectSlugSchema = z.string().regex(/^[a-z0-9][a-z0-9-]*$/);
 const archivedSchema = z.boolean().optional();
 /** The project's GitHub repo ("owner/name"). One project, one repository —
  * P13-D-5 deleted the task-level override (nothing ever wrote `task.repo`
- * and the admin toggle gated nothing). */
+ * and the admin toggle gated nothing). Ruling 700(a): the parse below holds it
+ * to `REPO_SLUG_RE`, so no reader builds a checkout path from anything else. */
 const repoSchema = z.string().nullable();
 const defaultBranchSchema = z.string().min(1);
 /** Task key prefix ("VIB" → VIB-142). */
@@ -474,7 +476,22 @@ export function parseProjectFrontmatter(
     }),
     slug,
     archived: tolerant(diagnostics, data, "archived", archivedSchema, false),
-    repo: tolerant(diagnostics, data, "repo", repoSchema, null),
+    // Ruling 700(a): a repository outside the pattern reads as none (ruling
+    // 667's project with no repository), and as an error, so `store:check`
+    // lists the project among the degraded files and names the field. The
+    // pattern is applied here, not on `repoSchema`: the browser loads this
+    // module for its constants, and only the server parses project.md.
+    repo: tolerant(
+      diagnostics,
+      data,
+      "repo",
+      repoSchema.refine(
+        (repo) => repo === null || REPO_SLUG_RE.test(repo),
+        "not a GitHub owner/name, so the project reads as having no repository",
+      ),
+      null,
+      { severity: "error" },
+    ),
     defaultBranch: tolerant(
       diagnostics,
       data,

@@ -33,9 +33,11 @@ export const INLINE_TYPES = new Map<string, string>([
   [".csv", "text/plain; charset=utf-8"],
 ]);
 
-/** Extensions `readTaskAttachmentText` returns as text. The inline set above
- *  is about what a BROWSER may render on the app origin, a different
- *  question. */
+/** Extensions a reader always takes as text: `readTaskAttachment` never
+ *  treats one as binary (ruling 574 sniffs only the others), and
+ *  `savedFilesText` reads only these into a run's citation corpus. The inline
+ *  set above is about what a BROWSER may render on the app origin, a
+ *  different question. */
 export const READABLE_TEXT_EXTENSIONS = new Set([
   ".txt",
   ".log",

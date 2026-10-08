@@ -66,8 +66,9 @@ let store: TestStore;
 const BASE_SHA = "b".repeat(40);
 
 /** `GET /repos/{repo}/compare/{base}...{head}` as the probe consumes it —
- *  mirrors `GhCompare` in app/server/github/branch-sync.server.ts (private
- *  there, so the fixture restates it rather than guessing at it). */
+ *  mirrors the schema `ghCompareSchema` parses in
+ *  app/server/github/branch-sync.server.ts (private there, so the fixture
+ *  restates it rather than guessing at it). */
 interface CompareBody {
   ahead_by: number;
   behind_by: number;

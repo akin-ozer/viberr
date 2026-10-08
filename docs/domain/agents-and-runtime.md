@@ -1960,10 +1960,21 @@ runtime's answer for a missing grant.
   reported "unresolved"; an unhealthy row is still mounted but flagged; a credential that
   cannot be opened drops the server; stdio servers get a real discovery handshake, WITH
   the credential on both backends, before the run and are dropped (and marked
-  unreachable) on failure. A handshake that timed out on a visible install (a first-run
-  or `@latest` download) also starts the background install a Retest starts (ruling 606,
-  ruling 74's `startMcpWarmup`), so a later run finds the server installed; the run's
-  prompt says so.
+  unreachable) on failure. The handshakes start in mount order and run two at a time,
+  each with its own 20 s limit, and two mounts of one command never at once
+  (ruling 700(b)); each verdict is applied in mount order as soon as every earlier
+  server's is in, so for the same verdicts the mounts, the registry rows, the log lines
+  and the prompt read as a one-at-a-time check left them. Two things differ. A later
+  server's handshake can end while an earlier one is still running, and its failure is
+  written only once the earlier verdict is in, so a Retest pressed in between is
+  overwritten by the older failure, where a one-at-a-time check would only then have
+  started that handshake. And every credential is read before the first handshake
+  starts, so a credential re-seal that failed is logged before the verdicts, not among
+  them. A verdict whose registry write fails fails the run start and ends the check
+  there, as the one-at-a-time check did: nothing after it is applied, logged or spawned.
+  A handshake that timed out on a visible install (a first-run or `@latest` download)
+  also starts the background install a Retest starts (ruling 606, ruling 74's
+  `startMcpWarmup`), so a later run finds the server installed; the run's prompt says so.
   Every grant that produced no usable server is listed in the prompt with the reason its
   own probe returned and an instruction not to infer another cause
   (`unavailableMcpSection`, `specialist-mcp.server.ts`, shared by the specialist and

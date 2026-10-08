@@ -71,7 +71,8 @@ export interface DockRouteMatch {
 export function dockContextFromMatches(
   matches: readonly DockRouteMatch[],
   location: { pathname: string; search: string },
-  /** From `projectNameFrom(useRouteLoaderData("routes/project"))`. */
+  /** The project layout loader's `project.name`
+   *  (`useRouteLoaderData("routes/project")`, read in controller-dock.tsx). */
   projectName: string | null = null,
 ): DockContext {
   const hidden = matches.some((m) => DOCK_HIDDEN_ROUTE_IDS.includes(m.id));

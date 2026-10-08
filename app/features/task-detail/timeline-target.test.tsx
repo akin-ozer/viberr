@@ -87,18 +87,23 @@ describe("a link to a timeline event (ruling 497)", () => {
     );
   });
 
-  it("opens the filter tab that hid the event, once, and then leaves the tabs to the person", async () => {
-    // Event 2 is a comment; "Important events" shows typed events only.
-    const { container, getByRole } = renderAt(`/t#${anchorOf(2)}`, "typed");
-    await waitFor(() => expect(targeted(container)).toEqual([anchorOf(2)]));
-    expect(getByRole("button", { name: "All" }).getAttribute("aria-pressed")).toBe("true");
-    // CANARY: key the step on the target alone and this click is undone.
-    fireEvent.click(getByRole("button", { name: "Important events" }));
-    expect(getByRole("button", { name: "Important events" }).getAttribute("aria-pressed")).toBe(
-      "true",
-    );
-    expect(targeted(container)).toEqual([]);
-  });
+  it.each(["typed", "all"] as const)(
+    "opens All when the default tab hides the event, once, and then leaves the tabs to the person (default %s)",
+    async (tlDefault) => {
+      // Event 2 is a comment; "Important events" shows typed events only.
+      const { container, getByRole } = renderAt(`/t#${anchorOf(2)}`, tlDefault);
+      await waitFor(() => expect(targeted(container)).toEqual([anchorOf(2)]));
+      expect(getByRole("button", { name: "All" }).getAttribute("aria-pressed")).toBe("true");
+      // A click with no press before it (a screen reader's, voice control's)
+      // leaves the hash in the URL. CANARY: key the step on the target alone,
+      // or spend it only when it changes the tab, and this click is undone.
+      fireEvent.click(getByRole("button", { name: "Important events" }));
+      expect(getByRole("button", { name: "Important events" }).getAttribute("aria-pressed")).toBe(
+        "true",
+      );
+      expect(targeted(container)).toEqual([]);
+    },
+  );
 
   it("loads older events until the named one is among them, keeping the link", async () => {
     // Event 9 is past the first window (4) and the next (4 + 30 covers it).

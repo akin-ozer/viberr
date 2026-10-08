@@ -826,10 +826,14 @@ function checkedWriteTools(names: readonly string[]): string[] {
         `"${name.slice(0, 60)}" is not an MCP tool name. Use letters, digits, _, - and . only, up to 128 characters.`,
       );
     }
-    if (!out.includes(name)) out.push(name);
-  }
-  if (out.length > MCP_WRITE_TOOLS_MAX) {
-    throw AppError.validation(`Mark at most ${MCP_WRITE_TOOLS_MAX} write tools on one server.`);
+    if (out.includes(name)) continue;
+    out.push(name);
+    // Refused at the first name past the cap: `out` stays within it, so each
+    // `includes` scans at most that many names however long the list (a
+    // received board file's) runs.
+    if (out.length > MCP_WRITE_TOOLS_MAX) {
+      throw AppError.validation(`Mark at most ${MCP_WRITE_TOOLS_MAX} write tools on one server.`);
+    }
   }
   return out;
 }

@@ -1,6 +1,13 @@
-import { useEffect, useId, useRef, useState } from "react";
-import { MAX_LABEL_LENGTH, MAX_TASK_LABELS } from "~/schemas/task-file.schema";
+import { useEffect, useId, useRef, useState, type RefObject } from "react";
+import { MAX_TASK_LABELS } from "~/schemas/task-file.schema";
 import { Icon } from "./icon";
+import {
+  foldLabels,
+  hasLabel,
+  labelRows,
+  normalizeLabel,
+  type LabelRow,
+} from "./label-input-derive";
 import { useDismiss } from "./use-dismiss";
 
 /**
@@ -29,10 +36,8 @@ import { useDismiss } from "./use-dismiss";
  *  it lands on; or the drop of a drag it started, which sends no click. */
 const PRESS_ENDS = ["click", "dragend"] as const;
 
-type Row =
-  | { kind: "selected"; value: string }
-  | { kind: "suggest"; value: string }
-  | { kind: "create"; value: string };
+const LIST_ID = "label-select-list";
+const rowId = (i: number) => `label-row-${i}`;
 
 export function LabelInput({
   value,
@@ -52,16 +57,7 @@ export function LabelInput({
   const listRef = useRef<HTMLUListElement>(null);
   const wrapRef = useDismiss<HTMLDivElement>(open, () => setOpen(false));
 
-  const normalize = (raw: string) => raw.trim().replace(/\s+/g, " ").slice(0, MAX_LABEL_LENGTH);
-  const has = (label: string) =>
-    value.some((l) => l.toLowerCase() === label.toLowerCase());
-
-  // Rows offered right now: the chosen labels pinned to the top (always shown, so
-  // any of them can be unchecked), then the project's other labels filtered by
-  // the query, then a "Create" row for genuinely-new typed text. Nothing can be
-  // ADDED once the set is full, but the chosen rows stay so labels can be removed.
-  const query = normalize(buffer);
-  const q = query.toLowerCase();
+  const query = normalizeLabel(buffer);
   const room = value.length < MAX_TASK_LABELS;
   // Interface review 2026-09-24 (writ-8): at the cap the refusal was a
   // screen-reader-only status and the typed label was cleared anyway, so a
@@ -70,19 +66,7 @@ export function LabelInput({
   // the field.
   const capNote = `A task can have at most ${MAX_TASK_LABELS} labels. Remove one to add another.`;
   const capNoteId = useId();
-  const suggestRows: Row[] = room
-    ? suggestions
-        .filter((s) => !has(s) && (q === "" || s.toLowerCase().includes(q)))
-        .map((s): Row => ({ kind: "suggest", value: s }))
-    : [];
-  const canCreate =
-    room &&
-    query !== "" &&
-    !has(query) &&
-    !suggestions.some((s) => s.toLowerCase() === q);
-  const rows: Row[] = value.map((v): Row => ({ kind: "selected", value: v }));
-  rows.push(...suggestRows);
-  if (canCreate) rows.push({ kind: "create", value: query });
+  const rows = labelRows(value, suggestions, query, room);
   const showList = open && rows.length > 0;
   // `active` can dangle when rows shrink under it; treat out-of-range as none.
   const activeRow = active >= 0 && active < rows.length ? active : -1;
@@ -96,37 +80,9 @@ export function LabelInput({
     if (showList) listRef.current?.scrollIntoView?.({ block: "nearest" });
   }, [showList]);
 
-  // Ruling 561: a press that takes the focus out of the field lands on what it
-  // pressed. The press folds the list (useDismiss, the blur) and commits a
-  // half-typed label as it begins, and with the list went its height: the
-  // Details editor's Save rose 128 px between the press and the release, so
-  // the release landed on no button and the browser sent no click. While a
-  // press outside is under way the combo keeps the height it had, and lets
-  // go at the press's click. Listening only while the list is shown or a
-  // label is half typed: nothing else here moves.
-  const shifts = showList || query !== "";
-  useEffect(() => {
-    const combo = wrapRef.current;
-    if (!shifts || !combo) return;
-    const onPress = (event: MouseEvent) => {
-      const target = event.target;
-      // The inline height is the hold: one press at a time.
-      if (event.button !== 0 || combo.style.height || !(target instanceof Element)) return;
-      // A select opens its menu on the press itself, and the menu takes the
-      // release: held, the combo would let go under an open menu, or never.
-      if (combo.contains(target) || target.closest("select")) return;
-      combo.style.height = `${combo.getBoundingClientRect().height}px`;
-      const end = () => {
-        for (const type of PRESS_ENDS) window.removeEventListener(type, end, true);
-        combo.style.height = "";
-      };
-      for (const type of PRESS_ENDS) window.addEventListener(type, end, true);
-    };
-    // Capture on the window, so the height is taken before anything this
-    // press sets off.
-    window.addEventListener("mousedown", onPress, true);
-    return () => window.removeEventListener("mousedown", onPress, true);
-  }, [shifts, wrapRef]);
+  // Ruling 561: listening only while the list is shown or a label is half
+  // typed: nothing else here moves.
+  usePressHold(wrapRef, showList || query !== "");
 
   const announce = (next: string[], verb: "Added" | "Removed", label: string) => {
     setStatus(`${verb} label ${label}, ${next.length} of ${MAX_TASK_LABELS}`);
@@ -135,9 +91,9 @@ export function LabelInput({
   /** False only when the cap refused the label — the caller then keeps the
    *  typed text. A duplicate is already there as a chip, so it clears. */
   const addLabel = (raw: string): boolean => {
-    const label = normalize(raw);
+    const label = normalizeLabel(raw);
     if (!label) return true;
-    if (has(label)) {
+    if (hasLabel(value, label)) {
       setStatus("That label is already added");
       return true;
     }
@@ -155,24 +111,7 @@ export function LabelInput({
    *  multi-item paste/comma-list doesn't stale-closure-overwrite itself.
    *  Returns the raw strings the cap refused, for the caller to keep. */
   const addLabels = (raws: readonly string[]): string[] => {
-    let next = value;
-    let added = 0;
-    let dup = false;
-    let refused: string[] = [];
-    for (const [i, raw] of raws.entries()) {
-      const label = normalize(raw);
-      if (!label) continue;
-      if (next.length >= MAX_TASK_LABELS) {
-        refused = raws.slice(i);
-        break;
-      }
-      if (next.some((l) => l.toLowerCase() === label.toLowerCase())) {
-        dup = true;
-        continue;
-      }
-      next = [...next, label];
-      added += 1;
-    }
+    const { next, added, dup, refused } = foldLabels(value, raws);
     if (added > 0) {
       onChange(next);
       // Inline plural, not `countLabel`: ruling 457 (shared/text/plural.ts).
@@ -256,9 +195,6 @@ export function LabelInput({
     }
   };
 
-  const listId = "label-select-list";
-  const rowId = (i: number) => `label-row-${i}`;
-
   return (
     <div className="label-combo" ref={wrapRef}>
       <div
@@ -284,7 +220,7 @@ export function LabelInput({
           className="label-input-field"
           role="combobox"
           aria-expanded={showList}
-          aria-controls={listId}
+          aria-controls={LIST_ID}
           aria-autocomplete="list"
           aria-activedescendant={activeRow >= 0 ? rowId(activeRow) : undefined}
           value={buffer}
@@ -317,55 +253,117 @@ export function LabelInput({
         </p>
       )}
       {showList && (
-        <ul
-          ref={listRef}
-          className="label-select"
-          id={listId}
-          role="listbox"
-          aria-multiselectable="true"
-        >
-          {rows.map((row, i) => (
-            <li
-              // Key by value (stable across a suggest<->selected transition) so a
-              // toggled row is REORDERED, not unmounted — otherwise React detaches
-              // it mid-click and the outside-press guard (which then sees a
-              // detached target) would wrongly close the list.
-              key={row.value}
-              id={rowId(i)}
-              role="option"
-              aria-selected={row.kind === "selected"}
-              className={"label-opt" + (row.kind === "create" ? " create" : "")}
-              data-active={i === activeRow}
-              // mousedown, not click: fire before the input's blur so focus is
-              // never lost (preventDefault keeps it) and the list stays open.
-              // stopPropagation so the press never reaches useDismiss's
-              // document-level listener — adding a label re-renders the list, and
-              // a detached target there reads as "outside" and dismisses.
-              onMouseDown={(e) => {
-                e.preventDefault();
-                e.stopPropagation();
-                toggleRow(i);
-              }}
-              onMouseEnter={() => setActive(i)}
-            >
-              {row.kind === "create" ? (
-                <span className="lc-plus">
-                  <Icon name="plus" />
-                </span>
-              ) : (
-                <span className="lc-check" data-checked={row.kind === "selected"}>
-                  <Icon name="check" />
-                </span>
-              )}
-              <span className="label-opt-name">{row.value}</span>
-              {row.kind === "create" && <span className="label-opt-hint">create</span>}
-            </li>
-          ))}
-        </ul>
+        <LabelOptions
+          rows={rows}
+          activeRow={activeRow}
+          listRef={listRef}
+          onToggle={toggleRow}
+          onHover={setActive}
+        />
       )}
       <span className="vh" role="status" aria-live="polite">
         {status}
       </span>
     </div>
+  );
+}
+
+/**
+ * Ruling 561: a press that takes the focus out of the field lands on what it
+ * pressed. The press folds the list (useDismiss, the blur) and commits a
+ * half-typed label as it begins, and with the list went its height: the
+ * Details editor's Save rose 128 px between the press and the release, so
+ * the release landed on no button and the browser sent no click. While a
+ * press outside is under way the combo keeps the height it had, and lets
+ * go at the press's click. `shifts`: the list is shown or a label is half
+ * typed. (Ruling 700(e), the split of `LabelInput`: its effect, unchanged,
+ * called where it always ran.)
+ */
+function usePressHold(wrapRef: RefObject<HTMLDivElement | null>, shifts: boolean) {
+  useEffect(() => {
+    const combo = wrapRef.current;
+    if (!shifts || !combo) return;
+    const onPress = (event: MouseEvent) => {
+      const target = event.target;
+      // The inline height is the hold: one press at a time.
+      if (event.button !== 0 || combo.style.height || !(target instanceof Element)) return;
+      // A select opens its menu on the press itself, and the menu takes the
+      // release: held, the combo would let go under an open menu, or never.
+      if (combo.contains(target) || target.closest("select")) return;
+      combo.style.height = `${combo.getBoundingClientRect().height}px`;
+      const end = () => {
+        for (const type of PRESS_ENDS) window.removeEventListener(type, end, true);
+        combo.style.height = "";
+      };
+      for (const type of PRESS_ENDS) window.addEventListener(type, end, true);
+    };
+    // Capture on the window, so the height is taken before anything this
+    // press sets off.
+    window.addEventListener("mousedown", onPress, true);
+    return () => window.removeEventListener("mousedown", onPress, true);
+  }, [shifts, wrapRef]);
+}
+
+/** The open checkbox list (ruling 700(e), the split of `LabelInput`:
+ *  hook-free, in the slot its `showList &&` held). */
+function LabelOptions({
+  rows,
+  activeRow,
+  listRef,
+  onToggle,
+  onHover,
+}: {
+  rows: LabelRow[];
+  activeRow: number;
+  listRef: RefObject<HTMLUListElement | null>;
+  onToggle: (index: number) => void;
+  onHover: (index: number) => void;
+}) {
+  return (
+    <ul
+      ref={listRef}
+      className="label-select"
+      id={LIST_ID}
+      role="listbox"
+      aria-multiselectable="true"
+    >
+      {rows.map((row, i) => (
+        <li
+          // Key by value (stable across a suggest<->selected transition) so a
+          // toggled row is REORDERED, not unmounted — otherwise React detaches
+          // it mid-click and the outside-press guard (which then sees a
+          // detached target) would wrongly close the list.
+          key={row.value}
+          id={rowId(i)}
+          role="option"
+          aria-selected={row.kind === "selected"}
+          className={"label-opt" + (row.kind === "create" ? " create" : "")}
+          data-active={i === activeRow}
+          // mousedown, not click: fire before the input's blur so focus is
+          // never lost (preventDefault keeps it) and the list stays open.
+          // stopPropagation so the press never reaches useDismiss's
+          // document-level listener — adding a label re-renders the list, and
+          // a detached target there reads as "outside" and dismisses.
+          onMouseDown={(e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            onToggle(i);
+          }}
+          onMouseEnter={() => onHover(i)}
+        >
+          {row.kind === "create" ? (
+            <span className="lc-plus">
+              <Icon name="plus" />
+            </span>
+          ) : (
+            <span className="lc-check" data-checked={row.kind === "selected"}>
+              <Icon name="check" />
+            </span>
+          )}
+          <span className="label-opt-name">{row.value}</span>
+          {row.kind === "create" && <span className="label-opt-hint">create</span>}
+        </li>
+      ))}
+    </ul>
   );
 }

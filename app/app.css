@@ -369,7 +369,7 @@ svg.ico { width: 16px; height: 16px; flex: none; }
 
    The design system shipped without a select rule, so four ad-hoc ones grew:
    `.op-sel`, the (since removed) schedule form's select, `.fm-toolbar select`, plus an inline
-   `selectStyle` in create-profile-modal.tsx that says so in a comment. This is
+   `selectStyle` in create-profile-modal.tsx whose comment said so. This is
    the missing base, and it deliberately mirrors `.field input` — same border
    token, same radius, same surface, same focus ring — so a select reads as a
    sibling of the app's inputs rather than as OS chrome.
@@ -1976,7 +1976,7 @@ button.kbd:hover { border-color: var(--border); color: var(--fg); }
 /* Ruling 169: the hero's stage and status are labelled fields (the Current
    state panel's own row keys), so a stage NAMED Ready can no longer be read as
    a status word beside "blocked". The label is the house field label
-   (.rs-lbl / .res-group .lbl): .69rem caps on --faint (ruling 625). */
+   (.flabel / .res-group .lbl): .69rem caps on --faint (ruling 625). */
 /* Ruling 666: a field gives way before the column does. Without `min-width: 0`
    the Epic field kept the whole width of its epic's name (the chip inside can
    only shorten once its parent may), and a long name made the task page scroll
@@ -3176,7 +3176,10 @@ dialog[data-closing]::backdrop {
 .field input[aria-invalid="true"], .field textarea[aria-invalid="true"] { border-color: var(--coral-dark); }
 /* Ruling 108: a read-only field (the deployment-locked controller doctrine)
    must READ read-only — muted fill, resting border on focus, no blue ring, no
-   resize grip. The only read-only field in the app, so this rule is its. */
+   resize grip. Any read-only `.field` control takes it, as the store browser's
+   file name does while its document saves; that document's text sits outside
+   `.field`, so the card keeps its resting edge and the text takes the muted
+   ink on its own (`.fm-doc`, `.doc-src[readonly]`). */
 .field textarea[readonly], .field input[readonly] {
   background: var(--tint-well); color: var(--muted); cursor: default; resize: none;
 }
@@ -5516,9 +5519,9 @@ body:has(.login-wrap), body:has(.home), body:has(.home-shell) { overflow: auto; 
   padding: 0 1.5rem;
 }
 
-/* search width + right-cluster geometry match the workspace topbar (viberr.css .top-search) */
+/* search width + right-cluster geometry match the workspace topbar (`.top-search`, above) */
 
-/* moved to viberr.css: .ntf-pop (shared by Home + workspace) */
+/* `.ntf-pop` is defined once, above (shared by Home + workspace) */
 
 /* ---------- Shell ---------- */
 .home-shell {
@@ -6875,11 +6878,13 @@ a.card:active { transform: scale(.99); }
   .detail-side > * { flex: 1 1 280px; min-width: min(280px, 100%); max-width: 100%; }
   .kv-row { flex-wrap: wrap; }
   .kv-row .v { min-width: 0; flex-wrap: wrap; overflow-wrap: anywhere; }
-  /* agents: the profile rail becomes a horizontal strip. The group labels ride
-     along rather than hide: `.ag-group-label.ag-group-row` is not only a label,
-     it CONTAINS the `New specialist profile` button (agents-page.tsx), and
+  /* agents: the profile rail becomes a horizontal strip. The list's own
+     controls ride along in it rather than hide: the dashed `.ag-newbtn` rows,
+     `New agent profile` and `Add from library · N` (agents-page.tsx), and
      R19-12's contract is that no control is hidden at any width. The gate in
-     `app.css.test.ts` fails if a width query ever hides it again. */
+     `app.css.test.ts` fails if a width query ever hides one. (The group label
+     held a "+" button of its own until the 2026-09-08 design pass; it is a
+     plain label now.) */
   .agents-layout { grid-template-columns: 1fr; }
   /* Ruling 625 (d-controller #15): the strip wraps instead of scrolling, so
      no card and neither button sits off-screen (1032px of strip in a 744px
@@ -8342,7 +8347,7 @@ body[data-rail-open="true"] .dock { visibility: hidden; transition: none; }
 
 /* ============================= Ruling 127 hosted sign-in steps =============================
    Profile → Agent accounts while a vendor sign-in is running
-   (agent-accounts-panel.tsx, `SignInSteps`). It used to be three `.kv-row`s,
+   (agent-sign-in-steps.tsx, `SignInSteps`). It used to be three `.kv-row`s,
    a read-out idiom for FACTS, holding a procedure: the vendor's full OAuth
    URL printed inline (a few hundred unbreakable characters) crushed the row
    labels to one word per line and ran off the card, and a bare `<input>`
@@ -9967,8 +9972,10 @@ a.pr-branch:hover { background: var(--tint-hover); }
 /* In Raw the card is the field, as the controller composer is (owner,
    2026-09-25: a square ring inside a rounded frame, and a resize grip, read
    as unfinished). The textarea draws no frame or ring of its own; the card
-   takes the field's blue edge and wash, and the ring on its own edge. */
-.fm-doc:has(.doc-src:focus) { border-color: var(--blue); box-shadow: 0 0 0 3px var(--focus-wash); }
+   takes the field's blue edge and wash, and the ring on its own edge. While a
+   save holds the text read-only the card keeps its resting edge, as a
+   read-only field keeps its resting border; the ring still paints (acce-4). */
+.fm-doc:has(.doc-src:focus:not([readonly])) { border-color: var(--blue); box-shadow: 0 0 0 3px var(--focus-wash); }
 .fm-doc:has(.doc-src:focus-visible) { outline: 2px solid var(--blue); outline-offset: -1px; }
 .doc-head {
   display: flex; align-items: center; flex-wrap: wrap; gap: .5rem .75rem;
@@ -10025,6 +10032,9 @@ a.pr-branch:hover { background: var(--tint-hover); }
   font-family: var(--font-mono); font-size: .75rem; line-height: 1.7;
   tab-size: 4;
 }
+/* Read-only while its save is in flight: the muted ink a read-only field
+   takes, so the locked text does not read as one that takes typing. */
+.doc-src[readonly] { color: var(--muted); }
 .doc-blank {
   display: flex; align-items: center; justify-content: center; gap: .5rem;
   min-height: 12rem; margin: 0; padding: 1.5rem;

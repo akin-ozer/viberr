@@ -110,8 +110,8 @@ describe("ruling 672: the repository question's card", () => {
   });
 
   it("is a project admin's to answer: both answers are inert for anyone else, and the card says who answers once", () => {
-    // CANARY: drop either row from PACKET_TIER_GATES and a maintainer is
-    // handed a Confirm the server refuses. Ruling 673: put a clause or a
+    // CANARY: drop either row from PACKET_TIER_GATES (decision-packet-derive.ts)
+    // and a maintainer is handed a Confirm the server refuses. Ruling 673: put a clause or a
     // hover title back on each answer, or print the selected one's refusal
     // beside the note, and the card names a project admin again and again;
     // drop `aria-describedby` and a screen reader on a dimmed answer hears no

@@ -1163,7 +1163,8 @@ describe("CreateProfileModal", () => {
     });
     // Catalog defaults seed the caps record.
     expect(payload.caps["merge-pull-request"]).toBe("human");
-    // A fresh profile starts with NO resources pre-granted (RES_DEFAULTS empty).
+    // A fresh profile starts with NO resources pre-granted (the mock's
+    // RES_DEFAULTS pre-checks are gone; see capability-catalog.ts).
     expect(payload.resources.skills).toEqual([]);
     expect(container.querySelector(".cap-matrix")).not.toBeNull();
   });

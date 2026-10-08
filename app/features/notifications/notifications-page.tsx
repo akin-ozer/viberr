@@ -7,6 +7,8 @@ import { daySections } from "~/shared/dates/day-sections";
 import { formatClock, formatClockUTC } from "~/shared/dates/format";
 import { ntfMeta, ntfPill, plainText } from "./notification-meta";
 import {
+  needsYouCountTail,
+  needsYouEmptyText,
   needsYouTime,
   needsYouTimeUTC,
   splitNotifications,
@@ -66,10 +68,6 @@ function NtfNeedsYou({
   const local = useHydrated();
   const hiddenByFilter = total - items.length;
   const onTaskPages = Math.max(0, decisionCount - total);
-  const subParts = [
-    hiddenByFilter > 0 ? `${hiddenByFilter} hidden by the filter` : null,
-    onTaskPages > 0 ? `${onTaskPages} on their task pages` : null,
-  ].filter(Boolean);
   return (
     <div className="panel">
       <div className="panel-head">
@@ -81,7 +79,7 @@ function NtfNeedsYou({
               tally, which misses decisions whose watcher set predates a later
               promotion or fall past the row window. */}
           {decisionCount} decision{decisionCount === 1 ? "" : "s"}
-          {subParts.length > 0 ? ` · ${subParts.join(" · ")}` : ""}
+          {needsYouCountTail(hiddenByFilter, onTaskPages)}
         </span>
       </div>
       <div className="rq-list ntf-wait">
@@ -135,11 +133,7 @@ function NtfNeedsYou({
         })}
         {!items.length && (
           <div className="empty">
-            {decisionCount === 0
-              ? "Nothing is waiting on you."
-              : hiddenByFilter > 0
-                ? `${decisionCount} decision${decisionCount === 1 ? " is" : "s are"} waiting on you. Switch to "All" to see ${decisionCount === 1 ? "it" : "them"}.`
-                : `${decisionCount} decision${decisionCount === 1 ? " is" : "s are"} waiting on you. Open ${decisionCount === 1 ? "it" : "them"} from the board or the task page.`}
+            {needsYouEmptyText(decisionCount, hiddenByFilter)}
           </div>
         )}
       </div>

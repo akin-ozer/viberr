@@ -5,9 +5,11 @@ import { createTestDbContext } from "../../../test-support/test-db";
 import {
   baseTaskFrontmatter,
   setupTestStore,
+  writeProject,
   writeTask,
 } from "../../../test-support/test-store";
 import { rescanProjections } from "../projections/rescan.server";
+import { readProjectFile } from "./project-writer.server";
 import { checkStore, untrustedFileReport } from "./store-check.server";
 
 /**
@@ -195,6 +197,31 @@ describe("checkStore", () => {
     const broken = report.untrusted.find((f) => f.kind === "epic");
     expect(broken?.blocking.map((d) => d.message)).toContain(
       "id: the file is named epic-2 but says it is epic-1.",
+    );
+  });
+
+  /**
+   * Ruling 700(a): a project.md `repo` GitHub could not name reads as no
+   * repository. The file stays trusted, so the error diagnostic is what tells
+   * an admin why the repository went, and the degraded listing is where they
+   * read it.
+   */
+  it("lists a project whose repo reads as none among the files parsed with errors", () => {
+    // CANARY: drop the degraded block from `renderCheckReport`, or keep only
+    // task files in `degraded`, and this store reads as parsed cleanly.
+    const store = setupTestStore(ctx);
+    const file = readProjectFile({ projectSlug: store.slug, dataRoot: store.dataRoot })!;
+    writeProject(
+      store.dataRoot,
+      { ...file.parsed.frontmatter, repo: "akin-ozer/.." },
+      file.parsed.description,
+    );
+
+    const report = checkStore({ dataRoot: store.dataRoot });
+    expect(report.untrusted).toEqual([]);
+    expect(report.degraded.map((f) => f.path)).toEqual([`projects/${store.slug}/project.md`]);
+    expect(report.text).toContain(
+      "frontmatter.invalid_field: Frontmatter field `repo` is invalid",
     );
   });
 

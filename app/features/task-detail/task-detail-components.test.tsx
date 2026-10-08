@@ -1471,7 +1471,8 @@ describe("ExecutionProfile — 'operator active' pill honesty (F7-UI1)", () => {
     // Live: the Code Reviewer (scoped to Agent Review) was listed as runnable
     // on an Intake task with "Runs as the delivering agent: it owns the branch
     // and PR."; the server refused after the click. Canary: delete the
-    // `ineligible` computation in AgentRunControl.
+    // `ineligible` computation in `agentDispatch`, or make `stageRefusal`
+    // return null (both in execution-profile-derive.ts).
     const scoped: DeployedSpecialistView[] = [
       { ...deployedFixture[1]!, stages: ["review"], spanAll: false },
     ];
@@ -1993,7 +1994,8 @@ describe("GithubTrace — project gates (ruling 482)", () => {
   };
 
   it("prints the server's line, each gate's outcome and a link to its log, and runs them again on a click", () => {
-    // CANARY: drop `<GatesRow>` from GithubTrace.
+    // CANARY: drop `<GatesRow>` from the PR card's status rows
+    // (`prCardSignalRows` in task-side-panels.tsx).
     const onRunGates = vi.fn();
     const { container, getByRole, getByText } = render(
       <MemoryRouter>
@@ -2359,8 +2361,9 @@ describe("GithubTrace — admin force-accept (DG-2)", () => {
 
   it("ruling 665: a task delivered as files says it has no branch, and its delivered files are work to accept", () => {
     // CANARY: drop `filesDelivery === "delivered"` from `wedgedOrDelivering`
-    // and a files-delivered task that review has stalled on loses the admin's
-    // way out along with the branch it no longer has.
+    // (`forceAcceptReason` in task-side-panels-derive.ts) and a
+    // files-delivered task that review has stalled on loses the admin's way
+    // out along with the branch it no longer has.
     const view = (filesDelivery: "expected" | "delivered") =>
       render(
         <MemoryRouter>
@@ -2501,7 +2504,7 @@ describe("GithubTrace — admin force-accept (DG-2)", () => {
  * DG-3 stays. This component owns the NAME of the number it renders — and, since
  * `checkedAt` was wired through the loader, the second fact beside it: the
  * per-tick `github.reconcile.task` audit row, which is written after every early
- * return in `reconcileTaskExclusive` and is therefore the app's only evidence
+ * return in `reconcileTaskUnlocked` and is therefore the app's only evidence
  * that a pass ran at all. `server/audit/audit-query.server.test.ts` proves the
  * two clocks diverge against the real reconciler; these pin what the human sees.
  */
@@ -2947,6 +2950,142 @@ describe("UI-42/UI-44: the decision packet", () => {
     expect(tabbable).toHaveLength(1);
     expect(tabbable[0]!.getAttribute("aria-checked")).toBe("true");
   });
+
+  /**
+   * UI-42 / F20-17 under UI-44: an inert option (`aria-disabled`, its reason
+   * in its description) ignores a click, and the arrows and digits used to
+   * check it anyway: a viewer's ArrowDown walked the selection across options
+   * that are all inert on a card with no Confirm, and a contributor-owner's
+   * digit chose an archive their role cannot carry out. The keyboard now
+   * passes an inert option by, as a disabled radio is in the APG radio group,
+   * and does nothing when every option is inert. With nothing chosen, the
+   * group's one tab stop is the first choice the viewer can make, and a
+   * refused Confirm focuses it (ruling 478(e)); an arrow that finds no other
+   * choice keeps a standing refusal (ruling 147). `accept_completion` carries
+   * no option-level gate, so a click and a key both still choose it and only
+   * Confirm refuses.
+   *
+   * CANARY: drop the `blockedOptions` check from `move` (arrows) or from the
+   * digit handler in `PacketOptions` and a key checks an option a click
+   * cannot; drop `move`'s trailing `if (blockedOptions[next]) return` and the
+   * viewer's arrows check an option on the agent's question; enter `move` at
+   * the end itself rather than past it and ArrowUp from nothing skips the
+   * directive; skip on `gateFor` alone and the third row cannot reach
+   * accept_completion, which a click can; put `tabStop` on option 0 whatever
+   * it is and the last two rows' tab stop and refusal focus land on an
+   * archive; let `selectOption` count the checked choice chosen again as a
+   * change and the last row's refusal goes on the arrow that lands back on it.
+   */
+  it.each<{
+    name: string;
+    packet: PacketRender;
+    viewer: Pick<
+      ComponentProps<typeof DecisionPacket>,
+      "canResolve" | "canResolveCompletion" | "canArchive"
+    >;
+    /** The radio checked as the card opens (-1: none), and the tab stop while
+     *  none is. */
+    opens: [checked: number, openStop: number];
+    /** Each key, or a press of Confirm, then the radio checked and whether a
+     *  refusal stands. */
+    steps: [key: string, checked: number, refused?: boolean][];
+  }>([
+    {
+      name: "a viewer who cannot resolve: every option is inert, so keys do nothing",
+      packet: packet142,
+      viewer: { canResolve: false, canResolveCompletion: false, canArchive: false },
+      opens: [0, 0],
+      steps: [["ArrowDown", 0], ["2", 0], ["ArrowUp", 0], ["3", 0]],
+    },
+    {
+      name: "a contributor-owner without canArchive: both archive options are passed by",
+      packet: recoveryPacket,
+      viewer: { canResolve: true, canResolveCompletion: true, canArchive: false },
+      opens: [0, 0],
+      steps: [["2", 0], ["3", 0], ["ArrowDown", 3], ["ArrowUp", 0], ["4", 3]],
+    },
+    {
+      name: "accept_completion without its grant stays choosable, as its click is",
+      packet: packet142,
+      viewer: { canResolve: true, canResolveCompletion: false, canArchive: true },
+      opens: [0, 0],
+      steps: [["2", 1], ["1", 0], ["ArrowUp", 3], ["ArrowDown", 0]],
+    },
+    {
+      name: "a viewer on an agent's question, where nothing is chosen: keys still check nothing",
+      packet: {
+        ...packet142,
+        kind: "Agent question",
+        from: "Developer",
+        answerTo: "Developer",
+        options: [
+          { kind: "custom", t: "Ship it as is", d: "", rec: true },
+          { kind: "custom", t: "Hold for the policy", d: "", rec: false },
+        ],
+      },
+      viewer: { canResolve: false, canResolveCompletion: false, canArchive: false },
+      opens: [-1, 0],
+      steps: [["ArrowDown", -1], ["ArrowUp", -1], ["2", -1]],
+    },
+    {
+      name: "nothing chosen and option 0 inert: the tab stop is the open option, and ArrowUp enters at the directive",
+      packet: {
+        ...recoveryPacket,
+        options: [
+          { kind: "archive_task", t: "Archive the task", d: "Keeps the branch.", rec: false },
+          { kind: "custom", t: "Rework and re-run the Developer", d: "", rec: false },
+        ],
+      },
+      viewer: { canResolve: true, canResolveCompletion: true, canArchive: false },
+      opens: [-1, 1],
+      steps: [["ArrowUp", 2], ["ArrowDown", 1], ["1", 1]],
+    },
+    {
+      name: "only the directive is open: a refused Confirm focuses it, and an arrow keeps its refusal",
+      packet: {
+        ...recoveryPacket,
+        options: [
+          { kind: "archive_task", t: "Archive the task", d: "Keeps the branch.", rec: false },
+          { kind: "archive_task", t: "Archive and delete the branch", d: "Discards the work.", rec: false, deleteBranch: true },
+        ],
+      },
+      viewer: { canResolve: true, canResolveCompletion: true, canArchive: false },
+      opens: [-1, 2],
+      steps: [["Confirm", -1, true], ["ArrowDown", 2], ["Confirm", 2, true], ["ArrowUp", 2, true], ["1", 2, true]],
+    },
+  ])("UI-42: an arrow or a digit passes an inert option by, as a click does ($name)", ({ packet, viewer, opens, steps }) => {
+    const { container } = render(
+      <DecisionPacket
+        packet={packet}
+        busy={false}
+        {...viewer}
+        canEditGoal
+        onResolveCustom={() => {}}
+        onResolve={() => {}}
+        onAsk={() => {}}
+      />,
+    );
+    const group = container.querySelector('[role="radiogroup"]')!;
+    const [opened, openStop] = opens;
+    const expectState = (when: string, checked: number, refused = false) => {
+      const radios = [...container.querySelectorAll<HTMLButtonElement>('[role="radio"]')];
+      const stop = checked >= 0 ? checked : openStop;
+      expect(radios.findIndex((r) => r.getAttribute("aria-checked") === "true"), `checked ${when}`).toBe(checked);
+      expect(radios.findIndex((r) => r.tabIndex === 0), `tab stop ${when}`).toBe(stop);
+      expect(container.querySelector('[role="alert"]') !== null, `refusal ${when}`).toBe(refused);
+      // Ruling 478(e): refused with nothing chosen, focus is on the tab stop.
+      if (refused && checked < 0) expect(document.activeElement, `focus ${when}`).toBe(radios[stop]);
+    };
+    expectState("on open", opened);
+    for (const [key, checked, refused] of steps) {
+      if (key === "Confirm") {
+        fireEvent.click(container.querySelector<HTMLButtonElement>(".packet-actions .btn.primary")!);
+      } else {
+        fireEvent.keyDown(group, { key });
+      }
+      expectState(`after ${key}`, checked, refused);
+    }
+  });
 });
 
 // UX19-4: the closed-PR recovery packet enumerated rework / archive / archive +
@@ -2995,7 +3134,8 @@ describe("UX19-4: the recovery packet names the in-app re-delivery path", () => 
   it("U36-2 (pass 36): a branchless task renders no re-delivery paragraph, whatever the options say", () => {
     // Live: an `input` packet on HLC-9 (no branch, no PR, no closure) rendered
     // the closed-PR recovery paragraph. Canary: drop the
-    // `archiveDisclosure?.branch != null` half of `branchDiscardOffered`.
+    // `archiveDisclosure?.branch != null` half of `branchDiscardOffered`
+    // (decision-packet-derive.ts).
     const packetView = render(
       <DecisionPacket
         packet={recoveryPacket}
@@ -3078,8 +3218,8 @@ describe("UX19-4: the recovery packet names the in-app re-delivery path", () => 
   it("names the closer, and lets go once a person has answered the closure", () => {
     // The unlock is `pr.closure.answered`, the same record `openTaskPr` reads:
     // an answered closure returns the control to its normal promise. Canary:
-    // drop `!task.pr.closure?.answered` from `closedRefusal` and the answered
-    // case stays refused.
+    // drop `!task.pr.closure?.answered` from `closedPrRefusal`
+    // (task-side-panels-derive.ts) and the answered case stays refused.
     const closed = (closure: PrRef["closure"]) =>
       render(
         <MemoryRouter>
@@ -3434,8 +3574,9 @@ describe("DecisionPacket — pass-20 governance", () => {
     );
     const opts = container.querySelectorAll<HTMLButtonElement>(".options .opt");
     expect(opts[0]!.getAttribute("aria-disabled")).toBe("true");
-    // Canary: drop the collision row's `option` from PACKET_TIER_GATES (or the
-    // `note` off it) and this goes red — that was the shipped state.
+    // Canary: drop the collision row's `option` from PACKET_TIER_GATES
+    // (decision-packet-derive.ts), or the `note` off it, and this goes red —
+    // that was the shipped state.
     expect(opts[0]!.querySelector(".od")!.textContent).toContain(
       "your role can't clear the collision",
     );
@@ -3459,8 +3600,8 @@ describe("DecisionPacket — pass-20 governance", () => {
    * `force-accept-completion` (admin), so one option is live and one is not.
    */
   it("ruling 164: force_accept takes the admin tier and move_stage the stage picker's, each with its own sentence", () => {
-    // Canary: drop either row from PACKET_TIER_GATES and a maintainer is
-    // offered a click the server answers with a 403.
+    // Canary: drop either row from PACKET_TIER_GATES (decision-packet-derive.ts)
+    // and a maintainer is offered a click the server answers with a 403.
     const { container } = render(
       <DecisionPacket
         packet={withOptions([
@@ -3511,8 +3652,9 @@ describe("DecisionPacket — pass-20 governance", () => {
    * foreign fixture commit the packet itself called "not ours".
    */
   it("U35-8: the archive + deleteBranch dialog names the foreign remote head and its PR before the button", () => {
-    // Canary: drop the `foreignHead` block from `PacketArchiveConfirm` and
-    // the sentence is gone.
+    // Canary: drop the `foreignHead` clause (`ForeignHeadClause`) from
+    // `PacketArchiveConfirm` (decision-packet-ceremonies.tsx) and the sentence
+    // is gone.
     const renderWith = (foreignHead: { sha: string | null; prNumber: number | null } | null) =>
       render(
         <DecisionPacket
@@ -3562,12 +3704,12 @@ describe("DecisionPacket — pass-20 governance", () => {
 
   /**
    * V16 — the three ask-first ceremonies are ONE shell with three sets of rows
-   * (`PacketDestructiveConfirm`). They were three shell-for-shell copies of the
-   * standard rulings 20 (R15-1) and 53 (R18-7) hold every one-way write to, so
-   * a change to the shared half landed on whichever copy was open. This pins
-   * the shell on all three at once: the same alertdialog contract, the same
-   * close affordance, the same obs body, the same "Not yet" beside one danger
-   * commit whose label names the outcome.
+   * (`PacketDestructiveConfirm`, decision-packet-ceremonies.tsx). They were
+   * three shell-for-shell copies of the standard rulings 20 (R15-1) and 53
+   * (R18-7) hold every one-way write to, so a change to the shared half landed
+   * on whichever copy was open. This pins the shell on all three at once: the
+   * same alertdialog contract, the same close affordance, the same obs body,
+   * the same "Not yet" beside one danger commit whose label names the outcome.
    */
   it("V16: all three destructive ceremonies render the same alertdialog shell", () => {
     const shells: {
@@ -3673,7 +3815,7 @@ describe("DecisionPacket — pass-20 governance", () => {
     );
     const opts = container.querySelectorAll<HTMLButtonElement>(".options .opt");
     expect(opts.length).toBeGreaterThan(0);
-    // Canary: drop `|| !canResolve` from the option `blocked` and the un-gated
+    // Canary: drop `|| !canResolve` from `blockedOptions` and the un-gated
     // options go interactive again with no Confirm behind them.
     expect(
       Array.from(opts).every((o) => o.getAttribute("aria-disabled") === "true"),
@@ -3732,7 +3874,7 @@ describe("DecisionPacket — pass-20 governance", () => {
   // Ruling 368: the escalation in flight shows itself on its button. It was
   // never even disabled for its own request (only the resolve fetcher's), so a
   // second click re-posted it and nothing said it was on its way.
-  // Canary: stop passing `escalating: escalateBusy` in task-detail-page.tsx
+  // Canary: stop passing `escalating: escalateBusy` in task-detail-regions.tsx
   // (this renders the card directly, so drop `aria-busy` on the button instead).
   it("ruling 368: an escalation in flight reads Sending…, busy, the loader spinning", () => {
     const { container } = render(
@@ -4520,7 +4662,8 @@ describe("TimelineItem — a gate run's note (ruling 493)", () => {
   };
 
   it("puts the ending in the pill and the revision beside it, and each gate in the table with its log", () => {
-    // CANARY: drop the `gates ?` branch from TimelineItem and the note is prose again.
+    // CANARY: drop the `ev.gates` branch from TimelineEntryBody (timeline-entry.tsx)
+    // and the note is prose again.
     const { container, getByRole } = render(<TimelineItem ev={gateNote(FAILED)} attachmentsBase={BASE} />);
     expect(container.querySelector(".tl-node.blocked")).not.toBeNull();
     const pill = container.querySelector(".tl-meta .pill");
@@ -4580,8 +4723,8 @@ describe("TimelineItem — a reviewer's verdict (ruling 526)", () => {
     });
 
   it("draws the title, the tally, the revision and the checklist, and says nothing twice", () => {
-    // CANARY: drop the `verdict ?` branch from TimelineItem and the note is a
-    // sentence over a monospaced block again.
+    // CANARY: drop the `ev.verdict` branch from TimelineEntryBody (timeline-entry.tsx)
+    // and the note is a sentence over a monospaced block again.
     const { container, getByRole } = render(
       <TimelineItem ev={verdictNote({})} attachmentNames={new Set([LOG, "board.png"])} attachmentsBase={BASE} />,
     );
@@ -4751,7 +4894,8 @@ describe("ruling 478: the task page's timeline, packet and GitHub panel", () => 
 
   it("(f) F40-35: a packet body's headings nest under the packet's own h2 title", () => {
     // WEB-3: "(a) Connect Workers Builds" and "Please reply with" were h2s,
-    // siblings of the question. CANARY: drop `headingBase` from PacketBody.
+    // siblings of the question. CANARY: drop `headingBase` from PacketBody
+    // (decision-packet-regions.tsx).
     const { container } = renderPacket(agentQuestion);
     const levels = [...container.querySelectorAll(".packet-body :is(h1, h2, h3, h4, h5, h6)")].map(
       (h) => `${h.tagName} ${h.textContent}`,
@@ -4910,7 +5054,8 @@ describe("DecisionPacket questionnaire custom answer (P21)", () => {
     // Ruling 147: Confirm stays ENABLED with the directive still empty, and the
     // click is refused in place instead of going dead.
     // SAFETY: the aria-label belongs to the packet's Confirm <button>
-    // (decision-packet.tsx); the bound query cannot state the element type.
+    // (`PacketActions`, decision-packet-regions.tsx); the bound query cannot
+    // state the element type.
     const confirm = getByLabelText(
       "Confirm decision: your custom directive",
     ) as HTMLButtonElement;
@@ -4941,8 +5086,14 @@ describe("DecisionPacket questionnaire custom answer (P21)", () => {
   });
 
   // Ruling 147: a pristine form is never accused — leaving the directive and
-  // coming back drops the standing refusal.
-  it("ruling 147: changing choice clears a standing directive refusal", () => {
+  // coming back drops the standing refusal. Choosing the directive again while
+  // it is the checked choice changes nothing, by a click or by its digit as by
+  // an arrow (UI-42's table): the box is as empty as when Confirm refused it,
+  // so the alert and the mark stay.
+  //
+  // CANARY: drop `selectOption`'s return on the checked choice and a click or
+  // the digit on the checked directive clears its refusal.
+  it("ruling 147: only a choice change clears a standing directive refusal", () => {
     const { getByText, getByLabelText } = render(
       <DecisionPacket
         packet={packet142}
@@ -4965,6 +5116,14 @@ describe("DecisionPacket questionnaire custom answer (P21)", () => {
     fireEvent.click(confirm);
     expect(document.querySelector('[role="alert"]')).toBeTruthy();
 
+    // The checked directive chosen again: still the same choice, still refused.
+    const box = document.querySelector("#pkt-custom")!;
+    fireEvent.click(custom);
+    expect(document.querySelector('[role="alert"]'), "after a click on it").not.toBeNull();
+    fireEvent.keyDown(custom, { key: String(packet142.options.length + 1) });
+    expect(document.querySelector('[role="alert"]'), "after its digit").not.toBeNull();
+    expect(box.getAttribute("aria-invalid")).toBe("true");
+
     // Pick an authored option, then come back: the directive is pristine again.
     fireEvent.click(
       document.querySelectorAll<HTMLButtonElement>('[role="radio"]')[0]!,
@@ -4979,10 +5138,11 @@ describe("DecisionPacket questionnaire custom answer (P21)", () => {
   // Ruling 147 dropped `choiceCount === 0` from Confirm's `disabled`, which
   // raises the question of what an options-less packet does now. Nothing bad:
   // the composed directive IS a choice, and it is offered to exactly the
-  // viewers who get the Confirm button (`customOffered = canResolve`), so the
-  // count is never zero while the button renders. With no authored option to
-  // select, `sel` lands on the directive, and an empty one is REFUSED — the
-  // button never reaches `onResolve` with an index that has no option.
+  // viewers who get the Confirm button (`customOffered = canResolve`, in
+  // `packetChoiceView`, decision-packet-derive.ts), so the count is never zero
+  // while the button renders. With no authored option to select, `sel` lands
+  // on the directive, and an empty one is REFUSED — the button never reaches
+  // `onResolve` with an index that has no option.
   //
   // Canary: hand the custom choice a different condition from the button's and
   // the click resolves option 0 of an empty list — this goes red.

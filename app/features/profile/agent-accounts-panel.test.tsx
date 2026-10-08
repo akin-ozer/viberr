@@ -2,7 +2,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { act, cleanup, fireEvent, render, waitFor, type RenderResult } from "@testing-library/react";
 import { renderToString } from "react-dom/server";
-import { createRoutesStub, useFetcher } from "react-router";
+import { createRoutesStub, useFetcher, useLoaderData, useRevalidator } from "react-router";
 import { ToastProvider } from "~/ui/toast";
 import { AgentAccountsPanel } from "./agent-accounts-panel";
 import type { ProfileBackend } from "./profile-query.server";
@@ -102,6 +102,23 @@ function runningLogin(
   };
 }
 
+/** The panel on one fetcher, as the profile page mounts it. A submit is
+ *  recorded in `lastSubmit` and never reaches a server. */
+function PanelOver({ backends }: { backends: ProfileBackend[] }) {
+  const fetcher = useFetcher();
+  return (
+    <ToastProvider>
+      <AgentAccountsPanel
+        backends={backends}
+        fetcher={fetcher}
+        submit={(fields) => {
+          lastSubmit = fields;
+        }}
+      />
+    </ToastProvider>
+  );
+}
+
 /** `poll` answers the card's poll, or is `unreachable`: a server that gives
  *  no answer (a restart, a dead network). */
 function panelElement(
@@ -110,23 +127,7 @@ function panelElement(
 ) {
   lastSubmit = null;
   const Stub = createRoutesStub([
-    {
-      path: "/profile",
-      Component: () => {
-        const fetcher = useFetcher();
-        return (
-          <ToastProvider>
-            <AgentAccountsPanel
-              backends={backends}
-              fetcher={fetcher}
-              submit={(fields) => {
-                lastSubmit = fields;
-              }}
-            />
-          </ToastProvider>
-        );
-      },
-    },
+    { path: "/profile", Component: () => <PanelOver backends={backends} /> },
     {
       // The real poll target, through the route's own `clientLoader`. Its
       // answer is what the success toast must settle on, so it is a route
@@ -423,7 +424,7 @@ describe("AgentAccountsPanel", () => {
 
     // Ruling 149: dropping the stored credential is destructive, so the
     // control carries the danger label. Canary: drop `danger` from the
-    // Disconnect className in `agent-accounts-panel.tsx`.
+    // Disconnect className in `ManageButtons` (agent-accounts-regions.tsx).
     const disconnect = Array.from(
       container.querySelectorAll<HTMLButtonElement>(".cred-card .cred-manage button"),
     ).find((button) => button.textContent === "Disconnect")!;
@@ -764,10 +765,10 @@ describe("AgentAccountsPanel", () => {
     await act(async () => {
       await vi.advanceTimersByTimeAsync(4_100);
     });
-    // CANARY: let a refusal past the card's session-id match (its SAFETY cast
-    // then hides it from the type checker) and reading its absent `health`
-    // takes the Profile page down with it; delete the route's `clientLoader`
-    // and the unreachable poll does.
+    // CANARY: let a refusal past the session-id match in `useSignInPoll`
+    // (agent-accounts-actions.ts; its SAFETY cast then hides it from the type
+    // checker) and reading its absent `health` takes the Profile page down
+    // with it; delete the route's `clientLoader` and the unreachable poll does.
     expect(getByText("signing in")).toBeTruthy();
     expect(getByText("Waiting for you to finish in the browser")).toBeTruthy();
     expect(queryByText("Claude connected")).toBeNull();
@@ -967,8 +968,9 @@ describe("ruling 294: copy the sign-in link", () => {
    * stops presenting it as current. It used to keep "92% of five hour" and
    * "The window resets 03:30" in the present tense hours after 03:30.
    *
-   * Canary: drop the `windowReset` branch in `usageText` (the percentage comes
-   * back) or in the note (the present tense comes back).
+   * Canary: drop the `windowReset` branch in `usageText`
+   * (agent-accounts-derive.ts; the percentage comes back) or in `UsageNote`
+   * (agent-account-in-use.tsx; the present tense comes back).
    */
   it("words a reading whose window has reset in the past tense, with no percentage (ruling 481)", () => {
     const { getByText, queryByText, container } = renderPanel([
@@ -1086,7 +1088,8 @@ function accountRow(view: RenderResult, accountName: string): HTMLElement {
  * backend, its method) and shows on the button that sent it; everything else,
  * the other card's controls included, only waits.
  * Canary: drop the `fetcher.formData?.get("backend") === backend` check in
- * `agent-accounts-panel.tsx` and the other card's button claims the work too.
+ * `cardRequest` (agent-accounts-derive.ts) and the other card's button claims
+ * the work too.
  */
 describe("ruling 368: the account request in flight", () => {
   function renderHeld(backends: ProfileBackend[]) {
@@ -1201,6 +1204,17 @@ describe("rulings 507 and 616: several accounts on one backend", () => {
   function chooseAction(view: RenderResult, accountName: string, action: string | RegExp): void {
     fireEvent.click(pickerFor(view, accountName));
     fireEvent.click(view.getByRole("menuitem", { name: action }));
+  }
+
+  /** Press an account's own button with Work in use: Work's under its health
+   *  line, another's in the management, opened from the picker. */
+  function pressOn(view: RenderResult, id: string, text: string): void {
+    if (id !== WORK.id) chooseAction(view, "Work", "Manage other accounts");
+    const scope =
+      id === WORK.id
+        ? view.container.querySelector<HTMLElement>(".cred-card .cred-manage")!
+        : rowOf(view.container, id);
+    fireEvent.click(buttonIn(scope, text));
   }
 
   // The switch is the picker's whole job: the row chosen is the account the
@@ -1335,6 +1349,340 @@ describe("rulings 507 and 616: several accounts on one backend", () => {
     expect(active.textContent).toContain(
       "Your runs switch to personal@example.com, the Claude account you used before it.",
     );
+  });
+
+  /** What the loader finds for the Claude card: its accounts and sign-in. */
+  interface ClaudeOnServer {
+    accounts: Account[];
+    login: ProfileBackend["login"];
+  }
+
+  /** The panel over a loader that reads `server` on every load, a fresh copy
+   *  each time as a decoded payload is; `reload` is a live event or another
+   *  panel's post revalidating the page. */
+  async function renderLoaded(server: ClaudeOnServer) {
+    lastSubmit = null;
+    let revalidate: () => Promise<void> = async () => {};
+    const Stub = createRoutesStub([
+      {
+        path: "/profile",
+        loader: (): ProfileBackend[] => [
+          server.accounts.length > 0
+            ? claudeWith(structuredClone(server.accounts), { login: server.login })
+            : backend("claude", { login: server.login }),
+          backend("codex"),
+        ],
+        Component: () => {
+          revalidate = useRevalidator().revalidate;
+          return <PanelOver backends={useLoaderData<ProfileBackend[]>()} />;
+        },
+      },
+      // A sign-in on the card starts its poll; nothing here answers it.
+      { path: "/resources/backend-login", loader: clientLoaderOver(backendLoginRoute, () => null) },
+    ]);
+    const view = render(<Stub initialEntries={["/profile"]} />);
+    await view.findByText("Agent accounts");
+    return { view, reload: () => act(() => revalidate()) };
+  }
+
+  // The confirm asks about an account on screen. An account disconnected in
+  // another tab while its "Disconnect …?" was open here left the dialog open
+  // over an account that no longer existed while others remained; with none
+  // left, or a sign-in from another tab in the card's place, the dialog went
+  // with the accounts but the card's state kept it, and the next load that
+  // showed an account opened it again with nobody asking.
+  // CANARY: drop `setConfirmDisconnect(null)` from the region reset in
+  // `AgentAccountCard` (agent-accounts-panel.tsx) and the sign-in row ends
+  // with the dialog open; render the dialog from the account the Disconnect
+  // was pressed on instead of finding it in the load (agent-account-in-use.tsx)
+  // and the row where other accounts remain does too; do both and the row
+  // where every account goes does as well; hold the account itself and find
+  // it by identity instead of id, and the load that changed nothing closes it
+  // under the person reading it.
+  it.each<[string, ClaudeOnServer[], string]>([
+    [
+      "another tab disconnects it and other accounts remain",
+      [{ accounts: [WORK, PERSONAL], login: null }],
+      "Work",
+    ],
+    [
+      "another tab disconnects every account, then connects a new one",
+      [
+        { accounts: [], login: null },
+        { accounts: [account("ubc_fresh", "fresh@example.com", { active: true })], login: null },
+      ],
+      "fresh@example.com",
+    ],
+    [
+      "another tab starts a sign-in, then cancels it",
+      [
+        { accounts: [WORK, PERSONAL, KEY], login: runningLogin("claude") },
+        { accounts: [WORK, PERSONAL, KEY], login: runningLogin("claude", { state: "cancelled" }) },
+      ],
+      "Work",
+    ],
+  ])("a Disconnect confirm closes, and stays closed, when %s", async (_label, loads, inUse) => {
+    const server: ClaudeOnServer = { accounts: [WORK, PERSONAL, KEY], login: null };
+    const { view, reload } = await renderLoaded(server);
+    chooseAction(view, "Work", "Manage other accounts");
+    fireEvent.click(buttonIn(rowOf(view.container, "ubc_key"), "Disconnect"));
+    // A load that still lists the account (a live event about something
+    // else) leaves the dialog where the person is reading it.
+    await reload();
+    expect(view.getByRole("alertdialog", { name: "Disconnect API key ending in abcd?" })).toBeTruthy();
+
+    for (const [index, load] of loads.entries()) {
+      Object.assign(server, load);
+      await reload();
+      expect(view.queryByRole("alertdialog"), `after load ${index + 1}`).toBeNull();
+    }
+    // The card shows an account in use again, where the dialog would be.
+    expect(pickerFor(view, inUse)).toBeTruthy();
+  });
+
+  // Every word of an open confirm is about what confirming does now. The
+  // dialog read the account's name and whether runs use it off the account
+  // the Disconnect was pressed on, and who else is in use off the latest
+  // load: after a switch in another tab, "Disconnect API key ending in abcd?"
+  // said "Your runs keep using API key ending in abcd." over a Disconnect
+  // that hands runs to Work, and after a rename its title kept the old name.
+  // CANARY: give DisconnectConfirm the account the Disconnect was pressed on
+  // instead of the loaded account with its id (agent-account-in-use.tsx) and
+  // each row keeps the name or the sentence the dialog opened with.
+  it.each<[string, string, Account[], string, string]>([
+    [
+      "another tab switches runs to it",
+      "ubc_key",
+      [{ ...KEY, active: true }, { ...WORK, active: false }, PERSONAL],
+      "API key ending in abcd",
+      "Your runs switch to Work, the Claude account you used before it.",
+    ],
+    [
+      "another tab switches runs away from it",
+      "ubc_work",
+      [{ ...PERSONAL, active: true }, { ...WORK, active: false }, KEY],
+      "Work",
+      "Your runs keep using personal@example.com.",
+    ],
+    [
+      "another tab renames it",
+      "ubc_key",
+      [WORK, PERSONAL, { ...KEY, name: "Spare key", label: "Spare key" }],
+      "Spare key",
+      "Your runs keep using Work.",
+    ],
+  ])("an open Disconnect confirm says what confirming does when %s", async (_label, id, loaded, name, sentence) => {
+    const server: ClaudeOnServer = { accounts: [WORK, PERSONAL, KEY], login: null };
+    const { view, reload } = await renderLoaded(server);
+    pressOn(view, id, "Disconnect");
+
+    server.accounts = loaded;
+    await reload();
+    const dialog = view.getByRole("alertdialog");
+    expect(dialog.getAttribute("aria-label")).toBe(`Disconnect ${name}?`);
+    expect(dialog.textContent).toContain(sentence);
+    fireEvent.click(buttonIn(dialog, `Disconnect ${name}`));
+    expect(lastSubmit).toEqual({ intent: "backend-disconnect", backend: "claude", account: id });
+  });
+
+  // What the picker's menu opens ("Add another account", the other accounts'
+  // management) sits in the card's account-in-use region, so it goes when
+  // that region does: no account left, or a sign-in under way in the card's
+  // place. It stayed open in the card's state instead, and the next load that
+  // showed an account in use opened it again with nobody asking, over an
+  // account a sign-in in another tab had just added. The add section goes as
+  // its Cancel closes it, key form and all, so opening it again later starts
+  // from the ways to connect.
+  // CANARY: drop `setAdding(false)` from the region reset in
+  // `AgentAccountCard` (agent-accounts-panel.tsx) and every row ends with the
+  // add section open; drop its `setPaste(null)` and every row opens it again
+  // on the key form; drop its `setManaging(false)` and the sign-in rows end
+  // with the management open.
+  it.each<[string, ClaudeOnServer[], string]>([
+    [
+      "another tab disconnects every account, then connects a new one",
+      [
+        { accounts: [], login: null },
+        { accounts: [account("ubc_fresh", "fresh@example.com", { active: true })], login: null },
+      ],
+      "fresh@example.com",
+    ],
+    [
+      "another tab adds an account through a sign-in",
+      [
+        { accounts: [WORK, PERSONAL, KEY], login: runningLogin("claude") },
+        {
+          accounts: [
+            account("ubc_new", "new@example.com", { active: true }),
+            { ...WORK, active: false },
+            PERSONAL,
+            KEY,
+          ],
+          login: runningLogin("claude", { state: "succeeded" }),
+        },
+      ],
+      "new@example.com",
+    ],
+    [
+      "another tab starts a sign-in, then cancels it",
+      [
+        { accounts: [WORK, PERSONAL, KEY], login: runningLogin("claude") },
+        { accounts: [WORK, PERSONAL, KEY], login: runningLogin("claude", { state: "cancelled" }) },
+      ],
+      "Work",
+    ],
+  ])("what the picker's menu opened closes, and stays closed, when %s", async (_label, loads, inUse) => {
+    const server: ClaudeOnServer = { accounts: [WORK, PERSONAL, KEY], login: null };
+    const { view, reload } = await renderLoaded(server);
+    const sections = ["Other Claude accounts", "Add another Claude account"];
+    const adding = { name: "Add another Claude account" };
+    const keyField = () => view.container.querySelector("#agentacc-claude-api_key");
+    chooseAction(view, "Work", "Manage other accounts");
+    chooseAction(view, "Work", "Add another Claude account");
+    fireEvent.click(buttonIn(view.getByRole("group", adding), "Use an API key"));
+    // A load that still shows the account in use (a live event about
+    // something else) leaves both where the person opened them.
+    await reload();
+    for (const name of sections) expect(view.getByRole("group", { name })).toBeTruthy();
+    expect(keyField()).toBeTruthy();
+
+    for (const [index, load] of loads.entries()) {
+      Object.assign(server, load);
+      await reload();
+      for (const name of sections) {
+        expect(view.queryByRole("group", { name }), `${name} after load ${index + 1}`).toBeNull();
+      }
+    }
+    // The card shows an account in use again, where the sections would be,
+    // and the add section opens again on the ways to connect.
+    chooseAction(view, inUse, "Add another Claude account");
+    expect(keyField(), "the key form, opened again").toBeNull();
+  });
+
+  // A rename form sits under the account it renames: under the health line
+  // while that account is in use, in the management while it is another. It
+  // goes when its place does, as the management's Done closes it: a sign-in
+  // under way takes that place while the account is still listed, and a
+  // switch in another tab moves the account in use into a management nobody
+  // has open. It stayed open in the card's state instead, and the load that
+  // showed its place again, or the person opening the management later,
+  // showed it again with nobody asking (under the account in use, its field
+  // took the focus as it mounted).
+  // CANARY: drop `setRenaming(null)` from the region reset in
+  // `AgentAccountCard` (agent-accounts-panel.tsx) and the first row ends with
+  // the form open; drop the reset of a rename form whose account is in
+  // neither place, and the switch row does; drop both, and every row does.
+  it.each<[string, string, ClaudeOnServer[], string | null]>([
+    [
+      "a sign-in takes the place of the account in use it renames, then is cancelled",
+      "ubc_work",
+      [
+        { accounts: [WORK, PERSONAL, KEY], login: runningLogin("claude") },
+        { accounts: [WORK, PERSONAL, KEY], login: runningLogin("claude", { state: "cancelled" }) },
+      ],
+      null,
+    ],
+    [
+      "a sign-in takes the place of the management it is in, then is cancelled",
+      "ubc_personal",
+      [
+        { accounts: [WORK, PERSONAL, KEY], login: runningLogin("claude") },
+        { accounts: [WORK, PERSONAL, KEY], login: runningLogin("claude", { state: "cancelled" }) },
+      ],
+      "Work",
+    ],
+    [
+      "a sign-in takes the place of the management it is in, then adds an account",
+      "ubc_personal",
+      [
+        { accounts: [WORK, PERSONAL, KEY], login: runningLogin("claude") },
+        {
+          accounts: [
+            account("ubc_new", "new@example.com", { active: true }),
+            { ...WORK, active: false },
+            PERSONAL,
+            KEY,
+          ],
+          login: runningLogin("claude", { state: "succeeded" }),
+        },
+      ],
+      "new@example.com",
+    ],
+    [
+      "another tab switches runs away from the account in use it renames",
+      "ubc_work",
+      [{ accounts: [{ ...PERSONAL, active: true }, { ...WORK, active: false }, KEY], login: null }],
+      "personal@example.com",
+    ],
+  ])("a rename form closes, and stays closed, when %s", async (_label, id, loads, manageOver) => {
+    const server: ClaudeOnServer = { accounts: [WORK, PERSONAL, KEY], login: null };
+    const { view, reload } = await renderLoaded(server);
+    const field = () => view.container.querySelector(`#agentacc-${id}-name`);
+    pressOn(view, id, "Rename");
+    // A load that changes nothing leaves the form where the person is typing.
+    await reload();
+    expect(field()).toBeTruthy();
+
+    for (const load of loads) {
+      Object.assign(server, load);
+      await reload();
+    }
+    // Where the form would be again: under the account in use, or in the
+    // management the person opens from the picker.
+    if (manageOver) chooseAction(view, manageOver, "Manage other accounts");
+    expect(field(), "the rename form, after the loads").toBeNull();
+  });
+
+  // The key form of a card with no account sits with the ways to connect, so
+  // it goes when they do: an account connected in another tab, or a sign-in
+  // under way in their place. It stayed open in the card's state instead, so
+  // the card that came back with no account showed it again, and the first
+  // "Add another account" on a card that came back with one opened on the key
+  // form rather than on the ways to connect.
+  // CANARY: drop `setPaste(null)` from the region reset in `AgentAccountCard`
+  // (agent-accounts-panel.tsx) and every row ends with the key form open.
+  it.each<[string, ClaudeOnServer[], string | null]>([
+    [
+      "another tab connects an API key",
+      [{ accounts: [{ ...KEY, active: true }], login: null }],
+      "API key ending in abcd",
+    ],
+    [
+      "another tab's sign-in connects an account",
+      [
+        { accounts: [], login: runningLogin("claude") },
+        {
+          accounts: [account("ubc_new", "new@example.com", { active: true })],
+          login: runningLogin("claude", { state: "succeeded" }),
+        },
+      ],
+      "new@example.com",
+    ],
+    [
+      "another tab's sign-in is cancelled",
+      [
+        { accounts: [], login: runningLogin("claude") },
+        { accounts: [], login: runningLogin("claude", { state: "cancelled" }) },
+      ],
+      null,
+    ],
+  ])("the key form of a card with no account closes, and stays closed, when %s", async (_label, loads, inUse) => {
+    const server: ClaudeOnServer = { accounts: [], login: null };
+    const { view, reload } = await renderLoaded(server);
+    const keyField = () => view.container.querySelector("#agentacc-claude-api_key");
+    fireEvent.click(buttonIn(view.container.querySelector<HTMLElement>(".cred-card")!, "Use an API key"));
+    // A load that changes nothing leaves the form where the person is typing.
+    await reload();
+    expect(keyField()).toBeTruthy();
+
+    for (const load of loads) {
+      Object.assign(server, load);
+      await reload();
+    }
+    // Where the form would be again: on the card with no account, or in the
+    // first "Add another account" over the account connected.
+    if (inUse) chooseAction(view, inUse, "Add another Claude account");
+    expect(keyField(), "the key form, after the loads").toBeNull();
   });
 
   it("renames in place, and refuses a name too long in the store's own words (ruling 147)", () => {

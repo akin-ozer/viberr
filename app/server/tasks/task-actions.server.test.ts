@@ -3567,12 +3567,12 @@ describe("F21-2 / ruling 88: the server-side acceptance disclosure", () => {
     // board's terminal column into a door no delivered work could pass, while
     // ruling 53 requires that same ceremony to disclose what it accepts.
     //
-    // Built here the way the COMPONENT builds it (accept-confirm.tsx's
-    // `disclosure`, off the fields the board hands it) so the projection and the
-    // door are proved against each other rather than against the file both are
-    // meant to agree with. CANARY: revert `work_revision_sha` in
-    // rebuilder.server.ts or its mapping — `revision` falls back to "none" and
-    // this fails with `accept_disclosure_stale`.
+    // Built here the way the COMPONENT builds it (`ceremonyFacts`'s
+    // `disclosure` in accept-confirm-derive.ts, off the fields the board hands
+    // it) so the projection and the door are proved against each other rather
+    // than against the file both are meant to agree with. CANARY: revert
+    // `work_revision_sha` in rebuilder.server.ts or its mapping — `revision`
+    // falls back to "none" and this fails with `accept_disclosure_stale`.
     const store = setupProjectedStore(ctx);
     seedReviewed(store);
     const summary = listProjectTasks(store.db, store.slug).find(
@@ -4240,7 +4240,7 @@ describe("ruling 137: a move off the acceptance boundary withdraws the offers", 
     // Ruling 387 (F39-14): the withdrawal is a CONSEQUENCE of the move, and
     // its timestamp is the later of the two, so it sits ABOVE the transition in
     // a newest-first timeline — and the file stays strictly newest-first, which
-    // viberr's own `timeline_not_strictly_newest_first` diagnostic checks.
+    // viberr's own `timeline.out_of_order` diagnostic checks.
     // CANARY: unshift the transition after the withdrawal and both fail.
     expect(parsed.timeline[0]?.title).toBe("Recommendation withdrawn");
     expect(parsed.timeline[1]?.type).toBe("transition");

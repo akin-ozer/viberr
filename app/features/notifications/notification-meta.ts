@@ -3,7 +3,8 @@ import type { IconName } from "~/ui/icon";
 /**
  * THE shared notification kind → icon/color mapping + markdown stripper
  * (contracts §4 / ruling 14 — the mock duplicates both ×3; port once).
- * The `act-*` classes are the timeline event palette in viberr.css.
+ * The `act-*` classes are the timeline event palette in app.css (ported from
+ * the mock's viberr.css).
  */
 
 export interface NtfMeta {
@@ -27,10 +28,10 @@ export function ntfMeta(n: {
     // a completion checkmark, exactly the "something to accept" reading a
     // supervisor scanning the inbox must NOT get. A non-blocked packet is an
     // open question: `hand` is the glyph this app already uses for "waiting on
-    // a human" (board WaitTag, "Waiting on me" filter, review queue). Ruling
-    // 625: on the blue palette, the one colour "a decision waits on you"
-    // wears everywhere (the board's chip, the review queue); amber stays an
-    // agent's question below.
+    // a human" (the board card's status chip, "Waiting on me" filter, review
+    // queue). Ruling 625: on the blue palette, the one colour "a decision
+    // waits on you" wears everywhere (the board's chip, the review queue);
+    // amber stays an agent's question below.
     return n.ptype === "blocked"
       ? { icon: "alert", cls: "act-blocked" }
       : { icon: "hand", cls: "act-transition" };

@@ -1629,7 +1629,7 @@ function humanDecisionsInstruction(snapshot: OperatorTaskSnapshot): string {
 
 /**
  * Ruling 413's field, explained where a Codex operator will read it. The first
- * version explained it only in the Claude toolkit's `read_task` description,
+ * version explained it only in the Claude toolkit's `get_task` description,
  * and every operator on the board it was written for runs on Codex.
  */
 function collisionsInstruction(snapshot: OperatorTaskSnapshot): string {

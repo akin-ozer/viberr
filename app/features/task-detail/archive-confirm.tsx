@@ -38,7 +38,8 @@ export function ArchiveConfirm({
   // F19-36: this printed the raw internal state token — "PR #12 accepted" for a
   // PR that is really merge-pending, "PR #12 review" for one in review — while
   // every other surface renders the canonical label from the ONE PR-state map
-  // (ruling 12). Same defect as F19-14 at accept-confirm.tsx, second site.
+  // (ruling 12). Same defect as F19-14 at accept-confirm-derive.ts (`prPill`),
+  // second site.
   const prPill = task.pr ? prStatePill(task.pr.state) : null;
   // What archiving withdraws, named exactly — the server writes the same list
   // into the archive note on the timeline.

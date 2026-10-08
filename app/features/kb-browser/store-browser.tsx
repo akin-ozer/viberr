@@ -1,12 +1,15 @@
 import {
   Fragment,
+  useCallback,
   useEffect,
   useReducer,
   useRef,
   useState,
+  type Dispatch,
   type DragEvent as ReactDragEvent,
   type ReactNode,
   type RefObject,
+  type SetStateAction,
 } from "react";
 import { useFetcher } from "react-router";
 import { countLabel } from "~/shared/text/plural";
@@ -16,7 +19,7 @@ import { useCsrfToken } from "~/ui/csrf-input";
 import { GlyphSwap } from "~/ui/copy-glyph";
 import { Icon } from "~/ui/icon";
 import { isMarkdownName } from "~/ui/code-language";
-import { DocViewToggle, MarkdownDoc, type DocView } from "~/ui/markdown-doc";
+import { DocViewToggle } from "~/ui/markdown-doc";
 import { useToast } from "~/ui/toast";
 import { useDialog } from "~/ui/use-dialog";
 import { useFetcherResult } from "~/ui/use-fetcher-result";
@@ -34,6 +37,12 @@ import {
 } from "./tree";
 import { prettySize } from "~/shared/text/byte-size";
 import { useRefusalShake, type RefusalShake } from "~/ui/use-refusal-shake";
+import {
+  documentCardState,
+  draftFileName,
+  type DocDraft,
+} from "./store-browser-derive";
+import { DocumentBody, DocumentFoot, DocumentNotes } from "./store-browser-regions";
 
 /**
  * Store-folder file manager popup.
@@ -204,10 +213,13 @@ function BrowserToolbar({
       </div>
       {gh.open && (
         <div className="fm-gh">
+          {/* The example URL is a hint that goes as the person types; the
+              field's name stays, as the destination select's does. */}
           <input
             type="text"
             className="mono"
             value={gh.url}
+            aria-label="GitHub repo or folder link"
             placeholder="https://github.com/owner/repo/tree/main/docs"
             onChange={(e) => dispatchGh({ type: "url", url: e.target.value })}
             onKeyDown={(e) => {
@@ -574,8 +586,8 @@ const STORE_ACTION = "/org/settings";
  * All store mutations behind the modal: the two fetcher POSTs to the
  * org-settings action (file ops + GitHub import), the file-ops toast
  * effect, and the hidden-input upload plumbing. The GitHub-import
- * feedback effect stays with the caller — it expands tree state the
- * caller owns.
+ * feedback effect is the caller's (`useGhImportFeedback`) — it expands
+ * tree state the caller owns.
  */
 function useStoreOps(
   resource: StoreBrowserResource,
@@ -733,31 +745,6 @@ function useStoreOps(
   };
 }
 
-/** The in-place document editor's state (P14-KM-08 / UI-59 / UI-60 / UI-61). */
-interface DocDraft {
-  /** Store-relative folder holding the document. */
-  dir: string[];
-  /** File name — fixed once the document exists on disk. */
-  name: string;
-  body: string;
-  existing: boolean;
-  /** Ruling 614: the body as the read returned it, so the card knows whether
-   *  anything changed. Null until the read answers (and after a read that
-   *  failed); always null for a new document. */
-  saved: string | null;
-  /** The on-disk file exceeded the read cap, so this body is a partial copy. */
-  truncated: boolean;
-  /** Ruling 663: the version the read returned. The save sends it back, and
-   *  the server refuses the save once the file is no longer that version, so
-   *  a correction an agent merged meanwhile is not wiped. Null for a new
-   *  document and until the read answers. */
-  version: string | null;
-  /** Ruling 614: rendered or raw. An existing markdown file opens rendered; a
-   *  new document opens raw, since there is nothing to render yet. */
-  view: DocView;
-  err: string | null;
-}
-
 /** What a document save posts (`store-write-doc`). `overwrite` rides only a
  *  confirmed replace, and `version` only a document that was opened (ruling
  *  663); each is sent or absent, never blank. */
@@ -773,13 +760,6 @@ type DocSaveFields = {
   version?: string;
 };
 
-/** The name a new document is saved under: `writeStoreDoc` gives a name with
- *  no extension `.md`. */
-function draftFileName(name: string): string {
-  const trimmed = name.trim();
-  return trimmed.includes(".") ? trimmed : `${trimmed}.md`;
-}
-
 /**
  * The in-app document editor (owner ruling R14-4).
  *
@@ -792,10 +772,19 @@ function draftFileName(name: string): string {
  * It owns its OWN fetchers, separate from the file-op ones, so a read or a
  * rejected save never rides the generic store toast — the editor stays open and
  * says what went wrong.
+ *
+ * A save's answer settles the draft it saved, not whatever the card holds when
+ * it arrives, and a read fills only the draft it was opened for. While a save
+ * is in flight the card takes no typing (`saving` makes its name and text
+ * read-only), so a success closes exactly the text it wrote, and a refused
+ * draft the card no longer holds comes back with the reason over whatever was
+ * opened since, which nothing was typed into.
+ *
+ * `onSaved` gets the toast and the folder the save was posted to.
  */
 function useDocEditor(
   resource: StoreBrowserResource,
-  onSaved: (path: string) => void,
+  onSaved: (toast: string, dir: string[]) => void,
 ) {
   const csrf = useCsrfToken();
   const readFetcher = useFetcher<StoreActionReply>();
@@ -803,11 +792,24 @@ function useDocEditor(
   const [doc, setDoc] = useState<DocDraft | null>(null);
   /** A save the user has confirmed will replace an existing file (UI-59). */
   const [confirmReplace, setConfirmReplace] = useState(false);
+  /** How many drafts the card has opened: the number a draft opened under
+   *  tells it apart from one opened after it. */
+  const opened = useRef(0);
+  /** The opening the last read was submitted for: a draft opened since is
+   *  not its answer's to fill. */
+  const readFor = useRef(0);
+  /** The last save: the draft as it was posted, and the opening it belongs
+   *  to. Kept apart from `doc`, which an Escape or another opened row can
+   *  clear or replace before the answer. */
+  const posted = useRef<{ draft: DocDraft; opening: number } | null>(null);
 
   const loading = readFetcher.state !== "idle";
   const saving = saveFetcher.state !== "idle";
 
   useFetcherResult(readFetcher, (d) => {
+    // New document, another row, or a refused draft brought back may have
+    // taken the card while the read was in flight.
+    if (readFor.current !== opened.current) return;
     setDoc((prev) =>
       prev
         ? d.ok
@@ -825,20 +827,39 @@ function useDocEditor(
   });
 
   useFetcherResult(saveFetcher, (d) => {
+    const sent = posted.current;
+    if (!sent) return;
+    // Does the card still hold the draft this save posted? Escape or Cancel
+    // may have closed it, and a row or New document replaced it, while the
+    // save was in flight; another draft is not this answer's to close or mark.
+    const held = doc !== null && opened.current === sent.opening;
     if (d.ok) {
-      setConfirmReplace(false);
-      setDoc(null);
-      onSaved(d.toast ?? "Document saved");
+      if (held) {
+        setConfirmReplace(false);
+        setDoc(null);
+      }
+      onSaved(d.toast ?? "Document saved", sent.draft.dir);
       return;
     }
-    // UI-60: keep the draft. The typed body is the only copy that exists.
-    setConfirmReplace(false);
-    setDoc((prev) =>
-      prev ? { ...prev, err: d.error ?? "The document was not saved." } : prev,
-    );
+    const err = d.error ?? "The document was not saved.";
+    if (held) {
+      // UI-60: keep the draft. The typed body is the only copy that exists.
+      setConfirmReplace(false);
+      setDoc((prev) => (prev ? { ...prev, err } : prev));
+      return;
+    }
+    // Closed or replaced while saving: the posted text is now the only copy.
+    // Taking the card back loses nothing, since it took no typing while the
+    // save was in flight: it is empty, or holds a new document with no name or
+    // text, or an opened one as read (or still reading). Back with the reason,
+    // as an open draft keeps it (UI-60), and as a new opening, so a read still
+    // in flight for the draft it replaces is not its to fill.
+    opened.current += 1;
+    setDoc({ ...sent.draft, err });
   });
 
-  const openNew = (dir: string[]) =>
+  const openNew = (dir: string[]) => {
+    opened.current += 1;
     setDoc({
       dir,
       name: "",
@@ -850,8 +871,11 @@ function useDocEditor(
       view: "raw",
       err: null,
     });
+  };
 
   const openExisting = (dir: string[], name: string) => {
+    opened.current += 1;
+    readFor.current = opened.current;
     setDoc({
       dir,
       name,
@@ -891,6 +915,7 @@ function useDocEditor(
     if (overwrite) fields.overwrite = "1";
     // Ruling 663: an opened document is saved against the version it read.
     if (doc.version) fields.version = doc.version;
+    posted.current = { draft: doc, opening: opened.current };
     saveFetcher.submit(fields, { method: "post", action: STORE_ACTION });
   };
 
@@ -905,6 +930,89 @@ function useDocEditor(
     openExisting,
     save,
   };
+}
+
+/**
+ * The tree's own state (ruling 700(e), split out of `StoreBrowser`, which calls
+ * it before any other hook, as these states always stood): which folders are
+ * open (the top-level ones at first), where the inline new-folder row stands,
+ * the folder every toolbar action writes into, and the entry whose delete is
+ * being confirmed.
+ */
+function useStoreTree(tree: StoreNode[]) {
+  const [expanded, setExpanded] = useState<Set<string>>(
+    () =>
+      new Set(
+        tree.flatMap((n) => (n.type === "dir" ? [n.name] : [])),
+      ),
+  );
+  const [newIn, setNewIn] = useState<string[] | null>(null);
+  /** Store-relative folder every toolbar action writes into (P14-KM-08). */
+  const [dest, setDest] = useState<string[]>([]);
+  const [confirm, setConfirm] = useState<{
+    path: string[];
+    node: StoreNode;
+  } | null>(null);
+
+  const toggle = (key: string) =>
+    setExpanded((s) => {
+      const n = new Set(s);
+      if (n.has(key)) n.delete(key);
+      else n.add(key);
+      return n;
+    });
+  // Stable, as StoreBrowser's arrival effect lists it: a fresh one each render
+  // was a dependency that never held still.
+  const expand = useCallback(
+    (path: string[]) =>
+      setExpanded((s) => {
+        const n = new Set(s);
+        for (let i = 1; i <= path.length; i++) n.add(path.slice(0, i).join("/"));
+        return n;
+      }),
+    [],
+  );
+  /** Pick the destination folder AND reveal it, so the two never disagree. */
+  const target = (path: string[]) => {
+    setDest(path);
+    expand(path);
+  };
+
+  return { expanded, setExpanded, newIn, setNewIn, dest, confirm, setConfirm, toggle, expand, target };
+}
+
+/**
+ * The GitHub import's answer (ruling 700(e), split out of `StoreBrowser`, which
+ * calls it where its effect always ran): a success toasts, opens the folder the
+ * snapshot landed in and closes the import bar; a failure lands in the bar's
+ * error line.
+ */
+function useGhImportFeedback(
+  ops: ReturnType<typeof useStoreOps>,
+  push: (text: string) => void,
+  setExpanded: Dispatch<SetStateAction<Set<string>>>,
+) {
+  const { ghFetcher, dispatchGh } = ops;
+  useFetcherResult(ghFetcher, (d) => {
+    if (d.ok) {
+      if (d.toast) push(d.toast);
+      if (d.folder) {
+        // The destination is store-relative now, so every ancestor of the
+        // imported folder has to open for it to be visible (P14-KM-08).
+        const parts = d.folder.split("/");
+        setExpanded(
+          (s) =>
+            new Set([
+              ...s,
+              ...parts.map((_, i) => parts.slice(0, i + 1).join("/")),
+            ]),
+        );
+      }
+      dispatchGh({ type: "reset" });
+    } else if (d.error) {
+      dispatchGh({ type: "err", err: d.error });
+    }
+  });
 }
 
 /** Nested "this file already exists" confirm — its own native <dialog> (the
@@ -938,14 +1046,6 @@ function ReplaceConfirm({
   );
 }
 
-/** Lines as the attachment reader's gutter counts them (ruling 363): a
- *  trailing newline ends the last line rather than opening an empty one. */
-function lineCount(text: string): number {
-  if (text === "") return 0;
-  const lines = text.split(/\r\n|\r|\n/);
-  return lines.length > 1 && lines.at(-1) === "" ? lines.length - 1 : lines.length;
-}
-
 /**
  * Ruling 614: the open document is one card. The head names the file and, for
  * markdown, carries the Preview / Raw switch; the body is the rendered document
@@ -972,6 +1072,10 @@ function DocumentCard({
   doc: DocDraft;
   /** The file's size as the tree lists it; null for a new document. */
   sizeBytes: number | null;
+  /** A save is in flight, whichever draft the card holds. Save reads
+   *  "Saving…", and the name and text take no typing until it answers: its
+   *  success closes the draft it posted, and its refusal takes the card back
+   *  from a draft opened since (`useDocEditor`). */
   saving: boolean;
   nameRef: RefObject<HTMLInputElement | null>;
   /** Ruling 147: a refused save of a nameless draft marks the name field. */
@@ -982,24 +1086,9 @@ function DocumentCard({
   onCancel: () => void;
   onSave: () => void;
 }) {
-  /** An existing document whose read has not answered, or failed. */
-  const unread = doc.existing && doc.saved === null;
-  /** Ruling 147(d): an opened document saves only once its text changed. */
-  const changed = doc.existing && doc.saved !== null && doc.body !== doc.saved;
-  const fileName = doc.existing ? doc.name : draftFileName(doc.name);
-  // A nameless draft is markdown until it is named otherwise: the server
-  // saves a bare name as `.md`.
-  const markdown = doc.existing || doc.name.trim() ? isMarkdownName(fileName) : true;
-  const view: DocView = markdown ? doc.view : "raw";
-  const meta =
-    doc.saved === null
-      ? ""
-      : [
-          doc.truncated ? null : countLabel(lineCount(doc.saved), "line"),
-          sizeBytes === null ? null : prettySize(sizeBytes),
-        ]
-          .filter(Boolean)
-          .join(" · ");
+  // Ruling 700(e): what the card reads off the draft is `documentCardState`'s,
+  // and its body, notes and foot are regions (`store-browser-regions.tsx`).
+  const { unread, changed, fileName, markdown, view, meta } = documentCardState(doc, sizeBytes);
 
   return (
     <section className="fm-doc" aria-label={doc.existing ? doc.name : "New document"}>
@@ -1040,6 +1129,7 @@ function DocumentCard({
             type="text"
             className="mono"
             value={doc.name}
+            readOnly={saving}
             placeholder="file-name.md"
             aria-invalid={nameInvalid || undefined}
             aria-describedby={nameInvalid ? "fm-doc-err" : undefined}
@@ -1057,107 +1147,28 @@ function DocumentCard({
           </div>
         </div>
       )}
-      {unread ? (
-        doc.err ? (
-          <div className="doc-blank" role="alert">
-            <Icon name="alert" />
-            {doc.err}
-          </div>
-        ) : (
-          <div className="doc-blank">
-            <Icon name="loader" className="spin" />
-            Loading document…
-          </div>
-        )
-      ) : view === "preview" ? (
-        doc.body.trim() ? (
-          /* Scrolls on its own, so it takes focus and a name: a keyboard
-             reaches all of a long document (WCAG 2.1.1). */
-          <div
-            className="doc-preview"
-            tabIndex={0}
-            role="region"
-            aria-label={
-              "Preview of " +
-              (doc.existing || doc.name.trim() ? fileName : "the new document")
-            }
-          >
-            <MarkdownDoc text={doc.body} />
-          </div>
-        ) : (
-          <p className="doc-blank">
-            {doc.existing ? "This document is empty." : "Nothing to preview yet."}
-          </p>
-        )
-      ) : (
-        <>
-          <label className="vh" htmlFor="fm-doc-body">
-            Document contents
-          </label>
-          <textarea
-            id="fm-doc-body"
-            className="doc-src"
-            // Where `field-sizing` is unsupported the rows size it; the sheet
-            // caps both at the preview's height.
-            rows={Math.min(24, Math.max(8, lineCount(doc.body) + 1))}
-            value={doc.body}
-            placeholder={"# Title\n\nWhat your agents must know."}
-            onChange={(e) => onEdit({ ...doc, body: e.target.value, err: null })}
-          />
-        </>
-      )}
-      {/* One box, never two: a refused save speaks in the same slot the
-          server's own sentence uses (ruling 147). A read that failed says so
-          in the body instead. */}
+      <DocumentBody
+        doc={doc}
+        view={view}
+        unread={unread}
+        fileName={fileName}
+        saving={saving}
+        onEdit={onEdit}
+      />
+      {/* One box, never two (`DocumentNotes`, ruling 147). A read that failed
+          says so in the body instead. */}
       {(nameInvalid || (doc.err && !unread)) && (
-        <div className="doc-notes">
-          {nameInvalid ? (
-            <div
-              key={`refused-${refusal.count}`}
-              id="fm-doc-err"
-              className={"form-err" + (refusal.shake.shake ? " refused" : "")}
-              onAnimationEnd={refusal.shake.onAnimationEnd}
-              role="alert"
-            >
-              <Icon name="alert" />
-              Give the document a file name.
-            </div>
-          ) : (
-            <div className="form-err">
-              <Icon name="alert" />
-              {doc.err}
-            </div>
-          )}
-        </div>
+        <DocumentNotes nameInvalid={nameInvalid} err={doc.err} refusal={refusal} />
       )}
-      <div className="doc-foot">
-        <span className="doc-state">
-          {changed ? (
-            <>
-              <span className="doc-dot" />
-              Unsaved changes
-            </>
-          ) : (
-            meta
-          )}
-        </span>
-        <button type="button" className="btn ghost sm" onClick={onCancel}>
-          {doc.existing && !changed ? "Close" : "Cancel"}
-        </button>
-        <button
-          type="button"
-          className="btn sm primary"
-          // Ruling 147: the in-flight states, the truncated hard block (a
-          // data-safety refusal whose reason is rendered above) and, for an
-          // opened document, nothing changed (147(d)) disable this; a
-          // nameless draft is refused instead.
-          disabled={doc.truncated || saving || unread || (doc.existing && !changed)}
-          aria-busy={saving}
-          onClick={onSave}
-        >
-          {saving ? "Saving…" : "Save document"}
-        </button>
-      </div>
+      <DocumentFoot
+        doc={doc}
+        changed={changed}
+        unread={unread}
+        meta={meta}
+        saving={saving}
+        onCancel={onCancel}
+        onSave={onSave}
+      />
     </section>
   );
 }
@@ -1183,40 +1194,17 @@ export function StoreBrowser({
    *  the link a knowledge-base proposal carries to the document it stands in. */
   initialDoc?: string;
 }) {
-  const [expanded, setExpanded] = useState<Set<string>>(
-    () =>
-      new Set(
-        tree.flatMap((n) => (n.type === "dir" ? [n.name] : [])),
-      ),
-  );
-  const [newIn, setNewIn] = useState<string[] | null>(null);
-  /** Store-relative folder every toolbar action writes into (P14-KM-08). */
-  const [dest, setDest] = useState<string[]>([]);
-  const [confirm, setConfirm] = useState<{
-    path: string[];
-    node: StoreNode;
-  } | null>(null);
+  const { expanded, setExpanded, newIn, setNewIn, dest, confirm, setConfirm, toggle, expand, target } =
+    useStoreTree(tree);
 
   const nodes = tree;
-  const toggle = (key: string) =>
-    setExpanded((s) => {
-      const n = new Set(s);
-      if (n.has(key)) n.delete(key);
-      else n.add(key);
-      return n;
-    });
-  const expand = (path: string[]) =>
-    setExpanded((s) => {
-      const n = new Set(s);
-      for (let i = 1; i <= path.length; i++) n.add(path.slice(0, i).join("/"));
-      return n;
-    });
-
   const ops = useStoreOps(resource, expand);
   const push = useToast();
-  const editor = useDocEditor(resource, (toast) => {
+  // Reveal the folder the document was saved in: the "into" select may name
+  // another by now, and an opened document never set it.
+  const editor = useDocEditor(resource, (toast, dir) => {
     push(toast);
-    expand(dest);
+    expand(dir);
   });
   // Ruling 147: Save document stays enabled on a nameless draft and refuses the
   // click with the sentence `writeStoreDoc` would have thrown. Counted, so a
@@ -1226,12 +1214,6 @@ export function StoreBrowser({
   // Ruling 451(g): the box shakes once per refusal, not on each mount.
   const docShake = useRefusalShake(refusedDoc);
   const docNameRef = useRef<HTMLInputElement>(null);
-
-  /** Pick the destination folder AND reveal it, so the two never disagree. */
-  const target = (path: string[]) => {
-    setDest(path);
-    expand(path);
-  };
 
   // Ruling 483: arriving from a proposal's "Open document", the document it
   // stands in opens once, the way a click on its row would open it. The ref
@@ -1247,29 +1229,9 @@ export function StoreBrowser({
     editor.openExisting(parts, name);
   }, [initialDoc, editor, expand]);
 
-  // ---- GitHub-import feedback: lives here (not in the hook) because a
+  // ---- GitHub-import feedback: its own hook (not `useStoreOps`) because a
   // successful import expands the tree state this component owns.
-  const { ghFetcher, dispatchGh } = ops;
-  useFetcherResult(ghFetcher, (d) => {
-    if (d.ok) {
-      if (d.toast) push(d.toast);
-      if (d.folder) {
-        // The destination is store-relative now, so every ancestor of the
-        // imported folder has to open for it to be visible (P14-KM-08).
-        const parts = d.folder.split("/");
-        setExpanded(
-          (s) =>
-            new Set([
-              ...s,
-              ...parts.map((_, i) => parts.slice(0, i + 1).join("/")),
-            ]),
-        );
-      }
-      dispatchGh({ type: "reset" });
-    } else if (d.error) {
-      dispatchGh({ type: "err", err: d.error });
-    }
-  });
+  useGhImportFeedback(ops, push, setExpanded);
 
   // ---- layered close on the native <dialog>: the nested DeleteConfirm is
   // topmost while open, so its own `cancel` handles that layer; here an

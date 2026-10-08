@@ -10,10 +10,12 @@ import { Icon } from "~/ui/icon";
 
 /**
  * THE credential card (github-view spec §7.12: one component, used by the
- * GitHub view now and Settings → RepoSettings in Phase 9, so the two can't
- * drift). Markup is the mock's `.cred-card` verbatim; the footer action
- * slot is the only variation point ("Fix in Settings" here, "Re-check scopes"
- * in Settings — this page currently renders both, see the phase report).
+ * GitHub view (`github-view.tsx`) and by the project settings page's
+ * Repository panel (`RepoCredentialSlot`, `settings-page.tsx`), so the two
+ * can't drift). Markup is the mock's `.cred-card` verbatim; the two differ
+ * only in what they hand it: the footer actions (Re-check scopes on both,
+ * plus "Fix in Settings" on the GitHub view), the manage row, and, from the
+ * GitHub view alone, the connection probe's token health (`connectionAuth`).
  *
  * States:
  * - source "pat" → cred-top + scope chips + warn/ok footer (chips render the
@@ -71,26 +73,9 @@ export function CredentialCard({
     );
   }
 
-  const missing = credential.scopes.find((s) => !s.ok);
-  // Owner ruling 2026-07-25: a chip is a PROVEN verdict — a scope header, a
-  // live probe (writes via the empty-payload dry-run), or an open violation.
-  // Ruling 480: a repository-scoped chip's probe is this project's repository's
-  // proof, a write Viberr made there included.
-  // `assumed`/`unchecked` entries are not evidence, so they render as the
-  // honest "unproven" line instead of a pseudo-check next to real ones.
-  const proven = credential.scopes.filter(
-    (s: ScopeChip) => s.source !== "assumed" && s.source !== "unchecked",
+  const { missing, proven, unproven, unverified } = readScopes(
+    credential.scopes,
   );
-  const unproven = credential.scopes.filter(
-    (s: ScopeChip) => s.source === "assumed" || s.source === "unchecked",
-  );
-  // F15-01: NOTHING has been proven — a freshly-attached PAT nobody validated
-  // (every chip "unchecked"), or a fine-grained token validated without repo
-  // context (every chip "assumed"). The `assumed` shape dodged the old
-  // all-"unchecked" test and fell straight through to the green footer, so a
-  // card with zero evidence affirmed "Every provable scope verified". Zero
-  // proven scopes is the unverified state, whatever the excuse.
-  const unverified = proven.length === 0;
   return (
     <div className="cred-card">
       <div className="cred-top">
@@ -122,65 +107,136 @@ export function CredentialCard({
           {a.text}
         </div>
       ))}
-      {connectionAuth === "revoked" || connectionAuth === "expired" ? (
-        <div className="cred-warn">
-          <Icon name="alert" />
-          <span>
-            Token {connectionAuth}. Re-authenticate this connection to
-            resume branch and PR sync. Its granted scopes don't apply while
-            the token is invalid.
-          </span>
-          {warnActions}
-        </div>
-      ) : missing ? (
-        <div className="cred-warn">
-          <Icon name="alert" />
-          <span>
-            Missing <code className="mono">{missing.id}</code>. PR status
-            can't auto-sync after merge.
-            {missing.flaggedTaskKey ? " Flagged on" : ""}
-          </span>
-          {missing.flaggedTaskKey && (
-            <button
-              type="button"
-              className="keybtn"
-              onClick={() => onOpenTask(missing.flaggedTaskKey!)}
-            >
-              {missing.flaggedTaskKey}
-            </button>
-          )}
-          {warnActions}
-        </div>
-      ) : unverified ? (
-        <div className="cred-warn">
-          <Icon name="alert" />
-          <span>
-            Credential attached. Scopes not yet verified against GitHub
-            {unproven.length > 0
-              ? ` (${unproven.map((s) => s.id).join(", ")})`
-              : ""}
-            . Use Re-check scopes to verify them.
-          </span>
-          {warnActions}
-        </div>
-      ) : (
-        <div className="cred-ok">
-          <Icon name="check" />
-          <span>
-            {unproven.length > 0
-              ? "Every provable scope verified. Secrets stay isolated from task records and timelines."
-              : "All required scopes proven. Secrets stay isolated from task records and timelines."}
-          </span>
-          {/* An advisory's scope (`workflow`, `checks:read`) is never required,
-              so a card whose only problem is an advisory lands here. Its copy
-              and the delivery remedies send the person to Re-check, and the
-              pre-push refusal reads the cached header scopes: without the slot
-              here, granting the scope on GitHub changed nothing short of
-              rotating the credential. */}
-          {credential.advisories.length > 0 && warnActions}
-        </div>
-      )}
+      <CredentialFooter
+        connectionAuth={connectionAuth}
+        missing={missing}
+        unverified={unverified}
+        unproven={unproven}
+        advised={credential.advisories.length > 0}
+        onOpenTask={onOpenTask}
+        warnActions={warnActions}
+      />
       {manageActions}
+    </div>
+  );
+}
+
+/** What a PAT card's scope chips prove (ruling 700(e), the split of
+ *  `CredentialCard`): the first refused scope, the chips that are evidence,
+ *  the ones that are not, and whether nothing at all is proven. */
+function readScopes(scopes: ScopeChip[]) {
+  const missing = scopes.find((s) => !s.ok);
+  // Owner ruling 2026-07-25: a chip is a PROVEN verdict — a scope header, a
+  // live probe (writes via the empty-payload dry-run), or an open violation.
+  // Ruling 480: a repository-scoped chip's probe is this project's repository's
+  // proof, a write Viberr made there included.
+  // `assumed`/`unchecked` entries are not evidence, so they render as the
+  // honest "unproven" line instead of a pseudo-check next to real ones.
+  const proven = scopes.filter(
+    (s: ScopeChip) => s.source !== "assumed" && s.source !== "unchecked",
+  );
+  const unproven = scopes.filter(
+    (s: ScopeChip) => s.source === "assumed" || s.source === "unchecked",
+  );
+  // F15-01: NOTHING has been proven — a freshly-attached PAT nobody validated
+  // (every chip "unchecked"), or a fine-grained token validated without repo
+  // context (every chip "assumed"). The `assumed` shape dodged the old
+  // all-"unchecked" test and fell straight through to the green footer, so a
+  // card with zero evidence affirmed "Every provable scope verified". Zero
+  // proven scopes is the unverified state, whatever the excuse.
+  const unverified = proven.length === 0;
+  return { missing, proven, unproven, unverified };
+}
+
+/**
+ * A PAT card's footer (ruling 700(e), the split of `CredentialCard`): the one
+ * warning that outranks the others (a dead token, then a refused scope, then
+ * no proof at all), or the all-clear. Hook-free, in the slot the card's
+ * ternary held.
+ */
+function CredentialFooter({
+  connectionAuth,
+  missing,
+  unverified,
+  unproven,
+  advised,
+  onOpenTask,
+  warnActions,
+}: {
+  connectionAuth?: "ok" | "revoked" | "expired";
+  missing: ScopeChip | undefined;
+  unverified: boolean;
+  unproven: ScopeChip[];
+  /** The card carries at least one advisory. */
+  advised: boolean;
+  onOpenTask: (taskKey: string) => void;
+  warnActions?: ReactNode;
+}) {
+  if (connectionAuth === "revoked" || connectionAuth === "expired") {
+    return (
+      <div className="cred-warn">
+        <Icon name="alert" />
+        <span>
+          Token {connectionAuth}. Re-authenticate this connection to
+          resume branch and PR sync. Its granted scopes don't apply while
+          the token is invalid.
+        </span>
+        {warnActions}
+      </div>
+    );
+  }
+  if (missing) {
+    return (
+      <div className="cred-warn">
+        <Icon name="alert" />
+        <span>
+          Missing <code className="mono">{missing.id}</code>. PR status
+          can't auto-sync after merge.
+          {missing.flaggedTaskKey ? " Flagged on" : ""}
+        </span>
+        {missing.flaggedTaskKey && (
+          <button
+            type="button"
+            className="keybtn"
+            onClick={() => onOpenTask(missing.flaggedTaskKey!)}
+          >
+            {missing.flaggedTaskKey}
+          </button>
+        )}
+        {warnActions}
+      </div>
+    );
+  }
+  if (unverified) {
+    return (
+      <div className="cred-warn">
+        <Icon name="alert" />
+        <span>
+          Credential attached. Scopes not yet verified against GitHub
+          {unproven.length > 0
+            ? ` (${unproven.map((s) => s.id).join(", ")})`
+            : ""}
+          . Use Re-check scopes to verify them.
+        </span>
+        {warnActions}
+      </div>
+    );
+  }
+  return (
+    <div className="cred-ok">
+      <Icon name="check" />
+      <span>
+        {unproven.length > 0
+          ? "Every provable scope verified. Secrets stay isolated from task records and timelines."
+          : "All required scopes proven. Secrets stay isolated from task records and timelines."}
+      </span>
+      {/* An advisory's scope (`workflow`, `checks:read`) is never required,
+          so a card whose only problem is an advisory lands here. Its copy
+          and the delivery remedies send the person to Re-check, and the
+          pre-push refusal reads the cached header scopes: without the slot
+          here, granting the scope on GitHub changed nothing short of
+          rotating the credential. */}
+      {advised && warnActions}
     </div>
   );
 }
@@ -209,17 +265,6 @@ function RemoveCredentialDialog({
       onConfirm={onConfirm}
     />
   );
-}
-
-/**
- * Ruling 480 (F40-45): where an instance admin replaces the token a project's
- * credential is bound to: its connection's Update token in Instance settings.
- * Null when no connection holds the token.
- */
-export function replaceTokenHref(connectionId: string | undefined): string | null {
-  return connectionId
-    ? `/org/settings?tab=connections&update=${encodeURIComponent(connectionId)}`
-    : null;
 }
 
 /**

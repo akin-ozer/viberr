@@ -8,6 +8,7 @@ import type {
   OperatorBurstSummary,
   OversightSummary,
   InsightsSummary,
+  QuotaWindow,
   ResumeSummary,
   RunAnalytics,
   RunMeasure,
@@ -497,13 +498,6 @@ function UsageLimits({ runs }: { runs: RunAnalytics }) {
   const hydrated = useHydrated();
   const { backend, reading, exhausted, credentialRefused } = runs.quota;
   const name = BACKEND_LABEL[backend];
-  const pctOf = (u: number) => Math.max(0, Math.min(100, Math.round(u * 100)));
-  // D32-2 (ruling 4): the app's ONE date formatter, never the server locale's
-  // `toLocaleString`. Every localized instant here is hydration-gated: rendered
-  // during SSR it would be the SERVER's timezone, and React re-renders the page
-  // rather than patching a text mismatch.
-  const instant = (unixSeconds: number) =>
-    formatDayDotTime(new Date(unixSeconds * 1000).toISOString());
   // V4 (pass 31): an exhaustion record is a claim about ONE moment. A
   // utilization reading this backend reported AFTER that moment is fresher
   // evidence from the same provider, so it wins: the refusal is history by
@@ -520,73 +514,9 @@ function UsageLimits({ runs }: { runs: RunAnalytics }) {
     // provider's sentence) and is cleared by a run that completes on the
     // backend or by the named account being replaced or disconnected (ruling
     // 165); the row says exactly that.
-    const refused = hydrated
-      ? `run ${credentialRefused.runId} was refused ${formatDayDotTime(credentialRefused.observedAt)}: ${credentialRefused.providerText}`
-      : undefined;
-    rows = (
-      <li className="quota-row spent">
-        <span className="quota-name">{name}</span>
-        <span className="quota-val">
-          Credential refused
-          {credentialRefused.credentialLabel ? ` · ${credentialRefused.credentialLabel}'s account` : ""}
-        </span>
-        <span className="quota-track">
-          <span className="quota-fill full" />
-        </span>
-        <span className="quota-meta" title={refused}>
-          from a refused run · clears when a run on this backend completes or the account changes
-          {/* Interface review 2026-09-24 (acce-5): the title is the pointer's
-              extra; touch, keyboard and screen readers get the same sentence
-              from `.vh`. */}
-          {refused && <span className="vh">{" · " + refused}</span>}
-        </span>
-      </li>
-    );
+    rows = <CredentialRefusedRow name={name} refused={credentialRefused} hydrated={hydrated} />;
   } else if (refusal) {
-    const refused = hydrated
-      ? `run ${refusal.runId} was refused ${formatDayDotTime(refusal.observedAt)}: ${refusal.providerText}`
-      : undefined;
-    rows = (
-      <li className="quota-row spent">
-        <span className="quota-name">{name}</span>
-        <span className="quota-val">Usage limit reached</span>
-        <span className="quota-track">
-          {/* D5: a provider that REFUSED a run said the window is spent, so
-              the track is full. That is the provider's own words, not an
-              invented utilization number. */}
-          <span className="quota-fill full" />
-        </span>
-        <span className="quota-meta" title={refused}>
-          {[
-            // Say where this came from. It is NOT a utilization reading the
-            // provider volunteered. Ruling 130(d): and WHOSE account it was.
-            refusal.credentialLabel
-              ? `from a refused run on ${refusal.credentialLabel}'s account`
-              : "from a refused run",
-            // V9: only an `exact` reset is a real instant (the provider
-            // emitted a unix epoch). A `prose` one was reconstructed from
-            // wall-clock words in the ACCOUNT's timezone, which this app does
-            // not know, so it renders as the calendar DATE it named and never
-            // as a to-the-minute local time we cannot stand behind. Pass 34
-            // review: `clock` is a to-the-minute UTC instant too (a provider's
-            // "resets 11:50am (UTC)"), so it keeps its hour.
-            refusal.resetsAt != null
-              ? `retry after ${
-                  hydrated &&
-                  (refusal.resetsAtPrecision === "exact" || refusal.resetsAtPrecision === "clock")
-                    ? instant(refusal.resetsAt)
-                    : // P07-I: a prose-derived date is a UTC calendar day,
-                      // and says so: it can be a day off locally.
-                      `${utcDayKey(new Date(refusal.resetsAt * 1000).toISOString())} (UTC)`
-                }`
-              : null,
-          ]
-            .filter(Boolean)
-            .join(" · ")}
-          {refused && <span className="vh">{" · " + refused}</span>}
-        </span>
-      </li>
-    );
+    rows = <RunRefusalRow name={name} refusal={refusal} hydrated={hydrated} />;
   } else if (reading == null) {
     rows = (
       <li className="quota-row">
@@ -596,59 +526,9 @@ function UsageLimits({ runs }: { runs: RunAnalytics }) {
       </li>
     );
   } else {
-    rows = runs.quotaWindows.map((w) => {
-      // Ruling 481(d): a window whose reset has passed keeps its row, in the
-      // past tense, with no percentage and no bar.
-      const pct = w.reset || w.utilization == null ? null : pctOf(w.utilization);
-      // The provider's status and overage belong to the binding window. A
-      // warning outranks the reset: the panel exists to warn BEFORE a run
-      // fails, so "warning" must never hide behind a date. Not once the window
-      // it warned about has reset.
-      const binding = w.rateLimitType === reading.rateLimitType && !w.reset;
-      const warning = binding && reading.status !== "allowed";
-      const overage = binding && reading.isUsingOverage;
-      return (
-        <li
-          key={w.rateLimitType}
-          className={"quota-row" + (warning || overage ? " warn" : "")}
-          data-quota-window={w.rateLimitType}
-        >
-          <span className="quota-name" title={w.rateLimitType}>
-            {quotaWindowLabel(w.rateLimitType)}
-          </span>
-          <span className={"quota-val" + (pct == null ? " na" : "")}>
-            {/* Three honest states: a percentage; a window that has reset
-                since (no reading on the new one yet); a reading whose
-                envelope carried no utilization (the provider's five_hour
-                events often omit it). Absent states render de-emphasized
-                (.na), never at value weight. */}
-            {w.reset ? "Window reset" : pct == null ? "Not reported" : `${pct}%`}
-          </span>
-          <span className="quota-track">
-            <span className="quota-fill" style={{ width: `${pct ?? 0}%` }} />
-          </span>
-          <span className="quota-meta">
-            {[
-              w.reset ? "no reading since" : null,
-              warning ? reading.status.replace(/^allowed_/, "").replaceAll("_", " ") : null,
-              overage ? "overage" : null,
-              // Ruling 130(d): the HOUR when the provider sent one. Before
-              // hydration, the timezone-neutral UTC day and clock, marked as
-              // such (P07-I), so the first paint is honest either way.
-              w.resetsAt != null
-                ? `${w.reset ? "reset" : "resets"} ${
-                    hydrated
-                      ? instant(w.resetsAt)
-                      : `${utcDayKey(new Date(w.resetsAt * 1000).toISOString())} ${formatClockUTC(new Date(w.resetsAt * 1000).toISOString())} (UTC)`
-                  }`
-                : null,
-            ]
-              .filter(Boolean)
-              .join(" · ")}
-          </span>
-        </li>
-      );
-    });
+    rows = runs.quotaWindows.map((w) => (
+      <QuotaWindowRow key={w.rateLimitType} w={w} reading={reading} hydrated={hydrated} />
+    ));
   }
 
   return (
@@ -669,6 +549,192 @@ function UsageLimits({ runs }: { runs: RunAnalytics }) {
           : ""}
       </p>
     </section>
+  );
+}
+
+/* Ruling 700(e), the split of `UsageLimits`: the card's three kinds of row,
+   each hook-free in the list slot the card's branches filled (the card keeps
+   `useHydrated` and hands its answer down), and what a window row reads off
+   the reading, as pure functions. */
+
+type QuotaReading = NonNullable<RunAnalytics["quota"]["reading"]>;
+
+const pctOf = (u: number) => Math.max(0, Math.min(100, Math.round(u * 100)));
+
+// D32-2 (ruling 4): the app's ONE date formatter, never the server locale's
+// `toLocaleString`. Every localized instant here is hydration-gated: rendered
+// during SSR it would be the SERVER's timezone, and React re-renders the page
+// rather than patching a text mismatch.
+const instant = (unixSeconds: number) =>
+  formatDayDotTime(new Date(unixSeconds * 1000).toISOString());
+
+/** A refused credential's row (F32-4, above). */
+function CredentialRefusedRow({
+  name,
+  refused: credentialRefused,
+  hydrated,
+}: {
+  name: string;
+  refused: NonNullable<RunAnalytics["quota"]["credentialRefused"]>;
+  hydrated: boolean;
+}) {
+  const refused = hydrated
+    ? `run ${credentialRefused.runId} was refused ${formatDayDotTime(credentialRefused.observedAt)}: ${credentialRefused.providerText}`
+    : undefined;
+  return (
+    <li className="quota-row spent">
+      <span className="quota-name">{name}</span>
+      <span className="quota-val">
+        Credential refused
+        {credentialRefused.credentialLabel ? ` · ${credentialRefused.credentialLabel}'s account` : ""}
+      </span>
+      <span className="quota-track">
+        <span className="quota-fill full" />
+      </span>
+      <span className="quota-meta" title={refused}>
+        from a refused run · clears when a run on this backend completes or the account changes
+        {/* Interface review 2026-09-24 (acce-5): the title is the pointer's
+            extra; touch, keyboard and screen readers get the same sentence
+            from `.vh`. */}
+        {refused && <span className="vh">{" · " + refused}</span>}
+      </span>
+    </li>
+  );
+}
+
+/** A run the provider refused for its limit (D5, V4 above). */
+function RunRefusalRow({
+  name,
+  refusal,
+  hydrated,
+}: {
+  name: string;
+  refusal: NonNullable<RunAnalytics["quota"]["exhausted"]>;
+  hydrated: boolean;
+}) {
+  const refused = hydrated
+    ? `run ${refusal.runId} was refused ${formatDayDotTime(refusal.observedAt)}: ${refusal.providerText}`
+    : undefined;
+  return (
+    <li className="quota-row spent">
+      <span className="quota-name">{name}</span>
+      <span className="quota-val">Usage limit reached</span>
+      <span className="quota-track">
+        {/* D5: a provider that REFUSED a run said the window is spent, so
+            the track is full. That is the provider's own words, not an
+            invented utilization number. */}
+        <span className="quota-fill full" />
+      </span>
+      <span className="quota-meta" title={refused}>
+        {[
+          // Say where this came from. It is NOT a utilization reading the
+          // provider volunteered. Ruling 130(d): and WHOSE account it was.
+          refusal.credentialLabel
+            ? `from a refused run on ${refusal.credentialLabel}'s account`
+            : "from a refused run",
+          // V9: only an `exact` reset is a real instant (the provider
+          // emitted a unix epoch). A `prose` one was reconstructed from
+          // wall-clock words in the ACCOUNT's timezone, which this app does
+          // not know, so it renders as the calendar DATE it named and never
+          // as a to-the-minute local time we cannot stand behind. Pass 34
+          // review: `clock` is a to-the-minute UTC instant too (a provider's
+          // "resets 11:50am (UTC)"), so it keeps its hour.
+          refusal.resetsAt != null
+            ? `retry after ${
+                hydrated &&
+                (refusal.resetsAtPrecision === "exact" || refusal.resetsAtPrecision === "clock")
+                  ? instant(refusal.resetsAt)
+                  : // P07-I: a prose-derived date is a UTC calendar day,
+                    // and says so: it can be a day off locally.
+                    `${utcDayKey(new Date(refusal.resetsAt * 1000).toISOString())} (UTC)`
+              }`
+            : null,
+        ]
+          .filter(Boolean)
+          .join(" · ")}
+        {refused && <span className="vh">{" · " + refused}</span>}
+      </span>
+    </li>
+  );
+}
+
+/** What one window's row reads off the backend's reading. */
+function windowState(w: QuotaWindow, reading: QuotaReading) {
+  // Ruling 481(d): a window whose reset has passed keeps its row, in the
+  // past tense, with no percentage and no bar.
+  const pct = w.reset || w.utilization == null ? null : pctOf(w.utilization);
+  // The provider's status and overage belong to the binding window. A
+  // warning outranks the reset: the panel exists to warn BEFORE a run
+  // fails, so "warning" must never hide behind a date. Not once the window
+  // it warned about has reset.
+  const binding = w.rateLimitType === reading.rateLimitType && !w.reset;
+  const warning = binding && reading.status !== "allowed";
+  const overage = binding && reading.isUsingOverage;
+  return { pct, warning, overage };
+}
+
+/** A window row's meta line: its reset, the provider's warning and overage,
+ *  and when it resets. */
+function windowMeta(
+  w: QuotaWindow,
+  reading: QuotaReading,
+  warning: boolean,
+  overage: boolean,
+  hydrated: boolean,
+): string {
+  return [
+    w.reset ? "no reading since" : null,
+    warning ? reading.status.replace(/^allowed_/, "").replaceAll("_", " ") : null,
+    overage ? "overage" : null,
+    // Ruling 130(d): the HOUR when the provider sent one. Before
+    // hydration, the timezone-neutral UTC day and clock, marked as
+    // such (P07-I), so the first paint is honest either way.
+    w.resetsAt != null
+      ? `${w.reset ? "reset" : "resets"} ${
+          hydrated
+            ? instant(w.resetsAt)
+            : `${utcDayKey(new Date(w.resetsAt * 1000).toISOString())} ${formatClockUTC(new Date(w.resetsAt * 1000).toISOString())} (UTC)`
+        }`
+      : null,
+  ]
+    .filter(Boolean)
+    .join(" · ");
+}
+
+/** One window the reading lists (ruling 635, ruling 642 above). */
+function QuotaWindowRow({
+  w,
+  reading,
+  hydrated,
+}: {
+  w: QuotaWindow;
+  reading: QuotaReading;
+  hydrated: boolean;
+}) {
+  const { pct, warning, overage } = windowState(w, reading);
+  return (
+    <li
+      className={"quota-row" + (warning || overage ? " warn" : "")}
+      data-quota-window={w.rateLimitType}
+    >
+      <span className="quota-name" title={w.rateLimitType}>
+        {quotaWindowLabel(w.rateLimitType)}
+      </span>
+      <span className={"quota-val" + (pct == null ? " na" : "")}>
+        {/* Three honest states: a percentage; a window that has reset
+            since (no reading on the new one yet); a reading whose
+            envelope carried no utilization (the provider's five_hour
+            events often omit it). Absent states render de-emphasized
+            (.na), never at value weight. */}
+        {w.reset ? "Window reset" : pct == null ? "Not reported" : `${pct}%`}
+      </span>
+      <span className="quota-track">
+        <span className="quota-fill" style={{ width: `${pct ?? 0}%` }} />
+      </span>
+      <span className="quota-meta">
+        {windowMeta(w, reading, warning, overage, hydrated)}
+      </span>
+    </li>
   );
 }
 

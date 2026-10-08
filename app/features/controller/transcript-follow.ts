@@ -127,7 +127,9 @@ export function useTranscriptFollow(
     const last = newest(messages);
     home.current = last?.author === "controller" ? last.id : null;
     if (!box) {
-      // The next box is a new element, scrolled to its top: that is an open.
+      // Another view holds the box (the dock's thread list or unavailable
+      // note). The box that comes back keeps that view's offset, not the
+      // transcript's: that is an open.
       opened.current = null;
       held.current = null;
       measure();

@@ -11,6 +11,7 @@ import type { ThemePreference } from "~/server/theme/theme-cookie.server";
 import { Avatar } from "~/ui/avatar";
 import { initialsOf } from "~/ui/initials";
 import { useDismiss } from "~/ui/use-dismiss";
+import { accountTriggerClass } from "./account-trigger";
 
 /**
  * The account menu as pages ship it. Ruling 457: the menu itself
@@ -41,11 +42,6 @@ export interface MenuUser {
 
 /** The trigger's accessible name, shared by this trigger and the menu's. */
 export const ACCOUNT_MENU_LABEL = "Account menu";
-
-/** The trigger's classes, shared by this trigger and the menu's. */
-export function accountTriggerClass(open: boolean): string {
-  return "home-user" + (open ? " open" : "");
-}
 
 /** What this trigger hands the menu when the menu replaces it. */
 export interface MenuHandOver {

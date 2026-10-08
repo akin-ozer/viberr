@@ -123,17 +123,51 @@ function renderEpic(view: EpicPageView, grants: Grants = {}, action?: ActionFunc
   return render(<Stub initialEntries={["/projects/viberr-core/epics/epic-3"]} />);
 }
 
-/** An action that records every POST's fields and answers `reply`. */
-function recorder(reply: EpicActionResult) {
+/** An action that records every POST's fields and answers `replies` in turn,
+ *  the last one from then on. */
+function recorder(...replies: [EpicActionResult, ...EpicActionResult[]]) {
   const posted: Record<string, string>[] = [];
   const action: ActionFunction = async ({ request }) => {
     const fd = await request.formData();
     const row: Record<string, string> = {};
     for (const [k, v] of fd.entries()) if (!(v instanceof File)) row[k] = v;
     posted.push(row);
-    return reply;
+    return replies[Math.min(posted.length, replies.length) - 1];
   };
   return { posted, action };
+}
+
+/** The page under a loader, as the route serves it: a POST answers `reply`,
+ *  and the reload after it, which the route runs after every write, reads
+ *  `after`. */
+function renderReloading(first: EpicPageView, after: EpicPageView, reply: EpicActionResult) {
+  let view = first;
+  const Stub = createRoutesStub([
+    {
+      id: "root",
+      path: "/",
+      loader: () => ({ csrf: "tok", theme: "system" }),
+      children: [
+        {
+          path: "projects/:slug/epics/:epicId",
+          loader: () => view,
+          action: () => {
+            view = after;
+            return reply;
+          },
+          Component: function Loaded() {
+            const data = useLoaderData<EpicPageView>();
+            return (
+              <ToastProvider>
+                <EpicPage view={data} projectSlug="viberr-core" canManage canEditTasks canCreateTask canArchive />
+              </ToastProvider>
+            );
+          },
+        },
+      ],
+    },
+  ]);
+  return render(<Stub initialEntries={["/projects/viberr-core/epics/epic-3"]} />);
 }
 
 /** A section of the page, by its heading. */
@@ -200,6 +234,43 @@ describe("ruling 503(e): the epic page's head", () => {
     expect(within(dialog).getByLabelText("Status")).toHaveProperty("value", "in_progress");
     expect(within(dialog).getByLabelText("Lead")).toHaveProperty("value", "u_murat");
     expect(within(dialog).getByRole("button", { name: "Save" })).toBeTruthy();
+  });
+
+  it("Save toasts the answer and leaves through the dialog's exit, posting once, and focus goes back to Edit", async () => {
+    const RENAMED = 'Updated epic-3: renamed it from "Checkout revamp" to "Checkout v2".';
+    const PAUSED = "Updated epic-3: set the status to Paused.";
+    const { posted, action } = recorder({ ok: true, toast: RENAMED }, { ok: true, toast: PAUSED });
+    renderEpic(pageView(), {}, action);
+    const edit = await screen.findByRole("button", { name: "Edit" });
+    edit.focus();
+    fireEvent.click(edit);
+    const dialog = await screen.findByRole("dialog", { name: "Edit epic-3" });
+    // The sheet's `dialog[data-closing]` clock, which jsdom has no stylesheet
+    // to read: the exit plays until its transitionend.
+    dialog.style.transitionDuration = "10s";
+    const name = within(dialog).getByLabelText(/Name/);
+    fireEvent.change(name, { target: { value: "Checkout v2" } });
+    fireEvent.keyDown(name, { key: "Enter" });
+    expect(await screen.findByText(RENAMED)).toBeTruthy();
+    // An edit's answer is the dialog's own (ruling 700(c)). CANARY: drop
+    // `close()` from EpicDialog's own result handler and the dialog stays
+    // open over its toast.
+    expect(dialog.hasAttribute("data-closing")).toBe(true);
+    // Ruling 459: a second Enter on the closing dialog posts nothing. CANARY:
+    // drop `fetcher.data?.ok` from submit's guard and the fade posts
+    // update-epic again.
+    fireEvent.keyDown(name, { key: "Enter" });
+    fireEvent.transitionEnd(dialog);
+    expect(screen.queryByRole("dialog", { name: "Edit epic-3" })).toBeNull();
+    expect(document.activeElement).toBe(edit);
+    // A later post's answer: once it shows, a post the second Enter made
+    // would have reached the action before it.
+    fireEvent.change(screen.getByRole("combobox", { name: "Status" }), { target: { value: "paused" } });
+    expect(await screen.findByText(PAUSED)).toBeTruthy();
+    expect(posted).toEqual([
+      expect.objectContaining({ intent: "update-epic", title: "Checkout v2" }),
+      { _csrf: "tok", intent: "update-epic", status: "paused" },
+    ]);
   });
 });
 
@@ -288,6 +359,35 @@ describe("ruling 503(e): About, History and Details", () => {
     fireEvent.click(within(panel).getByRole("button", { name: "Show 2 more" }));
     expect(panel.querySelectorAll("li")).toHaveLength(10);
     expect(within(panel).getByRole("button", { name: "Show less" })).toBeTruthy();
+  });
+
+  it("a new line leaves the rows already drawn in place, so a task chip in them keeps the focus", async () => {
+    // Local hours of one fixed past day, so every zone reads one day. The
+    // eight lines fill the preview, so the new one pushes the oldest out.
+    const at = (hour: number) => new Date(2024, 8, 20, hour).toISOString();
+    const earlier = [
+      { occurredAt: at(11), text: "Arda Kaya added VIB-151." },
+      ...Array.from({ length: 7 }, (_, i) => ({ occurredAt: at(10 - i), text: `Entry ${7 - i}` })),
+    ];
+    const latest = { occurredAt: at(12), text: "Arda Kaya set the status to Paused." };
+    const taskLinks = { "VIB-151": "/projects/viberr-core/tasks/VIB-151" };
+    renderReloading(
+      pageView({ epic: detail({ history: earlier }), taskLinks }),
+      pageView({ epic: detail({ status: "paused", history: [latest, ...earlier] }), taskLinks }),
+      { ok: true },
+    );
+    const panel = await section("History");
+    const chip = within(panel).getByRole("link", { name: "VIB-151" });
+    chip.focus();
+    // The line reaches the open page the way every write does, by the reload;
+    // a change event leaves the focus on the chip.
+    fireEvent.change(screen.getByRole("combobox", { name: "Status" }), { target: { value: "paused" } });
+    expect(await within(panel).findByText(latest.text)).toBeTruthy();
+    // CANARY: key a row by its place in its day again, or count it from the end
+    // of `entries` (a full preview stays eight long), and the new line re-keys
+    // every row under it: the chip's row remounts and the focus falls to <body>.
+    expect(chip.isConnected).toBe(true);
+    expect(document.activeElement).toBe(chip);
   });
 
   it("Details names the status, the lead, the dates and the creator", async () => {
@@ -524,7 +624,7 @@ describe("ruling 503(e): the Tasks section", () => {
     expect(folded?.querySelector("summary")?.textContent).toBe("1 archived task");
     const archived = folded?.querySelector<HTMLElement>('li[data-task="VIB-139"]');
     expect(archived?.querySelector(".chip.st")?.textContent).toBe("archived");
-    // CANARY: pass `canRemove={canEditTasks}` to the archived rows and a task
+    // CANARY: drop `&& !task.archived` from EpicTasks' `onRemove` and a task
     // whose planning metadata is frozen is offered a Remove the server refuses.
     expect(screen.queryByRole("button", { name: "Take VIB-139 out of epic-3" })).toBeNull();
     expect(screen.getByRole("button", { name: "Take VIB-151 out of epic-3" })).toBeTruthy();
@@ -622,35 +722,13 @@ describe("ruling 651: archiving from the epic page", () => {
   });
 
   it("the row's answer is toasted after the row moves into the fold", async () => {
-    // The page reloads after the action, as the route's loader does: the
-    // archived row leaves the live list for the fold, a new element.
-    let view = pageView({ tasks: [DONE] });
-    const Stub = createRoutesStub([
-      {
-        id: "root",
-        path: "/",
-        loader: () => ({ csrf: "tok", theme: "system" }),
-        children: [
-          {
-            path: "projects/:slug/epics/:epicId",
-            loader: () => view,
-            action: () => {
-              view = pageView({ tasks: [{ ...DONE, archived: true, status: FILED.status }] });
-              return { ok: true, toast: "VIB-160 archived. Find it under Archived on the board." };
-            },
-            Component: function Loaded() {
-              const data = useLoaderData<EpicPageView>();
-              return (
-                <ToastProvider>
-                  <EpicPage view={data} projectSlug="viberr-core" canManage canEditTasks canCreateTask canArchive />
-                </ToastProvider>
-              );
-            },
-          },
-        ],
-      },
-    ]);
-    render(<Stub initialEntries={["/projects/viberr-core/epics/epic-3"]} />);
+    // The page reloads after the action: the archived row leaves the live
+    // list for the fold, a new element.
+    renderReloading(
+      pageView({ tasks: [DONE] }),
+      pageView({ tasks: [{ ...DONE, archived: true, status: FILED.status }] }),
+      { ok: true, toast: "VIB-160 archived. Find it under Archived on the board." },
+    );
     fireEvent.click(await screen.findByRole("button", { name: "Archive VIB-160" }));
     // CANARY: give `EpicTaskRow` its own fetcher again and the toast is lost
     // when the row unmounts into the fold.
