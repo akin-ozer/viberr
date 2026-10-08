@@ -917,7 +917,7 @@ const MODEL_SUBSTITUTED_TAG = "run·model_substituted";
 
 /** Ruling 636: the console line of a run that starts without a temporary
  *  directory of its own. */
-export const RUN_TMP_UNAVAILABLE_TAG = "run·tmp_unavailable";
+const RUN_TMP_UNAVAILABLE_TAG = "run·tmp_unavailable";
 
 /**
  * Starts a run: selects the requested provider adapter, inserts the queued
