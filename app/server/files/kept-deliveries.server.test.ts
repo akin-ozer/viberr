@@ -126,11 +126,15 @@ describe("ruling 703: the task's files set against the delivery a reviewer judge
     save("placeholder.md", "makes the folder");
     writeFileSync(path.join(attachments, decomposed), "the offer");
     keep(JUDGED, [decomposed]);
+    // The later save, under the composed name. A file system that tells the
+    // two forms apart (Linux) now holds two files; one that does not (macOS)
+    // still holds one. Either way a file answers to each name.
+    writeFileSync(path.join(attachments, composed), "the offer");
     expect(changes(JUDGED, [composed])).toEqual({ changed: [], added: [], removed: [], same: [composed] });
     // A folder that holds both forms as two files keeps them apart: the kept
-    // file answers for one of them, and the other is a file it does not hold.
-    // Canary: let two names claim the one kept file, and three names in come
-    // out as two.
+    // file answers for the one spelled exactly so, and the other is a file it
+    // does not hold. Canary: let two names claim the one kept file, and three
+    // names in come out as two.
     expect(changes(JUDGED, [composed, decomposed, "other.md"])).toEqual({
       changed: [],
       // Code-unit order: the composed capital sorts after every ASCII name.
