@@ -6,13 +6,12 @@ import {
   createLiveRunLogStore,
   type ConsoleThreadInput,
   type LiveRunLogStore,
-  type RunLogSource,
   type RunLogStore,
   type ThreadView,
 } from "./run-log-store";
 import type { RunLiveFacts } from "./runtime-types";
 
-export type { OlderLogState, RunLogSource, RunLogStore, StreamedLine, ThreadView } from "./run-log-store";
+export type { OlderLogState, RunLogStore, StreamedLine, ThreadView } from "./run-log-store";
 
 /**
  * The run-log console's live half (phase-6 report §"High-frequency streams",
@@ -45,6 +44,11 @@ export type { OlderLogState, RunLogSource, RunLogStore, StreamedLine, ThreadView
  * P13-D-11: the page carries a BOUNDED window (NFR5), so the console also
  * pages backwards through the history it did not ship (`loadOlder`).
  */
+
+/** What the console follows: a task's runs, or a controller conversation's. */
+export type RunLogSource =
+  | { kind: "task"; projectSlug: string; taskKey: string }
+  | { kind: "controller"; conversationId: string };
 
 /** The two runtime frames this consumer subscribes, as the broker puts them on
  *  the wire (`app/schemas/sse-event.schema.ts`). Parsed rather than trusted: a
@@ -128,11 +132,11 @@ export function useRunLogStream(input: {
   // a different store.
   const [held, setHeld] = useState(() => ({
     key: streamKey,
-    store: createLiveRunLogStore(source, input.threads),
+    store: createLiveRunLogStore(input.threads),
   }));
   let store: LiveRunLogStore = held.store;
   if (held.key !== streamKey) {
-    const next = { key: streamKey, store: createLiveRunLogStore(source, input.threads) };
+    const next = { key: streamKey, store: createLiveRunLogStore(input.threads) };
     setHeld(next);
     store = next.store;
   }

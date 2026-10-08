@@ -130,20 +130,6 @@ export interface RunLogStore {
   setRawView(on: boolean): void;
 }
 
-/** What the store follows: a task's runs, or a controller conversation's. */
-export type RunLogSource =
-  | { kind: "task"; projectSlug: string; taskKey: string }
-  | { kind: "controller"; conversationId: string };
-
-/** One phrase for "this stream is not yours", per source: the task channel's
- *  logs are project-member material, a controller turn's are the conversation
- *  owner's (and org admins'). */
-function forbiddenNote(kind: RunLogSource["kind"]): string {
-  return kind === "task"
-    ? "project-member only"
-    : "for the conversation's owner and org admins only";
-}
-
 /** Page size for a backward fetch. The endpoint clamps to 1…500. */
 const OLDER_PAGE_LINES = 200;
 /** The most lines one `/resources/run-log` page returns. */
@@ -292,10 +278,7 @@ export interface LiveRunLogStore extends RunLogStore {
   dispose(): void;
 }
 
-export function createLiveRunLogStore(
-  source: RunLogSource,
-  threads: readonly ConsoleThreadInput[],
-): LiveRunLogStore {
+export function createLiveRunLogStore(threads: readonly ConsoleThreadInput[]): LiveRunLogStore {
   const listeners = new Set<() => void>();
   let threadMap = new Map<string, ThreadState>();
   const factsByRun = new Map<string, RunLiveFacts>();
@@ -466,14 +449,12 @@ export function createLiveRunLogStore(
         }
         const { status, data } = await getData<TailPage>(tailUrl(t.runId, t.cursor));
         if (data === null) {
-          // UI-30: a 403 here means the viewer is not a project member (or, on
-          // the controller channel, not the conversation's owner). It used to
-          // be swallowed, leaving a console that silently stopped following.
-          setStreamError(
-            status === 403
-              ? `Live tail stopped: raw run logs are ${forbiddenNote(source.kind)}.`
-              : `Live tail stopped: the log endpoint returned ${status}.`,
-          );
+          // UI-30: a refused read used to be swallowed, leaving a console that
+          // silently stopped following. Only the status is named: the route
+          // answers a viewer who may not read the run (a member removed while
+          // the page is open) with the 404 a missing run gets (F19-28), so
+          // the console cannot tell the two apart.
+          setStreamError(`Live tail stopped: the log endpoint returned ${status}.`);
           return;
         }
         if (!current(t)) return;
@@ -542,11 +523,7 @@ export function createLiveRunLogStore(
       );
       if (signal.aborted || !current(t)) return;
       if (data === null) {
-        fail(
-          status === 403
-            ? `This console is ${forbiddenNote(source.kind)}.`
-            : `Could not load this console: the log endpoint returned ${status}.`,
-        );
+        fail(`Could not load this console: the log endpoint returned ${status}.`);
         return;
       }
       const { lines, lineKeys, logWindow, facts, runId } = data;
@@ -673,11 +650,9 @@ export function createLiveRunLogStore(
         const { status, data } = await getData<TailPage>(`/resources/run-log?${qs.toString()}`);
         if (data === null) {
           fail(
-            status === 403
-              ? `Older lines are ${forbiddenNote(source.kind)}.`
-              : status === 200
-                ? "Could not load older lines: malformed response."
-                : `Could not load older lines: the log endpoint returned ${status}.`,
+            status === 200
+              ? "Could not load older lines: malformed response."
+              : `Could not load older lines: the log endpoint returned ${status}.`,
           );
           return;
         }

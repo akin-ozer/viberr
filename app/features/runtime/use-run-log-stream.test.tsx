@@ -318,14 +318,18 @@ describe("UI-35: run-log tail deduplication", () => {
 });
 
 describe("UI-30 / UI-03: the tail says when it stopped", () => {
-  it("reports a 403 instead of swallowing it", async () => {
-    fetchMock.mockResolvedValue({ ok: false, status: 403 });
+  it("reports a 404 instead of swallowing it", async () => {
+    // F19-28: the route's refusal of a viewer who may not read the run (a
+    // member removed while the page is open) is the 404 of a missing run.
+    // CANARY: return from `tail` on a refusal without setting the stream
+    // error (the swallow UI-30 fixed) and this reads null.
+    fetchMock.mockResolvedValue({ ok: false, status: 404 });
     render(<Page />, { wrapper: DataRouter });
     await act(async () => {
       emitFrame(FakeEventSource.last(), "run.log-appended", frame(0));
       await flush();
     });
-    expect(store.streamError()).toMatch(/project-member only/);
+    expect(store.streamError()).toBe("Live tail stopped: the log endpoint returned 404.");
   });
 });
 
@@ -488,14 +492,16 @@ describe("a thread the page did not carry", () => {
 
   it("says why when the window cannot load", async () => {
     render(<Page threads={[unloaded]} />, { wrapper: DataRouter });
-    fetchMock.mockResolvedValue({ ok: false, status: 403 });
+    // CANARY: return from `loadWindow` on a refusal without failing the
+    // thread and it reads "loading" for good.
+    fetchMock.mockResolvedValue({ ok: false, status: 404 });
     await act(async () => {
       store.show("primary");
       await flush();
     });
     expect(store.thread("primary")).toMatchObject({
       status: "failed",
-      loadError: "This console is project-member only.",
+      loadError: "Could not load this console: the log endpoint returned 404.",
     });
   });
 
@@ -774,7 +780,9 @@ describe("P13-D-11: paging backwards through the withheld history", () => {
 
   it("surfaces a failed page instead of silently dropping the click", async () => {
     render(<Page threads={resumedThread()} />, { wrapper: DataRouter });
-    fetchMock.mockResolvedValue({ ok: false, status: 403 });
+    // CANARY: return from `loadOlder` on a refusal without failing the page
+    // and it reads loading, with no error, for good.
+    fetchMock.mockResolvedValue({ ok: false, status: 404 });
     await act(async () => {
       store.loadOlder("primary");
       await flush();
@@ -782,7 +790,7 @@ describe("P13-D-11: paging backwards through the withheld history", () => {
     expect(store.thread("primary")?.older).toMatchObject({
       hasMore: true,
       loading: false,
-      error: "Older lines are project-member only.",
+      error: "Could not load older lines: the log endpoint returned 404.",
     });
     expect(texts()).toEqual(["b3", "b4", "b5"]);
   });
@@ -877,18 +885,6 @@ describe("the controller channel", () => {
     });
     expect(fetchMock).not.toHaveBeenCalled();
     expect(texts("controller")).toEqual([]);
-  });
-
-  it("names the conversation's owner in the refusal, not project membership", async () => {
-    fetchMock.mockResolvedValue({ ok: false, status: 403 });
-    render(<Page source={conversation} threads={[ctlThread]} />, { wrapper: DataRouter });
-    await act(async () => {
-      emitFrame(FakeEventSource.last(), "controller.log-appended", controllerFrame());
-      await flush();
-    });
-    expect(store.streamError()).toBe(
-      "Live tail stopped: raw run logs are for the conversation's owner and org admins only.",
-    );
   });
 
   /**

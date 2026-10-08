@@ -17,7 +17,6 @@ import { NO_RUN_CACHE } from "../../../test-support/run-view";
  * `runs-panels.test.tsx`.
  */
 
-const TASK = { kind: "task", projectSlug: "p", taskKey: "K-1" } as const;
 /** `since` past every line: the store's facts-only read. */
 const FACTS_ONLY = `since=${Number.MAX_SAFE_INTEGER}`;
 
@@ -156,7 +155,7 @@ async function flush(times = 12) {
 
 describe("CON-1: every running group's strip moves, shown or not (ruling 457, LIVE-1)", () => {
   it("a frame for a thread the console never showed reads that run's facts", async () => {
-    const store = createLiveRunLogStore(TASK, [
+    const store = createLiveRunLogStore([
       loaded(2, { id: "op", serverRunId: "run_op" }),
       thread({ id: "spec", serverRunId: "run_spec", logWindow: win({ runIds: ["run_spec"], headSeq: 2, totalLines: 3, loaded: false }) }),
     ]);
@@ -173,7 +172,7 @@ describe("CON-1: every running group's strip moves, shown or not (ruling 457, LI
   });
 
   it("one facts read in flight per thread, and one more for the frames it missed", async () => {
-    const store = createLiveRunLogStore(TASK, [
+    const store = createLiveRunLogStore([
       thread({ id: "spec", serverRunId: "run_spec", logWindow: win({ runIds: ["run_spec"], headSeq: 2, loaded: false }) }),
     ]);
     const release = held(FACTS_ONLY);
@@ -190,7 +189,7 @@ describe("CON-1: every running group's strip moves, shown or not (ruling 457, LI
 
 describe("CON-2: a catch-up wider than the window re-windows instead of reading every missed line", () => {
   it("a shown thread far behind loads the bounded window, not one unbounded forward read", async () => {
-    const store = createLiveRunLogStore(TASK, [loaded(11)]);
+    const store = createLiveRunLogStore([loaded(11)]);
     store.show("primary");
     const gapHead = 10 + RUN_LOG_WINDOW_LINES + 4_600;
     const seqs = Array.from({ length: RUN_LOG_WINDOW_LINES }, (_, i) => gapHead - RUN_LOG_WINDOW_LINES + 1 + i);
@@ -216,7 +215,7 @@ describe("CON-2: a catch-up wider than the window re-windows instead of reading 
   });
 
   it("a thread nobody shows drops what it held and asks for nothing", async () => {
-    const store = createLiveRunLogStore(TASK, [loaded(11)]);
+    const store = createLiveRunLogStore([loaded(11)]);
     store.reconcile([thread({ logWindow: win({ headSeq: 10 + RUN_LOG_WINDOW_LINES + 1, loaded: false }) })]);
     await flush();
     expect(asked).toEqual([]);
@@ -224,7 +223,7 @@ describe("CON-2: a catch-up wider than the window re-windows instead of reading 
   });
 
   it("a gap within the window is still one forward read", async () => {
-    const store = createLiveRunLogStore(TASK, [loaded(11)]);
+    const store = createLiveRunLogStore([loaded(11)]);
     store.show("primary");
     route("since=10", tailPage("run_1", [11, 12]));
     store.reconcile([thread({ logWindow: win({ headSeq: 12, totalLines: 13, loaded: false }) })]);
@@ -236,7 +235,7 @@ describe("CON-2: a catch-up wider than the window re-windows instead of reading 
 
 describe("CON-3: a resume keeps the shown console drawn while its new window loads", () => {
   it("the held lines stay until the window answers, then the window replaces them", async () => {
-    const store = createLiveRunLogStore(TASK, [loaded(2)]);
+    const store = createLiveRunLogStore([loaded(2)]);
     store.show("primary");
     const release = held("window=1");
     store.reconcile([
@@ -269,7 +268,7 @@ describe("CON-3: a resume keeps the shown console drawn while its new window loa
   });
 
   it("a thread nobody shows is not loaded on a resume", async () => {
-    const store = createLiveRunLogStore(TASK, [loaded(2)]);
+    const store = createLiveRunLogStore([loaded(2)]);
     store.reconcile([thread({ serverRunId: "run_2", logWindow: win({ runIds: ["run_1", "run_2"], loaded: false }) })]);
     await flush();
     expect(asked).toEqual([]);
@@ -279,7 +278,7 @@ describe("CON-3: a resume keeps the shown console drawn while its new window loa
 
 describe("CON-5: a window that answers for a newer run is followed on that run", () => {
   it("adopts the window's run: no old-run lines appended after it, the new run's frames tail it", async () => {
-    const store = createLiveRunLogStore(TASK, [
+    const store = createLiveRunLogStore([
       thread({ serverRunId: "run_a", logWindow: win({ runIds: ["run_a"], headSeq: 2, totalLines: 3, loaded: false }) }),
     ]);
     // run_a writes two more lines and ends; run_b becomes the representative
@@ -319,7 +318,7 @@ describe("CON-7: the newest read of a run's facts wins, whichever arrives last",
   const at = (iso: string) => Date.parse(iso);
 
   it("a revalidation read before a tail read does not step the strip back", async () => {
-    const store = createLiveRunLogStore(TASK, [loaded(1, { factsAt: at("2026-09-24T10:00:00.000Z") })]);
+    const store = createLiveRunLogStore([loaded(1, { factsAt: at("2026-09-24T10:00:00.000Z") })]);
     route("since=0", tailPage("run_1", [1], { facts: { ...FACTS, turns: 5, factsAt: at("2026-09-24T10:00:02.000Z") } }));
     store.onFrame("run_1", 1);
     await flush();
@@ -333,7 +332,7 @@ describe("CON-7: the newest read of a run's facts wins, whichever arrives last",
   });
 
   it("a late tail answer read before the run's final revalidation does not undo it", async () => {
-    const store = createLiveRunLogStore(TASK, [loaded(1, { factsAt: at("2026-09-24T10:00:00.000Z") })]);
+    const store = createLiveRunLogStore([loaded(1, { factsAt: at("2026-09-24T10:00:00.000Z") })]);
     const release = held("since=0");
     store.onFrame("run_1", 1);
     await flush();
@@ -348,7 +347,7 @@ describe("CON-7: the newest read of a run's facts wins, whichever arrives last",
 
 describe("CON-8: lines that land after the raw view opened get their envelopes too", () => {
   it("a raw=0 tail read in flight at the toggle is filled when it lands", async () => {
-    const store = createLiveRunLogStore(TASK, [loaded(1)]);
+    const store = createLiveRunLogStore([loaded(1)]);
     store.show("primary");
     const release = held("since=0&raw=0");
     store.onFrame("run_1", 1);
@@ -368,7 +367,7 @@ describe("CON-8: lines that land after the raw view opened get their envelopes t
   });
 
   it("lines that land while a fill is in flight are filled when it ends", async () => {
-    const store = createLiveRunLogStore(TASK, [loaded(1)]);
+    const store = createLiveRunLogStore([loaded(1)]);
     store.show("primary");
     const releaseTail = held("since=0&raw=0");
     store.onFrame("run_1", 1);
@@ -386,7 +385,7 @@ describe("CON-8: lines that land after the raw view opened get their envelopes t
   });
 
   it("an older page in flight at the toggle is filled when it lands", async () => {
-    const store = createLiveRunLogStore(TASK, [
+    const store = createLiveRunLogStore([
       thread({
         lines: [line("l3")],
         lineKeys: ["0:3"],
