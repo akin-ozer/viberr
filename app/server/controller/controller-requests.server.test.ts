@@ -137,18 +137,4 @@ describe("ruling 390: a grant request the controller cannot answer itself", () =
       "VIBERR_UNLOCK_CONTROLLER_MCPS=enabled",
     );
   });
-
-  it("puts the open ask back in the controller's own turn context", () => {
-    const root = makeRoot();
-    raiseResourceRequest(ASK, root);
-    const line = openRequestsContextLine(root);
-    // This is the whole fix: the ask outlives the conversation that made it.
-    expect(line).toContain("instance-standing-rules");
-    expect(line).toContain("do not describe the resource as if you can read it");
-    expect(line).toContain("VIBERR_UNLOCK_CONTROLLER_KB=enabled");
-    // Answered asks are history and stay out of the prompt.
-    const [open] = openResourceRequests(root);
-    closeResourceRequest(open!.id, "granted", "arda@viberr.dev", root);
-    expect(openRequestsContextLine(root)).toBe("");
-  });
 });

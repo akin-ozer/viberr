@@ -564,6 +564,9 @@ describe("gatherControllerContext", () => {
       });
       expect(read.text, JSON.stringify(scope)).toContain("instance-standing-rules");
       expect(read.text, JSON.stringify(scope)).toContain(
+        "do not describe the resource as if you can read it",
+      );
+      expect(read.text, JSON.stringify(scope)).toContain(
         "VIBERR_UNLOCK_CONTROLLER_KB=enabled",
       );
     }
