@@ -113,11 +113,23 @@ describe("ruling 131: the summary carries the caller's resolved dependency list"
   });
 });
 
-describe("ruling 503: the summary names the task's epic from the projection", () => {
-  it("carries epic_id as epicId, and null for a task in no epic", () => {
-    // CANARY: drop `epicId` from the mapper's return object.
-    expect(summarize(row({ epic_id: "epic-2" }), false).epicId).toBe("epic-2");
-    expect(summarize(row(), false).epicId).toBeNull();
+/**
+ * Projected facts the summary carries through as they are, each one a surface
+ * reads: the task's epic (ruling 503), a force-accept (N20-14), the delivered
+ * revision the board's acceptance ceremony discloses and echoes back for the
+ * server to compare with the live task (rulings 53/88), and degraded runtime
+ * continuity (D4). Each is null while its column is.
+ */
+describe("the summary carries the projected facts its surfaces read", () => {
+  it.each([
+    { field: "epicId", patch: { epic_id: "epic-2" }, value: "epic-2" },
+    { field: "acceptance", patch: { acceptance: "forced" }, value: "forced" },
+    { field: "workRevisionSha", patch: { work_revision_sha: "a".repeat(40) }, value: "a".repeat(40) },
+    { field: "continuity", patch: { continuity: "degraded" }, value: "degraded" },
+  ] as const)("$field: the projected value, and null when the column is", ({ field, patch, value }) => {
+    // CANARY: drop the field from the mapper's return object, or hard-code its null.
+    expect(summarize(row(patch), false)[field]).toBe(value);
+    expect(summarize(row(), false)[field]).toBeNull();
   });
 });
 
@@ -458,43 +470,6 @@ describe("R21-8: while an agent carries the task, readiness reads 'agent working
     // must not relabel a done task as in-flight.
     const r = row({ stage: "done", readiness: "ready", waiting: "agent" });
     expect(summarize(r, true).displayReadiness).toBe("accepted");
-  });
-});
-
-describe("N20-14: acceptance fact surfaces on the summary", () => {
-  it("carries a force-accept fact through to TaskSummary", () => {
-    expect(summarize(row({ acceptance: "forced" }), true).acceptance).toBe("forced");
-  });
-  it("is null when the task was accepted the ordinary way", () => {
-    expect(summarize(row({ acceptance: null }), true).acceptance).toBeNull();
-  });
-});
-
-describe("ruling 53/88: the delivered revision surfaces on the summary", () => {
-  it("carries the projected head sha through to TaskSummary", () => {
-    // The board's acceptance ceremony discloses this row and echoes it back for
-    // the server to compare against the live task — it can only do that if the
-    // summary the board renders from carries the sha.
-    expect(
-      summarize(row({ work_revision_sha: "a".repeat(40) }), false)
-        .workRevisionSha,
-    ).toBe("a".repeat(40));
-  });
-  it("is null before delivery — the ceremony's honest-absence row", () => {
-    expect(
-      summarize(row({ work_revision_sha: null }), false).workRevisionSha,
-    ).toBeNull();
-  });
-});
-
-describe("D4: continuity fact surfaces on the summary", () => {
-  it("carries the projected 'degraded' continuity through to TaskSummary", () => {
-    expect(summarize(row({ continuity: "degraded" }), false).continuity).toBe(
-      "degraded",
-    );
-  });
-  it("is null when runtime continuity is healthy", () => {
-    expect(summarize(row({ continuity: null }), false).continuity).toBeNull();
   });
 });
 
