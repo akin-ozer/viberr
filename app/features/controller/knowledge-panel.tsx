@@ -252,7 +252,6 @@ export function KnowledgePanel({
             body.set("id", confirmUndo.id);
             if (reason.trim()) body.set("reason", reason.trim());
             undo.submit(body, { method: "post" });
-            setConfirmUndo(null);
           }}
         >
           <label className="field confirm-reason">
@@ -421,10 +420,7 @@ function LegacyProposals({
           cancelLabel="Keep it"
           busy={sending}
           onCancel={() => setConfirmDismiss(null)}
-          onConfirm={() => {
-            ask("dismiss", confirmDismiss);
-            setConfirmDismiss(null);
-          }}
+          onConfirm={() => ask("dismiss", confirmDismiss)}
         />
       )}
     </div>

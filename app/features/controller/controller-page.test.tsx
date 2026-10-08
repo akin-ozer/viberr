@@ -1553,11 +1553,22 @@ describe("the project's open knowledge-base proposals (ruling 483)", () => {
     const panel = await screen.findByRole("region", { name: "Knowledge base" });
     fireEvent.click(within(panel).getByRole("button", { name: "Dismiss" }));
     expect(posted).toEqual([]);
+    const dialog = await screen.findByRole("alertdialog", { name: "Dismiss kp-0123456789?" });
+    // The sheet's `dialog[data-closing]` clock, which jsdom has no stylesheet
+    // to read: the exit plays until its transitionend.
+    dialog.style.transitionDuration = "10s";
     await act(async () => {
-      fireEvent.click(await screen.findByRole("button", { name: "Dismiss proposal" }));
+      fireEvent.click(within(dialog).getByRole("button", { name: "Dismiss proposal" }));
     });
     await waitFor(() => expect(posted).toHaveLength(1));
     expect(posted[0]).toContain("Dismiss knowledge-base proposal kp-0123456789");
+    // Ruling 459(e): the confirm leaves the way Keep it does. CANARY: put
+    // `setConfirmDismiss(null)` back in its onConfirm and the card is gone in
+    // the click's own commit, with no exit.
+    expect(dialog.isConnected).toBe(true);
+    expect(dialog.hasAttribute("data-closing")).toBe(true);
+    fireEvent.transitionEnd(dialog);
+    expect(dialog.isConnected).toBe(false);
     cleanup();
 
     renderPage(view({ viewerIsOrgAdmin: false, proposals: [{ ...proposal, docHref: null }] }));
@@ -1648,6 +1659,8 @@ describe("the project's knowledge-base corrections (ruling 498)", () => {
     fireEvent.click(within(panel).getByRole("button", { name: "Undo" }));
     expect(posted).toEqual([]);
     const dialog = await screen.findByRole("alertdialog");
+    // The sheet's `dialog[data-closing]` clock (jsdom reads no stylesheet).
+    dialog.style.transitionDuration = "10s";
     fireEvent.change(within(dialog).getByRole("textbox"), { target: { value: "Previews are on." } });
     await act(async () => {
       fireEvent.click(within(dialog).getByRole("button", { name: "Undo correction" }));
@@ -1656,6 +1669,13 @@ describe("the project's knowledge-base corrections (ruling 498)", () => {
     // CANARY: send it to the controller and every undo costs a turn.
     expect(posted[0]).toMatchObject({ intent: "kb-correction-undo", id: "kc-0123456789", reason: "Previews are on." });
     expect(await screen.findByText("Undid kc-0123456789.")).toBeTruthy();
+    // Ruling 459(e): the confirm leaves the way Keep it does. CANARY: put
+    // `setConfirmUndo(null)` back in its onConfirm and the card is gone in
+    // the click's own commit, with no exit.
+    expect(dialog.isConnected).toBe(true);
+    expect(dialog.hasAttribute("data-closing")).toBe(true);
+    fireEvent.transitionEnd(dialog);
+    expect(dialog.isConnected).toBe(false);
   });
 
   it("an undone correction says who undid it and offers nothing; a member is told who can undo", async () => {
