@@ -206,9 +206,8 @@ export type DeliveryOutcome =
       /** Ruling 494: where the pushed branch stands against the base, from the
        *  compare the push ran before this returned (or that it could not run
        *  it, so the count on record is the one from before the push). Null
-       *  when the delivery pushed nothing. Optional only so hand-built
-       *  fixtures need not restate it; `performDelivery` always sets it. */
-      recompare?: string | null;
+       *  when the delivery pushed nothing. */
+      recompare: string | null;
     }
   /** F15-15/B-GH1: the remote branch diverged (non-fast-forward). No PR was
    *  opened — it would review the stale remote content, not the delivery. */
