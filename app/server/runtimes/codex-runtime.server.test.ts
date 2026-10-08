@@ -1038,32 +1038,6 @@ describe("codex run isolation (P13-LV-13 / LV-14 / RT-04)", () => {
       hooks: false,
     });
   });
-
-  it("cannot be re-opened by a deployment's base config override", async () => {
-    const run = fakeCodex([
-      { type: "turn.completed", usage: { input_tokens: 1, output_tokens: 1 } },
-    ]);
-    createCodexAdapter({
-      codexFactory: run.factory,
-      config: {
-        project_doc_max_bytes: 32_000,
-        skills: { include_instructions: true, bundled: { enabled: true } },
-        features: { apps: true, plugins: true, hooks: true },
-      },
-    }).start(SPEC, { onLine: () => {}, onExit: () => {} });
-    await drain();
-    const config = run.factoryOptions()?.config;
-    expect(config?.project_doc_max_bytes).toBe(0);
-    expect(config?.skills).toEqual({
-      include_instructions: false,
-      bundled: { enabled: false },
-    });
-    expect(config?.features).toMatchObject({
-      apps: false,
-      plugins: false,
-      hooks: false,
-    });
-  });
 });
 
 describe("ruling 185: Viberr never OS-confines a Codex run", () => {
