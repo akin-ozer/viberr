@@ -602,11 +602,10 @@ describe("controller config locks (ruling 108)", () => {
     expect(details.definitionEdited).toBe(false);
   });
 
-  it("controllerSectionLocks: locked unless the env flag parses truthy", async () => {
-    const { controllerSectionLocks } = await import(
-      "~/server/controller/controller-profile.server"
-    );
-    expect(controllerSectionLocks({})).toEqual({
+  it("the loader's locks: a section stays locked unless its env flag reads enabled", async () => {
+    // What the Controller tab renders (`controllerLocks`), read from the env a
+    // deployment sets.
+    expect((await runLoader(ids.arda)).controllerLocks).toEqual({
       skills: true,
       kb: true,
       mcps: true,
@@ -614,14 +613,21 @@ describe("controller config locks (ruling 108)", () => {
     });
     // Only `enabled` unlocks (case-insensitive, trimmed); `disabled`, a stale
     // `1`, and anything unexpected keep the section locked — a typo fails safe.
-    expect(
-      controllerSectionLocks({
+    const flagged = await withEnv(
+      {
         VIBERR_UNLOCK_CONTROLLER_KB: "enabled",
         VIBERR_UNLOCK_CONTROLLER_SKILLS: " ENABLED ",
         VIBERR_UNLOCK_CONTROLLER_MCPS: "disabled",
         VIBERR_UNLOCK_CONTROLLER_INSTRUCTIONS: "1",
-      }),
-    ).toEqual({ skills: false, kb: false, mcps: true, instructions: true });
+      },
+      () => runLoader(ids.arda),
+    );
+    expect(flagged.controllerLocks).toEqual({
+      skills: false,
+      kb: false,
+      mcps: true,
+      instructions: true,
+    });
   });
 });
 
