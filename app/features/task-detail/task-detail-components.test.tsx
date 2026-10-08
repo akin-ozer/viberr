@@ -1820,22 +1820,12 @@ describe("ExecutionProfile — a closed task withholds the release ✕ (F33-10)"
     expect(container.querySelector(".rev-agent .rev-x")).not.toBeNull();
   });
 
-  it("a MERGED task keeps the ledger row and drops the ✕", () => {
-    const { container } = renderExec(withSupporting({ displayReadiness: "merged" }));
-    expect(container.querySelectorAll(".rev-agent")).toHaveLength(1);
-    expect(container.querySelector(".rev-agent .rev-x")).toBeNull();
-  });
-
-  it("an ACCEPTED task drops it too", () => {
-    const { container } = renderExec(
-      withSupporting({ displayReadiness: "accepted" }),
-    );
-    expect(container.querySelectorAll(".rev-agent")).toHaveLength(1);
-    expect(container.querySelector(".rev-agent .rev-x")).toBeNull();
-  });
-
-  it("an ARCHIVED task drops it too (F15-11)", () => {
-    const { container } = renderExec(withSupporting({ archived: true }));
+  it.each<[string, Partial<TaskSummary>]>([
+    ["a MERGED task", { displayReadiness: "merged" }],
+    ["an ACCEPTED task", { displayReadiness: "accepted" }],
+    ["an ARCHIVED task (F15-11)", { archived: true }],
+  ])("%s keeps the ledger row and drops the ✕", (_, patch) => {
+    const { container } = renderExec(withSupporting(patch));
     expect(container.querySelectorAll(".rev-agent")).toHaveLength(1);
     expect(container.querySelector(".rev-agent .rev-x")).toBeNull();
   });
@@ -2799,7 +2789,12 @@ describe("UI-42/UI-44: the decision packet", () => {
     expect(queryByRole("radiogroup")).not.toBeNull();
   });
 
-  it("blocks edit_goal for a resolver who cannot edit the goal", () => {
+  // Ruling 459: the blocked option and the refused Confirm each carried an
+  // inline .55 of their own, off the house .45 step, and the sheet's
+  // `:not(:disabled)` hover and press still matched both. The attribute is now
+  // the whole contract: `.opt[aria-disabled="true"]` and
+  // `.btn[aria-disabled="true"]` dim them in app.css, which pins those rules.
+  it("blocks edit_goal for a resolver who cannot edit the goal; the dim is the sheet's (ruling 459)", () => {
     const onResolve = vi.fn();
     const { container } = render(
       <DecisionPacket
@@ -2815,6 +2810,7 @@ describe("UI-42/UI-44: the decision packet", () => {
     );
     const first = container.querySelectorAll<HTMLButtonElement>(".options .opt")[0]!;
     expect(first.getAttribute("aria-disabled")).toBe("true");
+    expect(first.getAttribute("style")).toBeNull();
     expect(first.textContent).toContain("your role can't edit the goal");
     // The Confirm button refuses too — before the fix an owner-contributor
     // recorded the decision, got "type the new goal", and found no editor.
@@ -2824,36 +2820,9 @@ describe("UI-42/UI-44: the decision packet", () => {
       ".packet-actions .btn.primary",
     )!;
     expect(confirm.getAttribute("aria-disabled")).toBe("true");
+    expect(confirm.getAttribute("style")).toBeNull();
     fireEvent.click(confirm);
     expect(onResolve).not.toHaveBeenCalled();
-  });
-
-  it("leaves the refusal's dim to the sheet, which also stills its hover and press (ruling 459)", () => {
-    // The blocked option and the refused Confirm each carried an inline .55
-    // of their own, off the house .45 step, and the sheet's `:not(:disabled)`
-    // hover and press still matched both. The attribute is now the whole
-    // contract: `.opt[aria-disabled="true"]` and `.btn[aria-disabled="true"]`
-    // dim them in app.css, which pins those rules.
-    const { container } = render(
-      <DecisionPacket
-        packet={goalPacket}
-        busy={false}
-        canResolve
-        canResolveCompletion={false}
-        canEditGoal={false}
-        canArchive
-        onResolveCustom={() => {}} onResolve={() => {}}
-        onAsk={() => {}}
-      />,
-    );
-    const blocked = container.querySelectorAll<HTMLButtonElement>(".options .opt")[0]!;
-    const confirm = container.querySelector<HTMLButtonElement>(
-      ".packet-actions .btn.primary",
-    )!;
-    for (const el of [blocked, confirm]) {
-      expect(el.getAttribute("aria-disabled")).toBe("true");
-      expect(el.getAttribute("style")).toBeNull();
-    }
   });
 
   it("offers edit_goal normally to a maintainer", () => {
