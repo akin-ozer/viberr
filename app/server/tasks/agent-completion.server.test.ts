@@ -241,7 +241,11 @@ afterEach(() => {
  *  unique per call so a test can drive more than one run without colliding on
  *  the (project, task, thread) uniqueness. */
 let runSeq = 0;
-async function finishedRunWith(text: string, reviewSubject?: string | null): Promise<string> {
+async function finishedRunWith(
+  text: string,
+  reviewSubject?: string | null,
+  { verdictWithheld = false } = {},
+): Promise<string> {
   runSeq += 1;
   queueFakeRun({
     lines: [
@@ -270,6 +274,8 @@ async function finishedRunWith(text: string, reviewSubject?: string | null): Pro
   };
   // Ruling 544: what the run was dispatched on, when the case says.
   if (reviewSubject !== undefined) input.reviewSubject = reviewSubject;
+  // Ruling 316: dispatched with its verdict channel withheld, when the case says.
+  if (verdictWithheld) input.verdictWithheld = true;
   const started = await startRun(store.db, input);
   await pollUntil(() => {
     // SAFETY: the SELECT list is the single column `state`, which
@@ -3952,11 +3958,9 @@ describe("applyAgentCompletionEffects (the shared effects)", () => {
       expect(classifyReviewerVerdict(answer)).toBe("request_changes");
 
       rework();
-      const quiet = await finishedRunWith(answer);
+      const quiet = await finishedRunWith(answer, undefined, { verdictWithheld: true });
       // The deadlock question's run: dispatched with its verdict channel taken
       // away (ruling 313), which ruling 316 makes the completion path honour.
-      const { patchRun } = await import("~/server/runtimes/run-store.server");
-      patchRun(store.db, quiet, { verdictWithheld: true });
       await applyAgentCompletionEffects(
         store.db,
         { dataRoot: store.dataRoot },
