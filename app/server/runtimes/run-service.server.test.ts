@@ -8,7 +8,6 @@ import { closeDb, shutdownDatabase } from "~/server/db/sqlite.server";
 import { logger } from "~/server/logging/logger.server";
 import { createTestDbContext, type TestDbContext } from "../../../test-support/test-db";
 import { setupTestStore, writeTask, baseTaskFrontmatter, type TestStore } from "../../../test-support/test-store";
-import { AppError } from "~/server/errors/app-error.server";
 import { readTaskFile } from "~/server/files/task-writer.server";
 import { listAuditEvents } from "../../../test-support/audit-log";
 import {
@@ -826,7 +825,7 @@ describe("interruptRun — RBAC + audit + idempotency", () => {
     for (const u of [store.users.selin, store.users.elif, store.users.deniz]) {
       await expect(
         interruptRun(store.db, { projectSlug: store.slug, taskKey: "VIB-1", dataRoot: store.dataRoot, runId }, { userId: u.id, label: u.email }),
-      ).rejects.toThrow(AppError);
+      ).rejects.toMatchObject({ status: 403 });
     }
   });
 
