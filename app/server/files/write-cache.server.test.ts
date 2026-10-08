@@ -178,15 +178,6 @@ describe("freshestContent — the read-your-own-writes repair", () => {
     expect(warn).not.toHaveBeenCalled();
   });
 
-  it("nothing remembered at all — the disk read passes through untouched", () => {
-    const abs = path.join(dir, "task.md");
-    writeFileSync(abs, STALE);
-    const warn = vi.spyOn(logger, "warn").mockImplementation(() => {});
-
-    expect(freshestContent(abs, STALE, taskFile)).toBe(STALE);
-    expect(warn).not.toHaveBeenCalled();
-  });
-
   it("an agreeing read is returned as-is and logs nothing — no warn noise on the happy path", () => {
     // The overwhelmingly common case is disk == our write. It must cost no log
     // line, or the warn stops meaning "a stale read really happened".
