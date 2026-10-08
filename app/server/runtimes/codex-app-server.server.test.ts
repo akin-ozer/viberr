@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import { PassThrough } from "node:stream";
 import { z } from "zod";
 import {
+  codexVendor,
   compactCodexThread,
   type AppServerProcess,
   type SpawnAppServer,
@@ -127,11 +128,10 @@ describe("compactCodexThread (ruling 376)", () => {
       config: { compact_prompt: "keep the task key" },
       env: { CODEX_HOME: "/home/codex", VIBERR_RUN_ID: "run_1" },
       spawn: server.spawn,
-      binary: "/opt/codex",
     });
     expect(outcome).toEqual({ compacted: true, preTokens: null, postTokens: null });
     expect(server.spawned).toEqual([
-      { binary: "/opt/codex", args: ["app-server"], env: { CODEX_HOME: "/home/codex", VIBERR_RUN_ID: "run_1" } },
+      { binary: codexVendor().binary, args: ["app-server"], env: { CODEX_HOME: "/home/codex", VIBERR_RUN_ID: "run_1" } },
     ]);
     expect(server.requests.map((r) => r.method)).toEqual([
       "initialize",
@@ -163,7 +163,7 @@ describe("compactCodexThread (ruling 376)", () => {
         write({ method: "item/completed", params: { threadId: "t-2", item: { type: "contextCompaction", id: "c" } } });
       }
     });
-    const outcome = await compactCodexThread({ threadId: "t-2", cwd: "/w", spawn: server.spawn, binary: "codex" });
+    const outcome = await compactCodexThread({ threadId: "t-2", cwd: "/w", spawn: server.spawn });
     expect(outcome.compacted).toBe(true);
   });
 
@@ -174,7 +174,7 @@ describe("compactCodexThread (ruling 376)", () => {
         write({ id: request.id, error: { code: -32000, message: "thread not found" } });
       }
     });
-    const outcome = await compactCodexThread({ threadId: "gone", cwd: "/w", spawn: server.spawn, binary: "codex" });
+    const outcome = await compactCodexThread({ threadId: "gone", cwd: "/w", spawn: server.spawn });
     expect(outcome).toEqual({ compacted: false, reason: "thread/resume refused: thread not found" });
     expect(server.requests.map((r) => r.method)).toEqual(["initialize", "initialized", "thread/resume"]);
   });
@@ -188,7 +188,7 @@ describe("compactCodexThread (ruling 376)", () => {
         queueMicrotask(() => server.exit(1));
       }
     });
-    const outcome = await compactCodexThread({ threadId: "t-3", cwd: "/w", spawn: server.spawn, binary: "codex" });
+    const outcome = await compactCodexThread({ threadId: "t-3", cwd: "/w", spawn: server.spawn });
     expect(outcome).toMatchObject({ compacted: false });
     expect(z.object({ reason: z.string() }).parse(outcome).reason).toContain("exited (1)");
   });
@@ -203,7 +203,6 @@ describe("compactCodexThread (ruling 376)", () => {
       threadId: "t-4",
       cwd: "/w",
       spawn: server.spawn,
-      binary: "codex",
       timeoutMs: 30,
     });
     expect(outcome).toMatchObject({ compacted: false });
@@ -228,7 +227,7 @@ describe("compactCodexThread (ruling 376)", () => {
         write({ method: "error", params: { threadId: "t-6", turnId: "u", willRetry: false, error: { message: refusal } } });
       }
     });
-    const outcome = await compactCodexThread({ threadId: "t-6", cwd: "/w", spawn: server.spawn, binary: "codex", timeoutMs: 2_000 });
+    const outcome = await compactCodexThread({ threadId: "t-6", cwd: "/w", spawn: server.spawn, timeoutMs: 2_000 });
     expect(outcome).toEqual({ compacted: false, reason: `the app-server reported an error: ${refusal}` });
     expect(server.killed).toEqual(["SIGTERM"]);
   });
@@ -242,7 +241,7 @@ describe("compactCodexThread (ruling 376)", () => {
         write({ method: "turn/completed", params: { threadId: "t-7", turn: { id: "u", status: "failed", error: { message: refusal } } } });
       }
     });
-    const outcome = await compactCodexThread({ threadId: "t-7", cwd: "/w", spawn: server.spawn, binary: "codex", timeoutMs: 2_000 });
+    const outcome = await compactCodexThread({ threadId: "t-7", cwd: "/w", spawn: server.spawn, timeoutMs: 2_000 });
     expect(outcome).toEqual({ compacted: false, reason: `the compaction turn failed: ${refusal}` });
   });
 
@@ -250,7 +249,6 @@ describe("compactCodexThread (ruling 376)", () => {
     const outcome = await compactCodexThread({
       threadId: "t-5",
       cwd: "/w",
-      binary: "codex",
       spawn: () => {
         throw new Error("ENOENT");
       },

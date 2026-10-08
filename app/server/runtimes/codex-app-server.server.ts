@@ -68,7 +68,6 @@ export interface CompactThreadInput {
   env?: Record<string, string>;
   /** Injected for tests; the real one spawns the vendored binary. */
   spawn?: SpawnAppServer;
-  binary?: string;
   /** Ruling 460: run the app-server as the person's own OS user, through the
    *  launcher — the compaction writes into their home like the run did. */
   launch?: AgentLaunch | null;
@@ -173,7 +172,7 @@ const realSpawn: SpawnAppServer = (binary, args, env) =>
  */
 export function compactCodexThread(input: CompactThreadInput): Promise<CompactOutcome> {
   const spawn = input.spawn ?? realSpawn;
-  const realBinary = input.binary ?? codexVendor().binary;
+  const realBinary = codexVendor().binary;
   const binary = input.launch ? input.launch.launcher : realBinary;
   // A launched run always carries its env (the credential's home rides it).
   const env = input.launch ? launchEnv(input.launch, realBinary, input.env ?? {}) : input.env;
