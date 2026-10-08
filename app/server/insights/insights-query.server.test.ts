@@ -659,8 +659,9 @@ describe("coordination share (F31-D6, rulings 190 and 635)", () => {
     insertRun(db, { backend: "codex", kind: "primary", inTok: 5000, outTok: 1000, turns: 3 });
     insertRun(db, { backend: "codex", kind: "reviewer", inTok: 2000, outTok: 200, turns: 2 });
     // F35-1: a live estimate is not a total. Counted as silent, not summed —
-    // on BOTH sides, because the numerator has its own guard and a fixture that
-    // only strands a delivery row would let that guard rot untested.
+    // on BOTH sides: `coordinationShare`'s one guarded tokens SUM serves both,
+    // and a stranded row on each side shows the guard and the silent count
+    // hold for each.
     insertRun(db, { backend: "codex", kind: "primary", inTok: 900_000, outTok: 900_000, usageFinal: 0, turns: 7 });
     insertRun(db, { backend: "codex", kind: "operator", inTok: 900_000, outTok: 900_000, usageFinal: 0, turns: 7 });
     const c = runsOf(db, { backend: "codex" }).coordination;
