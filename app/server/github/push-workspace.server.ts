@@ -15,7 +15,6 @@ import { withServerStage } from "~/server/tasks/repo-mirror.server";
 import {
   serverExec,
   taskWorkspaceGit,
-  workspaceExecWhenIsolationOff,
   workspaceUploadPack,
   type Exec,
   type ExecOutcome,
@@ -1259,10 +1258,8 @@ export async function discardLocalTaskBranch(input: {
   branch: string;
   defaultBranch: string;
   /** The project's PAT is resolved from here so the ruling-17 remote check can
-   *  actually answer on a PRIVATE repo. Optional only so the existing exec-fake
-   *  tests keep working; a caller without one gets the anonymous check, which
-   *  still refuses when it cannot reach a verdict. */
-  db?: DatabaseSync;
+   *  actually answer on a PRIVATE repo. */
+  db: DatabaseSync;
   dataRoot?: string;
   workdir?: string | null;
   /** Injected runner (tests): the workspace's git and, unless `serverExec` is
@@ -1283,14 +1280,8 @@ export async function discardLocalTaskBranch(input: {
       input.workdir,
     );
     if (!repoDir) return { status: "no_workspace", branch };
-    // R-seams-1: the workspace's git as the task's person; without a db (a
-    // test) only where no agent is launched.
-    const runners = input.db
-      ? deliveryRunners(input.db, { projectSlug, taskKey, dataRoot }, input)
-      : {
-          workspace: input.exec ?? workspaceExecWhenIsolationOff(),
-          server: input.serverExec ?? input.exec ?? serverExec,
-        };
+    // R-seams-1: the workspace's git as the task's person.
+    const runners = deliveryRunners(input.db, { projectSlug, taskKey, dataRoot }, input);
     const exec = runners.workspace;
 
     // Read the branch sha BEFORE any deletion — the outcome must name what it
@@ -1318,9 +1309,8 @@ export async function discardLocalTaskBranch(input: {
     );
     const hasOrigin = originRes.ok && originRes.stdout.trim() !== "";
 
-    const credential = input.db ? getProjectCredential(input.db, projectSlug) : null;
-    const token =
-      (input.db && credential ? getPatToken(input.db, credential.id) : null) ?? "";
+    const credential = getProjectCredential(input.db, projectSlug);
+    const token = (credential ? getPatToken(input.db, credential.id) : null) ?? "";
     const askpassInput: Parameters<typeof createGitHubAskpassEnv>[0] = {};
     if (token) askpassInput.token = token;
     const askpass = createGitHubAskpassEnv(askpassInput);

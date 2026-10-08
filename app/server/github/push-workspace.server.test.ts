@@ -842,6 +842,7 @@ describe("discardLocalTaskBranch (F20-6 / R20-2)", () => {
   it("deletes a local, never-pushed task branch and reports its sha", async () => {
     const repoDir = initWorkspaceRepo(true);
     const out = await discardLocalTaskBranch({
+      db: store.db,
       projectSlug: store.slug,
       taskKey: "VIB-1",
       branch: "vib-1-work",
@@ -872,6 +873,7 @@ describe("discardLocalTaskBranch (F20-6 / R20-2)", () => {
     gitOutSync(repoDir, ["remote", "add", "origin", "https://example.invalid/acme/app.git"]);
 
     const out = await discardLocalTaskBranch({
+      db: store.db,
       projectSlug: store.slug,
       taskKey: "VIB-1",
       branch: "vib-1-work",
@@ -912,6 +914,7 @@ describe("discardLocalTaskBranch (F20-6 / R20-2)", () => {
     const repoDir = initWorkspaceRepo(true);
     gitOutSync(repoDir, ["checkout", "-q", "vib-1-work"]); // HEAD now ON the branch
     const out = await discardLocalTaskBranch({
+      db: store.db,
       projectSlug: store.slug,
       taskKey: "VIB-1",
       branch: "vib-1-work",
@@ -925,6 +928,7 @@ describe("discardLocalTaskBranch (F20-6 / R20-2)", () => {
   it("reports not_found when the branch is not in the workspace", async () => {
     initWorkspaceRepo(false); // no task branch created
     const out = await discardLocalTaskBranch({
+      db: store.db,
       projectSlug: store.slug,
       taskKey: "VIB-1",
       branch: "vib-1-work",
@@ -947,6 +951,7 @@ describe("discardLocalTaskBranch (F20-6 / R20-2)", () => {
     gitOutSync(repoDir, ["push", "-q", "origin", "vib-1-work"]);
     const out = await withLocalGithub(origins, () =>
       discardLocalTaskBranch({
+        db: store.db,
         projectSlug: store.slug,
         taskKey: "VIB-1",
         branch: "vib-1-work",
@@ -963,6 +968,7 @@ describe("discardLocalTaskBranch (F20-6 / R20-2)", () => {
 
   it("reports no_workspace when the task has no clone", async () => {
     const out = await discardLocalTaskBranch({
+      db: store.db,
       projectSlug: store.slug,
       taskKey: "VIB-404",
       branch: "vib-404",
@@ -991,6 +997,7 @@ describe("discardLocalTaskBranch (F20-6 / R20-2)", () => {
       return { ok: true, stdout: "", stderr: "" };
     });
     const out = await discardLocalTaskBranch({
+      db: store.db,
       projectSlug: store.slug,
       taskKey: "VIB-1",
       branch: "vib-1-work",
