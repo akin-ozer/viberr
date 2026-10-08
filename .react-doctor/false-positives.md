@@ -208,14 +208,18 @@ scan run from inside an agent worktree under `.claude/` sees no files at all.
   `nextList`, `difference`). A `.find()` per item over one project's deployed agents
   (settings-actions `validateRequiredReviewerRules`, one per submitted rule, stopping at the
   first refusal), over one task's engagements (task-acceptance `refreshAndReview`, one per
-  reviewer it starts) and over the page renderer's two widths (page-capture.server.ts:
-  `render`'s `views.find` per reported shot, `captureReplyText`'s `page.shots.find` /
-  `page.ended.find` per width of PAGE_CAPTURE_VIEWS). Literal lists: a surface's live-update
-  scopes (use-live-updates `previous`, one to three per call site, compared once per stream
-  open) and the arguments a console row draws in full (runs-helpers `hiddenArguments`'s
-  `drawn`: edit-diff.ts and console-todos.ts pass one or two literal keys). One table's
-  columns, in the one-time rebuild of an old root's table (sqlite.server.ts
-  `ensureBackendAccountsTable`). Two more are small in practice, not by a constant. The
+  reviewer it starts) and over the page renderer's widths (page-capture.server.ts
+  `render`'s `views.find` per reported shot, at most the two of PAGE_CAPTURE_VIEWS). The
+  other way round, a loop over the renderer's widths: page-capture.server.ts
+  `captureReplyText` runs `page.shots.find` and `page.ended.find` once per width of
+  PAGE_CAPTURE_VIEWS (two per reply), over the page's reported shots and ends, which
+  only the report's 1 MB read caps; a `Map` of them would cost a full pass to save one.
+  Literal lists: a surface's live-update scopes (use-live-updates `previous`, one to three
+  per call site, compared once per stream open) and the arguments a console row draws in
+  full (runs-helpers `hiddenArguments`'s `drawn`: edit-diff.ts and console-todos.ts pass
+  one or two literal keys). One table's columns, in the one-time rebuild of an old root's
+  table (sqlite.server.ts `ensureBackendAccountsTable`). Two more are small in practice,
+  not by a constant. The
   MCP editor's write-tool chips (mcp-modal-fields `marked.includes(tool)` in each chip's
   class and `aria-pressed`) scan one server's own tools: the discovered `tools/list` names (no
   cap), the saved write tools and names typed in. `marked` starts as the discovery
@@ -229,8 +233,9 @@ scan run from inside an agent worktree under `.claude/` sees no files at all.
   a handful, on a settings panel. Verify the array is stages, a hardcoded catalog or
   literal list, one task's/run's/profile's/MCP server's own list, one project's deployed
   agents, the renderer's widths, one table's columns, the org's GitHub connections, or
-  capped by a named constant. A `.find()` keeps the first match, which a `Map` built in
-  order would not: a renderer report that names one width twice yields two shots of it.
+  capped by a named constant, or that the loop is over PAGE_CAPTURE_VIEWS. A `.find()`
+  keeps the first match, which a `Map` built in order would not: a renderer report that
+  names one width twice yields two shots of it.
 
 - `react-doctor/js-set-map-lookups` — the live ledger's settle filter
   (revalidation-policy.ts `!due.includes(o)` in `flushLive`): both lists are the data
@@ -347,12 +352,11 @@ scan run from inside an agent worktree under `.claude/` sees no files at all.
   own checkout when it ends, a delivery's render its scratch after the task write,
   `removeRunPageCaptures` a run's folder when the run ends, and each render empties its
   run's folder before making its own, so a folder holds one entry or none unless a restart
-  cut a job short or a removal failed. Both queues run one job at a time. capturePage's
-  `["profile", "tmp"]` is a fixed pair removed before an agent's reply: `Promise.all` would
-  save the shorter `rm` (about 3 ms here, plus the launcher's start) on a call that waits
-  seconds for the browser. Verify each loop body is still one `removeAgentTree` per entry,
-  that `render` still empties its run's folder first and that the completion pipeline
-  still calls `removeRunPageCaptures` for every run that ends.
+  cut a job short or a removal failed. Both queues run one job at a time. Verify each loop
+  body is still one `removeAgentTree` per entry (`removeScratch`, `removeGateCheckout`),
+  or, in `render`'s loop over the other runs' folders, one `removeCaptureHome` of a folder
+  whose run has ended; that `render` still empties its run's folder first; and that the
+  completion pipeline still calls `removeRunPageCaptures` for every run that ends.
 
 - `react-doctor/server-sequential-independent-await` / `async-parallel` /
   `async-await-in-loop` — awaits of cached dynamic `import("~/…")` that break import
@@ -511,6 +515,12 @@ scan run from inside an agent worktree under `.claude/` sees no files at all.
   Each is one short git process (about 3 to 4 ms here) on a path that pushes to or has just
   fetched from GitHub; `Promise.all` would save one of them. Verify both are still local
   reads, not a fetch or a push.
+
+- `react-doctor/async-await-in-loop` — page-capture.server.ts `capturePage` removes the
+  render's `["profile", "tmp"]` one after the other before the agent's reply. The two are
+  independent, so the rule holds, but `Promise.all` would save only the shorter `rm`'s
+  process (about 3 ms here, median of 60) on a call that has just waited seconds for the
+  browser. Verify the pair is still fixed and each is one `removeScratch`.
 
 - `react-doctor/exhaustive-deps` — changes-panel.tsx DiffLines' drag effect lists only
   `dragging`: it adds the window's release, cancel and Escape listeners once per drag, and
