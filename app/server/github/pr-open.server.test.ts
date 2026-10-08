@@ -704,25 +704,12 @@ describe("openTaskPr", () => {
   });
 
   it("skips creation when the task already carries a live PR (agent-side capture) — reconciles instead (B5)", async () => {
-    const store = setupTestStore(ctx);
     // The agent delivered on ITS OWN branch and the PR was captured into
     // fm.pr — the deterministic-branch head= dedup would never match it.
-    writeTask(store.dataRoot, store.slug, {
-      frontmatter: baseTaskFrontmatter("VIB-201", {
-        title: "Attach execution workspace to task runtime",
-        stage: "review",
-        branch: "agent-made-this-branch",
-        pr: { number: 7, state: "review", title: "[VIB-201] agent PR" },
-      }),
-      goal: "Deliver.",
+    const store = setupWithBranch("VIB-201", {
+      branch: "agent-made-this-branch",
+      pr: { number: 7, state: "review", title: "[VIB-201] agent PR" },
     });
-    rebuildAll(store.db, { dataRoot: store.dataRoot });
-    const pat = createPat(
-      store.db,
-      { userId: store.users.arda.id, label: "bot", token: "ghp_propen00000002" },
-      ACTOR,
-    );
-    setProjectCredential(store.db, { projectSlug: store.slug, patId: pat.id }, ACTOR);
 
     const gh = fakeGithubFetch({
       [`GET ${REPO_PATH}/pulls/7`]: {
@@ -739,23 +726,10 @@ describe("openTaskPr", () => {
   });
 
   it("never downgrades a human-set \"accepted\" (merge pending) on the reuse path (B3)", async () => {
-    const store = setupTestStore(ctx);
-    writeTask(store.dataRoot, store.slug, {
-      frontmatter: baseTaskFrontmatter("VIB-201", {
-        title: "Attach execution workspace to task runtime",
-        stage: "done",
-        branch: BRANCH,
-        pr: { number: 7, state: "accepted", title: "[VIB-201] x" },
-      }),
-      goal: "Deliver.",
+    const store = setupWithBranch("VIB-201", {
+      stage: "done",
+      pr: { number: 7, state: "accepted", title: "[VIB-201] x" },
     });
-    rebuildAll(store.db, { dataRoot: store.dataRoot });
-    const pat = createPat(
-      store.db,
-      { userId: store.users.arda.id, label: "bot", token: "ghp_propen00000003" },
-      ACTOR,
-    );
-    setProjectCredential(store.db, { projectSlug: store.slug, patId: pat.id }, ACTOR);
 
     const gh = fakeGithubFetch({
       // Still open on GitHub — "review" must NOT clobber "accepted".
@@ -774,30 +748,13 @@ describe("openTaskPr", () => {
   /** Ruling 160 (pass 35, F35-11): a closed-unmerged cache, with an unanswered
    *  closure record or none. The two tests below share this seed. */
   function seedClosedCache(closure: NonNullable<PrRef["closure"]> | null) {
-    const store = setupTestStore(ctx);
     const pr: NonNullable<TaskFrontmatter["pr"]> = {
       number: 7,
       state: "closed",
       title: "[VIB-201] abandoned",
     };
     if (closure) pr.closure = closure;
-    writeTask(store.dataRoot, store.slug, {
-      frontmatter: baseTaskFrontmatter("VIB-201", {
-        title: "Attach execution workspace to task runtime",
-        stage: "review",
-        branch: BRANCH,
-        pr,
-      }),
-      goal: "Deliver.",
-    });
-    rebuildAll(store.db, { dataRoot: store.dataRoot });
-    const pat = createPat(
-      store.db,
-      { userId: store.users.arda.id, label: "bot", token: "ghp_propen00000004" },
-      ACTOR,
-    );
-    setProjectCredential(store.db, { projectSlug: store.slug, patId: pat.id }, ACTOR);
-    return store;
+    return setupWithBranch("VIB-201", { pr });
   }
 
   it("ruling 160: a cached closed-unmerged PR with no answered closure refuses a fresh PR (closed_by_human)", async () => {
@@ -952,26 +909,12 @@ describe("openTaskPr", () => {
   });
 
   it("a MERGED cached PR clears the way — a reworked branch opens a fresh PR (DG-1)", async () => {
-    const store = setupTestStore(ctx);
-    writeTask(store.dataRoot, store.slug, {
-      frontmatter: baseTaskFrontmatter("VIB-201", {
-        title: "Attach execution workspace to task runtime",
-        stage: "review",
-        branch: BRANCH,
-        // The prior PR on this branch already merged; the branch was then
-        // reworked (new commits). Resurrecting the merged PR would dead-end
-        // acceptance at "merge pending" forever.
-        pr: { number: 7, state: "merged", title: "[VIB-201] already merged" },
-      }),
-      goal: "Deliver.",
+    const store = setupWithBranch("VIB-201", {
+      // The prior PR on this branch already merged; the branch was then
+      // reworked (new commits). Resurrecting the merged PR would dead-end
+      // acceptance at "merge pending" forever.
+      pr: { number: 7, state: "merged", title: "[VIB-201] already merged" },
     });
-    rebuildAll(store.db, { dataRoot: store.dataRoot });
-    const pat = createPat(
-      store.db,
-      { userId: store.users.arda.id, label: "bot", token: "ghp_propen00000005" },
-      ACTOR,
-    );
-    setProjectCredential(store.db, { projectSlug: store.slug, patId: pat.id }, ACTOR);
 
     const gh = fakeGithubFetch({
       // No open PR for the branch → a fresh one is created (the merged #7 is
@@ -991,25 +934,11 @@ describe("openTaskPr", () => {
   });
 
   it("a cached 'review' PR that GitHub reports MERGED out-of-band opens a fresh PR, not the dead one (DG-1)", async () => {
-    const store = setupTestStore(ctx);
-    writeTask(store.dataRoot, store.slug, {
-      frontmatter: baseTaskFrontmatter("VIB-201", {
-        title: "Attach execution workspace to task runtime",
-        stage: "review",
-        branch: BRANCH,
-        // Cache still says "review" (reconcile hasn't run), but the PR was
-        // merged out-of-band on GitHub and the branch reworked since.
-        pr: { number: 7, state: "review", title: "[VIB-201] merged out-of-band" },
-      }),
-      goal: "Deliver.",
+    const store = setupWithBranch("VIB-201", {
+      // Cache still says "review" (reconcile hasn't run), but the PR was
+      // merged out-of-band on GitHub and the branch reworked since.
+      pr: { number: 7, state: "review", title: "[VIB-201] merged out-of-band" },
     });
-    rebuildAll(store.db, { dataRoot: store.dataRoot });
-    const pat = createPat(
-      store.db,
-      { userId: store.users.arda.id, label: "bot", token: "ghp_propen00000006" },
-      ACTOR,
-    );
-    setProjectCredential(store.db, { projectSlug: store.slug, patId: pat.id }, ACTOR);
 
     const gh = fakeGithubFetch({
       // The live PR is CLOSED+merged on GitHub → must not be reused.
@@ -1031,22 +960,15 @@ describe("openTaskPr", () => {
   it("P13-D-28: reusing the SAME PR keeps the reconciler-owned checks + review", async () => {
     // openTaskPr never reads CI or reviews. Rebuilding the ref from scratch on a
     // reuse would blank both pills until the next 5-minute poller tick.
-    const store = setupWithBranch();
-    writeTask(store.dataRoot, store.slug, {
-      frontmatter: baseTaskFrontmatter("VIB-201", {
-        title: "Attach execution workspace to task runtime",
-        stage: "review",
-        branch: BRANCH,
-        pr: {
-          number: 42,
-          state: "review",
-          title: "old title",
-          checks: { total: 3, passing: 2, failing: 0, pending: 1 },
-          review: "approved",
-        },
-      }),
+    const store = setupWithBranch("VIB-201", {
+      pr: {
+        number: 42,
+        state: "review",
+        title: "old title",
+        checks: { total: 3, passing: 2, failing: 0, pending: 1 },
+        review: "approved",
+      },
     });
-    rebuildAll(store.db, { dataRoot: store.dataRoot });
     const gh = fakeGithubFetch({
       [`GET ${REPO_PATH}/pulls/42`]: {
         body: {
@@ -1099,20 +1021,13 @@ describe("openTaskPr", () => {
  */
 describe("ruling 135: writePrToTask and the PR head", () => {
   it("reusing the SAME PR writes the live head and clears a satisfied unpushed record", async () => {
-    const store = setupWithBranch();
-    writeTask(store.dataRoot, store.slug, {
-      frontmatter: baseTaskFrontmatter("VIB-201", {
-        title: "Attach execution workspace to task runtime",
-        stage: "review",
-        branch: BRANCH,
-        workRevision: { id: "rev_1", headSha: "9".repeat(40), treeSha: null, branch: BRANCH, createdAt: "2026-09-04T00:00:00.000Z", sourceProfileId: "developer" },
-        pr: {
-          number: 42, state: "review", title: "old title", headSha: "1".repeat(40),
-          unpushedRevision: { revisionSha: "9".repeat(40), prHeadSha: "1".repeat(40), relation: "behind" },
-        },
-      }),
+    const store = setupWithBranch("VIB-201", {
+      workRevision: { id: "rev_1", headSha: "9".repeat(40), treeSha: null, branch: BRANCH, createdAt: "2026-09-04T00:00:00.000Z", sourceProfileId: "developer" },
+      pr: {
+        number: 42, state: "review", title: "old title", headSha: "1".repeat(40),
+        unpushedRevision: { revisionSha: "9".repeat(40), prHeadSha: "1".repeat(40), relation: "behind" },
+      },
     });
-    rebuildAll(store.db, { dataRoot: store.dataRoot });
     const gh = fakeGithubFetch({
       [`GET ${REPO_PATH}/pulls/42`]: {
         body: { number: 42, html_url: "https://github.com/akin-ozer/viberr/pull/42", title: "new title", state: "open", merged: false, head: { sha: "9".repeat(40) } },
@@ -1125,27 +1040,20 @@ describe("ruling 135: writePrToTask and the PR head", () => {
   });
 
   it("a DIFFERENT PR inherits nothing from the old record: head, closure, checks or review (rulings 135, 160; P13-D-28)", async () => {
-    const store = setupWithBranch();
-    writeTask(store.dataRoot, store.slug, {
-      frontmatter: baseTaskFrontmatter("VIB-201", {
-        title: "Attach execution workspace to task runtime",
-        stage: "review",
-        branch: BRANCH,
-        // Ruling 160: a closed cache clears the way only once a person has
-        // answered the closure. The fresh PR inherits none of the old record:
-        // not the head, the closure, or the reconciler-owned checks and review.
-        pr: {
-          number: 7,
-          state: "closed",
-          title: "[VIB-201] abandoned",
-          headSha: "1".repeat(40),
-          checks: { total: 3, passing: 3, failing: 0, pending: 0 },
-          review: "approved",
-          closure: { at: "2026-09-06T19:33:19.000Z", by: "akin-ozer", answered: { at: "2026-09-06T19:40:00.000Z", byUserId: "u_arda" } },
-        },
-      }),
+    const store = setupWithBranch("VIB-201", {
+      // Ruling 160: a closed cache clears the way only once a person has
+      // answered the closure. The fresh PR inherits none of the old record:
+      // not the head, the closure, or the reconciler-owned checks and review.
+      pr: {
+        number: 7,
+        state: "closed",
+        title: "[VIB-201] abandoned",
+        headSha: "1".repeat(40),
+        checks: { total: 3, passing: 3, failing: 0, pending: 0 },
+        review: "approved",
+        closure: { at: "2026-09-06T19:33:19.000Z", by: "akin-ozer", answered: { at: "2026-09-06T19:40:00.000Z", byUserId: "u_arda" } },
+      },
     });
-    rebuildAll(store.db, { dataRoot: store.dataRoot });
     const gh = fakeGithubFetch({
       [`GET ${REPO_PATH}/pulls`]: { body: [] },
       [`POST ${REPO_PATH}/pulls`]: {
