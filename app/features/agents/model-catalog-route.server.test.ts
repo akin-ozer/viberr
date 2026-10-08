@@ -110,9 +110,13 @@ describe("resources/model-catalog", () => {
   });
 
   it("defaults an unknown/missing backend to claude", async () => {
-    const res = await runLoader("", ardaId);
-    const body: ModelCatalogBody = await res.json();
-    expect(body.data.defaultModel).toBe("sonnet");
+    // CANARY: send a backend name the route does not know to Codex, and
+    // `gemini` reads Codex's default model.
+    for (const query of ["", "?backend=gemini"]) {
+      const res = await runLoader(query, ardaId);
+      const body: ModelCatalogBody = await res.json();
+      expect(body.data.defaultModel, query).toBe("sonnet");
+    }
   });
 
   /**
