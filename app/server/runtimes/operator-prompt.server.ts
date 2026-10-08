@@ -535,9 +535,17 @@ export function buildOperatorSystemPrompt(
   // F21-14 rides the same note: the acceptance exception, stated where the model
   // reads the rows it misread ("I can't accept completion myself…", 60 seconds
   // before it accepted).
+  // Ruling 67 (R19-A): a run that asked for more autonomy than the project's
+  // ceiling runs at the ceiling, and the audit row tells only people. The
+  // clause tells the run, beside the autonomy it produced; a run nothing
+  // reduced reads the line it always did.
+  const clamp = authority.autonomyClampedFrom
+    ? ` (this run asked for ${authority.autonomyClampedFrom}; ${authority.configuredAutonomy} is ` +
+      "this project's ceiling for every run, ruling 67)"
+    : "";
   parts.push(
     "\n\n---\n# Live authority: YOUR OWN capability policy\n\n" +
-      `Autonomy: **${authority.autonomy}**.\n\n` +
+      `Autonomy: **${authority.autonomy}**${clamp}.\n\n` +
       "Your capability policy (capabilityId: mode). These are the OPERATOR's capabilities, not any agent's:\n" +
       policyLines +
       "\n\n" +

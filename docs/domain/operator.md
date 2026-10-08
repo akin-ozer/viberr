@@ -54,9 +54,14 @@ recovery and the controller each start one), and every run a project makes reads
 rulings (ruling 239).
 
 - **Autonomy is a ceiling, not a pin** (ruling 67). A per-run level may sit at or
-  below the configured one; a clamp that bites writes the audit fact
-  `task.operator.autonomy_clamped`. The task page's run control shows the backend and
-  offers Run; it picks neither backend nor autonomy (ruling 92).
+  below the configured one. Only an agent-reply react carries one, the autonomy of the
+  drive that dispatched the agent (ruling 231), so a clamp bites when the ceiling was
+  lowered while the chain ran. A clamp that bites writes the audit fact
+  `task.operator.autonomy_clamped`, and the run's own prompt names it beside its autonomy:
+  "Autonomy: **supervised** (this run asked for full; supervised is this project's ceiling
+  for every run, ruling 67)." A run nothing reduced reads the bare line. The task page's
+  run control shows the backend and offers Run; it picks neither backend nor autonomy
+  (ruling 92).
 - **An operator run bills the TASK OWNER** (ruling 127), like every other run on a task:
   `runOperator` resolves `resolveTaskRunPrincipal` before it starts anything and spawns
   with that person's own Claude or Codex credential. Authority is still the operator's
@@ -273,7 +278,8 @@ guidance, the attached skills (verbatim) and knowledge-base INDEXES (ruling 283,
 document with its size class and sections, read on demand; the project's rulings KB with its
 note, ruling 286), sorted by name, the two-kinds-of-ruling note (ruling 312), the runtime
 ground truth (backend, model, effort, the attached MCP servers in name order), the measured
-shell inventory (ruling 191), the live capability policy (rows sorted by id), the triage
+shell inventory (ruling 191), the live authority (the autonomy the run holds, naming a
+clamp that bit, ruling 67, and the capability policy, rows sorted by id), the triage
 signals, the non-negotiable rules and the writing guide (ruling 502) close the static
 block; the workspace section (the checkout's repository, branch and directory, and what
 the run may write), the MCP governance and write-tool notes, the servers that failed their

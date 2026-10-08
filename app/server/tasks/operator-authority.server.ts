@@ -48,8 +48,8 @@ export interface OperatorAuthority {
   /**
    * R19-A — non-null when THIS run asked for more autonomy than the project
    * allows and was reduced to the ceiling. Carries what was asked for, so the
-   * reduction can be named (audit row, run disclosure) instead of silently
-   * happening.
+   * reduction is named instead of silently happening: to people by the audit
+   * row, and to the run by its prompt's autonomy line (ruling 67).
    */
   autonomyClampedFrom: OperatorAutonomy | null;
   backend: RealBackend;
