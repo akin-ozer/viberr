@@ -215,7 +215,7 @@ export function conservativeGrantsFor(
 }
 
 /** Flat id+label view — the shape most consumers key on. */
-export const CAP_CATALOG: readonly CapabilityDef[] = UNIFIED_CAP_CATALOG.map(
+const CAP_CATALOG: readonly CapabilityDef[] = UNIFIED_CAP_CATALOG.map(
   ({ id, label }) => ({ id, label }),
 );
 /** Server-side invariant: these capabilities are human-only, always —
@@ -232,7 +232,7 @@ const byId = new Map(CAP_CATALOG.map((c) => [c.id, c]));
 const byLabel = new Map(CAP_CATALOG.map((c) => [c.label, c]));
 
 /** Capabilities whose absence actually constrains runtime behavior. */
-export const ENFORCED_CAPABILITY_IDS: ReadonlySet<string> = new Set([
+const ENFORCED_CAPABILITY_IDS: ReadonlySet<string> = new Set([
   "create-task-branch",
   "commit-push-branch",
   "open-review-pr",
@@ -284,7 +284,7 @@ export const ENFORCED_CAPABILITY_IDS: ReadonlySet<string> = new Set([
  * The SCOPED delivery commands below were always claude-only at the tool
  * layer, for the same reason: on Codex the real boundary is that agents hold
  * no credential and delivery is server-owned. */
-export const CLAUDE_ONLY_ENFORCED_CAPABILITY_IDS: ReadonlySet<string> = new Set([
+const CLAUDE_ONLY_ENFORCED_CAPABILITY_IDS: ReadonlySet<string> = new Set([
   "execute-code-or-write-repo",
   "create-task-branch",
   "commit-push-branch",

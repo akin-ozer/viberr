@@ -17,7 +17,7 @@ import type { ClaudeQueryOptions } from "./claude-runtime.server";
 import { fakeClaudeQuery } from "../../../test-support/fake-claude-query";
 import { resolveSpecialistDisallowedTools } from "../tasks/specialist-tool-policy";
 import { agentGitIdentity } from "../tasks/specialist-workspace.server";
-import { CAP_CATALOG, capabilityEnforcement } from "~/shared/capabilities";
+import { UNIFIED_CAP_CATALOG, capabilityEnforcement } from "~/shared/capabilities";
 import type { CapabilityGrant } from "~/schemas/project-file.schema";
 import { ENV_KEYS, resetEnvCacheForTests } from "~/server/config/env.server";
 
@@ -510,7 +510,7 @@ describe("UC-16 backend parity (claude ↔ codex, one spec, two adapters)", () =
     // it does not. Derive the tool-layer capabilities from the policy itself (so
     // a NEW deny rule is covered the day it lands) and check each one against
     // the Codex thread options the same grant actually produces.
-    const allGranted: CapabilityGrant[] = CAP_CATALOG.map((c) => ({
+    const allGranted: CapabilityGrant[] = UNIFIED_CAP_CATALOG.map((c) => ({
       capabilityId: c.id,
       mode: "direct",
     }));
@@ -524,7 +524,7 @@ describe("UC-16 backend parity (claude ↔ codex, one spec, two adapters)", () =
       ]);
 
     const toolLayer: string[] = [];
-    for (const cap of CAP_CATALOG) {
+    for (const cap of UNIFIED_CAP_CATALOG) {
       const denied = resolveSpecialistDisallowedTools(
         withMode(allGranted, cap.id, "off"),
       );

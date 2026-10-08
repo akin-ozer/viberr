@@ -3,12 +3,10 @@ import {
   ALWAYS_HUMAN_CAPABILITY_IDS,
   applyGrantCouplings,
   repairBrowserEgressGrants,
-  CAP_CATALOG,
-  CLAUDE_ONLY_ENFORCED_CAPABILITY_IDS,
-  ENFORCED_CAPABILITY_IDS,
   UNIFIED_CAP_CATALOG,
   applyVerdictOutcomeGate,
   capabilityEnforcement,
+  capabilityIsAdvisory,
   coerceSpecialistCapabilityMode,
   conservativeGrantsFor,
   normalizeDeliveryGrants,
@@ -16,15 +14,22 @@ import {
 } from "./capabilities";
 
 describe("capability catalog", () => {
-  it("has no duplicate ids and every enforced id exists in the catalog", () => {
-    const ids = CAP_CATALOG.map((c) => c.id);
+  it("has no duplicate ids and every always-human id exists in the catalog", () => {
+    const ids = UNIFIED_CAP_CATALOG.map((c) => c.id);
     expect(new Set(ids).size).toBe(ids.length);
     const idSet = new Set(ids);
-    for (const id of ENFORCED_CAPABILITY_IDS) {
-      expect(idSet.has(id), `${id} in ENFORCED but missing from catalog`).toBe(true);
-    }
     for (const id of ALWAYS_HUMAN_CAPABILITY_IDS) {
       expect(idSet.has(id), `${id} in ALWAYS_HUMAN but missing from catalog`).toBe(true);
+    }
+  });
+
+  it("calls a row advisory exactly where it has no toggle (F39-4)", () => {
+    // The matrix's enforcement badge and `get_project`'s advisory mark are two
+    // readings of one fact: a row with a group has a runtime consumer, a row
+    // without one binds nothing. CANARY: misspell an id in the enforced or the
+    // claude-only set and that real toggle reads advisory here.
+    for (const { id } of UNIFIED_CAP_CATALOG) {
+      expect(capabilityEnforcement(id) === "advisory", id).toBe(capabilityIsAdvisory(id));
     }
   });
 });
@@ -39,7 +44,6 @@ describe("capabilityEnforcement (S3 backend-asymmetry labeling)", () => {
       expect(capabilityEnforcement(id), id).toBe("both");
     }
     expect(capabilityEnforcement("merge-pull-request")).toBe("both");
-    expect(CLAUDE_ONLY_ENFORCED_CAPABILITY_IDS.has("merge-pull-request")).toBe(false);
   });
 
   it("classifies operator-gate caps as both, and unknown/advisory caps as advisory", () => {
@@ -80,7 +84,6 @@ describe("capabilityEnforcement (S3 backend-asymmetry labeling)", () => {
     // credential into `--config`, so the tool simply is not built on Codex —
     // advisory there, same shape as comment-on-task.
     expect(capabilityEnforcement("read-github-api")).toBe("claude-only");
-    expect(CLAUDE_ONLY_ENFORCED_CAPABILITY_IDS.has("read-github-api")).toBe(true);
     // Default OFF, agent-only, and NOT promotable — raising a project's autonomy
     // never silently grants a private-repo reader.
     const entry = UNIFIED_CAP_CATALOG.find((c) => c.id === "read-github-api")!;
