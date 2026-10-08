@@ -3,7 +3,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import { createTestDbContext } from "../../../test-support/test-db";
 import { setupProjectedStore } from "../../../test-support/projected-store";
 import type { TestStore } from "../../../test-support/test-store";
-import { fakeGithubFetch } from "../../../test-support/fake-github";
+import { fakeGithubFetch, unreachableFetch } from "../../../test-support/fake-github";
 import {
   createConnection,
   getConnection,
@@ -96,10 +96,9 @@ describe("runSetCredential refreshes the PAT cache with project context", () => 
     await addFineConnection(store, actor);
 
     // Attach while GitHub is down: bind still lands, cache stays org-level.
-    const down = fakeGithubFetch({}); // every route 404s; validator reports it
     const outcome = await runSetCredential(store.db, store.slug, actor, {
       dataRoot: store.dataRoot,
-      fetchImpl: down.fetchImpl,
+      fetchImpl: unreachableFetch(),
     });
     expect(outcome.result).toBe("attached");
     expect(getProjectCredential(store.db, store.slug)).not.toBeNull();
