@@ -32,7 +32,7 @@ describe("reviewRowSub", () => {
   it("falls back to the newest event text (markdown stripped)", () => {
     expect(
       reviewRowSub({ ...base, latestEventText: "**Transition request:** move on" }),
-    ).toContain("Transition request:");
+    ).toBe("Transition request: move on");
   });
 
   // F19-31: this test USED to pin "Agent working — the packet arrives at the
