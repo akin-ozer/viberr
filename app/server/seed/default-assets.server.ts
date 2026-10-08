@@ -593,6 +593,17 @@ export const PRIOR_SHIPPED_HASHES: PriorShippedHashes = {
     // pass-21 outgoing (humanizer sweep).
     "d7c78f20730ef44a8e1d490cc2efbb2a1cf1cd1c5bb21a63bf8343df7ba1b17e",
   ],
+  [path.join("skills", "writer-expertise", "SKILL.md")]: [
+    // Ruling 695 (2026-10-08): before the manual said a person's own words
+    // are material and not quotations, and that the evidence stays out of
+    // the narration.
+    "7f3e87f2478e5c2b798d2b45884ff95f9e62f81f25faa5cefc92161bd1166244",
+  ],
+  [path.join("skills", "editor-expertise", "SKILL.md")]: [
+    // Ruling 695 (2026-10-08): before the cold read named a narrator who
+    // cites their own records, and "I chose" on the strength of a record.
+    "26b0210af906fd9b5495af1f5b343654422cee54986f86808e6285c3508cf253",
+  ],
   [path.join("skills", "reviewer-expertise", "SKILL.md")]: [
     // Ruling 690 (2026-10-07): before the guardrails said to check a claim
     // against the source kept on the task, and that a claim with no kept
