@@ -120,7 +120,7 @@ describe("ruling 484: the review-notes intent", () => {
     );
   });
 
-  it("refuses notes written on another revision, and malformed notes, with the reason", async () => {
+  it("answers notes written on another revision 409 and malformed notes 400", async () => {
     const stale = actionResult.parse(await postNotes(ids.selin, { headSha: "0".repeat(40), notes }));
     expect(stale).toMatchObject({ init: { status: 409 } });
     const malformed = actionResult.parse(

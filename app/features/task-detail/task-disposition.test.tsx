@@ -649,7 +649,7 @@ describe("P14-LV-06: the acceptance affordance", () => {
     expect(submitted[0]!.intent).toBe("accept-completion");
   });
 
-  it("the confirm names the PR, revision, verdict state and target branch (R15-1)", () => {
+  it("the confirm names the PR, revision and target branch (R15-1)", () => {
     const { container, getByText } = renderPage({
       task: {
         pr: { number: 117, state: "review", title: "[VIB-151] x" },

@@ -205,7 +205,7 @@ describe("loader — runtime projection shape", () => {
 });
 
 describe("action — run-interrupt RBAC + audit", () => {
-  it("reviewer (selin) is denied (403)", async () => {
+  it("a contributor (selin) is denied (403) at interruptRun's run-agents gate", async () => {
     const result = await postIntent("VIB-151", ids.selin, {
       intent: "run-interrupt",
       runId: runningRunId,

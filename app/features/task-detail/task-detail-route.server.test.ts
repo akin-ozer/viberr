@@ -369,7 +369,7 @@ describe("comment action — @agent routing detection", () => {
     );
   });
 
-  it("R15-4: an ORG ADMIN who is not a member still acts (audited D2 override)", async () => {
+  it("R15-4: an ORG ADMIN who is not a member still acts (the D2 override) and reads as a guest", async () => {
     const { updateUserFields } = await import("~/server/auth/user-store.server");
     updateUserFields(app.db, ids.deniz, { role: "admin" });
     try {
