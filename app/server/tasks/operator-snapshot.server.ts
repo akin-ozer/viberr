@@ -1049,18 +1049,15 @@ export function operatorSnapshot(
   // changed` may go back to the review stage (and only there) for its
   // re-verdict; `failing` keeps the whole backward license.
   const currentStageIndex = stages.findIndex((s) => s.id === fm.stage);
+  const deployed = listDeployedSpecialists(projectSlug, ctx);
   const changedTarget =
-    fm.validation === "changed"
-      ? verdictStageFor({ stages, workflow }, fm, listDeployedSpecialists(projectSlug, ctx))
-      : null;
+    fm.validation === "changed" ? verdictStageFor({ stages, workflow }, fm, deployed) : null;
   // Ruling 702: a task with no delivering agent may also go back to a stage
   // where one can be engaged, and the entry says who, so the move and the
   // hand-off that follows it are one decision. `failing` already licenses
   // every earlier stage, so the names ride on those entries too.
   const engageAt = new Map(
-    engageStagesFor({ stages, workflow }, fm, listDeployedSpecialists(projectSlug, ctx)).map(
-      (e) => [e.stageId, e.agents],
-    ),
+    engageStagesFor({ stages, workflow }, fm, deployed).map((e) => [e.stageId, e.agents]),
   );
   const reworkStages = stages
     .slice(0, Math.max(currentStageIndex, 0))
@@ -1138,7 +1135,7 @@ export function operatorSnapshot(
     doneStageId,
     reviewStageId: roles.reviewId,
     workStageId: roles.workId,
-    deployedSpecialists: listDeployedSpecialists(projectSlug, ctx).map((s) => ({
+    deployedSpecialists: deployed.map((s) => ({
       ...s,
       // Ruling 133: may this profile RUN here (declared, or the engaged
       // deliverer), not only "may it be newly engaged here".

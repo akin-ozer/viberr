@@ -422,7 +422,7 @@ export const REREVIEW_RESTATES_NOTE =
  * knows, byte for byte, what a rework changed. Nothing said so to the reviewer
  * sent to judge the rework. Live on BLOG-8 a reviewer sent one label of a
  * diagram back; its maker fixed the label in 47 seconds, and the second
- * review took 18 minutes and $6.30 against 20 minutes and $7.12 for the
+ * review took 18 minutes and $6.69 against 20 minutes and $7.12 for the
  * first: it hashed all seven files against its own notes of the first round
  * to learn that three had not changed, then rendered the unchanged cover
  * again and pictured the whole page five times.
