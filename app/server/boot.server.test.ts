@@ -3,6 +3,7 @@ import path from "node:path";
 import { afterEach, describe, expect, it, vi, beforeEach } from "vitest";
 import type { DatabaseSync } from "node:sqlite";
 import { lockPath } from "../../test-support/data-root-lock";
+import { withEnv } from "../../test-support/env";
 import { createTestDbContext } from "../../test-support/test-db";
 import { HERMETIC_TOOLCHAIN } from "../../test-support/toolchain";
 import { logger } from "./logging/logger.server";
@@ -10,14 +11,13 @@ import type {
   MaintenancePassOptions,
   MaintenancePassResult,
 } from "./ops/maintenance.server";
-import type { BuildInfo } from "./ops/build-info.server";
-import type { DiskStatus } from "./ops/disk-space.server";
 import {
   installCrashVisibilityHandlers,
   logBootIntegrity,
   reconcileRestartedWork,
   startStoreMaintenance,
   takeDataRootWriterLock,
+  widenNotificationKindCheck,
 } from "./boot.server";
 
 /**
@@ -143,7 +143,18 @@ beforeEach(() => {
  */
 describe("takeDataRootWriterLock (G1)", () => {
   const lockCtx = createTestDbContext();
-  afterEach(lockCtx.cleanup);
+  afterEach(() => {
+    vi.restoreAllMocks();
+    lockCtx.cleanup();
+  });
+
+  /** `process.exit` ends the worker, so the spy throws where the process would
+   *  have died: nothing after the call runs, and the test reads the code. */
+  function stubProcessExit() {
+    return vi.spyOn(process, "exit").mockImplementation((code) => {
+      throw new Error(`__exit:${code}`);
+    });
+  }
 
   function foreignHostLock(): string {
     const dataRoot = lockCtx.makeTempDir();
@@ -161,25 +172,19 @@ describe("takeDataRootWriterLock (G1)", () => {
     return dataRoot;
   }
 
-  it("prints the readable refusal and exits 1 instead of throwing an SSR crash", () => {
-    const written: string[] = [];
-    const exits: number[] = [];
+  it("prints the readable refusal and exits 1 instead of throwing an SSR crash", async () => {
+    const stderr = vi.spyOn(process.stderr, "write").mockImplementation(() => true);
+    stubProcessExit();
 
-    expect(() =>
-      takeDataRootWriterLock(
-        { VIBERR_FORCE_DATA_ROOT_LOCK: undefined },
-        {
-          dataRoot: foreignHostLock(),
-          io: {
-            write: (message) => void written.push(message),
-            exit: (code) => void exits.push(code),
-          },
-        },
-      ),
-    ).not.toThrow();
+    // The exit, not the lock's own error: a DataRootLockedError escaping here
+    // is the SSR crash this guards against.
+    await withEnv({ VIBERR_DATA_ROOT: foreignHostLock() }, () =>
+      expect(() =>
+        takeDataRootWriterLock({ VIBERR_FORCE_DATA_ROOT_LOCK: undefined }),
+      ).toThrow("__exit:1"),
+    );
 
-    expect(exits).toEqual([1]);
-    const message = written.join("");
+    const message = stderr.mock.calls.map(([chunk]) => String(chunk)).join("");
     expect(message).toContain("Refusing to boot");
     expect(message).toContain("some-dead-container");
     expect(message).toContain("different host");
@@ -188,15 +193,11 @@ describe("takeDataRootWriterLock (G1)", () => {
   });
 
   it("the force override boots through the same refusal", async () => {
-    const exits: number[] = [];
-    takeDataRootWriterLock(
-      { VIBERR_FORCE_DATA_ROOT_LOCK: "1" },
-      {
-        dataRoot: foreignHostLock(),
-        io: { write: () => {}, exit: (code) => void exits.push(code) },
-      },
+    const exit = stubProcessExit();
+    await withEnv({ VIBERR_DATA_ROOT: foreignHostLock() }, () =>
+      takeDataRootWriterLock({ VIBERR_FORCE_DATA_ROOT_LOCK: "1" }),
     );
-    expect(exits).toEqual([]);
+    expect(exit).not.toHaveBeenCalled();
     // A forced boot really holds the root afterwards — give it back.
     const { releaseDataRootLock } = await import("./db/data-root-lock.server");
     releaseDataRootLock();
@@ -371,6 +372,24 @@ describe("startStoreMaintenance (gap 15)", () => {
 });
 
 /**
+ * Boot's one integrity line for `db`, as `logBootIntegrity` logs it: what an
+ * operator reads after a deploy. The drift WARN that can follow it is muted.
+ */
+function bootLine(db: DatabaseSync) {
+  const info = vi.spyOn(logger, "info").mockImplementation(() => {});
+  const warn = vi.spyOn(logger, "warn").mockImplementation(() => {});
+  try {
+    logBootIntegrity(db);
+    const line = info.mock.calls.find(([msg]) => msg === "boot integrity check");
+    expect(line).toBeDefined();
+    return line![1]!;
+  } finally {
+    info.mockRestore();
+    warn.mockRestore();
+  }
+}
+
+/**
  * Gap 18: the boot integrity line was the doc's answer to "which build is
  * running" (deployment.md §First run) while carrying no build identity at all —
  * `latestMigration` is the constant `0001_baseline.sql` for every build.
@@ -379,38 +398,8 @@ describe("logBootIntegrity (gaps 16 + 18)", () => {
   const bootCtx = createTestDbContext();
   afterEach(bootCtx.cleanup);
 
-  /** The two fields gaps 18 + 16 added to boot's one integrity line — the only
-   *  ones these tests read off it. */
-  interface BootIntegrityLine {
-    build: BuildInfo;
-    disk: { free: string; total: string; status: DiskStatus } | null;
-  }
-
-  function integrityFields(): BootIntegrityLine {
-    const info = vi.spyOn(logger, "info").mockImplementation(() => {});
-    try {
-      logBootIntegrity(bootCtx.makeDb());
-      const line = info.mock.calls.find(
-        ([msg]) => msg === "boot integrity check",
-      );
-      expect(line).toBeDefined();
-      const fields = line![1]!;
-      // SAFETY: the logger types every call's fields as the open bag any caller
-      // may pass, but this line has ONE writer — `logBootIntegrity`, which
-      // builds it from its own `BootIntegrityFields`, where `build` is
-      // `getBuildInfo()`'s return and `disk` its formatted block or null.
-      return {
-        ...fields,
-        build: fields.build as BuildInfo,
-        disk: fields.disk as BootIntegrityLine["disk"],
-      };
-    } finally {
-      info.mockRestore();
-    }
-  }
-
   it("names the running build", () => {
-    const fields = integrityFields();
+    const fields = bootLine(bootCtx.makeDb());
     expect(fields.build).toBeDefined();
     expect(fields.build).toHaveProperty("version");
     expect(fields.build).toHaveProperty("revision");
@@ -418,7 +407,7 @@ describe("logBootIntegrity (gaps 16 + 18)", () => {
   });
 
   it("reports free space at the one moment an operator is reading this log", () => {
-    expect(integrityFields().disk).toMatchObject({
+    expect(bootLine(bootCtx.makeDb()).disk).toMatchObject({
       free: expect.any(String),
       total: expect.any(String),
       status: expect.stringMatching(/^(ok|low|critical)$/),
@@ -428,28 +417,27 @@ describe("logBootIntegrity (gaps 16 + 18)", () => {
   it("ruling 182: carries the host toolchain, resolved here so the first health request does not pay for the probe", () => {
     // The suite's primed reading (setup-env), not a live probe — what matters
     // is that the boot line reads the ONE memoized toolchain.
-    expect(integrityFields()).toHaveProperty("toolchain", HERMETIC_TOOLCHAIN);
+    expect(bootLine(bootCtx.makeDb())).toHaveProperty("toolchain", HERMETIC_TOOLCHAIN);
   });
 });
 
 describe("projectionMissingColumns (pass-21 live-validation catch)", () => {
-  it("names columns the live root lacks relative to the shipped baseline, and nothing on a healthy schema", async () => {
-    const { projectionMissingColumns } = await import("./boot.server");
+  it("names columns the live root lacks relative to the shipped baseline, and nothing on a healthy schema", () => {
     const ctx = createTestDbContext();
     try {
       const db = ctx.makeDb();
-      // Freshly migrated ⇒ healthy ⇒ nothing to report.
-      expect(projectionMissingColumns(db)).toEqual([]);
+      // Freshly migrated ⇒ healthy ⇒ the line names nothing.
+      expect(bootLine(db)).not.toHaveProperty("projectionMissingColumns");
       // An old root predating a baseline column addition (the real pass-21
       // shape: work_revision_sha reached only fresh roots). Names are
       // table-qualified since the check grew a second rebuilder table.
       db.exec("ALTER TABLE task_projections DROP COLUMN work_revision_sha");
-      expect(projectionMissingColumns(db)).toEqual([
+      expect(bootLine(db).projectionMissingColumns).toEqual([
         "task_projections.work_revision_sha",
       ]);
       // Same trap, second table: the event INSERT names attachments_json.
       db.exec("ALTER TABLE task_events DROP COLUMN attachments_json");
-      expect(projectionMissingColumns(db)).toEqual([
+      expect(bootLine(db).projectionMissingColumns).toEqual([
         "task_projections.work_revision_sha",
         "task_events.attachments_json",
       ]);
@@ -469,17 +457,16 @@ describe("projectionMissingColumns (pass-21 live-validation catch)", () => {
  * the `notifications.kind: ownership` entry is never reported.
  */
 describe("projectionCheckGaps (ruling 140)", () => {
-  it("F21-1 / ruling 225: reads the baseline's own task_projections CHECKs", async () => {
-    // The positive control behind every `toEqual([])` on a fresh database in
+  it("F21-1 / ruling 225: reads the baseline's own task_projections CHECKs", () => {
+    // The positive control behind every drift-free line on a fresh database in
     // this file: a probe whose pattern stopped matching the baseline's CHECK
-    // would answer `[]` there too, and a missing enum member would ship
+    // would report nothing there too, and a missing enum member would ship
     // unseen. CANARY: reformat either CHECK in `0001_baseline.sql` past the
     // probe's pattern, or drop its arm here, and this reports nothing.
-    const { projectionCheckGaps } = await import("./boot.server");
     const ctx = createTestDbContext();
     try {
       const db = ctx.makeDb();
-      expect(projectionCheckGaps(db)).toEqual([]);
+      expect(bootLine(db)).not.toHaveProperty("projectionSchemaDrift");
       // SAFETY: the baseline creates `task_projections`, so its CREATE TABLE
       // row is present and `sql` is non-null for a table.
       const { sql } = db
@@ -489,7 +476,7 @@ describe("projectionCheckGaps (ruling 140)", () => {
       // `schedule` (sqlite cannot ALTER a CHECK in place).
       db.exec("DROP TABLE task_projections;");
       db.exec(sql.replace(/,\s*'bypassed'/, "").replace(/,\s*'schedule'/, ""));
-      expect(projectionCheckGaps(db)).toEqual([
+      expect(bootLine(db).projectionSchemaDrift).toEqual([
         "task_projections.validation: bypassed",
         "task_projections.waiting: schedule",
       ]);
@@ -498,12 +485,11 @@ describe("projectionCheckGaps (ruling 140)", () => {
     }
   });
 
-  it("reports a notifications CHECK that lacks a declared kind, beside the validation gaps", async () => {
-    const { projectionCheckGaps } = await import("./boot.server");
+  it("reports a notifications CHECK that lacks a declared kind, beside the validation gaps", () => {
     const ctx = createTestDbContext();
     try {
       const db = ctx.makeDb();
-      expect(projectionCheckGaps(db)).toEqual([]);
+      expect(bootLine(db)).not.toHaveProperty("projectionSchemaDrift");
       // Rebuild `notifications` with the pre-pass-34 CHECK (sqlite cannot ALTER
       // a CHECK in place) — exactly what an existing root carries.
       db.exec(`
@@ -523,7 +509,7 @@ describe("projectionCheckGaps (ruling 140)", () => {
           created_at TEXT NOT NULL
         );
       `);
-      expect(projectionCheckGaps(db)).toEqual([
+      expect(bootLine(db).projectionSchemaDrift).toEqual([
         "notifications.kind: question",
         "notifications.kind: dependency",
         "notifications.kind: ownership",
@@ -534,13 +520,12 @@ describe("projectionCheckGaps (ruling 140)", () => {
     }
   });
 
-  it("ruling 503: reports an epic_projections status CHECK that lacks a declared status", async () => {
+  it("ruling 503: reports an epic_projections status CHECK that lacks a declared status", () => {
     // CANARY: drop the `epic_projections.status` arm from `projectionCheckGaps`.
-    const { projectionCheckGaps } = await import("./boot.server");
     const ctx = createTestDbContext();
     try {
       const db = ctx.makeDb();
-      expect(projectionCheckGaps(db)).toEqual([]);
+      expect(bootLine(db)).not.toHaveProperty("projectionSchemaDrift");
       // A root whose epic table predates a status the file schema declares.
       db.exec(`
         DROP TABLE epic_projections;
@@ -556,7 +541,7 @@ describe("projectionCheckGaps (ruling 140)", () => {
           PRIMARY KEY (project_slug, epic_id)
         );
       `);
-      expect(projectionCheckGaps(db)).toEqual([
+      expect(bootLine(db).projectionSchemaDrift).toEqual([
         "epic_projections.status: paused",
         "epic_projections.status: cancelled",
       ]);
@@ -575,8 +560,7 @@ describe("projectionCheckGaps (ruling 140)", () => {
  * the gap survives, the `question` insert throws, and the index check fails.
  */
 describe("widenNotificationKindCheck (ruling 481)", () => {
-  it("rebuilds a lagging notifications table with the shipped CHECK, rows and indexes kept", async () => {
-    const { projectionCheckGaps, widenNotificationKindCheck } = await import("./boot.server");
+  it("rebuilds a lagging notifications table with the shipped CHECK, rows and indexes kept", () => {
     const ctx = createTestDbContext();
     try {
       const db = ctx.makeDb();
@@ -613,11 +597,14 @@ describe("widenNotificationKindCheck (ruling 481)", () => {
           .run();
       expect(insertQuestion).toThrow(/CHECK constraint failed/);
       // Ruling 503's `epic` postdates this root too.
-      expect(projectionCheckGaps(db)).toEqual(["notifications.kind: question", "notifications.kind: epic"]);
+      expect(bootLine(db).projectionSchemaDrift).toEqual([
+        "notifications.kind: question",
+        "notifications.kind: epic",
+      ]);
 
       expect(widenNotificationKindCheck(db)).toEqual(["question", "epic"]);
 
-      expect(projectionCheckGaps(db)).toEqual([]);
+      expect(bootLine(db)).not.toHaveProperty("projectionSchemaDrift");
       expect(db.prepare(`SELECT id, kind, ptype, title FROM notifications`).all()).toEqual([
         { id: "ntf_old", kind: "packet", ptype: "input", title: "Decision needed" },
       ]);
