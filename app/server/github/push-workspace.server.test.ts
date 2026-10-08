@@ -1089,14 +1089,31 @@ describe("ruling 144: workflow-file pushes and the workflow scope", () => {
   });
 });
 
-/**
- * Ruling 159 (pass 35, F35-10): a tree that carries Viberr's own store layout
- * (`projects/<slug>/tasks/...`) is never pushed. KNC-9's agent created the
- * store-relative attachments path inside its checkout, committed it, and the
- * delivery pushed it to GitHub. Canaries: delete the pre-count check (the push
- * proceeds); read the tree before the auto-commit (the uncommitted folder
- * slips through); treat an unreadable tree as empty.
- */
+/** {@link push} with the project's PAT bound first. */
+const pushBound = (git: ReturnType<typeof fakeGit>) => {
+  bindPat();
+  return push(git);
+};
+
+/** Lease `paths` to `taskKey` in project.md's `fileLeases`, which the push gate reads. */
+async function leaseTo(taskKey: string, paths: string[]) {
+  // Ruling 245(b): the holder must be a LIVE task. A lease naming a task that
+  // is done, archived or absent binds nobody, so a fixture that skipped
+  // seeding it would prove the gate works while actually proving it is
+  // skipped — which is how the ruling-245 suite first passed against a
+  // phantom holder.
+  if (taskKey !== "VIB-1") {
+    writeTask(store.dataRoot, store.slug, {
+      frontmatter: baseTaskFrontmatter(taskKey, { stage: "review" }),
+    });
+    rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
+  }
+  const { updateProjectFile } = await import("~/server/files/project-writer.server");
+  await updateProjectFile({ projectSlug: store.slug, dataRoot: store.dataRoot }, (parsed) => {
+    parsed.frontmatter.fileLeases = [{ paths, taskKey, reason: "splitting it into fragments" }];
+  });
+}
+
 /**
  * Ruling 245 (pass 37, F37-74): a push that changes a file another task LEASES
  * is refused before it reaches GitHub.
@@ -1109,22 +1126,6 @@ describe("ruling 245: a leased file refuses the push", () => {
   // Ruling 353: the gate measures the branch from its fork point, not the push.
   const FORK = "d".repeat(40);
   const range = `${FORK}..HEAD`;
-  const leaseTo = async (taskKey: string, paths: string[]) => {
-    // Ruling 245(b): the holder must be a LIVE task. A lease naming a task that
-    // is done, archived or absent binds nobody, so a fixture that skipped
-    // seeding it would prove the gate works while actually proving it is
-    // skipped — which is how this test first passed against a phantom holder.
-    if (taskKey !== "VIB-1") {
-      writeTask(store.dataRoot, store.slug, {
-        frontmatter: baseTaskFrontmatter(taskKey, { stage: "review" }),
-      });
-      rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
-    }
-    const { updateProjectFile } = await import("~/server/files/project-writer.server");
-    await updateProjectFile({ projectSlug: store.slug, dataRoot: store.dataRoot }, (parsed) => {
-      parsed.frontmatter.fileLeases = [{ paths, taskKey, reason: "splitting it into fragments" }];
-    });
-  };
 
   it("ruling 245(b): a lease whose HOLDER has merged binds nobody", async () => {
     await leaseTo("VIB-9", ["Makefile"]);
@@ -1133,7 +1134,7 @@ describe("ruling 245: a leased file refuses the push", () => {
       frontmatter: baseTaskFrontmatter("VIB-9", { stage: "done" }),
     });
     rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
-    const res = await push(fakeGit({
+    const res = await pushBound(fakeGit({
       branch: "vib-1-work",
       ahead: 1,
       remoteHead: REMOTE,
@@ -1143,10 +1144,6 @@ describe("ruling 245: a leased file refuses the push", () => {
     // a completed task fencing off a file forever.
     expect(res.status).toBe("pushed");
   });
-  const push = (git: ReturnType<typeof fakeGit>) => {
-    bindPat();
-    return pushWorkspaceBranch({ db: store.db, projectSlug: store.slug, taskKey: "VIB-1", dataRoot: store.dataRoot, exec: git.exec });
-  };
 
   it("refuses, names the holder and the file, and pushes nothing", async () => {
     await leaseTo("VIB-9", ["Makefile", "make/**"]);
@@ -1156,7 +1153,7 @@ describe("ruling 245: a leased file refuses the push", () => {
       remoteHead: REMOTE,
       changedFilesByRange: { [range]: ["services/cart/src/a.ts", "Makefile"] },
     });
-    const res = await push(git);
+    const res = await pushBound(git);
     expect(res).toMatchObject({ status: "lease_held", path: "Makefile", holder: "VIB-9" });
     expect(res.status === "lease_held" ? res.reason : "").toContain("VIB-9 holds");
     // CANARY: drop the gate and this pushes. Nothing may reach the remote.
@@ -1165,7 +1162,7 @@ describe("ruling 245: a leased file refuses the push", () => {
 
   it("never refuses the HOLDER its own file", async () => {
     await leaseTo("VIB-1", ["Makefile"]);
-    const res = await push(fakeGit({
+    const res = await pushBound(fakeGit({
       branch: "vib-1-work",
       ahead: 1,
       remoteHead: REMOTE,
@@ -1176,7 +1173,7 @@ describe("ruling 245: a leased file refuses the push", () => {
 
   it("passes a push that touches nothing leased", async () => {
     await leaseTo("VIB-9", ["Makefile"]);
-    const res = await push(fakeGit({
+    const res = await pushBound(fakeGit({
       branch: "vib-1-work",
       ahead: 1,
       remoteHead: REMOTE,
@@ -1190,7 +1187,7 @@ describe("ruling 245: a leased file refuses the push", () => {
     // "no files changed". CANARY: treat a failed read as an empty list and this
     // still passes; treat it as a conflict and every degraded clone is blocked.
     await leaseTo("VIB-9", ["Makefile"]);
-    const res = await push(fakeGit({
+    const res = await pushBound(fakeGit({
       branch: "vib-1-work",
       ahead: 1,
       remoteHead: REMOTE,
@@ -1200,6 +1197,14 @@ describe("ruling 245: a leased file refuses the push", () => {
   });
 });
 
+/**
+ * Ruling 159 (pass 35, F35-10): a tree that carries Viberr's own store layout
+ * (`projects/<slug>/tasks/...`) is never pushed. KNC-9's agent created the
+ * store-relative attachments path inside its checkout, committed it, and the
+ * delivery pushed it to GitHub. Canaries: delete the pre-count check (the push
+ * proceeds); read the tree before the auto-commit (the uncommitted folder
+ * slips through); treat an unreadable tree as empty.
+ */
 describe("ruling 159: the store layout never reaches origin", () => {
   const STRAY = (slug: string) => `projects/${slug}/tasks/VIB-1/attachments/knc-9-licence-verification.txt`;
 
@@ -1264,20 +1269,6 @@ describe("ruling 159: the store layout never reaches origin", () => {
 describe("ruling 353: the lease gate measures the branch from its fork point", () => {
   const REMOTE = "c".repeat(40);
   const FORK = "d".repeat(40);
-  const leaseTo = async (taskKey: string, paths: string[]) => {
-    writeTask(store.dataRoot, store.slug, {
-      frontmatter: baseTaskFrontmatter(taskKey, { stage: "review" }),
-    });
-    rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
-    const { updateProjectFile } = await import("~/server/files/project-writer.server");
-    await updateProjectFile({ projectSlug: store.slug, dataRoot: store.dataRoot }, (parsed) => {
-      parsed.frontmatter.fileLeases = [{ paths, taskKey, reason: "one owner at a time" }];
-    });
-  };
-  const push = (git: ReturnType<typeof fakeGit>) => {
-    bindPat();
-    return pushWorkspaceBranch({ db: store.db, projectSlug: store.slug, taskKey: "VIB-1", dataRoot: store.dataRoot, exec: git.exec });
-  };
 
   it("refuses a leased path the branch changed BEFORE the lease existed, on a push that does not touch it", async () => {
     await leaseTo("VIB-9", ["Makefile"]);
@@ -1292,7 +1283,7 @@ describe("ruling 353: the lease gate measures the branch from its fork point", (
         [`${FORK}..HEAD`]: ["docs/notes.md", "Makefile"],
       },
     });
-    const res = await push(git);
+    const res = await pushBound(git);
     // CANARY: measure `remoteHead..HEAD` again and this pushes.
     expect(res).toMatchObject({ status: "lease_held", path: "Makefile", holder: "VIB-9" });
     expect(git.calls.some((c) => c.includes("push"))).toBe(false);
@@ -1303,7 +1294,7 @@ describe("ruling 353: the lease gate measures the branch from its fork point", (
 
   it("an unreadable fork point measures nothing and, as before, refuses nothing", async () => {
     await leaseTo("VIB-9", ["Makefile"]);
-    const res = await push(fakeGit({
+    const res = await pushBound(fakeGit({
       branch: "vib-1-work",
       ahead: 1,
       remoteHead: REMOTE,
