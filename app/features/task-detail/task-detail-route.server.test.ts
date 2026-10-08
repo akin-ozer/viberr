@@ -148,6 +148,27 @@ async function postFile(
   } as never);
 }
 
+/** Interrupt every live run a dispatch under test started on `key`. */
+async function stopLiveRuns(key: string) {
+  const { listRunsForTaskRows } = await import(
+    "~/server/runtimes/run-store.server"
+  );
+  const { interruptRun } = await import("~/server/runtimes/run-service.server");
+  for (const run of listRunsForTaskRows(app.db, "viberr-core", key)) {
+    if (run.state === "running" || run.state === "queued") {
+      try {
+        await interruptRun(
+          app.db,
+          { projectSlug: "viberr-core", taskKey: key, runId: run.id },
+          { userId: ids.arda, label: "test" },
+        );
+      } catch {
+        // ignore
+      }
+    }
+  }
+}
+
 /* --------------------------------------------------- loader (read-only) */
 
 describe("loader — VIB-142 fidelity", () => {
@@ -280,7 +301,7 @@ describe("loader — runPrincipal (ruling 127)", () => {
 /* ------------------------------------------------------ comment routing */
 
 describe("comment action — @agent routing detection", () => {
-  // VIB-153 carries a Codex specialist, so @operator/@codex starts or resumes
+  // VIB-153 carries a Codex specialist, so @operator starts or resumes
   // runtime work. Inject a fake adapter and stop any run left open by a test.
   // Do NOT re-install the fake runtime here — the file-level beforeAll already
   // did, and re-installing clears its queued runs. Just drop any operator lease
@@ -292,28 +313,6 @@ describe("comment action — @agent routing detection", () => {
     );
     resetOperatorLeasesForTests();
   });
-
-  async function stopTaskRuns(key: string, userId: string) {
-    const { listRunsForTaskRows } = await import(
-      "~/server/runtimes/run-store.server"
-    );
-    const { interruptRun } = await import(
-      "~/server/runtimes/run-service.server"
-    );
-    for (const run of listRunsForTaskRows(app.db, "viberr-core", key)) {
-      if (run.state === "running" || run.state === "queued") {
-        try {
-          await interruptRun(
-            app.db,
-            { projectSlug: "viberr-core", taskKey: key, runId: run.id },
-            { userId, label: "test" },
-          );
-        } catch {
-          // ignore
-        }
-      }
-    }
-  }
 
   it("@operator on a task WITH a specialist triggers the agent + names it in the toast", async () => {
     // SAFETY: arda is a project admin, so the comment runs to completion and the
@@ -329,7 +328,7 @@ describe("comment action — @agent routing detection", () => {
     expect(result.agent).toBeTruthy();
     expect(result.triggered).toBeTruthy();
     expect(result.toast).toContain("is picking it up");
-    await stopTaskRuns("VIB-153", ids.arda);
+    await stopLiveRuns("VIB-153");
 
     const after = await runLoader("VIB-153", ids.arda);
     // The human comment is recorded with the routed tint.
@@ -1155,7 +1154,7 @@ describe("run-agent intent — the one manual dispatch (auto-engage)", () => {
     for (const r of before.runtime.filter(
       (r) => r.kind === "primary" && (r.state === "running" || r.state === "idle"),
     )) {
-      stopExisting(
+      await stopExisting(
         app.db,
         { projectSlug: "viberr-core", taskKey: "VIB-166", runId: r.serverRunId },
         { userId: ids.arda, label: "arda@viberr.dev" },
@@ -1653,27 +1652,6 @@ describe("run-agent auto-engage — reviewer vs supporting agent, and release-ag
     );
   }
 
-  /** Interrupt every live run the dispatch under test started. */
-  async function stopRuns(key: string) {
-    const { listRunsForTaskRows } = await import(
-      "~/server/runtimes/run-store.server"
-    );
-    const { interruptRun } = await import("~/server/runtimes/run-service.server");
-    for (const run of listRunsForTaskRows(app.db, "viberr-core", key)) {
-      if (run.state === "running" || run.state === "queued") {
-        try {
-          await interruptRun(
-            app.db,
-            { projectSlug: "viberr-core", taskKey: key, runId: run.id },
-            { userId: ids.arda, label: "test" },
-          );
-        } catch {
-          // ignore
-        }
-      }
-    }
-  }
-
   it("engages a verdict-capable profile 'as a reviewer' on its way into the run", async () => {
     // The seeded Reviewer profile holds "Report a validation verdict" directly,
     // and VIB-153 already has a deliverer — so the dispatch engages it as a
@@ -1691,7 +1669,7 @@ describe("run-agent auto-engage — reviewer vs supporting agent, and release-ag
     expect(result.toast).toBe(
       "Claude run started for Reviewer · streaming to agent logs",
     );
-    await stopRuns("VIB-153");
+    await stopLiveRuns("VIB-153");
     const after = await runLoader("VIB-153", ids.arda);
     // The engagement landed in the supporting roster, not the deliverer seat…
     expect(after.task.specialist?.profileId).not.toBe("reviewer");
@@ -1746,7 +1724,7 @@ describe("run-agent auto-engage — reviewer vs supporting agent, and release-ag
     expect(result.toast).toBe(
       "Claude run started for Reviewer · streaming to agent logs",
     );
-    await stopRuns("VIB-145");
+    await stopLiveRuns("VIB-145");
     const after = await runLoader("VIB-145", ids.arda);
     const engaged = after.task.timeline.find(
       (e) => e.type === "agent" && e.text.includes("Engaged **Reviewer**"),
