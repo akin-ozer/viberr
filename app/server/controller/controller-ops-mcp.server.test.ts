@@ -1012,13 +1012,24 @@ describe("read_store_doc: org admins only, like the store browser", () => {
   });
 
   it("says so when the target or the file is gone", async () => {
+    // Ruling 246's rule holds for the resource too: an id that never named one
+    // is not one that "no longer exists". CANARY: restore "That resource no
+    // longer exists." and a mistyped id reads as a deletion, with no pointer
+    // to the ids that are real.
     expect(
       await call(ids.orgAdmin, "read_store_doc", {
         kind: "kb",
         id: "kb_nope",
         path: ["ops-note.md"],
       }),
-    ).toBe("[error] That resource no longer exists.");
+    ).toBe("[error] No knowledge base has the id kb_nope; list_knowledge_bases names them.");
+    expect(
+      await call(ids.orgAdmin, "read_store_doc", {
+        kind: "skill",
+        id: "sk_nope",
+        path: ["SKILL.md"],
+      }),
+    ).toBe("[error] No skill has the id sk_nope; list_skills names them.");
     // Ruling 246 (F37-75): "no longer exists" claimed the file once did, and
     // sent the controller looking for a deletion that never happened. The
     // message now says what this reader IS. CANARY: restore the old sentence
@@ -1031,8 +1042,13 @@ describe("read_store_doc: org admins only, like the store browser", () => {
     });
     expect(missing).toContain("has no `gone.md`");
     expect(missing).toContain("not a git repository");
-    // Ruling 246: and the two doors that do read a repo file.
-    expect(missing).toContain("Open it on GitHub, or ask an agent on a task with a checkout.");
+    // Ruling 246: and the doors that do read a repo file, which since ruling
+    // 299 include the controller's own. CANARY: say "Viberr has no tool that
+    // returns repository file contents" again and the controller is told it
+    // cannot do what read_default_branch_file does.
+    expect(missing).toContain(
+      "read_default_branch_file reads a file as the project's default branch has it, and read_pull_request a pull request's changed files.",
+    );
     expect(missing).not.toContain("no longer exists");
   });
 });

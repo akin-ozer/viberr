@@ -1402,6 +1402,3 @@ columns (`goal_id`, `goal_link_index`), which nothing reads or writes.
 - Ruling 108's note that the panel "skips the P13-KM-01 display-name repair" under a
   lock is stale wording: the panel runs the repair for display and posts blank for
   locked sections; the byte-for-byte outcome holds through the server.
-- `read_store_doc`'s not-found sentence says "Viberr has no tool that returns repository
-  file contents"; `read_default_branch_file` (ruling 299) is one
-  (`controller-ops-mcp.server.ts`).
