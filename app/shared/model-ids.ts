@@ -10,8 +10,8 @@
 /** Claude family aliases — the SDK resolves each to the latest model of that
  *  tier at run time, so they are valid ids forever, whether or not a served
  *  catalog happens to list them. Every curated `CLAUDE_MODELS` value in
- *  model-catalog.server.ts must be one (locked by test, through
- *  `claudeModelRunsVerbatim`). */
+ *  model-catalog.server.ts must run verbatim by `claudeModelRunsVerbatim`
+ *  below (locked by test); today each one is an alias here. */
 const CLAUDE_MODEL_ALIASES: readonly string[] = [
   "sonnet",
   "opus",
