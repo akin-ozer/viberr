@@ -48,14 +48,30 @@ describe("evidence-separation guardrail", () => {
     expect(out).toContain("Closing note.");
   });
 
-  it("does NOT treat an inline ``` inside prose as the closing fence (#12)", () => {
-    // An inline triple-backtick mid-line must not be mistaken for the closing
-    // fence — the regex is anchored to line starts.
-    const body = Array.from({ length: 30 }, (_, i) => `line ${i}`).join("\n");
-    const text = `Note: use \`\`\`lang for fences.\nThen the dump:\n\`\`\`\n${body}\n\`\`\`\nDone.`;
+  /** Thirty dump lines; `quote` puts an inline ``` in the middle of line 5. */
+  const dump = (quote: boolean) =>
+    Array.from({ length: 30 }, (_, i) =>
+      quote && i === 5 ? "line 5 quotes ```js mid-line" : `line ${i}`,
+    ).join("\n");
+
+  // #12: both fences are anchored to line starts, so a ``` mid-line is never
+  // taken for one and the dump is still trimmed whole. CANARY: drop the `^`
+  // before the opening fence and the prose row's inline ``` opens a block that
+  // ends at the dump's own fence, so nothing is trimmed; drop the one before
+  // the closing fence and the dump row's block closes on its line 5.
+  it.each([
+    [
+      "in the prose before the dump",
+      `Note: use \`\`\`lang for fences.\nThen the dump:\n\`\`\`\n${dump(false)}\n\`\`\`\nDone.`,
+    ],
+    ["inside the dump", `Then the dump:\n\`\`\`\n${dump(true)}\n\`\`\`\nDone.`],
+  ])("does NOT take an inline ``` %s for a fence (#12)", (_where, text) => {
     const out = separateEvidence(text);
+    expect(out).toContain(
+      "```\nline 0\nline 1\nline 2\n```\n_(evidence trimmed by the evidence-separation guardrail; 27 more lines in the agent logs)_",
+    );
     expect(out).toContain("Done.");
-    expect(out).toContain("Note: use");
+    expect(out).not.toContain("line 25");
   });
 });
 
