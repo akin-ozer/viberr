@@ -1576,8 +1576,10 @@ describe("the project's open knowledge-base proposals (ruling 483)", () => {
     expect(dialog.isConnected).toBe(true);
     expect(dialog.hasAttribute("data-closing")).toBe(true);
     // The exit ends with the ask still on its way, so Dismiss is disabled and
-    // cannot take the focus back. CANARY: drop useDialog's fallback for a
-    // disabled opener and the focus falls to <body>.
+    // cannot take the focus back; useDialog hands it to the opener's list row
+    // (its rule is use-dialog.test.tsx's). What this panel owns is that
+    // Dismiss sits in a focusable `li`. CANARY: render the actions outside
+    // the proposal's `li`, or drop its tabIndex, and the focus falls to <body>.
     expect(opener.disabled).toBe(true);
     fireEvent.transitionEnd(dialog);
     expect(dialog.isConnected).toBe(false);

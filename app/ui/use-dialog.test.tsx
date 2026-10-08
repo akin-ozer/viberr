@@ -33,6 +33,41 @@ function Host() {
   );
 }
 
+/** A confirm whose action disables its own opener until the request lands, as
+ *  the knowledge panel's Undo and Dismiss do, so the exit (ruling 459) ends on
+ *  a disabled opener. It sits in a focusable <main>, as Home's skip-link
+ *  target is; `inRow` puts the opener in a focusable list row. */
+function BusyHost({ inRow }: { inRow: boolean }) {
+  const [open, setOpen] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const opener = (
+    <button type="button" disabled={busy} onClick={() => setOpen(true)}>
+      Undo
+    </button>
+  );
+  return (
+    <main tabIndex={-1}>
+      {inRow ? (
+        <ul>
+          <li tabIndex={-1}>{opener}</li>
+        </ul>
+      ) : (
+        opener
+      )}
+      {open && (
+        <ConfirmDialog
+          screenLabel="Undo dialog"
+          title="Undo it?"
+          body="It goes back."
+          confirmLabel="Undo it"
+          onCancel={() => setOpen(false)}
+          onConfirm={() => setBusy(true)}
+        />
+      )}
+    </main>
+  );
+}
+
 /** Opens the dialog the way a keyboard user does: focus on the trigger, then
  *  activate it (fireEvent.click does not move focus by itself). */
 function openFromTrigger(getByText: (text: string) => HTMLElement) {
@@ -70,6 +105,35 @@ describe("useDialog focus restore", () => {
     fireEvent(getByRole("dialog"), new Event("cancel", { cancelable: true }));
     expect(queryByRole("dialog")).toBeNull();
     expect(document.activeElement).toBe(trigger);
+  });
+
+  // A disabled button takes no focus. In a list row the row takes it, so the
+  // keyboard user keeps their place; anywhere else it stays on <body>, never
+  // a region or landmark around the opener, whose focus reads the whole page
+  // out and sends the next Tab to its top.
+  // CANARY (in a list row): drop the hook's `:disabled` branch and the focus
+  // falls to <body>.
+  // CANARY (no row): widen the lookup to any `[tabindex]` ancestor and the
+  // focus lands on <main>.
+  it.each([
+    { where: "in a list row, the row takes the focus", inRow: true, lands: "LI" },
+    { where: "with no row, the focus stays on <body>, not the <main> around it", inRow: false, lands: "BODY" },
+  ])("when the exit ends on a disabled opener $where", ({ inRow, lands }) => {
+    const { container, getByRole } = render(<BusyHost inRow={inRow} />);
+    const opener = getByRole("button", { name: "Undo" });
+    opener.focus();
+    fireEvent.click(opener);
+    const dialog = container.querySelector("dialog")!;
+    slow(dialog);
+    // The keyboard user's Enter on the confirm (jsdom's showModal moves no
+    // focus into the dialog).
+    const confirm = getByRole("button", { name: "Undo it" });
+    confirm.focus();
+    fireEvent.click(confirm);
+    expect(opener).toHaveProperty("disabled", true);
+    fireEvent.transitionEnd(dialog);
+    expect(dialog.isConnected).toBe(false);
+    expect(document.activeElement?.tagName).toBe(lands);
   });
 });
 
