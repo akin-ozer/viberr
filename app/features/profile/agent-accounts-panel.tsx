@@ -171,6 +171,11 @@ function AgentAccountCard({
   // it again on its own, and during render, so no frame paints it open and
   // empty.
   if (managing && others.length === 0) setManaging(false);
+  // A rename form sits under the account in use, or in the management for
+  // another account, so it goes when its account is in neither: a switch in
+  // another tab moves the account in use into a management nobody has open,
+  // and opening that later showed the form again.
+  if (renaming && !managing && renaming !== active?.id) setRenaming(null);
 
   // A completed rename or saved key closes what the person had open for it.
   // Settled on the RESULT, so a refusal leaves the field as it was. Not the

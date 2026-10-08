@@ -1557,14 +1557,16 @@ describe("rulings 507 and 616: several accounts on one backend", () => {
   // A rename form sits under the account it renames: under the health line
   // while that account is in use, in the management while it is another. It
   // goes when its place does, as the management's Done closes it: a sign-in
-  // under way takes that place while the account is still listed. It stayed
-  // open in the card's state instead, and the load that showed its place
-  // again, or the person opening the management later, showed it again with
-  // nobody asking (under the account in use, its field took the focus as it
-  // mounted).
+  // under way takes that place while the account is still listed, and a
+  // switch in another tab moves the account in use into a management nobody
+  // has open. It stayed open in the card's state instead, and the load that
+  // showed its place again, or the person opening the management later,
+  // showed it again with nobody asking (under the account in use, its field
+  // took the focus as it mounted).
   // CANARY: drop `setRenaming(null)` from the region reset in
-  // `AgentAccountCard` (agent-accounts-panel.tsx) and every row ends with the
-  // form open.
+  // `AgentAccountCard` (agent-accounts-panel.tsx) and the first row ends with
+  // the form open; drop the reset of a rename form whose account is in
+  // neither place, and the switch row does; drop both, and every row does.
   it.each<[string, string, ClaudeOnServer[], string | null]>([
     [
       "a sign-in takes the place of the account in use it renames, then is cancelled",
@@ -1600,6 +1602,12 @@ describe("rulings 507 and 616: several accounts on one backend", () => {
         },
       ],
       "new@example.com",
+    ],
+    [
+      "another tab switches runs away from the account in use it renames",
+      "ubc_work",
+      [{ accounts: [{ ...PERSONAL, active: true }, { ...WORK, active: false }, KEY], login: null }],
+      "personal@example.com",
     ],
   ])("a rename form closes, and stays closed, when %s", async (_label, id, loads, manageOver) => {
     const server: ClaudeOnServer = { accounts: [WORK, PERSONAL, KEY], login: null };
