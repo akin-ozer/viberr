@@ -1,7 +1,10 @@
 import { afterEach, describe, expect, it } from "vitest";
 import { createTestDbContext } from "../../../test-support/test-db";
 import { setupProjectedStore } from "../../../test-support/projected-store";
+import { writeProject } from "../../../test-support/test-store";
 import { fakeGithubFetch } from "../../../test-support/fake-github";
+import { readProjectFile } from "~/server/files/project-writer.server";
+import { rebuildAll } from "~/server/projections/rebuilder.server";
 import { createPat, setProjectCredential } from "~/server/secrets/pat-store.server";
 import { readPullRequestDiff } from "./pr-diff.server";
 
@@ -231,7 +234,8 @@ describe("readPullRequestDiff — the hunks, bounded, and honest about what it c
     });
     expect(missing.ok).toBe(false);
     if (missing.ok) return;
-    expect(missing.reason).toBeTruthy();
+    // GitHub's own words, not a generic failure.
+    expect(missing.reason).toBe("Not Found");
 
     const bad = await readPullRequestDiff(store.db, store.slug, 0, {
       fetchImpl: gh.fetchImpl,
@@ -243,12 +247,18 @@ describe("readPullRequestDiff — the hunks, bounded, and honest about what it c
   it("a project with no repository or no credential says which, and calls nothing", async () => {
     const store = setupProjectedStore(ctx);
     const gh = fakeGithubFetch({});
-    const noCred = await readPullRequestDiff(store.db, store.slug, 7, {
-      fetchImpl: gh.fetchImpl,
-    });
-    expect(noCred.ok).toBe(false);
-    if (noCred.ok) return;
-    expect(noCred.reason).toContain("credential");
+    // CANARY: word both refusals the same and one of these names the wrong gap.
+    expect(
+      await readPullRequestDiff(store.db, store.slug, 7, { fetchImpl: gh.fetchImpl }),
+    ).toEqual({ ok: false, reason: "no GitHub credential is configured for this project" });
+
+    const fm = readProjectFile({ projectSlug: store.slug, dataRoot: store.dataRoot })!.parsed
+      .frontmatter;
+    writeProject(store.dataRoot, { ...fm, repo: null });
+    rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
+    expect(
+      await readPullRequestDiff(store.db, store.slug, 7, { fetchImpl: gh.fetchImpl }),
+    ).toEqual({ ok: false, reason: "no repository is configured for this project" });
     expect(gh.calls).toHaveLength(0);
   });
 });
