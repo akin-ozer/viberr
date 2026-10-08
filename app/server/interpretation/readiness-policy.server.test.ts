@@ -32,6 +32,9 @@ describe("deriveReadiness matrix", () => {
     ["blocked", [], "blocked", false], // derivation never improves
     ["blocked", [info], "blocked", false],
     ["blocked", [error], "blocked", false],
+    // A missing stored readiness bases on `ready` (the missing-field warning floors it).
+    [null, [warning], "input_required", true],
+    [null, [], "ready", false],
   ] as const)(
     "stored=%s diags=%j → %s (downgraded=%s)",
     (stored, diagnostics, expected, downgraded) => {
@@ -43,19 +46,6 @@ describe("deriveReadiness matrix", () => {
       expect(result.downgraded).toBe(downgraded);
     },
   );
-
-  it("missing stored readiness bases on `ready` (the missing-field warning floors it)", () => {
-    const result = deriveReadiness({
-      storedReadiness: null,
-      diagnostics: [warning],
-    });
-    expect(result.readiness).toBe("input_required");
-  });
-
-  it("missing stored readiness with clean diagnostics → ready", () => {
-    const result = deriveReadiness({ storedReadiness: null, diagnostics: [] });
-    expect(result.readiness).toBe("ready");
-  });
 });
 
 describe("isAcceptedDisplayState", () => {
