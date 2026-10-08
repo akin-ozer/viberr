@@ -2,7 +2,12 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { RouterContextProvider } from "react-router";
 import { setupAppTest, type AppTestContext } from "../../test-support/test-app";
 import { connectFakeBackend } from "../../test-support/backend-credentials";
-import { queueFakeRun, startedRunSpecs } from "../../test-support/fake-runtime";
+import {
+  drainRunCompletions,
+  queueFakeRun,
+  startedRunSpecs,
+} from "../../test-support/fake-runtime";
+import { waitFor } from "../../test-support/polling";
 import type { RunSpec } from "~/server/runtimes/adapter.server";
 
 /**
@@ -34,34 +39,11 @@ beforeAll(async () => {
 });
 afterAll(async () => {
   // A dispatch's completion re-invokes the operator, whose fake run and its
-  // completion effects write files after the case returned; removing the data
-  // root under them raced (ENOTEMPTY in the full suite). Wait until every run
-  // on the task is terminal, then remove, retrying once more on a straggler.
-  const { listRunsForTaskRows } = await import("~/server/runtimes/run-store.server");
-  for (let i = 0; i < 40; i += 1) {
-    const live = listRunsForTaskRows(app.db, SLUG, TASK).filter(
-      (row) => row.state === "queued" || row.state === "running",
-    );
-    if (live.length === 0) break;
-    await new Promise((resolve) => setTimeout(resolve, 50));
-  }
-  await new Promise((resolve) => setTimeout(resolve, 200));
-  for (let attempt = 0; ; attempt += 1) {
-    try {
-      app.cleanup();
-      break;
-    } catch (error) {
-      if (attempt >= 2) throw error;
-      await new Promise((resolve) => setTimeout(resolve, 300));
-    }
-  }
+  // completion effects write files after the case returned; the data root
+  // must outlive them.
+  await drainRunCompletions();
+  app.cleanup();
 });
-
-/** The fake runtime finishes a run on a microtask and the completion hook
- *  (ruling 203's window included) runs after it; give both a beat. */
-async function settle(): Promise<void> {
-  await new Promise((resolve) => setTimeout(resolve, 60));
-}
 
 /** The developer's own runs; a completion re-invokes the operator (its run
  *  is the completion contract, not a second delivery of the prompt). */
@@ -113,7 +95,7 @@ describe("ruling 375: a prompted manual dispatch runs once", () => {
     const prompt = "Prompt-cache check-in: reply with one sentence and stop.";
     const result = await post({ intent: "run-agent", profileId: "developer", prompt });
     expect(result).toMatchObject({ ok: true, intent: "run-agent" });
-    await settle();
+    await drainRunCompletions();
     expect(developerRuns().length).toBe(before + 1);
 
     const { listRunsForTaskRows } = await import("~/server/runtimes/run-store.server");
@@ -147,7 +129,7 @@ describe("ruling 375: a prompted manual dispatch runs once", () => {
       { projectSlug: SLUG, taskKey: TASK, profileId: "developer", runStartedAt: run!.started_at! },
     );
     expect(delivered).toEqual({ started: false, pending: 0 });
-    await settle();
+    await drainRunCompletions();
     expect(developerRuns().length).toBe(before + 1);
   });
 
@@ -163,7 +145,7 @@ describe("ruling 375: a prompted manual dispatch runs once", () => {
       ).length ?? 0;
     const result = await post({ intent: "run-agent", profileId: "developer" });
     expect(result).toMatchObject({ ok: true, intent: "run-agent" });
-    await settle();
+    await drainRunCompletions();
     expect(developerRuns().length).toBe(before + 1);
     const commentsAfter =
       readTaskFile(taskRef({ dataRoot: app.dataRoot }, SLUG, TASK))?.parsed.timeline.filter(
@@ -221,10 +203,10 @@ describe("ruling 452: a dispatch refused because the agent is running is deliver
     expect(note?.toAgent).toBe(false);
 
     release();
-    for (let i = 0; i < 80 && developerRuns().length < before + 2; i += 1) {
-      await new Promise((resolve) => setTimeout(resolve, 60));
-    }
-    await settle();
+    // The held run plays after the release, before any completion work the
+    // drain could wait on: wait for the run its completion starts, then drain.
+    await waitFor(() => developerRuns().length >= before + 2, "the deferred prompt's run", 5_000);
+    await drainRunCompletions();
     expect(developerRuns().length, "delivered once, not twice").toBe(before + 2);
     expect(developerRuns().at(-1)?.prompt).toContain(prompt);
   });
