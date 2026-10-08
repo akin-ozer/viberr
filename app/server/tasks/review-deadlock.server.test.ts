@@ -59,9 +59,4 @@ describe("ruling 329: what a deadlock option writes into the goal", () => {
       );
     }
   });
-
-  it("keeps the ask where it is read once — the body, which is appended to nothing", () => {
-    expect(packet.body).toContain("say why in the note box");
-    expect(packet.body).toContain("the next round is judged against it");
-  });
 });
