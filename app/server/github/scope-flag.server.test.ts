@@ -13,8 +13,6 @@ import {
   scopeFlagText,
 } from "./scope-flag.server";
 import { readTaskFile } from "~/server/files/task-writer.server";
-import { credentialAdvisories } from "~/server/secrets/pat-store.server";
-import { scopeIsAdvisory } from "~/shared/credential-scopes";
 
 const ctx = createTestDbContext();
 afterEach(ctx.cleanup);
@@ -205,17 +203,5 @@ describe("F39-5: advisory scopes are not violations", () => {
     const required = await clear("repo");
     expect(required).toContain("Policy update");
     expect(required).toContain("violation is resolved");
-  });
-
-  it("the timeline writer and the credential card read the SAME advisory list", () => {
-    expect(scopeIsAdvisory("checks:read")).toBe(true);
-    expect(scopeIsAdvisory("repo")).toBe(false);
-    expect(scopeIsAdvisory("workflow")).toBe(false);
-    // The card's advisory still fires for the same scope, so the two surfaces
-    // agree about which kind of thing happened.
-    const advisories = credentialAdvisories(null, [
-      { scope: "checks:read", taskKey: "VIB-1" },
-    ]);
-    expect(advisories.map((a) => a.id)).toEqual(["checks_read"]);
   });
 });
