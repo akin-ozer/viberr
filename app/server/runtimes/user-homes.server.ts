@@ -77,10 +77,6 @@ import { toError } from "~/shared/errors";
  * (`legacyHome`).
  */
 
-/** Re-exported so a consumer of the per-user homes needs one import, not two.
- *  The vocabulary itself stays owned by the runtime registry. */
-export type { RealBackend };
-
 /** The directory under `<dataRoot>/runtimes` that holds the per-person homes. */
 const USER_RUNTIMES_DIR = "users";
 
@@ -158,7 +154,7 @@ export function ensureUserBackendHome(
 // ------------------------------------------------ per-account homes (507)
 
 /** The directory under a backend home that holds its accounts' own homes. */
-export const ACCOUNT_HOMES_DIR = "accounts";
+const ACCOUNT_HOMES_DIR = "accounts";
 
 /** What locates one account's vendor home (ruling 507): its id, and whether it
  *  was connected before the ruling and so lives in the backend home itself. */

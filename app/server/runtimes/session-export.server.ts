@@ -794,7 +794,7 @@ const utilizationOf = (window: CodexRateWindow) =>
  * Ruling 608: and every window beside it, shortest first. The weekly window
  * at 42% hid the five-hour one a controller pacing runs to it needs.
  */
-export function codexRateLimitReading(
+function codexRateLimitReading(
   snapshots: Iterable<CodexRateSnapshot>,
 ): CodexRateLimitReading | null {
   let binding: { window: CodexRateWindow; reached: boolean } | null = null;

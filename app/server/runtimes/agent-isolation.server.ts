@@ -62,7 +62,7 @@ import { userRuntimeRoot } from "./user-homes.server";
  */
 
 /** Where the image installs the launcher (Dockerfile). */
-export const AGENT_LAUNCHER_PATH = "/usr/local/libexec/viberr-launch";
+const AGENT_LAUNCHER_PATH = "/usr/local/libexec/viberr-launch";
 /** The first agent uid, the last, and the agents' shared primary group. The
  *  Dockerfile ARGs `VIBERR_AGENT_UID_FLOOR` / `_MAX` / `VIBERR_AGENT_GID`
  *  compile the same numbers into the launcher (`agent-isolation.server.test.ts`
@@ -407,11 +407,10 @@ export function launchedSignal(signal: NodeJS.Signals): NodeJS.Signals {
 export function reapAgentProcesses(
   signal: "0" | "TERM" | "KILL",
   markers: readonly string[],
-  launcher = launcherPath,
 ): Promise<number[]> {
   if (markers.length === 0 || !launchesAgents()) return Promise.resolve([]);
   return new Promise((resolve) => {
-    execFile(launcher, ["--reap", signal, ...markers], { timeout: 30_000 }, (error, stdout) => {
+    execFile(launcherPath, ["--reap", signal, ...markers], { timeout: 30_000 }, (error, stdout) => {
       if (error) {
         logger.warn("the agent launcher's reap failed", { signal, err: toError(error) });
       }
@@ -725,7 +724,7 @@ export interface LayoutReport {
 
 /** The per-task directories a run writes: shared with the agent group here,
  *  and removed as the task's person wherever they are removed (ruling 485). */
-export const TASK_SHARED_DIRS = ["workspace", "attachments", ".operator-scratch"] as const;
+const TASK_SHARED_DIRS = ["workspace", "attachments", ".operator-scratch"] as const;
 
 /**
  * Ruling 691: the folder of a task directory that holds the page renderer's
