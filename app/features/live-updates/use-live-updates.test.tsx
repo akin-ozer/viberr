@@ -1,16 +1,15 @@
 // @vitest-environment jsdom
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { act, cleanup, render } from "@testing-library/react";
-import {
-  onLiveFrame,
-  REVALIDATE_DEBOUNCE_MS,
-  SSE_REOPEN_BACKOFF_MS,
-  useLiveStreamFailed,
-  useLiveUpdates,
-} from "./use-live-updates";
+import { onLiveFrame, useLiveStreamFailed, useLiveUpdates } from "./use-live-updates";
 import { CONTROLLER_UPDATED_EVENT } from "./event-types";
 import { DataRouter, loaderRunCount, resetDataRouter } from "../../../test-support/data-router";
 import { FakeEventSource } from "../../../test-support/fake-event-source";
+
+/** The flush's debounce, as projections-and-events.md documents it ("debounced 300 ms"). */
+const DEBOUNCE_MS = 300;
+/** The first two steps of the reopen backoff it documents ("a 2 / 5 / 15 / 30 s backoff"). */
+const BACKOFF_MS = [2_000, 5_000] as const;
 
 /** One console line of a task run, as the broker frames it. */
 function emitRunLine(source: FakeEventSource, projectSlug: string, taskKey: string, seq: number): void {
@@ -119,7 +118,7 @@ describe("useLiveUpdates", () => {
     act(() => {
       FakeEventSource.last().onopen?.();
       FakeEventSource.last().emit("stream.open", "42");
-      vi.advanceTimersByTime(REVALIDATE_DEBOUNCE_MS * 2);
+      vi.advanceTimersByTime(DEBOUNCE_MS * 2);
     });
     // The first stream of a surface's life never revalidates on open.
     expect(loaderRunCount()).toBe(0);
@@ -140,14 +139,14 @@ describe("useLiveUpdates", () => {
     act(() => {
       FakeEventSource.last().onopen?.();
       FakeEventSource.last().emit("stream.open", "44");
-      vi.advanceTimersByTime(REVALIDATE_DEBOUNCE_MS * 2);
+      vi.advanceTimersByTime(DEBOUNCE_MS * 2);
     });
     expect(loaderRunCount(), "nothing was missed, so nothing reloads").toBe(0);
 
     // What the tab missed while it was away arrives as the broker's replay.
     act(() => {
       FakeEventSource.last().emit("task.updated", "43");
-      vi.advanceTimersByTime(REVALIDATE_DEBOUNCE_MS);
+      vi.advanceTimersByTime(DEBOUNCE_MS);
     });
     expect(loaderRunCount(), "a returning tab rendered a stale snapshot").toBe(1);
   });
@@ -174,7 +173,7 @@ describe("useLiveUpdates", () => {
     expect(FakeEventSource.last().url).toBe("/resources/events?scope=project%3Aviberr-core");
     act(() => {
       FakeEventSource.last().onopen?.();
-      vi.advanceTimersByTime(REVALIDATE_DEBOUNCE_MS * 2);
+      vi.advanceTimersByTime(DEBOUNCE_MS * 2);
     });
     expect(loaderRunCount()).toBe(1);
   });
@@ -183,7 +182,7 @@ describe("useLiveUpdates", () => {
     render(<Probe scopes={["project:viberr-core"]} />, { wrapper: DataRouter });
     act(() => {
       FakeEventSource.last().emit("stream.resync", "9");
-      vi.advanceTimersByTime(REVALIDATE_DEBOUNCE_MS);
+      vi.advanceTimersByTime(DEBOUNCE_MS);
     });
     expect(loaderRunCount()).toBe(1);
   });
@@ -200,7 +199,7 @@ describe("useLiveUpdates", () => {
     expect(loaderRunCount()).toBe(0);
 
     act(() => {
-      vi.advanceTimersByTime(REVALIDATE_DEBOUNCE_MS - 1);
+      vi.advanceTimersByTime(DEBOUNCE_MS - 1);
     });
     expect(loaderRunCount()).toBe(0);
 
@@ -212,7 +211,7 @@ describe("useLiveUpdates", () => {
     // A later, separate event revalidates again.
     await act(async () => {
       es.emit("projection.rebuilt", "4");
-      vi.advanceTimersByTime(REVALIDATE_DEBOUNCE_MS);
+      vi.advanceTimersByTime(DEBOUNCE_MS);
     });
     expect(loaderRunCount()).toBe(2);
   });
@@ -227,13 +226,13 @@ describe("useLiveUpdates", () => {
     const es = FakeEventSource.last();
     act(() => {
       es.emit("task.updated", "1");
-      vi.advanceTimersByTime(REVALIDATE_DEBOUNCE_MS);
+      vi.advanceTimersByTime(DEBOUNCE_MS);
     });
     // The first revalidation is in flight (its loader ran; it has not landed).
     expect(loaderRunCount()).toBe(1);
     act(() => {
       es.emit("task.updated", "2");
-      vi.advanceTimersByTime(REVALIDATE_DEBOUNCE_MS);
+      vi.advanceTimersByTime(DEBOUNCE_MS);
     });
     expect(loaderRunCount()).toBe(1);
     await act(async () => {
@@ -265,7 +264,7 @@ describe("useLiveUpdates", () => {
     render(<Probe scopes={["user"]} />, { wrapper: DataRouter });
     act(() => {
       FakeEventSource.last().emit("stream.open", "9");
-      vi.advanceTimersByTime(REVALIDATE_DEBOUNCE_MS * 2);
+      vi.advanceTimersByTime(DEBOUNCE_MS * 2);
     });
     expect(loaderRunCount()).toBe(0);
   });
@@ -279,7 +278,7 @@ describe("useLiveUpdates", () => {
     render(<Probe scopes={["user"]} />, { wrapper: DataRouter });
     act(() => {
       FakeEventSource.last().emit("controller.log-appended", "10");
-      vi.advanceTimersByTime(REVALIDATE_DEBOUNCE_MS * 2);
+      vi.advanceTimersByTime(DEBOUNCE_MS * 2);
     });
     expect(loaderRunCount()).toBe(0);
   });
@@ -301,7 +300,7 @@ describe("useLiveUpdates", () => {
       act(() => {
         // One send's burst.
         for (let i = 0; i < 5; i += 1) FakeEventSource.last().emit("controller.updated", String(i));
-        vi.advanceTimersByTime(REVALIDATE_DEBOUNCE_MS);
+        vi.advanceTimersByTime(DEBOUNCE_MS);
       });
       // CANARY: drop the `SSE_CONVERSATION_EVENTS` branch, so `controller.updated`
       // goes to `recordLive` like a data event.
@@ -312,7 +311,7 @@ describe("useLiveUpdates", () => {
       render(<ConversationProbe />, { wrapper: DataRouter });
       act(() => {
         FakeEventSource.last().emit("controller.updated", "11");
-        vi.advanceTimersByTime(REVALIDATE_DEBOUNCE_MS);
+        vi.advanceTimersByTime(DEBOUNCE_MS);
       });
       expect(loaderRunCount()).toBe(1);
       expect(notices).toHaveLength(1);
@@ -358,7 +357,7 @@ describe("useLiveUpdates", () => {
     // Its own domain events still revalidate, as before.
     act(() => {
       FakeEventSource.last().emit("run.state-changed", "23");
-      vi.advanceTimersByTime(REVALIDATE_DEBOUNCE_MS);
+      vi.advanceTimersByTime(DEBOUNCE_MS);
     });
     expect(loaderRunCount()).toBe(1);
   });
@@ -389,7 +388,7 @@ describe("useLiveUpdates", () => {
     expect(loaderRunCount()).toBe(0);
     act(() => {
       es.emit("task.updated", "44");
-      vi.advanceTimersByTime(REVALIDATE_DEBOUNCE_MS);
+      vi.advanceTimersByTime(DEBOUNCE_MS);
     });
     expect(loaderRunCount()).toBe(1);
   });
@@ -452,7 +451,7 @@ describe("useLiveUpdates", () => {
       act(() => {
         a!.emit("notification.created", "7");
         b!.emit("notification.created", "7");
-        vi.advanceTimersByTime(REVALIDATE_DEBOUNCE_MS);
+        vi.advanceTimersByTime(DEBOUNCE_MS);
       });
       expect(seen).toEqual(["7"]);
       expect(loaderRunCount()).toBe(1);
@@ -478,7 +477,7 @@ describe("useLiveUpdates", () => {
     act(() => FakeEventSource.last().fail());
     expect(failed).toBe(true);
     act(() => {
-      vi.advanceTimersByTime(SSE_REOPEN_BACKOFF_MS[0]);
+      vi.advanceTimersByTime(BACKOFF_MS[0]);
     });
     act(() => FakeEventSource.last().onopen?.());
     expect(failed).toBe(false);
@@ -493,7 +492,7 @@ describe("useLiveUpdates", () => {
     unmount();
     expect(es.closed).toBe(true);
     act(() => {
-      vi.advanceTimersByTime(REVALIDATE_DEBOUNCE_MS * 2);
+      vi.advanceTimersByTime(DEBOUNCE_MS * 2);
     });
     expect(loaderRunCount()).toBe(0);
   });
@@ -519,7 +518,7 @@ describe("useLiveUpdates", () => {
     expect(FakeEventSource.instances).toHaveLength(1);
 
     act(() => {
-      vi.advanceTimersByTime(SSE_REOPEN_BACKOFF_MS[0]!);
+      vi.advanceTimersByTime(BACKOFF_MS[0]!);
     });
     // A brand-new EventSource — the only thing that recovers after a re-login.
     expect(FakeEventSource.instances).toHaveLength(2);
@@ -567,7 +566,7 @@ describe("useLiveUpdates", () => {
     act(() => {
       FakeEventSource.last().onopen?.();
       FakeEventSource.last().emit("stream.open", "7");
-      vi.advanceTimersByTime(REVALIDATE_DEBOUNCE_MS * 2);
+      vi.advanceTimersByTime(DEBOUNCE_MS * 2);
     });
     // First stream of the surface's life: opening must NOT revalidate.
     expect(loaderRunCount()).toBe(0);
@@ -577,14 +576,14 @@ describe("useLiveUpdates", () => {
     act(() => {
       FakeEventSource.last().onopen?.();
       FakeEventSource.last().emit("stream.open", "8");
-      vi.advanceTimersByTime(REVALIDATE_DEBOUNCE_MS * 2);
+      vi.advanceTimersByTime(DEBOUNCE_MS * 2);
     });
     expect(loaderRunCount()).toBe(0);
 
     // The broker replays the gap's notification.read: it reaches the page.
     act(() => {
       FakeEventSource.last().emit("notification.read", "8");
-      vi.advanceTimersByTime(REVALIDATE_DEBOUNCE_MS);
+      vi.advanceTimersByTime(DEBOUNCE_MS);
     });
     expect(loaderRunCount()).toBe(1);
   });
@@ -618,7 +617,7 @@ describe("useLiveUpdates — OBS-6: a dead session stops the retry loop", () => 
       FakeEventSource.last().fail();
     });
     await act(async () => {
-      await vi.advanceTimersByTimeAsync(SSE_REOPEN_BACKOFF_MS[step]!);
+      await vi.advanceTimersByTimeAsync(BACKOFF_MS[step]!);
     });
   }
 

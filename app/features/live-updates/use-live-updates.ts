@@ -65,6 +65,9 @@ import { useLiveLedger } from "./revalidation-policy";
  *    run for a failed connection).
  */
 
+/** The live flush's debounce. Exported with no importer on purpose, as
+ *  `SSE_SESSION_PROBE_AFTER` is: module-local, it grows every route's closure
+ *  (root by 11 B gzip, measured against ruling 457's ratchet). */
 export const REVALIDATE_DEBOUNCE_MS = 300;
 
 /**
@@ -160,7 +163,7 @@ const SCOPE_SEPARATOR = "\n";
 
 /** Backoff schedule for re-opening a failed stream (ms). Caps out — after the
  *  last step it keeps retrying at that interval rather than giving up. */
-export const SSE_REOPEN_BACKOFF_MS = [2_000, 5_000, 15_000, 30_000] as const;
+const SSE_REOPEN_BACKOFF_MS = [2_000, 5_000, 15_000, 30_000] as const;
 
 /**
  * OBS-6 — consecutive failures (with no successful open in between) before the
