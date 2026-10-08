@@ -22,8 +22,10 @@ function deferred() {
 
 function renderApp(
   gate: Promise<void>,
-  opts: { delayMs?: number } = {},
+  opts: { delayMs?: number; holdRefresh?: Promise<void> } = {},
 ) {
+  const { holdRefresh } = opts;
+  let indexLoads = 0;
   const Stub = createRoutesStub([
     {
       path: "/",
@@ -36,6 +38,15 @@ function renderApp(
       children: [
         {
           index: true,
+          // With `holdRefresh`, a revalidation re-runs this loader and stays in
+          // flight until the test releases it.
+          loader: holdRefresh
+            ? async () => {
+                indexLoads += 1;
+                if (indexLoads > 1) await holdRefresh;
+                return null;
+              }
+            : undefined,
           Component: () => {
             const revalidator = useRevalidator();
             return (
@@ -109,14 +120,21 @@ describe("RoutePendingBar", () => {
 
   it("ignores SSE revalidation (which is not a navigation)", async () => {
     // The live-update hook calls `useRevalidator().revalidate()` on every SSE
-    // frame; a progress bar over an idle page would be constant noise.
-    const gate = deferred();
-    gate.release();
-    const { container, getByText } = renderApp(gate.promise, { delayMs: 0 });
-    fireEvent.click(getByText("refresh"));
-    await act(async () => {
-      await Promise.resolve();
+    // frame; a progress bar over an idle page would be constant noise. The
+    // revalidation is held in flight past the bar's (zero) delay, so a bar
+    // that followed it would be on screen.
+    // CANARY: let the bar follow `useRevalidator().state` and this goes red.
+    const refresh = deferred();
+    const { container, findByText } = renderApp(Promise.resolve(), {
+      delayMs: 0,
+      holdRefresh: refresh.promise,
     });
+    fireEvent.click(await findByText("refresh"));
+    await act(() => new Promise((resolve) => setTimeout(resolve, 0)));
     expect(container.querySelector(".route-pending")).toBeNull();
+    await act(async () => {
+      refresh.release();
+      await refresh.promise;
+    });
   });
 });
