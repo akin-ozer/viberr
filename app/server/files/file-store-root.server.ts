@@ -66,8 +66,26 @@ export function projectsDir(dataRoot?: string): string {
   return path.join(getDataRoot(dataRoot), "projects");
 }
 
+/**
+ * One project's folder. Ruling 697: the slug is one folder under `projects/`,
+ * or it names no project.
+ *
+ * Like a task key (ruling 696), the slug arrives from a URL — decoded, so a
+ * `%2F` is a `/` — and from form fields. `projectDir` is where every project
+ * path is built, and the membership guard reads `project.md` from the folder
+ * the slug resolves to. Unchecked, a slug that walked into a task's own
+ * `attachments/` (which a person holding `attach-file`, and an agent's shell,
+ * may write, ruling 460) named a `project.md` planted there as its frontmatter:
+ * the folder then passed as a project its planter administered, and the
+ * settings `delete-project` door ran its `rmSync` on it. The refusal is here,
+ * and it is the answer an unknown project gets.
+ */
 export function projectDir(slug: string, dataRoot?: string): string {
-  return path.join(projectsDir(dataRoot), slug);
+  try {
+    return resolveStoreSegment(projectsDir(dataRoot), slug);
+  } catch {
+    throw AppError.notFound(`No project at projects/${slug}.`);
+  }
 }
 
 export function projectFilePath(slug: string, dataRoot?: string): string {

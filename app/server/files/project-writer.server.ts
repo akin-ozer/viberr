@@ -5,7 +5,7 @@ import type {
   ParsedProjectFile,
   ProjectFrontmatter,
 } from "~/schemas/project-file.schema";
-import { AppError } from "~/server/errors/app-error.server";
+import { AppError, isAppError } from "~/server/errors/app-error.server";
 import { ERROR_CODES } from "~/server/errors/error-codes";
 import { withFileLock } from "./file-mutex.server";
 import { projectDir, projectFilePath } from "./file-store-root.server";
@@ -39,7 +39,16 @@ export interface ProjectFileReadResult {
 export function readProjectFile(
   ref: ProjectFileRef,
 ): ProjectFileReadResult | null {
-  const absPath = resolveProjectFilePath(ref);
+  let absPath: string;
+  try {
+    absPath = resolveProjectFilePath(ref);
+  } catch (error) {
+    // Ruling 697: a slug that is not one folder under `projects/` names no
+    // project, the same null an absent project.md gives. The membership guard
+    // turns that into its "No project" 404.
+    if (isAppError(error) && error.code === ERROR_CODES.NOT_FOUND) return null;
+    throw error;
+  }
   if (!existsSync(absPath)) return null;
   const content = readFileSync(absPath, "utf8");
   const { parsed, diagnostics } = parseStoreFile(
