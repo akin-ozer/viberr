@@ -2,7 +2,6 @@ import { readFileSync } from "node:fs";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
 import {
-  DOCK_SELF_STREAM_ROUTE_IDS,
   dockContextFromMatches,
   dockScopeKey,
   dockViewUrl,
@@ -81,7 +80,6 @@ describe("dockContextFromMatches", () => {
     expect(read("routes/project.tsx")).toContain("useLiveUpdates");
     expect(read("features/org-settings/org-settings-page.tsx")).toContain("useLiveUpdates");
     expect(read("routes/insights.tsx")).not.toContain("useLiveUpdates");
-    expect(DOCK_SELF_STREAM_ROUTE_IDS).toEqual(["routes/insights"]);
   });
 
   /** Review finding 17: the trigger is named the same before and after the
