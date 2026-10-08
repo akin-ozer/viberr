@@ -228,8 +228,8 @@ const FINISHED_OPERATOR = run({
 });
 
 const DEPLOYED: DeployedSpecialistView[] = [
-  { id: "developer", name: "Developer", role: "Developer", backend: "claude", model: "claude-sonnet-4-5", capabilities: { delivery: true, verdict: false, askHuman: true, browser: true } },
-  { id: "reviewer", name: "Reviewer", role: "Reviewer", backend: "codex", model: "gpt-5-codex", capabilities: { delivery: false, verdict: true, askHuman: false, browser: false } },
+  { id: "developer", name: "Developer", role: "Developer", backend: "claude", model: "claude-sonnet-4-5", capabilities: { delivery: true, verdict: false, askHuman: true, browser: true }, stages: [], spanAll: true },
+  { id: "reviewer", name: "Reviewer", role: "Reviewer", backend: "codex", model: "gpt-5-codex", capabilities: { delivery: false, verdict: true, askHuman: false, browser: false }, stages: [], spanAll: true },
 ];
 
 const SCHEDULE: TaskSchedule = {

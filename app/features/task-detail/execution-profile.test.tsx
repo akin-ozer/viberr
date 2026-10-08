@@ -22,7 +22,7 @@ afterEach(cleanup);
  */
 
 const deployedFixture: DeployedSpecialistView[] = [
-  { id: "developer", name: "Developer", role: "Implementation", backend: "codex", model: "codex-large" },
+  { id: "developer", name: "Developer", role: "Implementation", backend: "codex", model: "codex-large", stages: [], spanAll: true },
 ];
 
 /** An UNOWNED task — `owner: null` is the branch this finding lives in. The

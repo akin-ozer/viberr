@@ -816,10 +816,12 @@ const deployedFixture: DeployedSpecialistView[] = [
   {
     id: "developer", name: "Developer", role: "Implementation", backend: "codex", model: "codex-large",
     capabilities: { delivery: true, verdict: false, askHuman: false, browser: false },
+    stages: [], spanAll: true,
   },
   {
     id: "reviewer", name: "Reviewer", role: "Code review", backend: "claude", model: "claude-sonnet",
     capabilities: { delivery: false, verdict: true, askHuman: false, browser: false },
+    stages: [], spanAll: true,
   },
 ];
 
@@ -1182,6 +1184,7 @@ describe("ExecutionProfile — run an agent (prompt + Run/Schedule)", () => {
     const docs: DeployedSpecialistView = {
       id: "docs", name: "Docs Writer", role: "Documentation", backend: "claude", model: "claude-sonnet",
       capabilities: { delivery: false, verdict: false, askHuman: false, browser: false },
+      stages: [], spanAll: true,
     };
     const fourth = renderExec(execTask(), {
       deployedSpecialists: [...deployedFixture, docs],
@@ -1199,6 +1202,7 @@ describe("ExecutionProfile — run an agent (prompt + Run/Schedule)", () => {
       id: "judge", name: "Estimate Judge", role: "Review", backend: "codex", model: "codex-large",
       capabilities: { delivery: true, verdict: true, askHuman: false, browser: true },
       requiredReviewer: true,
+      stages: [], spanAll: true,
     };
     const fifth = renderExec(execTask(), {
       deployedSpecialists: [...deployedFixture, judge],
@@ -1215,6 +1219,7 @@ describe("ExecutionProfile — run an agent (prompt + Run/Schedule)", () => {
     const builder: DeployedSpecialistView = {
       id: "builder", name: "Calculator Builder", role: "Estimate", backend: "codex", model: "codex-large",
       capabilities: { delivery: false, verdict: false, askHuman: true, browser: true },
+      stages: [], spanAll: true,
     };
     const sixth = renderExec(
       execTask({
@@ -1691,6 +1696,7 @@ describe("ExecutionProfile — engaged agents ledger", () => {
     const docs: DeployedSpecialistView = {
       id: "docs", name: "Docs agent", role: "Documentation", backend: "claude", model: "claude-sonnet",
       capabilities: { delivery: true, verdict: false, askHuman: false, browser: false },
+      stages: [], spanAll: true,
     };
     const { container } = renderExec(
       execTask({

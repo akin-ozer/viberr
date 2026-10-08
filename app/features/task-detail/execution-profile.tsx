@@ -76,10 +76,10 @@ export interface DeployedSpecialistView {
     askHuman: boolean;
     browser: boolean;
   };
-  /** U36-10 (pass 36): stage scope, as the loader's view carries it. Absent in
-   *  older fixtures = unknown, and the control pre-refuses nothing. */
-  stages?: string[];
-  spanAll?: boolean;
+  /** U36-10 (pass 36): stage scope, as the loader's view carries it: the
+   *  stages this profile may be newly engaged at, empty when `spanAll`. */
+  stages: string[];
+  spanAll: boolean;
   /** Ruling 556: the project names it a required reviewer, so a dispatch never
    *  makes it the deliverer, whatever it may write. Sent only when true. */
   requiredReviewer?: true;
