@@ -22,7 +22,7 @@ import {
 import { createGithubClient } from "./github-client.server";
 import {
   deriveSyncState,
-  ensureTaskBranch, ensureTaskBranchBestEffort,
+  ensureTaskBranchBestEffort,
   getBranchCompare,
   taskBranchName,
   taskCommits,
@@ -338,7 +338,7 @@ describe("ensureTaskBranch", () => {
       },
       [`GET ${REPO_PATH}/compare/main...${branch}`]: compareRoute([]),
     });
-    const result = await ensureTaskBranch(
+    const result = await ensureTaskBranchBestEffort(
       store.db,
       { projectSlug: store.slug, taskKey: "VIB-201" },
       ACTOR,
@@ -395,7 +395,7 @@ describe("ensureTaskBranch", () => {
       },
       [`GET ${REPO_PATH}/compare/main...vib-210`]: compareRoute([]),
     });
-    const result = await ensureTaskBranch(
+    const result = await ensureTaskBranchBestEffort(
       store.db,
       { projectSlug: store.slug, taskKey: "VIB-210" },
       ACTOR,
@@ -454,7 +454,7 @@ describe("ensureTaskBranch", () => {
         body: { object: { sha: "basesha11" } },
       },
     });
-    const result = await ensureTaskBranch(
+    const result = await ensureTaskBranchBestEffort(
       store.db,
       { projectSlug: store.slug, taskKey: "VIB-211" },
       ACTOR,
@@ -473,7 +473,7 @@ describe("ensureTaskBranch", () => {
         body: { message: "Resource not accessible by personal access token" },
       },
     });
-    const result = await ensureTaskBranch(
+    const result = await ensureTaskBranchBestEffort(
       store.db,
       { projectSlug: store.slug, taskKey: "VIB-212" },
       ACTOR,
@@ -496,7 +496,7 @@ describe("ensureTaskBranch", () => {
         2,
       ),
     });
-    const result = await ensureTaskBranch(
+    const result = await ensureTaskBranchBestEffort(
       store.db,
       { projectSlug: store.slug, taskKey: "VIB-202" },
       ACTOR,
@@ -534,7 +534,7 @@ describe("ensureTaskBranch", () => {
       },
       [`GET ${REPO_PATH}/compare/main...vib-203-race`]: compareRoute([]),
     });
-    const result = await ensureTaskBranch(
+    const result = await ensureTaskBranchBestEffort(
       store.db,
       { projectSlug: store.slug, taskKey: "VIB-203" },
       ACTOR,
@@ -558,7 +558,7 @@ describe("ensureTaskBranch", () => {
         body: { message: "Resource not accessible by personal access token" },
       },
     });
-    const result = await ensureTaskBranch(
+    const result = await ensureTaskBranchBestEffort(
       store.db,
       { projectSlug: store.slug, taskKey: "VIB-204" },
       ACTOR,
@@ -587,7 +587,7 @@ describe("ensureTaskBranch", () => {
     });
     rebuildAll(bare.db, { dataRoot: bare.dataRoot });
     expect(
-      await ensureTaskBranch(
+      await ensureTaskBranchBestEffort(
         bare.db,
         { projectSlug: bare.slug, taskKey: "VIB-205" },
         ACTOR,
@@ -607,7 +607,7 @@ describe("ensureTaskBranch", () => {
       [`PUT ${REPO_PATH}/contents/README.md`]: { status: 500, body: { message: "boom" } },
     });
     expect(
-      await ensureTaskBranch(
+      await ensureTaskBranchBestEffort(
         store.db,
         { projectSlug: store.slug, taskKey: "VIB-206" },
         ACTOR,
@@ -617,7 +617,7 @@ describe("ensureTaskBranch", () => {
 
     // Unknown task.
     expect(
-      await ensureTaskBranch(
+      await ensureTaskBranchBestEffort(
         store.db,
         { projectSlug: store.slug, taskKey: "VIB-999" },
         ACTOR,
@@ -653,7 +653,7 @@ describe("ruling 128: ensureTaskBranch bootstraps an empty repository", () => {
       [`POST ${REPO_PATH}/git/refs`]: { status: 201, body: { ref: "refs/heads/vib-207" } },
       [`GET ${REPO_PATH}/compare/main...vib-207`]: compareRoute([]),
     });
-    const result = await ensureTaskBranch(
+    const result = await ensureTaskBranchBestEffort(
       store.db,
       { projectSlug: store.slug, taskKey: "VIB-207" },
       ACTOR,
@@ -687,7 +687,7 @@ describe("ruling 670: ensureTaskBranch cuts the task branch from a default branc
       [`POST ${REPO_PATH}/git/refs`]: { status: 201, body: { ref: "refs/heads/vib-208" } },
       [`GET ${REPO_PATH}/compare/master...vib-208`]: compareRoute([]),
     });
-    const result = await ensureTaskBranch(
+    const result = await ensureTaskBranchBestEffort(
       store.db,
       { projectSlug: store.slug, taskKey: "VIB-208" },
       ACTOR,
@@ -718,7 +718,7 @@ describe("ref paths (B11)", () => {
         body: { ref: "refs/heads/vib-900", object: { sha: "a".repeat(40) } },
       },
     });
-    const result = await ensureTaskBranch(
+    const result = await ensureTaskBranchBestEffort(
       store.db,
       { projectSlug: store.slug, taskKey: "VIB-900" },
       ACTOR,
