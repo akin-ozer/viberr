@@ -287,7 +287,7 @@ export function getBackendAccount(
 
 /** Every account the person holds, both backends, each backend's active one
  *  first. */
-export function listBackendCredentials(
+function listBackendCredentials(
   db: DatabaseSync,
   userId: string,
 ): BackendCredentialRow[] {
