@@ -132,7 +132,7 @@ const runCommand: CommandRunner = (command, args, options) => {
 const VERSION_RE = /\d+\.\d+\.\d+[0-9A-Za-z.+-]*/;
 
 /** The first semver-shaped token of a `--version` line, or null. */
-export function versionOf(text: string | null | undefined): string | null {
+function versionOf(text: string | null | undefined): string | null {
   const match = text ? VERSION_RE.exec(text) : null;
   return match ? match[0] : null;
 }
@@ -276,7 +276,7 @@ export function cachedToolchain(): Toolchain {
  * It reports presence and a version, never a path: where a binary lives is
  * deployment configuration, and this reading is open to any asker.
  */
-export const PROBE_NAME_RE = /^[A-Za-z0-9][A-Za-z0-9._+-]{0,63}$/;
+const PROBE_NAME_RE = /^[A-Za-z0-9][A-Za-z0-9._+-]{0,63}$/;
 
 /** The most names one call may probe: a bounded question, not an inventory. */
 export const PROBE_LIMIT = 8;
