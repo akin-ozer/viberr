@@ -250,7 +250,7 @@ function pushFailed(reason: string, detail: string): PushWorkspaceResult {
   return failure;
 }
 
-export type { Exec, ExecOutcome } from "~/server/tasks/workspace-git.server";
+export type { Exec } from "~/server/tasks/workspace-git.server";
 
 /**
  * The two runners a delivery takes: the workspace's own git (as the task's
@@ -339,7 +339,7 @@ export async function publishFromWorkspace(input: {
  * Ruling 144(c): GitHub's refusal of a workflow-file push for a token without
  * the `workflow` scope ("refusing to allow a Personal Access Token to create
  * or update workflow `.github/workflows/ci.yml` without `workflow` scope").
- * Exported for its unit test.
+ * The base refresh's push reads it too (`update-branch.server.ts`).
  */
 export function isWorkflowScopeRejection(stderr: string): boolean {
   return /refusing to allow .*(create|update) workflow/i.test(stderr) && /workflow.? scope/i.test(stderr);
@@ -477,8 +477,9 @@ export async function storeLayoutFilesInTree(
 /**
  * Non-fast-forward classifier for `git push` stderr (B-GH1). git's rejection
  * text is stable across versions: `! [rejected] ... (non-fast-forward)` or the
- * `(fetch first)` hint when the remote ref moved. Exported for its unit test —
- * misclassifying here re-creates the F15-15 "blame the credential" copy.
+ * `(fetch first)` hint when the remote ref moved. The base refresh's push reads
+ * it too (`update-branch.server.ts`). Misclassifying here re-creates the F15-15
+ * "blame the credential" copy.
  */
 export function isNonFastForwardStderr(stderr: string): boolean {
   return (

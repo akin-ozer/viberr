@@ -19,12 +19,11 @@ import {
 import type { PatValidation } from "~/schemas/github-pat.schema";
 import { taskDir } from "~/server/files/file-store-root.server";
 import { logger } from "~/server/logging/logger.server";
-import { serverExec } from "~/server/tasks/workspace-git.server";
+import { serverExec, type ExecOutcome } from "~/server/tasks/workspace-git.server";
 import {
   discardLocalTaskBranch,
   pushWorkspaceBranch,
   isWorkflowScopeRejection,
-  type ExecOutcome,
 } from "./push-workspace.server";
 
 let ctx: TestDbContext;

@@ -16,7 +16,6 @@ import { rebuildAll } from "~/server/projections/rebuilder.server";
 import {
   reconcileWorkspaceDelivery,
   type CommandExec,
-  type ReconcileWorkspaceDeliveryInput,
 } from "./workspace-delivery.server";
 
 /**
@@ -139,7 +138,7 @@ function readFm(store: ReturnType<typeof setupTask>, taskKey = "ATL-3") {
  *  backend, role and command runner are the caller's. */
 function deliver(
   store: ReturnType<typeof setupTask>,
-  run: Omit<ReconcileWorkspaceDeliveryInput, "db" | "projectSlug" | "taskKey" | "profileId" | "dataRoot">,
+  run: Omit<Parameters<typeof reconcileWorkspaceDelivery>[0], "db" | "projectSlug" | "taskKey" | "profileId" | "dataRoot">,
 ) {
   return reconcileWorkspaceDelivery({
     db: store.db,

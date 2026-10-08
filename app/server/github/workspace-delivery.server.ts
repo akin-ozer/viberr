@@ -177,7 +177,7 @@ function reconcileExec(git: WorkspaceGit, serverDir: string): CommandExec {
 
 // ------------------------------------------------------------------- input
 
-export interface ReconcileWorkspaceDeliveryInput {
+interface ReconcileWorkspaceDeliveryInput {
   db: DatabaseSync;
   projectSlug: string;
   taskKey: string;
