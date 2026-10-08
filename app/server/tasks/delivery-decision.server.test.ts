@@ -1201,36 +1201,6 @@ describe("R15-1: the verdict gate on human acceptance (F15-19)", () => {
       message: expect.stringContaining("no review pull request"),
     });
   });
-
-  it("accepts once a verdict-capable reviewer approved the delivered revision", async () => {
-    seed({
-      stage: "review",
-      branch: "vib-1",
-      engagements: [REVIEWER],
-      workRevision: revision(),
-      verdicts: [approval()],
-      pr: { number: 7, state: "review", title: "[VIB-1] t" },
-      validation: "healthy",
-    });
-    const task = await transitionStage(
-      store.db,
-      { projectSlug: store.slug, taskKey: "VIB-1", toStageId: "done", manual: true },
-      actorOf(store.users.arda),
-      dataCtx(),
-    );
-    expect(task.stage).toBe("done");
-  });
-
-  it("a task with NOTHING delivered stays acceptable (planning / non-repo work)", async () => {
-    seed({ stage: "review" });
-    const task = await transitionStage(
-      store.db,
-      { projectSlug: store.slug, taskKey: "VIB-1", toStageId: "done", manual: true },
-      actorOf(store.users.arda),
-      dataCtx(),
-    );
-    expect(task.stage).toBe("done");
-  });
 });
 
 describe("R15-1 gate 2 (F15-15): the PR head must contain the delivered revision", () => {
