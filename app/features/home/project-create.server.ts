@@ -795,7 +795,7 @@ const START_WITHOUT_REPOSITORY =
  * with no repository. Its agents keep repo-write, so connecting one is all it
  * takes for tasks to ship as pull requests.
  */
-export const SOFTWARE_WITHOUT_REPOSITORY_NOTE =
+const SOFTWARE_WITHOUT_REPOSITORY_NOTE =
   "It has no repository yet: tasks come back as files until one is connected. The operator asks for it the first time a task needs a pull request, and it can be attached any time in the project's settings.";
 
 /** What the repository probe (and, asked for, its creation) settled before
