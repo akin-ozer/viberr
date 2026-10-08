@@ -156,6 +156,23 @@ const OPERATOR_POLICY: { capabilityId: string; mode: CapabilityMode }[] = [
   { capabilityId: "stage-transitions", mode: "recommend" },
 ];
 
+/** The deployed Codex operator, holding `capabilities`. */
+const codexOperator = (
+  capabilities: AgentDeployment["capabilities"],
+  over: AgentDeploymentDefinition = {},
+): AgentDeployment => ({
+  profileId: "operator",
+  capabilities,
+  extras: [],
+  definition: {
+    kind: "operator",
+    name: "Operator",
+    backends: ["codex"],
+    model: defaultModelFor("codex"),
+    ...over,
+  },
+});
+
 /** What a case overrides on the `transition_stage` plan action it feeds the
  *  operator: a real field, or the undeclared property the strict plan schema
  *  must reject. */
@@ -205,23 +222,6 @@ describe("Codex structured operator completion", () => {
       taskKey: "VIB-1",
       dataRoot: store.dataRoot,
     })!.parsed;
-
-  /** The deployed Codex operator, holding `capabilities`. */
-  const codexOperator = (
-    capabilities: AgentDeployment["capabilities"],
-    over: AgentDeploymentDefinition = {},
-  ): AgentDeployment => ({
-    profileId: "operator",
-    capabilities,
-    extras: [],
-    definition: {
-      kind: "operator",
-      name: "Operator",
-      backends: ["codex"],
-      model: defaultModelFor("codex"),
-      ...over,
-    },
-  });
 
   beforeEach(async () => {
     ctx = createTestDbContext();
@@ -2545,19 +2545,7 @@ describe("stranded auto-stage resume", () => {
       writeProject(store2.dataRoot, {
         ...project.parsed.frontmatter,
         repo: null,
-        agents: [
-          {
-            profileId: "operator",
-            capabilities: OPERATOR_POLICY,
-            extras: [],
-            definition: {
-              kind: "operator",
-              name: "Operator",
-              backends: ["codex"],
-              model: defaultModelFor("codex"),
-            },
-          },
-        ],
+        agents: [codexOperator(OPERATOR_POLICY)],
       });
       // The live stranding shape: fresh task at the AUTO triage stage.
       writeTask(store2.dataRoot, store2.slug, {
@@ -2590,19 +2578,24 @@ describe("stranded auto-stage resume", () => {
         .all()
         .map((row) => ({ id: String(row.id), state: String(row.state) }));
 
-    /** A FINISHED operator run on `taskKey`, written by hand for a drive that
-     *  ended before the case begins: the backstop judges it by id. */
+    /** A FINISHED operator run on `taskKey`, for a drive that ended before the
+     *  case begins: the backstop judges it by id. */
     const finishedRun = (id: string, taskKey: string, at = "2026-09-13T00:00:00.000Z"): void => {
-      store2.db
-        .prepare(
-          `INSERT INTO agent_runs
-             (id, task_key, project_slug, thread_id, role, kind, backend, model, state,
-              turns, input_tokens, cached_input_tokens, output_tokens, usage_final,
-              created_at, updated_at, agent_profile_id)
-           VALUES (?, ?, ?, ?, 'Operator', 'operator', 'codex', 'gpt-5', 'finished',
-                   1, 0, 0, 0, 1, ?, ?, 'operator')`,
-        )
-        .run(id, taskKey, store2.slug, `t_${id}`, at, at);
+      upsertRun(store2.db, {
+        id,
+        taskKey,
+        projectSlug: store2.slug,
+        threadId: `t_${id}`,
+        role: "Operator",
+        kind: "operator",
+        backend: "codex",
+        model: "gpt-5",
+        sdk: "Codex SDK",
+        agentProfileId: "operator",
+        state: "finished",
+        turns: 1,
+        finishedAt: at,
+      });
     };
 
     /**
@@ -3952,19 +3945,7 @@ describe("pending trigger queue", () => {
       repo: null,
       // A person approves the move into Review (see the task below).
       workflow: REVIEW_APPROVAL_WORKFLOW,
-      agents: [
-        {
-          profileId: "operator",
-          capabilities: OPERATOR_POLICY,
-          extras: [],
-          definition: {
-            kind: "operator",
-            name: "Operator",
-            backends: ["codex"],
-            model: defaultModelFor("codex"),
-          },
-        },
-      ],
+      agents: [codexOperator(OPERATOR_POLICY)],
     });
   };
 
@@ -4647,19 +4628,7 @@ describe("stranded codex plan recovery", () => {
     writeProject(store4.dataRoot, {
       ...project.parsed.frontmatter,
       repo: null,
-      agents: [
-        {
-          profileId: "operator",
-          capabilities: OPERATOR_POLICY,
-          extras: [],
-          definition: {
-            kind: "operator",
-            name: "Operator",
-            backends: ["codex"],
-            model: defaultModelFor("codex"),
-          },
-        },
-      ],
+      agents: [codexOperator(OPERATOR_POLICY)],
     });
     // The cross-boot shape: an AUTO stage (triage → ready) the restart left
     // idle, with no packet and no recommendation for a human to act on.
@@ -5929,19 +5898,7 @@ describe("stranded-resume shares the transition chain cap (B4)", () => {
     writeProject(store6.dataRoot, {
       ...project.parsed.frontmatter,
       repo: null,
-      agents: [
-        {
-          profileId: "operator",
-          capabilities: OPERATOR_POLICY,
-          extras: [],
-          definition: {
-            kind: "operator",
-            name: "Operator",
-            backends: ["codex"],
-            model: defaultModelFor("codex"),
-          },
-        },
-      ],
+      agents: [codexOperator(OPERATOR_POLICY)],
     });
     // An AUTO stage with nothing pending — the stranded shape the backstop
     // resumes, so the ONLY thing bounding the chain is the cap.
