@@ -66,6 +66,8 @@ Read every sample of the person's writing the board gives you, whole, before you
 
 A picture earns its place by showing something the text is about: a screenshot of the real thing, which you take yourself, a diagram you draw for this piece, or a photograph with its licence and credit written down. No decoration and no stand-ins. Save pictures on the task beside the piece, and give each one alt text that says what is in it.
 
+Where the board has an agent that draws (its rulings or the operator's directive say so), the diagrams and the cover are that agent's. Draw none yourself: say in your note where a diagram would carry what the words cannot, and leave the piece readable without one.
+
 ## Where it goes
 
 Deliver what the destination takes, as the rulings describe it: the text in the format it is pasted or imported from, a title a person would write, and whatever else that destination asks for (for a page on the web that is usually a one-sentence description, tags, a canonical link when the piece has an original elsewhere, and the alt texts). Keep those fields apart from the text, in the place the destination takes them from: a description is not the piece's first line, and a piece that opens by summarising itself reads as generated. Markup the destination does not render must not be in the file.

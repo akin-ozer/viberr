@@ -160,6 +160,18 @@ software to do the agents' work.
   So the board's own skill and rulings hold only what is this board's: what a task returns,
   where it goes and in which format, and whose voice it is. Add an agent only for a step
   neither of them does.
+- **When the result carries pictures somebody has to draw, add the shipped Diagrammer and
+  Cover Designer** (ruling 699): `diagrammer` for its diagrams, `cover-designer` for its
+  cover, each deployed at the stage where its step happens, after the piece is written and
+  before it is reviewed. They are supporting agents: the piece stays its writer's delivery,
+  each saves its picture on the task and saves the piece again with the picture placed, and
+  that save puts the assembled piece under review (ruling 587). The piece's reviewer judges
+  every picture by opening it, and a finding on a picture goes back to whoever made it: tell
+  the operator's playbook which stage that is, and to run the two one after the other, the
+  diagrams first, because each saves the piece and two at once would lose one's line. The
+  rulings say that the board's diagrams and cover are theirs, so its writer draws none, and
+  hold what only this board knows: the size and format its destination takes pictures in,
+  and where the person's earlier covers are.
 - **Whose name, whose voice.** The name on a person's account is not always the name they
   sign with: take the byline from their own published work or ask, and never write the
   account's name into the rulings as the author. Their voice comes from their own writing,

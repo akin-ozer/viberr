@@ -49,11 +49,15 @@ const developerSkillMd = readAsset("developer-expertise.skill.md");
 const reviewerSkillMd = readAsset("reviewer-expertise.skill.md");
 const writerSkillMd = readAsset("writer-expertise.skill.md");
 const editorSkillMd = readAsset("editor-expertise.skill.md");
+const diagrammerSkillMd = readAsset("diagrammer-expertise.skill.md");
+const coverDesignerSkillMd = readAsset("cover-designer-expertise.skill.md");
 const operatorDefinitionMd = readAsset("operator.definition.md");
 const developerDefinitionMd = readAsset("developer.definition.md");
 const reviewerDefinitionMd = readAsset("reviewer.definition.md");
 const writerDefinitionMd = readAsset("writer.definition.md");
 const editorDefinitionMd = readAsset("editor.definition.md");
+const diagrammerDefinitionMd = readAsset("diagrammer.definition.md");
+const coverDesignerDefinitionMd = readAsset("cover-designer.definition.md");
 const operatorProfileMd = readAsset("operator.profile.md");
 const controllerSkillMd = readAsset("controller-guide.skill.md");
 const controllerDefinitionMd = readAsset("controller.definition.md");
@@ -82,6 +86,8 @@ const SPECIALIST_PERSONA_BY_ID = new Map<string, string>([
   ["reviewer", splitFrontmatter(reviewerDefinitionMd).body.trim()],
   ["writer", splitFrontmatter(writerDefinitionMd).body.trim()],
   ["editor", splitFrontmatter(editorDefinitionMd).body.trim()],
+  ["diagrammer", splitFrontmatter(diagrammerDefinitionMd).body.trim()],
+  ["cover-designer", splitFrontmatter(coverDesignerDefinitionMd).body.trim()],
 ]);
 
 /**
@@ -171,6 +177,10 @@ const STATIC_ASSETS: { rel: string; content: string }[] = [
   // is prose a person puts their name to.
   { rel: path.join("skills", "writer-expertise", "SKILL.md"), content: writerSkillMd },
   { rel: path.join("skills", "editor-expertise", "SKILL.md"), content: editorSkillMd },
+  // Ruling 699: the Diagrammer's and the Cover Designer's manuals, for a board
+  // whose result carries pictures somebody has to draw.
+  { rel: path.join("skills", "diagrammer-expertise", "SKILL.md"), content: diagrammerSkillMd },
+  { rel: path.join("skills", "cover-designer-expertise", "SKILL.md"), content: coverDesignerSkillMd },
   { rel: path.join("skills", "controller-guide", "SKILL.md"), content: controllerSkillMd },
   // Definitions — the OPERATOR and the CONTROLLER keep dedicated definition
   // files (system profiles). Specialist personas live in their profile-template
@@ -260,6 +270,10 @@ export const PRIOR_SHIPPED_HASHES: PriorShippedHashes = {
     "86f1e309de8bdb5393156fc6f12bc93a035597c43ae74c02b6b6f2c94c1b488b",
   ],
   [path.join("skills", "controller-guide", "SKILL.md")]: [
+    // Ruling 699 (2026-10-08): before "A board that delivers results" said a
+    // result that carries pictures starts from the shipped Diagrammer and
+    // Cover Designer, each at the stage where its step happens.
+    "e51e4710c9719b8bae32484e443a0c8be92e5fe6298e03dd53bc78eb26abb208",
     // Rulings 690 to 692 (owner, 2026-10-07, on a board asked to write blog
     // posts): before "A board that delivers results" said a person is asked
     // only what they alone know, that a board whose result is prose starts
@@ -594,12 +608,19 @@ export const PRIOR_SHIPPED_HASHES: PriorShippedHashes = {
     "d7c78f20730ef44a8e1d490cc2efbb2a1cf1cd1c5bb21a63bf8343df7ba1b17e",
   ],
   [path.join("skills", "writer-expertise", "SKILL.md")]: [
+    // Ruling 699 (2026-10-08): before the manual left the diagrams and the
+    // cover to a board's drawing agent where it has one.
+    "8c133fa610e494f0497b114cf71f64f08d91c9d08e6974634f1f4129fb64e870",
     // Ruling 695 (2026-10-08): before the manual said a person's own words
     // are material and not quotations, and that the evidence stays out of
     // the narration.
     "7f3e87f2478e5c2b798d2b45884ff95f9e62f81f25faa5cefc92161bd1166244",
   ],
   [path.join("skills", "editor-expertise", "SKILL.md")]: [
+    // Ruling 699 (2026-10-08): before the manual had the Editor open every
+    // picture and judge a diagram against the sources and a cover against
+    // the piece.
+    "62e62eed5108c4228e92c228d082d9815cb79c450d64b8d79f07beab7e30538a",
     // Ruling 695 (2026-10-08): before the cold read named a narrator who
     // cites their own records, and "I chose" on the strength of a record.
     "26b0210af906fd9b5495af1f5b343654422cee54986f86808e6285c3508cf253",

@@ -154,6 +154,8 @@ import {
 } from "./task-escalations.server";
 import {
   deliveredFileNames,
+  deliverersOwnFileNames,
+  filesClaimedBy,
   filesSavedByOtherAgents,
   keepStampedDelivery,
   postAgentReplyComment,
@@ -1948,9 +1950,24 @@ export async function applyAgentCompletionEffects(
   const deliveredNow = completionFile
     ? deliveredFileNames(completionFile.frontmatter, completionFile.timeline)
     : new Set<string>();
+  // Ruling 699: a maker's own earlier file is in that set now, and its rework
+  // beside another specialist run (a review that sent the text and a picture
+  // back at once) would claim nothing and move nothing. A file this agent
+  // saved before and its own words name is still its: only a name the
+  // deliverer's entries claim stays out, which is the case ruling 627 is for.
+  const ownEarlier =
+    completionFile && input.profileId
+      ? filesClaimedBy(completionFile.timeline, new Set([input.profileId]))
+      : new Set<string>();
+  const deliverersOwn = completionFile
+    ? deliverersOwnFileNames(completionFile.frontmatter, completionFile.timeline)
+    : new Set<string>();
+  const stillItsOwn = (name: string): boolean => ownEarlier.has(name) && !deliverersOwn.has(name);
   const runAttachments =
     finished.state === "finished" && !input.delivers && overlappingSpecialists > 0
-      ? attachmentsPrune.kept.filter((name) => ownWords.includes(name) && !deliveredNow.has(name))
+      ? attachmentsPrune.kept.filter(
+          (name) => ownWords.includes(name) && (!deliveredNow.has(name) || stillItsOwn(name)),
+        )
       : attachmentsPrune.kept;
   /** Ruling 362: this completion's RECORDED verdict was `approve` — a boundary
    *  for the react chain's depth count (the arm before the react decision). */

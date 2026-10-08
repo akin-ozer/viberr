@@ -223,13 +223,27 @@ async function keptDelivery(key: string, stamp: string, files: Record<string, st
 const picture = (key: string, stamp: string) =>
   requestDeliveryCaptures(store.db, { dataRoot: store.dataRoot }, { projectSlug: store.slug, taskKey: key, stamp });
 
+/** What an ask may name beside the page: a stretch, or an exact size. */
+interface AskOver {
+  runId?: string | null;
+  view?: "desktop" | "phone";
+  from?: number;
+  width?: number;
+  height?: number;
+  scale?: number;
+  keeps?: boolean;
+}
+
 /** An agent's `capture_page`, at the door both backends call. */
-const ask = (name: string, over: { runId?: string | null; from?: number } = {}) =>
+const ask = (name: string, over: AskOver = {}) =>
   captureTaskPage(
     store.db,
     { dataRoot: store.dataRoot },
-    { projectSlug: store.slug, taskKey: "VIB-1", name, runId: over.runId ?? null, from: over.from },
+    { projectSlug: store.slug, taskKey: "VIB-1", name, ...over, runId: over.runId ?? null },
   );
+/** The pictures a reply hands back, by their own headers. */
+const handedBack = (reply: { images: { data: string }[] }) =>
+  reply.images.map((image) => imageHeader(Buffer.from(image.data, "base64")));
 
 let runSeq = 0;
 /** A finished run of the writer whose window holds `files`, as a real run's
@@ -1147,6 +1161,172 @@ describe("a delivered page is pictured (ruling 691)", () => {
     // names byte for byte, it answers "the file is not there to render" for a
     // file the stat just found.
     expect(opened()).toEqual([stored]);
+  });
+
+  it("an agent's ask with a size is answered with one picture of exactly that size, told what of the layout the box left out and how the picture is kept, and saves nothing on the task", async () => {
+    saveFiles("VIB-1", {
+      "cover.html": '<img src="https://fonts.example.com/inter.css"><img src="logo.png"><p>a cover that fits its box</p>',
+      "long.html": "<p>a layout that does not fit: fake-height:900 fake-width:1400</p>",
+      "skew.html": "<p>comes back a px off the size asked: fake-short-by:1</p>",
+    });
+    // Ruling 698: an agent that draws a diagram or a cover asks for its
+    // picture at the size the picture is for.
+    const run = await liveRun("illustrator");
+    const before = timeline();
+    const kept = "Copying that file into the task's attachments folder under a name ending `\\.png` keeps it as a file of the task\\.$";
+    await withBrowser("", async () => {
+      // CANARY: leave the size out of the views `capturePage` hands the
+      // renderer and this is the page in stretches, at both widths; drop
+      // KEEP_PICTURE from the reply and the run is told of a file in a
+      // scratch that goes with it, and not how the picture stays.
+      const twice = await ask("cover.html", { runId: run, width: 1200, height: 630, scale: 2 });
+      expect(twice.text).toMatch(
+        new RegExp(
+          "^\\[done\\] `cover\\.html` as a picture of the size asked: 1,200 by 630 px at scale 2, " +
+            "saved as a PNG of 2,400 by 1,260 px\\. " +
+            "It asked the network for 1 thing \\(fonts\\.example\\.com\\), which a capture never loads, " +
+            "and for `logo\\.png`, which is not among this task's files \\(the folder is flat\\)\\. " +
+            // Over 2,000 px on a side: saved, and not handed back. CANARY:
+            // hand every box back as it is and a run that has looked at 20
+            // pictures is sent one the model's API refuses.
+            "It is over 2,000 px on a side, so it is saved and not shown here: " +
+            "the same box at a lower scale is the same layout, and shows you it\\. " +
+            `Saved for this run at \`\\S+/\\.captures/${run}/cap_\\S+/out/1-desktop\\.png\`: ` +
+            "scratch, your next capture replaces it, and it goes when this run ends\\. " +
+            kept,
+        ),
+      );
+      expect(handedBack(twice)).toEqual([]);
+      // The file the reply names is that picture, where the run's shell
+      // reads it to copy it.
+      const saved = /Saved for this run at `([^`]+)`/.exec(twice.text)![1]!;
+      expect(pngOf(saved)).toEqual({ mimeType: "image/png", width: 2400, height: 1260 });
+      // One picture of the one box: no second width, no stretch.
+      expect(fake.pages()).toHaveLength(1);
+
+      // A layout past the box, in each direction: said, with both sizes.
+      // CANARY: delete either sentence from `boxReplyText` and the run sees
+      // a picture cut at an edge with no word of how much lies past it.
+      const long = await ask("long.html", { width: 1200, height: 630 });
+      expect(long.text).toMatch(
+        new RegExp(
+          "^\\[done\\] `long\\.html` as a picture of the size asked: 1,200 by 630 px at scale 1, " +
+            "saved as a PNG of 1,200 by 630 px\\. " +
+            "It is laid out 900 px tall in a box 630 px tall, so the picture leaves out what is below the box\\. " +
+            "It is laid out 1,400 px wide in a box 1,200 px wide, so the picture leaves out what is to the right of the box\\. " +
+            "Saved at `\\S+/\\.captures/no\\.run/cap_\\S+/out/1-desktop\\.png`: " +
+            "scratch, and the next capture on this task replaces it\\. " +
+            kept,
+        ),
+      );
+      expect(handedBack(long)).toEqual([{ mimeType: "image/png", width: 1200, height: 630 }]);
+
+      // A run that holds the verdict is not told how a picture is kept: it
+      // judges pictures and makes none. CANARY: ignore `keeps` in
+      // `boxReplyText` and the sentence is there.
+      const judged = await ask("long.html", { width: 1200, height: 630, keeps: false });
+      expect(judged.text).toMatch(/scratch, and the next capture on this task replaces it\.$/);
+      expect(judged.text).not.toContain("keeps it as a file of the task");
+
+      // Under 1, and each side rounded by itself.
+      const half = await ask("cover.html", { width: 1201, height: 631, scale: 0.5 });
+      expect(half.text).toContain("as a picture of the size asked: 1,201 by 631 px at scale 0.5, saved as a PNG of 601 by 316 px.");
+      expect(handedBack(half)).toEqual([{ mimeType: "image/png", width: 601, height: 316 }]);
+
+      // A picture that comes back any other size is not the one asked for.
+      // CANARY: hold a box to its width and a cap, as a stretch is held, and
+      // this answers [done] with a PNG of 1,200 by 629 px.
+      expect((await ask("skew.html", { width: 1200, height: 630 })).text).toBe(
+        "[error] `skew.html` could not be captured: its picture did not come back as a PNG of the size asked for.",
+      );
+    });
+    // One too large to hand back says so and what to change. The stand-in's
+    // pictures weigh 1,000 bytes per px of height here: 4,000 px of them is
+    // past the 3,750,000 bytes a capture hands back.
+    const heavy = await withBrowser("big", () => ask("cover.html", { width: 1000, height: 2000, scale: 2 }));
+    expect(heavy.text).toMatch(
+      /^\[error\] `cover\.html` could not be captured: the picture is 4,0\d\d,\d{3} bytes, over the 3,750,000 a capture hands back; lower the scale or simplify the picture\.$/,
+    );
+    expect(heavy.images).toEqual([]);
+
+    // It saved nothing on the task: no file, no entry, no record, no audit
+    // row. A picture the run wants kept is the run's to copy.
+    expect(onTask()).toEqual(["cover.html", "long.html", "skew.html"]);
+    expect(timeline()).toEqual(before);
+    expect(frontmatter().pageCaptures).toBeUndefined();
+    expect(captureAudits()).toEqual([]);
+    await stopRun(run);
+  });
+
+  it("refuses a size it cannot picture in a sentence that says what to change, and starts no browser for it", async () => {
+    saveFiles("VIB-1", { "cover.html": "<p>a cover</p>" });
+    const alone = (given: string, wanted: string) =>
+      `[noop] \`cover.html\` was not pictured: a size is \`width\` and \`height\` together, and this call gave only \`${given}\`. Give \`${wanted}\` too.`;
+    const noStretch =
+      "[noop] `cover.html` was not pictured: a size makes one picture of the box it names, so it goes with neither `view` nor `from`. " +
+      "Give the size alone, or leave it out to look at the page in stretches.";
+    // CANARY: turn any one of `askedBox`'s four refusals off. A lone `width`
+    // or a lone `scale` is then read as no size at all and answered with the
+    // page in stretches; a `view` beside a size is dropped without a word;
+    // and 64,000,000 px is asked of the browser.
+    const refusals: [AskOver, string][] = [
+      [{ width: 1200 }, alone("width", "height")],
+      [{ height: 630, scale: 2 }, alone("height", "width")],
+      [
+        { scale: 2 },
+        "[noop] `cover.html` was not pictured: `scale` goes with a size. Give `width` and `height` too, or leave `scale` out.",
+      ],
+      [{ width: 1200, height: 630, view: "phone" }, noStretch],
+      [{ width: 1200, height: 630, from: 0 }, noStretch],
+      [
+        { width: 4000, height: 4000, scale: 2 },
+        "[noop] `cover.html` was not pictured: 4,000 by 4,000 px at scale 2 is a picture of 8,000 by 8,000 px, " +
+          "64,000,000 px in all, and a capture makes one of up to 16,000,000. Lower the scale or the size.",
+      ],
+    ];
+    await withBrowser("", async () => {
+      for (const [over, text] of refusals) expect((await ask("cover.html", over)).text).toBe(text);
+      expect(fake.launches()).toEqual([]);
+      // The limit is a bound and not a wall: 16,000,000 px is still made,
+      // and saved where the reply says (it is too large to hand back).
+      const largest = await ask("cover.html", { width: 4000, height: 4000 });
+      expect(largest.text).toContain("saved as a PNG of 4,000 by 4,000 px.");
+      expect(pngOf(/Saved at `([^`]+)`/.exec(largest.text)![1]!)).toEqual({ mimeType: "image/png", width: 4000, height: 4000 });
+    });
+  });
+
+  it("pictures an SVG drawing at a size it is given and no other way: a delivered one is never pictured, and one asked for with no size is said to need one", async () => {
+    const drawing = '<svg xmlns="http://www.w3.org/2000/svg" width="800" height="400"><rect width="800" height="400"/></svg>';
+    // A delivered drawing is not a page: Viberr pictures none by itself, at
+    // a desktop or a phone width it does not have. CANARY: answer a kind for
+    // `.svg` from `pageKindOf` and this delivery gets two pictures, a record
+    // and a note.
+    await deliver({ "diagram.svg": drawing, "figures.csv": "a,b\n1,2\n" });
+    expect(onTask()).toEqual(["diagram.svg", "figures.csv"]);
+    expect(frontmatter().pageCaptures).toBeUndefined();
+    expect(captureNote()).toBeUndefined();
+    saveFiles("VIB-1", {}, { "huge.svg": 14 * 1024 * 1024 });
+    await withBrowser("", async () => {
+      // CANARY: drop the refusal and a drawing is pictured in stretches at
+      // 1280 and 390 px, widths it was never drawn for.
+      expect((await ask("diagram.svg")).text).toBe(
+        "[noop] `diagram.svg` is a drawing, and a drawing is pictured at a size: give `width` and `height`.",
+      );
+      expect((await ask("huge.svg", { width: 800, height: 400 })).text).toBe(
+        "[noop] `huge.svg` is 14 MB; capture_page renders a drawing of up to 10 MB.",
+      );
+      expect(fake.launches()).toEqual([]);
+      const reply = await ask("diagram.svg", { width: 800, height: 400 });
+      expect(reply.text).toMatch(
+        /^\[done\] `diagram\.svg` as a picture of the size asked: 800 by 400 px at scale 1, saved as a PNG of 800 by 400 px\. Saved at /,
+      );
+      expect(handedBack(reply)).toEqual([{ mimeType: "image/png", width: 800, height: 400 }]);
+      // The renderer was told it is a drawing: the browser was sent to the
+      // page a drawing is set as, which holds it inline. CANARY: hand it over
+      // as `html` and the browser is sent to `diagram.svg` itself.
+      expect(opened()).toEqual([".viberr-render.html"]);
+      expect(fake.pages()[0]!.html).toContain(`<body>\n${drawing}\n</body>`);
+    });
   });
 
   it("keeps an agent's pictures for the run that asked: only the pictures, apart from another run's, until that run ends", async () => {

@@ -252,7 +252,52 @@ export const LIBRARY_AGENT_PROFILES: SeedAgentProfile[] = [
       recommend: [],
       forbidden: ["Merge a pull request", "Transition a task to Done", "Commit & push to the branch"],
     },
-    "The quality specialist of a prose task: reads the piece cold beside the person's own writing, checks every fact against the sources kept on the task, looks at the page as a reader sees it, then records an approve or request-changes verdict that gates acceptance. Never rewrites the piece.",
+    "The quality specialist of a prose task: reads the piece cold beside the person's own writing, checks every fact against the sources kept on the task, looks at the page and at every picture as a reader sees them, then records an approve or request-changes verdict that gates acceptance. Never rewrites the piece.",
+  ),
+  // Ruling 699: the two agents that make a piece's pictures. Supporting agents
+  // by design: neither holds a delivery grant, so the piece stays its writer's
+  // delivery, and each saves its picture on the task and the piece again with
+  // the picture placed (ruling 587 then moves the review to the assembled
+  // piece). Claude only, as the Editor is: each judges its own work by looking
+  // at the picture `capture_page` returns, and an image a tool returns is not
+  // proven to reach a Codex model.
+  profile(
+    {
+      id: "diagrammer", kind: "specialist", name: "Diagrammer", role: "Diagrams",
+      icon: "board", backends: ["claude"], model: "opus",
+      scope: "Global base",
+      stages: ["impl"],
+      resources: { skills: ["diagrammer-expertise"], mcps: [], kb: [] },
+    },
+    {
+      // Web egress is explicit: a part it draws may rest on a file no kept
+      // source holds yet, which it opens and keeps. It asks the person nothing
+      // (the writer asked once, ruling 692): what only they can supply is a
+      // line of its report. "Ask the human a question" is direct when absent,
+      // so it is withheld by name.
+      direct: ["Attach evidence references", "Post mid-run comments", "Search & fetch from the web"],
+      recommend: [],
+      forbidden: ["Ask the human a question", "Merge a pull request", "Transition a task to Done", "Commit & push to the branch"],
+    },
+    "Draws the diagrams a piece needs (how its parts connect, what happens in what order) from the piece and the sources kept on the task, as pictures saved beside it and placed where its reader needs them. Judges each one by looking at it rendered, and draws none where the piece needs none.",
+  ),
+  profile(
+    {
+      id: "cover-designer", kind: "specialist", name: "Cover Designer", role: "Cover",
+      icon: "page", backends: ["claude"], model: "opus",
+      scope: "Global base",
+      stages: ["impl"],
+      resources: { skills: ["cover-designer-expertise"], mcps: [], kb: [] },
+    },
+    {
+      // Web egress is explicit: it looks at the covers the person has already
+      // published before it designs one. It asks the person nothing, as the
+      // Diagrammer does not.
+      direct: ["Attach evidence references", "Post mid-run comments", "Search & fetch from the web"],
+      recommend: [],
+      forbidden: ["Ask the human a question", "Merge a pull request", "Transition a task to Done", "Commit & push to the branch"],
+    },
+    "Makes the cover picture of a piece from something the piece itself shows (its command, its number, its real screen), in the look of the person's publication and at the size its destination takes. No generated or stock imagery and no decoration. Judges the cover by looking at it rendered, large and as a thumbnail.",
   ),
 ];
 

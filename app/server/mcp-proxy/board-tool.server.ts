@@ -119,14 +119,36 @@ export const TASK_ATTACHMENT_TOOL: Tool = {
   annotations: { title: "Read one attachment of a task", ...READ_ONLY },
 };
 
+/**
+ * Ruling 698: what `capture_page` takes for a picture of an exact size, on
+ * either backend:
+ * each side of the box in CSS px, and the scale it is drawn at. The largest
+ * side at the largest scale is 8,000 px, the most a reader of images takes
+ * (`IMAGE_READ_MAX_SIDE`); how many px a picture holds in all is the door's
+ * own limit, and its refusal says it.
+ *
+ * Five scales and no others, each a binary fraction on purpose: a side times
+ * one of them is the same number in the browser's single-precision arithmetic
+ * and in the server's, so the PNG is exactly the size the reply states. Read
+ * against Chrome 153 before this shipped, a scale of 0.7 or 1.3 came out one
+ * px off `Math.round` on some boxes (1200 by 675 at 0.7 is 840 by 473), and
+ * the door, which keeps only a picture of the size asked, refused it with a
+ * sentence that named nothing the run could change.
+ */
+export const CAPTURE_PAGE_BOX = { minSide: 100, maxSide: 4000, scales: [0.25, 0.5, 1, 1.5, 2] } as const;
+const SCALES_TEXT = "0.25, 0.5, 1, 1.5 and 2";
+
 /** Ruling 691: what `capture_page` says it does, on either backend. */
 export const CAPTURE_PAGE_DESCRIPTION =
-  "Look at ONE page on this task as a reader sees it. `name` is a .html, .htm, .md or .markdown file among this task's files, exactly as `read_board` lists it. Viberr renders it in a real browser at a desktop width (1280 px) and a phone width (390 px), or the one `view` names, scrolls it once from top to bottom, and hands you the picture: one stretch of the page, up to 2000 px tall, sized so you can read it. When the page runs on, the reply gives `nextFrom`; call again with `from` set to it. A markdown file is set as a plain article first. The page loads only its own bytes and the files saved beside it on the task, nothing from the network, and the reply names what it asked for and did not get. Look before you deliver a page, and when you review one: the source tells you the words, the picture tells you what a reader gets. Where a task's result is files on the task, Viberr pictures each delivered page the same way and keeps those pictures on the task as `<file>.capture-desktop.png` and `<file>.capture-phone.png`. This call saves nothing on the task.";
+  "Look at ONE page on this task as a reader sees it. `name` is a .html, .htm, .md or .markdown file among this task's files, exactly as `read_board` lists it. Viberr renders it in a real browser at a desktop width (1280 px) and a phone width (390 px), or the one `view` names, scrolls it once from top to bottom, and hands you the picture: one stretch of the page, up to 2000 px tall, sized so you can read it. When the page runs on, the reply gives `nextFrom`; call again with `from` set to it. A markdown file is set as a plain article first. The page loads only its own bytes and the files saved beside it on the task, nothing from the network, and the reply names what it asked for and did not get. Look before you deliver a page, and when you review one: the source tells you the words, the picture tells you what a reader gets. Where a task's result is files on the task, Viberr pictures each delivered page the same way and keeps those pictures on the task as `<file>.capture-desktop.png` and `<file>.capture-phone.png`. To make a picture of an exact size instead (a diagram, a cover image), give `width` and `height`: the page, or a .svg drawing, is laid out in a viewport of that size, in CSS px, and pictured once, cut to that box from its top left corner, as a PNG of exactly `width` times `scale` by `height` times `scale` px. The reply says when the page is laid out taller or wider than the box (what a page that hides its overflow, or a drawing's own canvas, cuts off it cannot see: look for that in the picture), and where the PNG was saved for this run. A picture over 2000 px on a side is saved and not shown: look at the same box at a lower scale, which is the same layout. Text is drawn in a font this server has (`fc-list : family` in your shell lists them by the names to use) or in one saved beside the page and loaded with `@font-face`. This call saves nothing on the task.";
 
 export const CAPTURE_PAGE_FIELDS = {
-  name: "The page's file name among this task's files, exactly as `read_board` lists it.",
-  view: "One width to picture, `desktop` (1280 px) or `phone` (390 px). Omit for both.",
-  from: "Where the stretch starts, in px from the top of the page: the `nextFrom` an earlier reply gave. Omit for the top. At most 40000.",
+  name: "The page's file name among this task's files, exactly as `read_board` lists it. With `width` and `height` it may be a .svg drawing.",
+  view: "One width to picture, `desktop` (1280 px) or `phone` (390 px). Omit for both. Not with `width` and `height`.",
+  from: "Where the stretch starts, in px from the top of the page: the `nextFrom` an earlier reply gave. Omit for the top. At most 40000. Not with `width` and `height`.",
+  width: `For a picture of an exact size: the box's width in CSS px, ${CAPTURE_PAGE_BOX.minSide} to ${CAPTURE_PAGE_BOX.maxSide}, which is also the width the page is laid out at. Give \`height\` with it.`,
+  height: `For a picture of an exact size: the box's height in CSS px, ${CAPTURE_PAGE_BOX.minSide} to ${CAPTURE_PAGE_BOX.maxSide}. Give \`width\` with it.`,
+  scale: `With \`width\` and \`height\`: how many picture px draw one CSS px, one of ${SCALES_TEXT}. Omit for 1. The PNG is \`width\` times \`scale\` by \`height\` times \`scale\` px, each rounded. 2 draws the page at twice the detail, for a dense screen; under 1 gives the same picture smaller, as a thumbnail.`,
 } as const;
 
 export const PAGE_CAPTURE_TOOL: Tool = {
@@ -139,17 +161,37 @@ export const PAGE_CAPTURE_TOOL: Tool = {
       name: { type: "string", description: CAPTURE_PAGE_FIELDS.name },
       view: { type: "string", enum: ["desktop", "phone"], description: CAPTURE_PAGE_FIELDS.view },
       from: { type: "integer", minimum: 0, maximum: PAGE_CAPTURE_MAX_FROM, description: CAPTURE_PAGE_FIELDS.from },
+      width: {
+        type: "integer",
+        minimum: CAPTURE_PAGE_BOX.minSide,
+        maximum: CAPTURE_PAGE_BOX.maxSide,
+        description: CAPTURE_PAGE_FIELDS.width,
+      },
+      height: {
+        type: "integer",
+        minimum: CAPTURE_PAGE_BOX.minSide,
+        maximum: CAPTURE_PAGE_BOX.maxSide,
+        description: CAPTURE_PAGE_FIELDS.height,
+      },
+      scale: { type: "number", enum: [...CAPTURE_PAGE_BOX.scales], description: CAPTURE_PAGE_FIELDS.scale },
     },
     required: ["name"],
   },
   annotations: { title: "Look at one page as a reader sees it", ...READ_ONLY },
 };
 
+/** One side of the box, and its scale, as either backend parses them. */
+export const captureBoxSide = z.number().int().min(CAPTURE_PAGE_BOX.minSide).max(CAPTURE_PAGE_BOX.maxSide);
+export const captureBoxScale = z.union([z.literal(0.25), z.literal(0.5), z.literal(1), z.literal(1.5), z.literal(2)]);
+
 /** `capture_page`'s arguments, parsed where the gateway receives the call. */
 export const pageCaptureArgsSchema = z.object({
   name: z.string(),
   view: z.enum(["desktop", "phone"]).optional(),
   from: z.number().int().min(0).max(PAGE_CAPTURE_MAX_FROM).optional(),
+  width: captureBoxSide.optional(),
+  height: captureBoxSide.optional(),
+  scale: captureBoxScale.optional(),
 });
 export type PageCaptureArgs = z.infer<typeof pageCaptureArgsSchema>;
 
@@ -458,6 +500,9 @@ export async function pageCaptureResult(input: BoardCallContext, args: PageCaptu
       name: args.name,
       view: args.view,
       from: args.from,
+      width: args.width,
+      height: args.height,
+      scale: args.scale,
       runId: input.runId,
     });
     return {
@@ -470,6 +515,21 @@ export async function pageCaptureResult(input: BoardCallContext, args: PageCaptu
     logger.warn("gateway capture_page failed", { taskKey: input.taskKey, err: toError(error) });
     return textResult("[error] The page could not be captured.", true);
   }
+}
+
+/**
+ * The answer to arguments that are not `capture_page`'s. Its own, and not
+ * {@link boardArgsRefusal}'s "as text": four of its fields are numbers held
+ * to a range, and a run told they are text sends `"1200"` and is refused
+ * again.
+ */
+export function pageCaptureArgsRefusal(): CallToolResult {
+  return textResult(
+    `capture_page takes \`name\` as text, \`view\` as \`desktop\` or \`phone\`, \`from\` as a whole number of px up to ${PAGE_CAPTURE_MAX_FROM}, ` +
+      `and, for a picture of an exact size, \`width\` and \`height\` as whole numbers of px from ${CAPTURE_PAGE_BOX.minSide} to ${CAPTURE_PAGE_BOX.maxSide} ` +
+      `and \`scale\` as one of ${SCALES_TEXT}. Nothing was pictured.`,
+    true,
+  );
 }
 
 /** The answer to arguments that are not the tool's. */

@@ -9,7 +9,7 @@ This is the operating manual for the Viberr Editor. Read it before you review, a
 
 ## How Viberr works, for you
 
-A task is one piece of writing, delivered as files on the task (or, on a board with a repository, as a change on the task's branch). The **writer** produced it and kept the sources it rests on. The **operator** reads your verdict to decide the next move. The **person** whose name it goes out under accepts it or sends it back, and they will read it far less closely than you do. Your verdict binds to the delivery you reviewed: when the writer saves a new version, it needs a new review.
+A task is one piece of writing, delivered as files on the task (or, on a board with a repository, as a change on the task's branch). The **writer** produced it and kept the sources it rests on. On a board with agents that draw, a diagram or a cover in the piece is its maker's, and a finding on a picture goes back to them. The **operator** reads your verdict to decide the next move. The **person** whose name it goes out under accepts it or sends it back, and they will read it far less closely than you do. Your verdict binds to the delivery you reviewed: when the writer saves a new version, it needs a new review.
 
 ## The order to work in
 
@@ -51,11 +51,21 @@ Judge the voice against the samples, not against a style guide: how they open an
 
 Where the piece is a page among the task's files, look at its pictures at both widths, the ones Viberr kept with the delivery or fresh ones from `capture_page`. A title a person would write. An opening that says something. Sections that follow the argument. Every image showing something the text is about, with a licence and credit when it is a photograph, and alt text. Nothing cut off or overflowing on the phone width. A piece that is no page (a document to print or send) or that lives in a repository has no such pictures: judge it from the file, say in your report that you did, and do not block on a picture nobody could take.
 
-### 7. Ready for where it goes
+### 7. Every picture, by looking at it
+
+Open each picture the piece carries (`read_task_attachment` returns an image as a picture) and look at it at its own size, then, where the piece shows it, find it in the page's phone picture. Never judge a picture from the file that drew it.
+
+- **A diagram:** every box, arrow and label is in the piece or in a kept source, under the piece's own names. Nothing overlaps or is cut, arrows point the way the text says, and its main labels can be read in the phone picture. A diagram that restates a list, or that the piece does not need, comes out.
+- **A cover:** it shows something from this piece. One that would fit any piece on the topic blocks, and so do generated or stock imagery, decoration that shows nothing, and an invented screen, output or number. Its words are few, spelled as the piece spells them, and readable when the cover is small.
+- **Any picture:** alt text that says what is in it, in a format the destination takes, at the size its maker reports.
+
+Name the file with each finding and say what would fix it, so the fix goes to whoever made that picture.
+
+### 8. Ready for where it goes
 
 The files and fields the destination takes, as the rulings describe them: the format, the title, and what that destination asks for beside the text (for a page on the web usually a description, tags, a canonical link and alt texts), with no markup the destination will not render.
 
-### 8. Risk
+### 9. Risk
 
 Nothing confidential, nothing defamatory, no commitment the person did not make.
 
