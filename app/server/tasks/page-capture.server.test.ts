@@ -25,14 +25,13 @@ import {
   actorOf,
   baseTaskFrontmatter,
   setupTestStore,
-  writeProject,
   writeTask,
   type TestStore,
 } from "../../../test-support/test-store";
+import { reconfigureProject } from "../../../test-support/projected-store";
 import type { Engagement, WorkRevision } from "~/schemas/task-file.schema";
 import { taskAttachmentsDir, taskDir } from "~/server/files/file-store-root.server";
 import { keepDelivery, listKeptDeliveries } from "~/server/files/kept-deliveries.server";
-import { readProjectFile } from "~/server/files/project-writer.server";
 import { attachmentNamesSince, imageHeader } from "~/server/files/task-attachments.server";
 import { readTaskFile, updateTaskFile } from "~/server/files/task-writer.server";
 import { rebuildAll } from "~/server/projections/rebuilder.server";
@@ -78,9 +77,7 @@ const WRITER: Engagement = {
 /** A board that delivers files: no repository (unless the case names one),
  *  one deliverer, and (when the case is about the react) an operator. */
 function deployBoard(opts: { operator?: boolean; repo?: string } = {}): void {
-  const file = readProjectFile({ projectSlug: store.slug, dataRoot: store.dataRoot })!;
-  writeProject(store.dataRoot, {
-    ...file.parsed.frontmatter,
+  reconfigureProject(store, {
     repo: opts.repo ?? null,
     agents: [
       {
@@ -116,7 +113,6 @@ function deployBoard(opts: { operator?: boolean; repo?: string } = {}): void {
         : []),
     ],
   });
-  rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
 }
 
 function writeDeliveringTask(patch: Parameters<typeof baseTaskFrontmatter>[1] = {}): void {

@@ -3,19 +3,18 @@ import { createTestDbContext, type TestDbContext } from "../../../test-support/t
 import {
   baseTaskFrontmatter,
   setupTestStore,
-  writeProject,
   writeTask,
   type TestStore,
 } from "../../../test-support/test-store";
 import { listAuditEvents } from "../../../test-support/audit-log";
 import { installFakeRuntime } from "../../../test-support/fake-runtime";
+import { reconfigureProject } from "../../../test-support/projected-store";
 import {
   closedPrBlockedReason,
   type TaskFrontmatter,
   type TaskPacket,
 } from "~/schemas/task-file.schema";
 import type { CapabilityMode } from "~/schemas/project-file.schema";
-import { readProjectFile } from "~/server/files/project-writer.server";
 import { readTaskFile } from "~/server/files/task-writer.server";
 import { rebuildAll } from "~/server/projections/rebuilder.server";
 import { upsertRun } from "~/server/runtimes/run-store.server";
@@ -47,9 +46,7 @@ const OPERATOR_POLICY: { capabilityId: string; mode: CapabilityMode }[] = [
 ];
 
 function deployOperator(): void {
-  const file = readProjectFile({ projectSlug: store.slug, dataRoot: store.dataRoot })!;
-  writeProject(store.dataRoot, {
-    ...file.parsed.frontmatter,
+  reconfigureProject(store, {
     repo: null,
     agents: [
       {
@@ -71,7 +68,6 @@ function deployOperator(): void {
       },
     ],
   });
-  rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
 }
 
 /** A task sitting in Review whose PR a human closed on GitHub. */

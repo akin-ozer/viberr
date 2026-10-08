@@ -22,6 +22,7 @@ import {
   startedRunSpecs,
 } from "../../../test-support/fake-runtime";
 import { connectFakeBackend } from "../../../test-support/backend-credentials";
+import { reconfigureProject } from "../../../test-support/projected-store";
 import { readTaskFile, updateTaskFile } from "~/server/files/task-writer.server";
 import type { TaskFrontmatter } from "~/schemas/task-file.schema";
 import { getProject } from "~/server/projections/board-query.server";
@@ -623,12 +624,9 @@ describe("fireDueSchedules", () => {
         ],
       }),
     });
-    const project = readProjectFile({ projectSlug: store.slug, dataRoot: store.dataRoot })!;
-    writeProject(store.dataRoot, {
-      ...project.parsed.frontmatter,
+    reconfigureProject(store, {
       archived: true,
     });
-    rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
 
     const res = await fireDueSchedules(store.db, dctx());
     expect(res.fired).toBe(0);

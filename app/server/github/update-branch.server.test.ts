@@ -9,11 +9,10 @@ import {
 import {
   baseTaskFrontmatter,
   setupTestStore,
-  writeProject,
   writeTask,
   type TestStore,
 } from "../../../test-support/test-store";
-import { readProjectFile } from "~/server/files/project-writer.server";
+import { reconfigureProject } from "../../../test-support/projected-store";
 import {
   createPat,
   setProjectCredential,
@@ -512,12 +511,9 @@ describe("ruling 428: the base refresh honours file leases", () => {
     writeTask(store.dataRoot, store.slug, {
       frontmatter: baseTaskFrontmatter(holder, { stage: "review", branch: holder.toLowerCase() }),
     });
-    const file = readProjectFile({ projectSlug: store.slug, dataRoot: store.dataRoot })!;
-    writeProject(store.dataRoot, {
-      ...file.parsed.frontmatter,
+    reconfigureProject(store, {
       fileLeases: [{ paths, taskKey: holder, reason: "lands first" }],
     });
-    rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
   }
 
   it("refuses a branch that changes a path another task holds, merging and pushing nothing", async () => {

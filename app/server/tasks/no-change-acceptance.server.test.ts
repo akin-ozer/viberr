@@ -14,6 +14,7 @@ import {
   type FakeGithub,
 } from "../../../test-support/fake-github";
 import { installFakeRuntime } from "../../../test-support/fake-runtime";
+import { reconfigureProject } from "../../../test-support/projected-store";
 import type {
   Engagement,
   FileActorRef,
@@ -102,9 +103,7 @@ const OPERATOR_POLICY: { capabilityId: string; mode: CapabilityMode }[] = [
 /** A verdict-capable reviewer profile (+ optionally the operator). Keeps the
  *  project's repo, so the LIVE probe path is what runs. */
 function deployAgents(withOperator = false): void {
-  const file = readProjectFile({ projectSlug: store.slug, dataRoot: store.dataRoot })!;
-  writeProject(store.dataRoot, {
-    ...file.parsed.frontmatter,
+  reconfigureProject(store, {
     agents: [
       {
         profileId: "reviewer",
@@ -140,7 +139,6 @@ function deployAgents(withOperator = false): void {
         : []),
     ],
   });
-  rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
 }
 
 const REVIEWER: Engagement = {

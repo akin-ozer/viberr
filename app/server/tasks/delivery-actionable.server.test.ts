@@ -18,6 +18,7 @@ import { flush, waitFor } from "../../../test-support/polling";
 import { decisionsRequiring } from "~/server/projections/decisions.server";
 import { listNotifications } from "~/server/projections/notifications.server";
 import { listAuditEvents } from "../../../test-support/audit-log";
+import { reconfigureProject } from "../../../test-support/projected-store";
 import type {
   ParsedTaskFile,
   Recommendation,
@@ -504,11 +505,9 @@ describe("F19-1 — a successful delivery leaves an actionable next step", () =>
 
   /** F36-6 (pass 36): a verdict-capable reviewer deployed on the project. */
   function deployReviewerToo(): void {
-    const file = readProjectFile({ projectSlug: store.slug, dataRoot: store.dataRoot })!;
-    writeProject(store.dataRoot, {
-      ...file.parsed.frontmatter,
+    reconfigureProject(store, (fm) => ({
       agents: [
-        ...file.parsed.frontmatter.agents,
+        ...fm.agents,
         {
           profileId: "reviewer",
           capabilities: [{ capabilityId: "report-validation-verdict", mode: "direct" }],
@@ -523,8 +522,7 @@ describe("F19-1 — a successful delivery leaves an actionable next step", () =>
           },
         },
       ],
-    });
-    rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
+    }));
   }
   const REVIEWED = "a".repeat(40);
   const reviewerEngagement = {
@@ -700,12 +698,9 @@ describe("ruling 136(a): the collision ceremony hands off exactly once", () => {
 
   it("on a board with no `impl → review` edge the cleared, re-delivered task still hands off (no card, one run)", async () => {
     deployDeliveryOperator(store, "supervised");
-    const file = readProjectFile({ projectSlug: store.slug, dataRoot: store.dataRoot })!;
-    writeProject(store.dataRoot, {
-      ...file.parsed.frontmatter,
-      workflow: file.parsed.frontmatter.workflow.filter((w) => !(w.from === "impl" && w.to === "review")),
-    });
-    rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
+    reconfigureProject(store, (fm) => ({
+      workflow: fm.workflow.filter((w) => !(w.from === "impl" && w.to === "review")),
+    }));
     const github = await seedCollision(clearedRoutes());
     await resolveCollision(github);
     await waitFor(() => runOp.mock.calls.length >= 1, "the operator run");

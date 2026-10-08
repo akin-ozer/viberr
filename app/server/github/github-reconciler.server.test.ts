@@ -31,7 +31,7 @@ import {
 import type { PrRef, WorkRevision } from "~/schemas/task-file.schema";
 import type { RevisionDrift } from "~/shared/revision-drift";
 import { rebuildAll } from "~/server/projections/rebuilder.server";
-import { setupProjectedStore } from "../../../test-support/projected-store";
+import { reconfigureProject, setupProjectedStore } from "../../../test-support/projected-store";
 import { getTaskDetail } from "~/server/projections/task-query.server";
 import {
   createPat,
@@ -3016,12 +3016,9 @@ describe("ruling 179: a PR head moved after the verdict voids it", () => {
     // CANARY: drop the gate request after `returnChangedRevisionToReview` in
     // reconcileTask and the moved head carries no gate record at all.
     const { store, run } = seedApproved();
-    const pf = readProjectFile({ projectSlug: store.slug, dataRoot: store.dataRoot })!;
-    writeProject(store.dataRoot, {
-      ...pf.parsed.frontmatter,
+    reconfigureProject(store, {
       gates: [{ name: "build", command: "true" }],
     });
-    rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
     const parsed = await run();
     const { whenProjectGatesIdle } = await import("~/server/tasks/project-gates.server");
     await whenProjectGatesIdle();

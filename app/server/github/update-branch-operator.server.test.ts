@@ -27,6 +27,7 @@ import { taskDir } from "~/server/files/file-store-root.server";
 import { readTaskFile } from "~/server/files/task-writer.server";
 import { readProjectFile } from "~/server/files/project-writer.server";
 import { MERGE_STAGE_BOARD, REVIEW_STAGE_REVIEWER, writeProject } from "../../../test-support/test-store";
+import { reconfigureProject } from "../../../test-support/projected-store";
 import { operatorSnapshot } from "~/server/tasks/operator-snapshot.server";
 import type { OperatorAuthority } from "~/server/tasks/operator-authority.server";
 import type { TaskActionDeps } from "~/server/tasks/task-action-core.server";
@@ -435,12 +436,9 @@ describe("operatorUpdateBranchFromBase — the decision half (N19-9)", () => {
     writeTask(store.dataRoot, store.slug, {
       frontmatter: baseTaskFrontmatter("VIB-2", { stage: "review", branch: "vib-2" }),
     });
-    const file = readProjectFile({ projectSlug: store.slug, dataRoot: store.dataRoot })!;
-    writeProject(store.dataRoot, {
-      ...file.parsed.frontmatter,
+    reconfigureProject(store, {
       fileLeases: [{ paths: ["internal/controller/task.go"], taskKey: "VIB-2", reason: "lands first" }],
     });
-    rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
     const git = fakeGit({ behind: 2, branchFiles: ["internal/controller/task.go"] });
     const res = await act(git.exec);
     expect(res.outcome).toBe("noop");
@@ -798,13 +796,10 @@ describe("pass 35 S15: the acceptance-boundary refusal and the redirect's rework
   }
 
   function withMergeBoard(): void {
-    const file = readProjectFile({ projectSlug: store.slug, dataRoot: store.dataRoot })!;
-    writeProject(store.dataRoot, {
-      ...file.parsed.frontmatter,
+    reconfigureProject(store, (fm) => ({
       ...MERGE_STAGE_BOARD,
-      agents: [...file.parsed.frontmatter.agents, REVIEW_STAGE_REVIEWER],
-    });
-    rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
+      agents: [...fm.agents, REVIEW_STAGE_REVIEWER],
+    }));
   }
 
   it("G35-5 (d): at the acceptance boundary the tool refuses with the sentence naming acceptance-time refresh, and runs no git", async () => {

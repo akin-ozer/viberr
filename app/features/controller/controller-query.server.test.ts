@@ -397,18 +397,13 @@ describe("getControllerSurface — other people's threads for a project admin (r
     const { createConversation, appendMessage } = await import(
       "~/server/controller/controller-conversations.server"
     );
-    const { readProjectFile } = await import("~/server/files/project-writer.server");
-    const { writeProject } = await import("../../../test-support/test-store");
-    const { rebuildAll } = await import("~/server/projections/rebuilder.server");
+    const { reconfigureProject } = await import("../../../test-support/projected-store");
     // Murat administers the project and is no org admin.
-    const file = readProjectFile({ projectSlug: store.slug, dataRoot: store.dataRoot })!;
-    writeProject(store.dataRoot, {
-      ...file.parsed.frontmatter,
-      members: file.parsed.frontmatter.members.map((m) =>
+    reconfigureProject(store, (fm) => ({
+      members: fm.members.map((m) =>
         m.userId === store.users.murat.id ? { ...m, role: "admin" as const } : m,
       ),
-    });
-    rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
+    }));
     const thread = (owner: { id: string; email: string }, projectSlug: string | null, text: string) => {
       const c = createConversation(store.db, { userId: owner.id, userLabel: owner.email, projectSlug });
       appendMessage(store.db, { conversationId: c.id, author: "user", userId: owner.id, text });

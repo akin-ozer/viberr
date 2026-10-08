@@ -33,6 +33,7 @@ import {
 import { drainRunCompletions, installFakeRuntime, queueFakeRun, startedRunSpecs } from "../../../test-support/fake-runtime";
 import { connectFakeBackend } from "../../../test-support/backend-credentials";
 import { pollUntil } from "../../../test-support/polling";
+import { reconfigureProject } from "../../../test-support/projected-store";
 import { joinedPrompt } from "~/server/runtimes/prompt-prefix.server";
 import { userBackendHome } from "~/server/runtimes/user-homes.server";
 import { probeSessionContinuity } from "~/server/runtimes/session-export.server";
@@ -78,10 +79,7 @@ let store: TestStore;
 
 /** Deploy a `dev` specialist (claude) with no repo (skips the network clone). */
 function deployDevSpecialist(): void {
-  const file = readProjectFile({ projectSlug: store.slug, dataRoot: store.dataRoot })!;
-  const fm = file.parsed.frontmatter;
-  writeProject(store.dataRoot, {
-    ...fm,
+  reconfigureProject(store, {
     repo: null,
     agents: [
       {
@@ -98,17 +96,13 @@ function deployDevSpecialist(): void {
       },
     ],
   });
-  rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
 }
 
 /** Ruling 211(h): a SECOND deployed profile, so a test can mention an agent
  *  that is real and is not the one under test — the state the cross-agent guard
  *  in `deliverDeferredMention` actually exists for. */
 function deployReviewerSpecialist(): void {
-  const file = readProjectFile({ projectSlug: store.slug, dataRoot: store.dataRoot })!;
-  const fm = file.parsed.frontmatter;
-  writeProject(store.dataRoot, {
-    ...fm,
+  reconfigureProject(store, (fm) => ({
     repo: null,
     agents: [
       ...fm.agents,
@@ -125,8 +119,7 @@ function deployReviewerSpecialist(): void {
         },
       },
     ],
-  });
-  rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
+  }));
 }
 
 /**
@@ -384,9 +377,7 @@ describe("resolveMentionedAgent", () => {
   // but the resolver used to parse a single token — so every agent whose name
   // contains a space ("Docs Writer") silently routed nowhere.
   it("resolves a multi-word display name (@Docs Writer)", () => {
-    const file = readProjectFile({ projectSlug: store.slug, dataRoot: store.dataRoot })!;
-    writeProject(store.dataRoot, {
-      ...file.parsed.frontmatter,
+    reconfigureProject(store, {
       agents: [
         {
           profileId: "docs-writer",
@@ -402,7 +393,6 @@ describe("resolveMentionedAgent", () => {
         },
       ],
     });
-    rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
 
     expect(call("@Docs Writer can you take another look?")).toMatchObject({
       profileId: "docs-writer",
@@ -419,9 +409,7 @@ describe("resolveMentionedAgent", () => {
     expect(call("@operator can you summarize")).toBeNull();
 
     // Deploy an operator; now @operator targets the operator, NOT the dev.
-    const file = readProjectFile({ projectSlug: store.slug, dataRoot: store.dataRoot })!;
-    writeProject(store.dataRoot, {
-      ...file.parsed.frontmatter,
+    reconfigureProject(store, (fm) => ({
       agents: [
         {
           profileId: "operator",
@@ -429,10 +417,9 @@ describe("resolveMentionedAgent", () => {
           extras: [],
           definition: { kind: "operator", name: "Operator", backends: ["claude"], model: "sonnet" },
         },
-        ...file.parsed.frontmatter.agents,
+        ...fm.agents,
       ],
-    });
-    rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
+    }));
 
     const target = call("@operator can you summarize");
     expect(target).toMatchObject({ profileId: "operator", isOperator: true, isPrimary: false });
@@ -453,10 +440,7 @@ describe("resolveMentionedAgent", () => {
     expect(call("@dev please continue")!.session?.session_id).toBe("claude-session-1");
 
     // …then an admin switches the profile to Codex (quota exhausted, say).
-    const file = readProjectFile({ projectSlug: store.slug, dataRoot: store.dataRoot })!;
-    const fm = file.parsed.frontmatter;
-    writeProject(store.dataRoot, {
-      ...fm,
+    reconfigureProject(store, (fm) => ({
       agents: [
         {
           ...fm.agents[0]!,
@@ -467,8 +451,7 @@ describe("resolveMentionedAgent", () => {
           },
         },
       ],
-    });
-    rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
+    }));
 
     // BEFORE: latestSessionRun matched on profile + kind only, so this resumed
     // the DEAD Claude session with `model: gpt-5.6-sol` — a (backend, model)
@@ -612,9 +595,7 @@ describe("agentMentionHandle (P14-RT-12)", () => {
   /** Re-deploy `dev` with a multi-word ROLE — the shape the two old, divergent
    *  derivations disagreed on. */
   function deployWithRole(role: string): void {
-    const file = readProjectFile({ projectSlug: store.slug, dataRoot: store.dataRoot })!;
-    writeProject(store.dataRoot, {
-      ...file.parsed.frontmatter,
+    reconfigureProject(store, {
       repo: null,
       agents: [
         {
@@ -631,7 +612,6 @@ describe("agentMentionHandle (P14-RT-12)", () => {
         },
       ],
     });
-    rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
   }
 
   it("derives a handle that actually RESOLVES back to the agent", () => {
@@ -1046,16 +1026,13 @@ describe("resumeWorkdir", () => {
 describe("ruling 133: the @mention resume door is stage-gated like every other door", () => {
   /** Redeploy with `dev` (delivers) and `rev` (supporting) both scoped to review only. */
   function scopeBothToReview(): void {
-    const file = readProjectFile({ projectSlug: store.slug, dataRoot: store.dataRoot })!;
-    writeProject(store.dataRoot, {
-      ...file.parsed.frontmatter,
+    reconfigureProject(store, {
       repo: null,
       agents: [
         { profileId: "dev", capabilities: [], extras: [], definition: { kind: "specialist", name: "dev", role: "developer", backends: ["claude"], model: "claude-sonnet", stages: ["review"] } },
         { profileId: "rev", capabilities: [], extras: [], definition: { kind: "specialist", name: "rev", role: "reviewer", backends: ["claude"], model: "claude-sonnet", stages: ["review"] } },
       ],
     });
-    rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
   }
   const sessionRow = (id: string, profileId: string, kind: "primary" | "reviewer") =>
     devRun(id, {
@@ -1147,16 +1124,13 @@ describe("ruling 133: the @mention resume door is stage-gated like every other d
     // "straight to" the architect. The completion delivers it (ruling 203), so
     // it is owed, not lost. CANARY: return `result.triggered !== null` alone
     // and the operator is handed the answer and nothing says it waits.
-    const file = readProjectFile({ projectSlug: store.slug, dataRoot: store.dataRoot })!;
-    writeProject(store.dataRoot, {
-      ...file.parsed.frontmatter,
+    reconfigureProject(store, {
       repo: null,
       agents: [
         { profileId: "rev", capabilities: [], extras: [], definition: { kind: "specialist", name: "rev", role: "reviewer", backends: ["claude"], model: "claude-sonnet" } },
         { profileId: "operator", capabilities: [], extras: [], definition: { kind: "operator", name: "Operator", backends: ["claude"], model: "sonnet", autonomy: "supervised" } },
       ],
     });
-    rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
     writeTask(store.dataRoot, store.slug, {
       frontmatter: baseTaskFrontmatter("VIB-1", {
         stage: "impl",
@@ -2261,16 +2235,13 @@ describe("commentToAgent", () => {
 describe("mention routing keeps each agent on its OWN session (regression)", () => {
   /** Redeploy with dev (primary, claude) + analyst (a second claude specialist). */
   function deployTwoSpecialists(): void {
-    const file = readProjectFile({ projectSlug: store.slug, dataRoot: store.dataRoot })!;
-    writeProject(store.dataRoot, {
-      ...file.parsed.frontmatter,
+    reconfigureProject(store, {
       repo: null,
       agents: [
         { profileId: "dev", capabilities: [], extras: [], definition: { kind: "specialist", name: "dev", role: "developer", backends: ["claude"], model: "claude-sonnet" } },
         { profileId: "analyst", capabilities: [], extras: [], definition: { kind: "specialist", name: "analyst", role: "reviewer", backends: ["claude"], model: "claude-sonnet" } },
       ],
     });
-    rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
   }
 
   it("@analyst does NOT inherit the primary dev's claude session (matched by identity, not backend)", async () => {
@@ -2495,9 +2466,7 @@ describe("a resumed @mention keeps the project's rulings (ruling 239)", () => {
 describe("comment routing: agent handles engage agents, teammate handles never do (UC-09)", () => {
   /** Deploy the operator alongside the fixture's `dev` specialist. */
   function deployOperatorToo(): void {
-    const file = readProjectFile({ projectSlug: store.slug, dataRoot: store.dataRoot })!;
-    writeProject(store.dataRoot, {
-      ...file.parsed.frontmatter,
+    reconfigureProject(store, {
       repo: null,
       agents: [
         {
@@ -2525,7 +2494,6 @@ describe("comment routing: agent handles engage agents, teammate handles never d
         },
       ],
     });
-    rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
   }
 
   async function clearOperatorLeases(): Promise<void> {
@@ -2551,9 +2519,7 @@ describe("comment routing: agent handles engage agents, teammate handles never d
    * specialist of that backend" could be read as "the only deployed specialist".
    */
   it("@codex reaches the codex specialist and @claude the claude one — backends never cross", () => {
-    const file = readProjectFile({ projectSlug: store.slug, dataRoot: store.dataRoot })!;
-    writeProject(store.dataRoot, {
-      ...file.parsed.frontmatter,
+    reconfigureProject(store, {
       repo: null,
       agents: [
         {
@@ -2582,7 +2548,6 @@ describe("comment routing: agent handles engage agents, teammate handles never d
         },
       ],
     });
-    rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
 
     const call = (text: string) =>
       resolveMentionedAgent(store.db, { dataRoot: store.dataRoot }, store.slug, "VIB-1", text);

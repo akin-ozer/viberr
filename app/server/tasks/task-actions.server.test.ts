@@ -40,7 +40,7 @@ import {
 import { insertUser } from "~/server/auth/user-store.server";
 import { listScopeViolations } from "~/server/projections/policy-violations.server";
 import { rebuildAll } from "~/server/projections/rebuilder.server";
-import { setupProjectedStore } from "../../../test-support/projected-store";
+import { reconfigureProject, setupProjectedStore } from "../../../test-support/projected-store";
 import { listProjectTasks } from "~/server/projections/board-query.server";
 import {
   attachmentProducers,
@@ -4182,9 +4182,7 @@ describe("ruling 137: a move off the acceptance boundary withdraws the offers", 
 });
 
 function deployOperatorOn(store: ReturnType<typeof setupProjectedStore>): void {
-  const projectFile = readProjectFile({ projectSlug: store.slug, dataRoot: store.dataRoot })!;
-  writeProject(store.dataRoot, {
-    ...projectFile.parsed.frontmatter,
+  reconfigureProject(store, {
     agents: [
       {
         profileId: "operator",
@@ -4202,7 +4200,6 @@ function deployOperatorOn(store: ReturnType<typeof setupProjectedStore>): void {
       },
     ],
   });
-  rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
 }
 
 /**
@@ -4720,9 +4717,7 @@ describe("pass 35: operator and task actions", () => {
   /** An operator deployment with the standard supervised policy, so the
    *  transition re-trigger and the acceptance fold have an authority to read. */
   function deployOperator(store: TestStore): void {
-    const projectFile = readProjectFile({ projectSlug: store.slug, dataRoot: store.dataRoot })!;
-    writeProject(store.dataRoot, {
-      ...projectFile.parsed.frontmatter,
+    reconfigureProject(store, {
       agents: [
         {
           profileId: "operator",
@@ -4744,7 +4739,6 @@ describe("pass 35: operator and task actions", () => {
         },
       ],
     });
-    rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
   }
 
   function seed(store: TestStore, patch: Partial<TaskFrontmatter> = {}, packet: TaskPacket | null = null): void {

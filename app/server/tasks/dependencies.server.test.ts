@@ -14,8 +14,7 @@ import { readTaskFile } from "~/server/files/task-writer.server";
 import { getTaskSummary } from "~/server/projections/task-query.server";
 import type { DatabaseSync } from "node:sqlite";
 import type { RunOperatorInput } from "~/server/runtimes/operator-run.server";
-import { readProjectFile } from "~/server/files/project-writer.server";
-import { writeProject } from "../../../test-support/test-store";
+import { reconfigureProject } from "../../../test-support/projected-store";
 import { createTask } from "./task-edits.server";
 import { setTaskArchived } from "./task-archive.server";
 import { transitionStage } from "./task-transitions.server";
@@ -51,11 +50,9 @@ async function seed(store: TestStore): Promise<void> {
   }
   // An operator is deployed so a release has someone to re-invoke
   // (`autoInvokeOperator` returns early without one).
-  const pf = readProjectFile({ projectSlug: store.slug, dataRoot: store.dataRoot })!;
-  writeProject(store.dataRoot, {
-    ...pf.parsed.frontmatter,
+  reconfigureProject(store, (fm) => ({
     agents: [
-      ...pf.parsed.frontmatter.agents,
+      ...fm.agents,
       {
         profileId: "operator",
         capabilities: [
@@ -66,8 +63,7 @@ async function seed(store: TestStore): Promise<void> {
         definition: { kind: "operator", backends: ["claude"], model: "sonnet", autonomy: "supervised" },
       },
     ],
-  });
-  rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
+  }));
 }
 
 const file = (store: TestStore, key: string) =>

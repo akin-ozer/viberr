@@ -5,16 +5,15 @@ import {
   approveReviewEntry,
   baseTaskFrontmatter,
   setupTestStore,
-  writeProject,
   writeTask,
   type TestStore,
 } from "../../../test-support/test-store";
-import { readProjectFile } from "~/server/files/project-writer.server";
 import { readTaskFile } from "~/server/files/task-writer.server";
 import { rebuildAll } from "~/server/projections/rebuilder.server";
 import { installFakeRuntime } from "../../../test-support/fake-runtime";
 import { deployDeliveryOperator } from "../../../test-support/delivery-operator";
 import { flush, waitFor } from "../../../test-support/polling";
+import { reconfigureProject } from "../../../test-support/projected-store";
 
 /**
  * R18-2 / F18-10 — a FULL-autonomy delivery re-queues the operator so an
@@ -245,13 +244,10 @@ describe("R18-2 — a full-autonomy delivery re-queues the operator", () => {
 
   it("D. no operator deployed → no re-trigger, delivery still ok", async () => {
     // A project with a repo but no operator agent.
-    const file = readProjectFile({ projectSlug: store.slug, dataRoot: store.dataRoot })!;
-    writeProject(store.dataRoot, {
-      ...file.parsed.frontmatter,
+    reconfigureProject(store, {
       repo: "akin-ozer/viberr",
       agents: [],
     });
-    rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
     seedTask();
     const outcome = await performDelivery(
       store.db,

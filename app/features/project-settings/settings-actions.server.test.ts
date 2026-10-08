@@ -16,7 +16,7 @@ import {
 } from "~/server/files/project-writer.server";
 import { rebuildAll } from "~/server/projections/rebuilder.server";
 import { repoFootprintTasks } from "~/server/projections/repo-footprint.server";
-import { setupProjectedStore } from "../../../test-support/projected-store";
+import { reconfigureProject, setupProjectedStore } from "../../../test-support/projected-store";
 import { createPat, setProjectCredential } from "~/server/secrets/pat-store.server";
 import type { WorkflowBoundary } from "~/schemas/project-file.schema";
 import { branchCleanupOnMerge } from "~/server/github/branch-cleanup.server";
@@ -484,9 +484,7 @@ describe("renameStage", () => {
 
 /** Deploy one specialist on the store's project, its repo-write headline in `mode`. */
 function deploy(store: TestStore, mode: "direct" | "off"): void {
-  const file = readProjectFile({ projectSlug: store.slug, dataRoot: store.dataRoot })!;
-  writeProject(store.dataRoot, {
-    ...file.parsed.frontmatter,
+  reconfigureProject(store, {
     agents: [
       {
         profileId: "builder",
@@ -499,7 +497,6 @@ function deploy(store: TestStore, mode: "direct" | "off"): void {
       },
     ],
   });
-  rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
 }
 
 /** A GitHub connection under `owner`, the instance default unless told otherwise. Returns its PAT's id. */
@@ -1088,9 +1085,7 @@ describe("changeProjectRepo attaches a repository to a project that has none (ru
   /** A project with no repository, and (unless told otherwise) an `acme` connection. */
   function repoLess(connection = true) {
     const store = setupTestStore(ctx);
-    const file = readProjectFile({ projectSlug: store.slug, dataRoot: store.dataRoot })!;
-    writeProject(store.dataRoot, { ...file.parsed.frontmatter, repo: null, defaultBranch: "main" });
-    rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
+    reconfigureProject(store, { repo: null, defaultBranch: "main" });
     return { store, patId: connection ? connect(store, "acme") : null };
   }
   const attach = (store: TestStore, routes: Parameters<typeof fakeGithubFetch>[0]) =>

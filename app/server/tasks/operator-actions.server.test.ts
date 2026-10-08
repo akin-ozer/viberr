@@ -54,6 +54,7 @@ import { createTask, updateTaskGoal } from "./task-edits.server";
 import type { TaskActionContext } from "./task-action-core.server";
 import { fakeGithubFetch } from "../../../test-support/fake-github";
 import { createLocalOrigin, withLocalGithub } from "../../../test-support/git-origin";
+import { reconfigureProject } from "../../../test-support/projected-store";
 import { createPat, setProjectCredential } from "~/server/secrets/pat-store.server";
 import type { CapabilityMode } from "~/schemas/project-file.schema";
 import {
@@ -114,9 +115,7 @@ function deployRoster(
   operatorPolicy: { capabilityId: string; mode: CapabilityMode }[],
   configuredAutonomy: OperatorAutonomy = "full",
 ): void {
-  const file = readProjectFile({ projectSlug: store.slug, dataRoot: store.dataRoot })!;
-  writeProject(store.dataRoot, {
-    ...file.parsed.frontmatter,
+  reconfigureProject(store, {
     repo: null,
     agents: [
       {
@@ -148,7 +147,6 @@ function deployRoster(
       },
     ],
   });
-  rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
 }
 
 const DEFAULT_POLICY: { capabilityId: string; mode: CapabilityMode }[] = [
@@ -828,15 +826,12 @@ describe("operatorDispatchAgent", () => {
       authority("full"),
     );
     await interruptRunningRuns("VIB-1");
-    const file = readProjectFile({ projectSlug: store.slug, dataRoot: store.dataRoot })!;
-    writeProject(store.dataRoot, {
-      ...file.parsed.frontmatter,
+    reconfigureProject(store, (fm) => ({
       agents: [
-        ...file.parsed.frontmatter.agents,
+        ...fm.agents,
         { profileId: "developer2", capabilities: [{ capabilityId: "execute-code-or-write-repo", mode: "direct" }], extras: [], definition: { kind: "specialist", name: "Dev Two", role: "Implementation", backends: ["claude"], model: "sonnet" } },
       ],
-    });
-    rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
+    }));
     const r = await operatorDispatchAgent(
       store.db,
       { dataRoot: store.dataRoot },
@@ -887,10 +882,8 @@ describe("operatorDispatchAgent — explicit delivers posture (P11-22 successor)
   /** The reviewer with its file posting withheld too: an agent with no way
    *  to deliver anything. */
   function withholdReviewerFiles(): void {
-    const file = readProjectFile({ projectSlug: store.slug, dataRoot: store.dataRoot })!;
-    writeProject(store.dataRoot, {
-      ...file.parsed.frontmatter,
-      agents: file.parsed.frontmatter.agents.map((a) =>
+    reconfigureProject(store, (fm) => ({
+      agents: fm.agents.map((a) =>
         a.profileId === "reviewer"
           ? {
               ...a,
@@ -901,8 +894,7 @@ describe("operatorDispatchAgent — explicit delivers posture (P11-22 successor)
             }
           : a,
       ),
-    });
-    rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
+    }));
   }
 
   it("refuses an explicit delivery hand-off to a profile that can neither write the repo nor post files", async () => {
@@ -940,12 +932,9 @@ describe("operatorDispatchAgent — explicit delivers posture (P11-22 successor)
     deployRoster(
       DEFAULT_POLICY.map((p) => (p.capabilityId === "dispatch-agents" ? { ...p, mode: "recommend" as const } : p)),
     );
-    const file = readProjectFile({ projectSlug: store.slug, dataRoot: store.dataRoot })!;
-    writeProject(store.dataRoot, {
-      ...file.parsed.frontmatter,
+    reconfigureProject(store, {
       requiredReviewers: [{ stageId: "review", profileId: "reviewer" }],
     });
-    rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
     seedTask("impl");
     const refused = await operatorDispatchAgent(
       store.db,
@@ -965,17 +954,14 @@ describe("operatorDispatchAgent — explicit delivers posture (P11-22 successor)
     deployRoster(
       DEFAULT_POLICY.map((p) => (p.capabilityId === "dispatch-agents" ? { ...p, mode: "recommend" as const } : p)),
     );
-    const file = readProjectFile({ projectSlug: store.slug, dataRoot: store.dataRoot })!;
-    writeProject(store.dataRoot, {
-      ...file.parsed.frontmatter,
+    reconfigureProject(store, (fm) => ({
       requiredReviewers: [{ stageId: "review", profileId: "reviewer" }],
-      agents: file.parsed.frontmatter.agents.map((a) =>
+      agents: fm.agents.map((a) =>
         a.profileId === "reviewer"
           ? { ...a, capabilities: [...a.capabilities, { capabilityId: "execute-code-or-write-repo", mode: "direct" as const }] }
           : a,
       ),
-    });
-    rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
+    }));
     seedTask("impl");
     const offered = await operatorDispatchAgent(
       store.db,
@@ -1028,9 +1014,7 @@ describe("operatorDispatchAgent — explicit delivers posture (P11-22 successor)
     deployRoster(DEFAULT_POLICY);
     const origins = ctx.makeTempDir("viberr-origins-");
     const origin = await createLocalOrigin(origins, { repo: "acme/widgets" });
-    const project = readProjectFile({ projectSlug: store.slug, dataRoot: store.dataRoot })!;
-    writeProject(store.dataRoot, { ...project.parsed.frontmatter, repo: "acme/widgets" });
-    rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
+    reconfigureProject(store, { repo: "acme/widgets" });
     const patActor = { userId: store.users.arda.id, label: store.users.arda.email };
     const pat = createPat(store.db, { ...patActor, label: "bot", token: "ghp_filesdeliverer1" }, patActor);
     setProjectCredential(store.db, { projectSlug: store.slug, patId: pat.id }, patActor);
@@ -2177,9 +2161,7 @@ describe("operatorTransitionStage", () => {
     // operator's own move lands there directly (KNC-30 took two operator
     // turns: one for Review to Merge, a second only to write the card).
     const foldBoard = (): void => {
-      const file = readProjectFile({ projectSlug: store.slug, dataRoot: store.dataRoot })!;
-      writeProject(store.dataRoot, {
-        ...file.parsed.frontmatter,
+      reconfigureProject(store, {
         workflow: [
           { from: "triage", to: "ready", boundary: "auto", by: "Operator", locked: false },
           { from: "ready", to: "impl", boundary: "auto", by: "Operator", locked: false },
@@ -2187,7 +2169,6 @@ describe("operatorTransitionStage", () => {
           { from: "review", to: "done", boundary: "human", by: "Human acceptance", locked: true },
         ],
       });
-      rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
     };
 
     it("a direct move onto the acceptance boundary files the accept_completion card in the same call", async () => {
@@ -2552,9 +2533,7 @@ describe("F37-65 — operatorAcceptsDirectly predicts what an acceptance really 
     // Not a redundant guard: the caption is rendered from a project file that
     // may have had its operator removed since the page last loaded, and the
     // helper must answer for that project rather than throw into the loader.
-    const file = readProjectFile({ projectSlug: store.slug, dataRoot: store.dataRoot })!;
-    writeProject(store.dataRoot, { ...file.parsed.frontmatter, agents: [] });
-    rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
+    reconfigureProject(store, { agents: [] });
     expect(operatorAcceptsDirectly({ dataRoot: store.dataRoot }, store.slug)).toBe(false);
     // And for a project that is not there at all — `resolveOperatorAuthority`
     // throws `notFound`, which must not become a 500 on the task page.
@@ -2619,14 +2598,11 @@ describe("operatorAcceptCompletion", () => {
       ...DEFAULT_POLICY.filter((c) => c.capabilityId !== "completion-for-acceptance"),
       { capabilityId: "completion-for-acceptance", mode: "direct" },
     ]);
-    const project = readProjectFile({ projectSlug: store.slug, dataRoot: store.dataRoot })!;
-    writeProject(store.dataRoot, {
-      ...project.parsed.frontmatter,
-      stages: project.parsed.frontmatter.stages.map((s) =>
+    reconfigureProject(store, (fm) => ({
+      stages: fm.stages.map((s) =>
         s.id === "done" ? { ...s, name: "Shipped" } : s,
       ),
-    });
-    rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
+    }));
     seedTask("review");
     const r = await operatorAcceptCompletion(
       store.db,
@@ -4610,9 +4586,7 @@ describe("operatorCorrectKnowledgeDoc (rulings 378, 483 and 498)", () => {
 
   async function seedRulingsKb(docBody: string): Promise<string> {
     const dir = await seedKb("ax-rulings", "environment-and-gates.md", docBody);
-    const file = readProjectFile({ projectSlug: store.slug, dataRoot: store.dataRoot })!;
-    writeProject(store.dataRoot, { ...file.parsed.frontmatter, rulingsKb: dir });
-    rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
+    reconfigureProject(store, { rulingsKb: dir });
     return path.join(store.dataRoot, "kb", dir);
   }
 
@@ -4822,16 +4796,13 @@ describe("operatorCorrectKnowledgeDoc (rulings 378, 483 and 498)", () => {
     seedTask("impl");
     const shared = await seedKb("shared-mapping", "mapping.md", "# Mapping\n\n- SAN: FSx for ONTAP.\n");
     engageDeveloperWithKb(shared);
-    const file = readProjectFile({ projectSlug: store.slug, dataRoot: store.dataRoot })!;
-    writeProject(store.dataRoot, {
-      ...file.parsed.frontmatter,
-      agents: file.parsed.frontmatter.agents.map((a) =>
+    reconfigureProject(store, (fm) => ({
+      agents: fm.agents.map((a) =>
         a.profileId === "reviewer"
           ? { ...a, definition: { ...a.definition, resources: { skills: [], mcps: [], kb: [shared] } } }
           : a,
       ),
-    });
-    rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
+    }));
     const r = await correct({
       kb: shared,
       doc: "mapping.md",
@@ -5091,9 +5062,7 @@ describe("operatorPostComment", () => {
 
 /** Deploy a roster with NO operator profile — the A4 shape. */
 function deployWithoutOperator(): void {
-  const file = readProjectFile({ projectSlug: store.slug, dataRoot: store.dataRoot })!;
-  writeProject(store.dataRoot, {
-    ...file.parsed.frontmatter,
+  reconfigureProject(store, {
     repo: null,
     agents: [
       {
@@ -5110,7 +5079,6 @@ function deployWithoutOperator(): void {
       },
     ],
   });
-  rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
 }
 
 describe("A4 — an UNDEPLOYED operator has no authority at all", () => {
@@ -5433,12 +5401,9 @@ describe("operatorPostComment honest outcome (G1/B-FD8)", () => {
   /** Deploy the operator roster, then turn the named anti-noise guardrails ON. */
   function deployWithGuardrails(ids: string[]): void {
     deployRoster(DEFAULT_POLICY);
-    const file = readProjectFile({ projectSlug: store.slug, dataRoot: store.dataRoot })!;
-    writeProject(store.dataRoot, {
-      ...file.parsed.frontmatter,
+    reconfigureProject(store, {
       guardrails: ids.map((id) => ({ id, desc: `${id} on`, on: true })),
     });
-    rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
   }
 
   const base = (text: string) => ({ projectSlug: store.slug, taskKey: "VIB-1", text });
@@ -5578,9 +5543,7 @@ describe("operatorSnapshot — two capability scopes, both labelled (F21-16)", (
   /** Deploy an operator whose own egress is WITHHELD alongside a specialist
    *  whose egress and browser are GRANTED — the exact live configuration. */
   function deployScopedRoster(): void {
-    const file = readProjectFile({ projectSlug: store.slug, dataRoot: store.dataRoot })!;
-    writeProject(store.dataRoot, {
-      ...file.parsed.frontmatter,
+    reconfigureProject(store, {
       repo: null,
       agents: [
         {
@@ -5631,7 +5594,6 @@ describe("operatorSnapshot — two capability scopes, both labelled (F21-16)", (
         },
       ],
     });
-    rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
   }
 
   it("labels the operator's own policy and carries the note that stops the misread", () => {
@@ -5807,9 +5769,7 @@ describe("operatorSnapshot — two capability scopes, both labelled (F21-16)", (
  */
 describe("supporting-dispatch copy branches on verdict authority (F21-6)", () => {
   function deployVerdictRoster(): void {
-    const file = readProjectFile({ projectSlug: store.slug, dataRoot: store.dataRoot })!;
-    writeProject(store.dataRoot, {
-      ...file.parsed.frontmatter,
+    reconfigureProject(store, {
       repo: null,
       agents: [
         {
@@ -5850,7 +5810,6 @@ describe("supporting-dispatch copy branches on verdict authority (F21-6)", () =>
         },
       ],
     });
-    rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
   }
 
   const dispatch = (profileId: string) =>
@@ -7155,19 +7114,16 @@ describe("pass 35 S15: the acceptance gate read by the operator (ruling 162) and
   }
 
   function withMergeBoard(): void {
-    const file = readProjectFile({ projectSlug: store.slug, dataRoot: store.dataRoot })!;
-    writeProject(store.dataRoot, {
-      ...file.parsed.frontmatter,
+    reconfigureProject(store, (fm) => ({
       ...MERGE_STAGE_BOARD,
       // The reviewer is eligible at Review only (the k9s board's shape): no
       // verdict can be given at Merge.
-      agents: file.parsed.frontmatter.agents.map((a) =>
+      agents: fm.agents.map((a) =>
         a.profileId === "reviewer"
           ? { ...a, definition: { ...a.definition, stages: ["review"] } }
           : a,
       ),
-    });
-    rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
+    }));
   }
 
   it("ruling 162 (a): the snapshot carries `pr.mergeable` and the gate's `notAcceptableReason`; a clean PR carries null", () => {
@@ -7302,12 +7258,9 @@ describe("ruling 178: the snapshot carries the project's required reviewers", ()
         .requiredReviewers,
     ).toEqual([]);
 
-    const file = readProjectFile({ projectSlug: store.slug, dataRoot: store.dataRoot })!;
-    writeProject(store.dataRoot, {
-      ...file.parsed.frontmatter,
+    reconfigureProject(store, {
       requiredReviewers: [{ stageId: "review", profileId: "reviewer" }],
     });
-    rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
     const snap = operatorSnapshot(store.db, { dataRoot: store.dataRoot }, store.slug, "VIB-1", authority("full"));
     expect(snap.requiredReviewers).toEqual([
       { stageId: "review", stageName: "Review", profileId: "reviewer", agentName: "Rev" },

@@ -83,6 +83,7 @@ import {
 import { createLocalOrigin, withLocalGithub } from "../../../test-support/git-origin";
 import { listAuditEvents } from "../../../test-support/audit-log";
 import { operatorSnapshot } from "../../../test-support/operator-snapshot";
+import { reconfigureProject } from "../../../test-support/projected-store";
 import { emptyRunFailureFacts, type RunFailureFacts } from "~/shared/run-failure";
 
 interface PendingRun {
@@ -546,11 +547,9 @@ describe("Codex structured operator completion", () => {
    * instruction and not the refusal.
    */
   it("F39-70: a dispatch carries the refusals its own plan collected before it", async () => {
-    const project = readProjectFile({ projectSlug: store.slug, dataRoot: store.dataRoot })!;
-    writeProject(store.dataRoot, {
-      ...project.parsed.frontmatter,
+    reconfigureProject(store, (fm) => ({
       agents: [
-        ...project.parsed.frontmatter.agents,
+        ...fm.agents,
         {
           profileId: "developer",
           capabilities: [],
@@ -564,8 +563,7 @@ describe("Codex structured operator completion", () => {
           },
         },
       ],
-    });
-    rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
+    }));
     await start();
     const operatorRun = adapter.pending!.spec.runId;
     const directive = "Carry on with the parser. If the move to Done was refused, say what blocks it.";
@@ -1321,16 +1319,13 @@ describe("Codex structured operator completion", () => {
     );
     insert.run("mcp_ops", "ops-readonly", "https://mcp.example/sse", 1, now, now, now);
     insert.run("mcp_down", "ops-down", "https://mcp.example/down", 0, now, now, now);
-    const project = readProjectFile({ projectSlug: store.slug, dataRoot: store.dataRoot })!;
-    writeProject(store.dataRoot, {
-      ...project.parsed.frontmatter,
+    reconfigureProject(store, {
       agents: [
         codexOperator(OPERATOR_POLICY, {
           resources: { skills: [], kb: [], mcps: ["ops-readonly", "ops-down"] },
         }),
       ],
     });
-    rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
 
     await start();
     expect(Object.keys(adapter.pending!.spec.mcpServers ?? {}).sort()).toEqual(["ops-down", "ops-readonly"]);
@@ -4210,11 +4205,9 @@ describe("pending trigger queue", () => {
   });
 
   it("ruling 421: a Codex plan's run_agent with `completeness` stamps the engagement with the run it started", async () => {
-    const project = readProjectFile({ projectSlug: store3.slug, dataRoot: store3.dataRoot })!;
-    writeProject(store3.dataRoot, {
-      ...project.parsed.frontmatter,
+    reconfigureProject(store3, (fm) => ({
       agents: [
-        ...project.parsed.frontmatter.agents,
+        ...fm.agents,
         {
           profileId: "reviewer",
           capabilities: [{ capabilityId: "report-validation-verdict", mode: "direct" }],
@@ -4228,8 +4221,7 @@ describe("pending trigger queue", () => {
           },
         },
       ],
-    });
-    rebuildAll(store3.db, { dataRoot: store3.dataRoot, force: true });
+    }));
     await drive({ trigger: "manual" });
     // CANARY: drop `if (a.completeness) dispatch.completeness = true` from the
     // executor and the engagement carries no question; drop ruling 583's
@@ -6317,17 +6309,14 @@ describe("R19-1 — the operator's read-only repository view", () => {
     // operator; it says when the tool is absent, which the seed's own test
     // holds.)
     deploy(null);
-    const project = readProjectFile({ projectSlug: store7.slug, dataRoot: store7.dataRoot })!;
-    writeProject(store7.dataRoot, {
-      ...project.parsed.frontmatter,
-      agents: project.parsed.frontmatter.agents.map((agent) => ({
+    reconfigureProject(store7, (fm) => ({
+      agents: fm.agents.map((agent) => ({
         ...agent,
         capabilities: agent.capabilities.map((c) =>
           c.capabilityId === "generate-packets" ? { ...c, mode: "off" as const } : c,
         ),
       })),
-    });
-    rebuildAll(store7.db, { dataRoot: store7.dataRoot, force: true });
+    }));
 
     await drive();
 

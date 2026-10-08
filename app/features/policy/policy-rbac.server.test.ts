@@ -63,6 +63,7 @@ import { GOVERNED_TEMPLATE } from "~/shared/workflow/templates";
 import type { CapabilityGrant } from "~/schemas/project-file.schema";
 import type { TaskFrontmatter, TaskPacket } from "~/schemas/task-file.schema";
 import { listAuditEvents } from "../../../test-support/audit-log";
+import { reconfigureProject } from "../../../test-support/projected-store";
 
 /**
  * THE binding test the matrix-as-source design promises (app/shared/rbac.ts):
@@ -663,9 +664,7 @@ function matrixDrivers() {
         // project the role tier is all that locks it — nothing drove that.
         label: "setProjectArchived (restore this project)",
         reset: () => {
-          const file = readProjectFile({ projectSlug: store.slug, dataRoot: store.dataRoot })!;
-          writeProject(store.dataRoot, { ...file.parsed.frontmatter, archived: true });
-          rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
+          reconfigureProject(store, { archived: true });
         },
         run: async (actor) => {
           await setProjectArchived(store.db, { projectSlug: store.slug, archived: false }, actor, {
@@ -785,9 +784,7 @@ describe("RBAC enforcement is bound to ACTION_ROLES (single-source guarantee)", 
   it("archived project FREEZES github/credential mutation (R8-5): even an admin is denied (409)", () => {
     // Archive the project (read-only per R6-3). Credential mutation no longer
     // passes allowArchived, so the mutable gate fires BEFORE the role check.
-    const file = readProjectFile({ projectSlug: store.slug, dataRoot: store.dataRoot })!;
-    writeProject(store.dataRoot, { ...file.parsed.frontmatter, archived: true });
-    rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
+    reconfigureProject(store, { archived: true });
     const admin = actorOf(store.users.arda);
     // grant-github-scope (change the credential) is admin-held, yet the archived
     // gate rejects it with a 409 (not a 403) — restore first.
@@ -1389,11 +1386,9 @@ describe("ALWAYS_HUMAN capabilities are unreachable whatever the grants say", ()
     // the chain), and such a row carries no `locked` flag. If the guard rested
     // on that flag alone, `impl → Done: auto` would be accepted and the terminal
     // stage would be machine-reachable on a perfectly ordinary project.
-    const file = readProjectFile({ projectSlug: store.slug, dataRoot: store.dataRoot })!;
-    writeProject(store.dataRoot, {
-      ...file.parsed.frontmatter,
+    reconfigureProject(store, (fm) => ({
       workflow: [
-        ...file.parsed.frontmatter.workflow,
+        ...fm.workflow,
         {
           from: "impl",
           to: TERMINAL_STAGE,
@@ -1402,8 +1397,7 @@ describe("ALWAYS_HUMAN capabilities are unreachable whatever the grants say", ()
           locked: false,
         },
       ],
-    });
-    rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
+    }));
     const admin = actorOf(store.users.arda);
     for (const boundary of ["auto", "approval"]) {
       await expect(
@@ -1429,14 +1423,11 @@ describe("ALWAYS_HUMAN capabilities are unreachable whatever the grants say", ()
     // cannot see (that edge is refused by the terminal-stage clause whether or
     // not the row is locked). `locked` is how a workflow row declares itself
     // non-negotiable; without this, deleting the flag check would be invisible.
-    const file = readProjectFile({ projectSlug: store.slug, dataRoot: store.dataRoot })!;
-    writeProject(store.dataRoot, {
-      ...file.parsed.frontmatter,
-      workflow: file.parsed.frontmatter.workflow.map((w) =>
+    reconfigureProject(store, (fm) => ({
+      workflow: fm.workflow.map((w) =>
         w.from === "triage" && w.to === "ready" ? { ...w, locked: true } : w,
       ),
-    });
-    rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
+    }));
     await expect(
       setTransitionBoundary(
         store.db,

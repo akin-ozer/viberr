@@ -28,7 +28,7 @@ import {
 } from "~/server/projections/notifications.server";
 import { readProjectFile } from "~/server/files/project-writer.server";
 import { rebuildAll } from "~/server/projections/rebuilder.server";
-import { setupProjectedStore } from "../../../test-support/projected-store";
+import { reconfigureProject, setupProjectedStore } from "../../../test-support/projected-store";
 
 import { getTaskDetail } from "~/server/projections/task-query.server";
 import { getBoardWithTasks, listProjectTasks } from "~/server/projections/board-query.server";
@@ -1112,9 +1112,7 @@ describe("resolvePacket kind matrix", () => {
     const store = setupProjectedStore(ctx);
     // The Developer profile is DEPLOYED ON CODEX — the backend the retry
     // exists to escape. Without a pin, every later run reverts to it.
-    const project = readProjectFile({ projectSlug: store.slug, dataRoot: store.dataRoot })!;
-    writeProject(store.dataRoot, {
-      ...project.parsed.frontmatter,
+    reconfigureProject(store, {
       repo: null,
       agents: [
         {
@@ -1132,7 +1130,6 @@ describe("resolvePacket kind matrix", () => {
         },
       ],
     });
-    rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
     const RETRY_PACKET: TaskPacket = {
       type: "blocked",
       kind: "Blocked decision",

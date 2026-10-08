@@ -8,7 +8,6 @@ import { createTestDbContext, type TestDbContext } from "../../../test-support/t
 import {
   baseTaskFrontmatter,
   setupTestStore,
-  writeProject,
   writeTask,
   type TestStore,
 } from "../../../test-support/test-store";
@@ -25,8 +24,8 @@ import { settle, waitFor } from "../../../test-support/polling";
 import { withEnv } from "../../../test-support/env";
 import { writeFakeBrowser } from "../../../test-support/fake-browser";
 import { startHttpUpstream, type UpstreamHandle } from "../../../test-support/mcp-upstream";
+import { reconfigureProject } from "../../../test-support/projected-store";
 import { appendTimelineEvent, readTaskFile } from "~/server/files/task-writer.server";
-import { readProjectFile } from "~/server/files/project-writer.server";
 import { taskAttachmentsDir } from "~/server/files/file-store-root.server";
 import { keepDelivery } from "~/server/files/kept-deliveries.server";
 import { readTaskSources } from "~/server/files/task-sources.server";
@@ -308,11 +307,9 @@ describe("ruling 585: the gateway answers a Codex run's knowledge server itself"
   it("reads and corrects the knowledge bases the run holds, a private one included, and nothing else, while the run lives", async () => {
     // An agent on the project is not given `answer-keys`, as AWSC-97's
     // Inventory Analyst is not given the calculator research.
-    const project = readProjectFile({ projectSlug: store.slug, dataRoot: store.dataRoot })!;
-    writeProject(store.dataRoot, {
-      ...project.parsed.frontmatter,
+    reconfigureProject(store, (fm) => ({
       agents: [
-        ...project.parsed.frontmatter.agents,
+        ...fm.agents,
         {
           profileId: "inventory-analyst",
           capabilities: [],
@@ -320,8 +317,7 @@ describe("ruling 585: the gateway answers a Codex run's knowledge server itself"
           definition: { kind: "specialist", name: "Inventory Analyst", role: "Intake", backends: ["codex"], model: defaultModelFor("codex") },
         },
       ],
-    });
-    rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
+    }));
     const dir = path.join(store.dataRoot, "kb", "answer-keys");
     mkdirSync(dir, { recursive: true });
     writeFileSync(path.join(dir, "sample-01.md"), "# Sample 01\n\nThe expected total is 1234.56.\n");

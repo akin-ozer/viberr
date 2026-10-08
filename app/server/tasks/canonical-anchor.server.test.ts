@@ -3,7 +3,6 @@ import { createTestDbContext, type TestDbContext } from "../../../test-support/t
 import {
   baseTaskFrontmatter,
   setupTestStore,
-  writeProject,
   writeTask,
   type TestStore,
 } from "../../../test-support/test-store";
@@ -12,7 +11,6 @@ import type {
   TaskFileEvent,
   TaskPacket,
 } from "~/schemas/task-file.schema";
-import { readProjectFile } from "~/server/files/project-writer.server";
 import { rebuildAll } from "~/server/projections/rebuilder.server";
 import { interruptRun } from "~/server/runtimes/run-service.server";
 import {
@@ -27,6 +25,7 @@ import {
   installFakeRuntime,
   startedRunSpecs,
 } from "../../../test-support/fake-runtime";
+import { reconfigureProject } from "../../../test-support/projected-store";
 import { canonicalTaskAnchor, specialistReplyDirective } from "./task-replies.server";
 import { commentToAgent } from "./task-comments.server";
 import { updateTaskGoal } from "./task-edits.server";
@@ -46,9 +45,7 @@ let ctx: TestDbContext;
 let store: TestStore;
 
 function deployDev(): void {
-  const file = readProjectFile({ projectSlug: store.slug, dataRoot: store.dataRoot })!;
-  writeProject(store.dataRoot, {
-    ...file.parsed.frontmatter,
+  reconfigureProject(store, {
     repo: null,
     agents: [
       {
@@ -65,7 +62,6 @@ function deployDev(): void {
       },
     ],
   });
-  rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
 }
 
 function parsed(overrides: Partial<ParsedTaskFile> = {}): ParsedTaskFile {

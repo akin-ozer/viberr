@@ -6,10 +6,9 @@ import { fakeGithubFetch } from "../../../test-support/fake-github";
 import {
   baseTaskFrontmatter,
   setupTestStore,
-  writeProject,
   writeTask,
 } from "../../../test-support/test-store";
-import { readProjectFile } from "~/server/files/project-writer.server";
+import { reconfigureProject } from "../../../test-support/projected-store";
 import { rebuildAll } from "~/server/projections/rebuilder.server";
 import { createPat, setProjectCredential } from "~/server/secrets/pat-store.server";
 import { insertUser } from "~/server/auth/user-store.server";
@@ -1625,11 +1624,9 @@ describe("report_outcome's evidence field (P13-D-26)", () => {
       );
       // Ruling 648: an agent on the project is not given the dossier, so the
       // correction's entry quotes none of it (ruling 568).
-      const project = readProjectFile({ projectSlug: store.slug, dataRoot: store.dataRoot })!;
-      writeProject(store.dataRoot, {
-        ...project.parsed.frontmatter,
+      reconfigureProject(store, (fm) => ({
         agents: [
-          ...project.parsed.frontmatter.agents,
+          ...fm.agents,
           {
             profileId: "inventory-analyst",
             capabilities: [],
@@ -1637,8 +1634,7 @@ describe("report_outcome's evidence field (P13-D-26)", () => {
             definition: { kind: "specialist", name: "Inventory Analyst", role: "Intake", backends: ["claude"], model: "sonnet" },
           },
         ],
-      });
-      rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
+      }));
       const built = buildAgentToolkit({
         db: store.db,
         ctx: { dataRoot: store.dataRoot },

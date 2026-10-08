@@ -4,7 +4,6 @@ import { pollUntil } from "../../../test-support/polling";
 import {
   baseTaskFrontmatter,
   setupTestStore,
-  writeProject,
   writeTask,
   type TestStore,
 } from "../../../test-support/test-store";
@@ -12,8 +11,8 @@ import {
   installFakeRuntime,
   queueFakeRun,
 } from "../../../test-support/fake-runtime";
+import { reconfigureProject } from "../../../test-support/projected-store";
 import { normalizeEvidenceRows } from "~/schemas/task-file.schema";
-import { readProjectFile } from "~/server/files/project-writer.server";
 import { readTaskFile } from "~/server/files/task-writer.server";
 import { rebuildAll } from "~/server/projections/rebuilder.server";
 import { getTaskDetail } from "~/server/projections/task-query.server";
@@ -288,9 +287,7 @@ describe("end-to-end: a staged report_outcome envelope lands its evidence", () =
   function deployReviewer(
     capabilities: { capabilityId: string; mode: "direct" | "human" | "off" }[],
   ): void {
-    const file = readProjectFile({ projectSlug: store.slug, dataRoot: store.dataRoot })!;
-    writeProject(store.dataRoot, {
-      ...file.parsed.frontmatter,
+    reconfigureProject(store, {
       repo: null,
       agents: [
         {
@@ -307,7 +304,6 @@ describe("end-to-end: a staged report_outcome envelope lands its evidence", () =
         },
       ],
     });
-    rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
   }
 
   function writeReviewTask(): void {

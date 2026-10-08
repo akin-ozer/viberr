@@ -49,6 +49,7 @@ import {
 import { connectFakeBackend } from "../../../test-support/backend-credentials";
 import { pollUntil } from "../../../test-support/polling";
 import { diskFoldsUnicodeForms } from "../../../test-support/unicode-forms";
+import { reconfigureProject } from "../../../test-support/projected-store";
 import { emptyRunFailureFacts } from "~/shared/run-failure";
 import type { LogLine } from "~/features/runtime/runtime-types";
 import { stageOutcome } from "./agent-outcome.server";
@@ -91,10 +92,7 @@ const VERDICT_GRANT: CapabilityGrant[] = [
 ];
 
 function deployDevSpecialist(): void {
-  const file = readProjectFile({ projectSlug: store.slug, dataRoot: store.dataRoot })!;
-  const fm = file.parsed.frontmatter;
-  writeProject(store.dataRoot, {
-    ...fm,
+  reconfigureProject(store, {
     repo: null,
     agents: [
       {
@@ -125,7 +123,6 @@ function deployDevSpecialist(): void {
       },
     ],
   });
-  rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
 }
 
 /** The delivering developer engagement (workspace owner; never a required
@@ -184,11 +181,9 @@ function writeReviewTask(
  *  actually reaches `runOperator` — with none deployed it returns early and any
  *  assertion about the react is vacuous. */
 function deployOperator(): void {
-  const pf = readProjectFile({ projectSlug: store.slug, dataRoot: store.dataRoot })!;
-  writeProject(store.dataRoot, {
-    ...pf.parsed.frontmatter,
+  reconfigureProject(store, (fm) => ({
     agents: [
-      ...pf.parsed.frontmatter.agents,
+      ...fm.agents,
       {
         profileId: "operator",
         capabilities: [
@@ -204,8 +199,7 @@ function deployOperator(): void {
         },
       },
     ],
-  });
-  rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
+  }));
 }
 
 function taskFile() {
@@ -2558,14 +2552,11 @@ describe("applyAgentCompletionEffects (the shared effects)", () => {
     writeReviewTask(); // reviewer engaged with verdictCapable: true (snapshot)
     // Re-deploy `reviewer` WITHOUT the verdict grant — the live grant now says
     // OFF while the engagement snapshot still says verdict-capable.
-    const file = readProjectFile({ projectSlug: store.slug, dataRoot: store.dataRoot })!;
-    writeProject(store.dataRoot, {
-      ...file.parsed.frontmatter,
-      agents: file.parsed.frontmatter.agents.map((a) =>
+    reconfigureProject(store, (fm) => ({
+      agents: fm.agents.map((a) =>
         a.profileId === "reviewer" ? { ...a, capabilities: [] } : a,
       ),
-    });
-    rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
+    }));
 
     const runId = await finishedRunWith(
       "Verdict: approve\n\n@operator the change meets the spec.",

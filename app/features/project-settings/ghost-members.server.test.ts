@@ -1,8 +1,8 @@
 import { afterEach, describe, expect, it } from "vitest";
 import { createTestDbContext } from "../../../test-support/test-db";
-import { setupTestStore, writeProject } from "../../../test-support/test-store";
+import { setupTestStore } from "../../../test-support/test-store";
 import { rebuildAll } from "~/server/projections/rebuilder.server";
-import { setupProjectedStore } from "../../../test-support/projected-store";
+import { reconfigureProject, setupProjectedStore } from "../../../test-support/projected-store";
 import { readProjectFile } from "~/server/files/project-writer.server";
 import { insertUser } from "~/server/auth/user-store.server";
 import { deleteOrgUser } from "~/server/org/org-users.server";
@@ -167,15 +167,12 @@ describe("UI-29: the last-admin guard counts LIVE accounts only", () => {
     // member. Before the fix, Settings→Members 409'd ("only admin — assign
     // another in Policy first") while Policy pointed back to Members — a loop
     // with no exit but hand-editing project.md.
-    const file = readProjectFile({ projectSlug: store.slug, dataRoot: store.dataRoot })!;
-    writeProject(store.dataRoot, {
-      ...file.parsed.frontmatter,
+    reconfigureProject(store, {
       members: [
         { userId: "u_ghost_admin", role: "admin" }, // no users row → ghost
         { userId: store.users.arda.id, role: "viewer" }, // live org admin, viewer here
       ],
     });
-    rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
 
     // countLiveAdmins sees ZERO live admins (the only admin is a ghost).
     expect(

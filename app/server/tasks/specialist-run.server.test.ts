@@ -82,6 +82,7 @@ import {
   connectFakeBackend,
   disconnectFakeBackend,
 } from "../../../test-support/backend-credentials";
+import { reconfigureProject } from "../../../test-support/projected-store";
 import { interruptRun } from "~/server/runtimes/run-service.server";
 import { startMcpGateway, stopMcpGateway } from "~/server/mcp-proxy/gateway.server";
 import { defaultModelFor } from "~/server/runtimes/model-catalog.server";
@@ -140,10 +141,7 @@ const stopRun = (runId: string) =>
 function deployDevSpecialist(
   backends: ("codex" | "claude")[] = ["claude"],
 ): void {
-  const file = readProjectFile({ projectSlug: store.slug, dataRoot: store.dataRoot })!;
-  const fm = file.parsed.frontmatter;
-  writeProject(store.dataRoot, {
-    ...fm,
+  reconfigureProject(store, {
     // No repo → the run skips the network clone (kept fast + offline). The
     // clone path itself is best-effort and covered by the "no repo" branch.
     repo: null,
@@ -164,7 +162,6 @@ function deployDevSpecialist(
       },
     ],
   });
-  rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
 }
 
 beforeEach(async () => {
@@ -392,10 +389,7 @@ describe("engagement uniqueness (adversarial-review)", () => {
   /** Deploy a SECOND profile alongside `dev` so a profile can be moved between
    *  the delivering and supporting positions. */
   function deploySecond(id: string): void {
-    const file = readProjectFile({ projectSlug: store.slug, dataRoot: store.dataRoot })!;
-    const fm = file.parsed.frontmatter;
-    writeProject(store.dataRoot, {
-      ...fm,
+    reconfigureProject(store, (fm) => ({
       agents: [
         ...fm.agents,
         {
@@ -405,8 +399,7 @@ describe("engagement uniqueness (adversarial-review)", () => {
           definition: { kind: "specialist", name: id, role: id, backends: ["claude"], model: "sonnet" },
         },
       ],
-    });
-    rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
+    }));
   }
 
   // P14-GV-10: replacing the deliverer used to be silent — the outgoing agent's
@@ -1096,13 +1089,10 @@ describe("startAgentRun — delivering (specialist) dispatch, and ruling 133's s
       },
     );
     // The profile is deleted from project.md — nothing live to resolve.
-    const project = readProjectFile({ projectSlug: store.slug, dataRoot: store.dataRoot })!;
-    writeProject(store.dataRoot, {
-      ...project.parsed.frontmatter,
+    reconfigureProject(store, {
       repo: null,
       agents: [],
     });
-    rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
 
     const run = await startAgentRun(
       store.db,
@@ -1549,9 +1539,7 @@ describe("assignReviewer / removeReviewer", () => {
 
   it("rejects engaging a reviewer whose profile isn't eligible for the current stage (F1)", async () => {
     // Re-deploy `dev` scoped to REVIEW only; VIB-1 is at impl → ineligible.
-    const file = readProjectFile({ projectSlug: store.slug, dataRoot: store.dataRoot })!;
-    writeProject(store.dataRoot, {
-      ...file.parsed.frontmatter,
+    reconfigureProject(store, {
       repo: null,
       agents: [
         {
@@ -1566,7 +1554,6 @@ describe("assignReviewer / removeReviewer", () => {
         },
       ],
     });
-    rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
     await expect(
       assignReviewer(store.db, { projectSlug: store.slug, taskKey: "VIB-1", profileId: "dev" }, actorOf(store.users.arda), { dataRoot: store.dataRoot }),
     ).rejects.toThrow(/not eligible/i);
@@ -1717,11 +1704,9 @@ describe("startAgentRun — supporting (reviewer) dispatch", () => {
     // the Run control and the controller could not start its review at all.
     // CANARY: drop the required-reviewer term from the derived posture and
     // this dispatch is refused.
-    const file = readProjectFile({ projectSlug: store.slug, dataRoot: store.dataRoot })!;
-    writeProject(store.dataRoot, {
-      ...file.parsed.frontmatter,
+    reconfigureProject(store, (fm) => ({
       requiredReviewers: [{ stageId: "review", profileId: "dev" }],
-      agents: file.parsed.frontmatter.agents.map((a) =>
+      agents: fm.agents.map((a) =>
         a.profileId === "dev"
           ? {
               ...a,
@@ -1732,8 +1717,7 @@ describe("startAgentRun — supporting (reviewer) dispatch", () => {
             }
           : a,
       ),
-    });
-    rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
+    }));
     const result = await startAgentRun(
       store.db,
       { projectSlug: store.slug, taskKey: "VIB-1", profileId: "dev" },
@@ -1847,9 +1831,7 @@ describe("P14-RT-01 — a FRESH run of an UNDEPLOYED profile is confined like a 
   /** Drop every deployment from project.md — the profile a task is still
    *  engaged with vanishes (undeployed / deleted between engage and run). */
   function undeployAll(): void {
-    const file = readProjectFile({ projectSlug: store.slug, dataRoot: store.dataRoot })!;
-    writeProject(store.dataRoot, { ...file.parsed.frontmatter, repo: null, agents: [] });
-    rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
+    reconfigureProject(store, { repo: null, agents: [] });
   }
 
   beforeEach(async () => {
@@ -1895,10 +1877,8 @@ describe("P14-RT-01 — a FRESH run of an UNDEPLOYED profile is confined like a 
     // that row sits "running" holding the single-flight slot — the task then
     // refuses EVERY further run until a restart. Force the throw at adapter.start
     // (which runs after the reservation), then prove a later run is not refused.
-    const file = readProjectFile({ projectSlug: store.slug, dataRoot: store.dataRoot })!;
     // repo:null → the run reaches adapter.start with no network clone.
-    writeProject(store.dataRoot, { ...file.parsed.frontmatter, repo: null });
-    rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
+    reconfigureProject(store, { repo: null });
 
     const throwingAdapter = (backend: RealBackend): RuntimeAdapter => ({
       backend,
@@ -2031,9 +2011,7 @@ describe("P14-RT-01 — a FRESH run of an UNDEPLOYED profile is confined like a 
       return specs.at(-1)!.prompt;
     };
     for (const backend of ["claude", "codex"] as const) {
-      const file = readProjectFile({ projectSlug: store.slug, dataRoot: store.dataRoot })!;
-      writeProject(store.dataRoot, {
-        ...file.parsed.frontmatter,
+      reconfigureProject(store, {
         repo: null,
         agents: ["dev", "critic"].map((profileId) => ({
           profileId,
@@ -2048,7 +2026,6 @@ describe("P14-RT-01 — a FRESH run of an UNDEPLOYED profile is confined like a 
           },
         })),
       });
-      rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
       await updateTaskFile(ref, (parsed) => {
         parsed.frontmatter.verdicts = [];
       });
@@ -2281,9 +2258,7 @@ describe("P14-RT-01 — a FRESH run of an UNDEPLOYED profile is confined like a 
   });
 
   it("D4: a mounted collaboration toolkit reaches the run auto-approved", async () => {
-    const file = readProjectFile({ projectSlug: store.slug, dataRoot: store.dataRoot })!;
-    writeProject(store.dataRoot, {
-      ...file.parsed.frontmatter,
+    reconfigureProject(store, {
       repo: null,
       agents: [
         {
@@ -2300,7 +2275,6 @@ describe("P14-RT-01 — a FRESH run of an UNDEPLOYED profile is confined like a 
         },
       ],
     });
-    rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
 
     await startAgentRun(
       store.db,
@@ -2322,9 +2296,7 @@ describe("P14-RT-01 — a FRESH run of an UNDEPLOYED profile is confined like a 
    * question is for, the same sentence the tool and the Codex field carry.
    */
   it("ruling 692: an ask-granted Claude run is told a person is asked only what they alone know", async () => {
-    const file = readProjectFile({ projectSlug: store.slug, dataRoot: store.dataRoot })!;
-    writeProject(store.dataRoot, {
-      ...file.parsed.frontmatter,
+    reconfigureProject(store, {
       repo: null,
       agents: [
         {
@@ -2341,7 +2313,6 @@ describe("P14-RT-01 — a FRESH run of an UNDEPLOYED profile is confined like a 
         },
       ],
     });
-    rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
 
     await startAgentRun(
       store.db,
@@ -2362,9 +2333,7 @@ describe("P14-RT-01 — a FRESH run of an UNDEPLOYED profile is confined like a 
   it("its prompt offers no delivery step it cannot perform (XS-4)", async () => {
     // Undeployed on a project WITH a repository: only a checkout's contract has
     // delivery steps to offer (the clone fails offline and the contract stays).
-    const file = readProjectFile({ projectSlug: store.slug, dataRoot: store.dataRoot })!;
-    writeProject(store.dataRoot, { ...file.parsed.frontmatter, repo: "acme/widgets", agents: [] });
-    rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
+    reconfigureProject(store, { repo: "acme/widgets", agents: [] });
 
     await startAgentRun(
       store.db,
@@ -2415,9 +2384,7 @@ describe("P14-RT-01 — a FRESH run of an UNDEPLOYED profile is confined like a 
    * on, which is how a prose report degrades into a stub.
    */
   it("B-AG3: an evidence-only Codex profile is TOLD about the envelope it is constrained to", async () => {
-    const file = readProjectFile({ projectSlug: store.slug, dataRoot: store.dataRoot })!;
-    writeProject(store.dataRoot, {
-      ...file.parsed.frontmatter,
+    reconfigureProject(store, {
       repo: null,
       agents: [
         {
@@ -2438,7 +2405,6 @@ describe("P14-RT-01 — a FRESH run of an UNDEPLOYED profile is confined like a 
         },
       ],
     });
-    rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
 
     await startAgentRun(
       store.db,
@@ -2475,9 +2441,7 @@ describe("P14-RT-01 — a FRESH run of an UNDEPLOYED profile is confined like a 
     expect(KB_CORRECTION_NOTE_CODEX).toContain("the passage exactly as the document has it");
     expect(`${KB_CORRECTION_NOTE_CLAUDE} ${KB_CORRECTION_NOTE_CODEX}`).not.toContain("not binding");
     for (const backend of ["codex", "claude"] as const) {
-      const file = readProjectFile({ projectSlug: store.slug, dataRoot: store.dataRoot })!;
-      writeProject(store.dataRoot, {
-        ...file.parsed.frontmatter,
+      reconfigureProject(store, {
         repo: null,
         agents: [
           {
@@ -2495,7 +2459,6 @@ describe("P14-RT-01 — a FRESH run of an UNDEPLOYED profile is confined like a 
           },
         ],
       });
-      rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
       await startAgentRun(
         store.db,
         { projectSlug: store.slug, taskKey: "VIB-1" },
@@ -2521,9 +2484,7 @@ describe("P14-RT-01 — a FRESH run of an UNDEPLOYED profile is confined like a 
    */
   it("ruling 488: a run with an outcome channel is told its relay, per backend", async () => {
     for (const backend of ["codex", "claude"] as const) {
-      const file = readProjectFile({ projectSlug: store.slug, dataRoot: store.dataRoot })!;
-      writeProject(store.dataRoot, {
-        ...file.parsed.frontmatter,
+      reconfigureProject(store, {
         repo: null,
         agents: [
           {
@@ -2543,7 +2504,6 @@ describe("P14-RT-01 — a FRESH run of an UNDEPLOYED profile is confined like a 
           },
         ],
       });
-      rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
       await startAgentRun(
         store.db,
         { projectSlug: store.slug, taskKey: "VIB-1" },
@@ -2564,9 +2524,7 @@ describe("P14-RT-01 — a FRESH run of an UNDEPLOYED profile is confined like a 
    * print was created inside the clone and pushed (KNC-9).
    */
   it("ruling 159: a fresh evidence-granted run's persona names the ABSOLUTE attachments dir", async () => {
-    const file = readProjectFile({ projectSlug: store.slug, dataRoot: store.dataRoot })!;
-    writeProject(store.dataRoot, {
-      ...file.parsed.frontmatter,
+    reconfigureProject(store, {
       repo: null,
       agents: [
         {
@@ -2583,7 +2541,6 @@ describe("P14-RT-01 — a FRESH run of an UNDEPLOYED profile is confined like a 
         },
       ],
     });
-    rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
     await startAgentRun(
       store.db,
       { projectSlug: store.slug, taskKey: "VIB-1" },
@@ -2611,9 +2568,7 @@ describe("P14-RT-01 — a FRESH run of an UNDEPLOYED profile is confined like a 
    * away — and must NOT claim ask-human is unavailable.
    */
   it("F20-32: an ask-granted Codex profile is told `question` IS its ask-human channel", async () => {
-    const file = readProjectFile({ projectSlug: store.slug, dataRoot: store.dataRoot })!;
-    writeProject(store.dataRoot, {
-      ...file.parsed.frontmatter,
+    reconfigureProject(store, {
       repo: null,
       agents: [
         {
@@ -2634,7 +2589,6 @@ describe("P14-RT-01 — a FRESH run of an UNDEPLOYED profile is confined like a 
         },
       ],
     });
-    rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
 
     await startAgentRun(
       store.db,
@@ -2656,9 +2610,7 @@ describe("P14-RT-01 — a FRESH run of an UNDEPLOYED profile is confined like a 
   it("a run of a LIVE deployment still follows its own grants", async () => {
     // A GRANTED profile is the control: the withheld fallback must not leak
     // onto a profile that resolves, or every deliverer would lose its tools.
-    const file = readProjectFile({ projectSlug: store.slug, dataRoot: store.dataRoot })!;
-    writeProject(store.dataRoot, {
-      ...file.parsed.frontmatter,
+    reconfigureProject(store, {
       repo: null,
       agents: [
         {
@@ -2680,7 +2632,6 @@ describe("P14-RT-01 — a FRESH run of an UNDEPLOYED profile is confined like a 
         },
       ],
     });
-    rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
 
     await startAgentRun(
       store.db,

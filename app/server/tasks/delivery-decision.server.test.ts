@@ -7,7 +7,6 @@ import {
   actorOf,
   baseTaskFrontmatter,
   setupTestStore,
-  writeProject,
   writeTask,
   type TestStore,
 } from "../../../test-support/test-store";
@@ -19,7 +18,6 @@ import type {
   WorkRevision,
 } from "~/schemas/task-file.schema";
 import { DIVERGED_BRANCH_REMEDY } from "~/schemas/task-file.schema";
-import { readProjectFile } from "~/server/files/project-writer.server";
 import { readTaskFile } from "~/server/files/task-writer.server";
 import { rebuildAll } from "~/server/projections/rebuilder.server";
 import { applyRecommendation } from "./task-recommendations.server";
@@ -53,6 +51,7 @@ import {
   fakeGithubFetch,
   type FakeGithub,
 } from "../../../test-support/fake-github";
+import { reconfigureProject } from "../../../test-support/projected-store";
 import { createPat, setProjectCredential } from "~/server/secrets/pat-store.server";
 import type { TaskActionContext } from "./task-action-core.server";
 
@@ -234,9 +233,7 @@ describe("R15-2: transitionStage no longer auto-delivers on review entry", () =>
     // A board that delivers results has no pull request to open, and the note
     // told its owner the operator was deciding a push and a review PR.
     // CANARY: drop the repository term from the condition and it is written.
-    const project = readProjectFile({ projectSlug: store.slug, dataRoot: store.dataRoot })!;
-    writeProject(store.dataRoot, { ...project.parsed.frontmatter, repo: null });
-    rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
+    reconfigureProject(store, { repo: null });
     seed({ stage: "impl" });
     await transitionStage(
       store.db,
@@ -2194,9 +2191,7 @@ describe("ruling 334: an unreachable GitHub is not a broken credential", () => {
 describe("P11-13: the delivery push carries the deliverer's repo-write grant", () => {
   /** Deploy a `dev` specialist whose repo-write grants are `mode`. */
   function deployDev(mode: "direct" | "human"): void {
-    const project = readProjectFile({ projectSlug: store.slug, dataRoot: store.dataRoot })!;
-    writeProject(store.dataRoot, {
-      ...project.parsed.frontmatter,
+    reconfigureProject(store, {
       repo: null,
       agents: [
         {
@@ -2216,7 +2211,6 @@ describe("P11-13: the delivery push carries the deliverer's repo-write grant", (
         },
       ],
     });
-    rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
   }
 
   const deliverer = (profileId: string): Engagement => ({
