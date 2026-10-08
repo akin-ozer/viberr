@@ -10,12 +10,9 @@ import {
   writeTask,
   type TestStore,
 } from "../../../test-support/test-store";
+import { connectFakeBackend } from "../../../test-support/backend-credentials";
 import { updateUserFields } from "~/server/auth/user-store.server";
-import {
-  loginTargetFor,
-  recordBackendLogin,
-  setBackendApiKey,
-} from "./backend-credentials.server";
+import { loginTargetFor, recordBackendLogin } from "./backend-credentials.server";
 import {
   principalRefusalMessage,
   resolveTaskRunPrincipal,
@@ -32,15 +29,8 @@ import {
  * on the controller — and a run that cannot name that person does not start.
  */
 
-const CLAUDE_KEY = "sk-ant-api03-viberr-principal-test";
-
 let ctx: TestDbContext;
 let store: TestStore;
-
-/** A provider that accepts the pasted key, so a person can be "connected"
- *  without a network. */
-const acceptingProvider: typeof fetch = () =>
-  Promise.resolve(new Response("{}", { status: 200 }));
 
 beforeEach(() => {
   ctx = createTestDbContext();
@@ -57,20 +47,9 @@ function writeOwnedTask(key: string, ownerUserId: string | null): void {
   });
 }
 
-async function connectClaude(userId: string, label: string): Promise<void> {
-  await setBackendApiKey(
-    store.db,
-    { userId, label },
-    "claude",
-    "api_key",
-    CLAUDE_KEY,
-    { fetchImpl: acceptingProvider },
-  );
-}
-
 describe("resolveTaskRunPrincipal", () => {
   it("resolves to the task OWNER when they have the backend connected", async () => {
-    await connectClaude(store.users.murat.id, store.users.murat.email);
+    await connectFakeBackend(store.db, store.users.murat.id, "claude");
     writeOwnedTask("VIB-1", store.users.murat.id);
 
     const resolution = resolveTaskRunPrincipal(
@@ -123,7 +102,7 @@ describe("resolveTaskRunPrincipal", () => {
   });
 
   it("refuses when the owner's account is DISABLED", async () => {
-    await connectClaude(store.users.selin.id, store.users.selin.email);
+    await connectFakeBackend(store.db, store.users.selin.id, "claude");
     updateUserFields(store.db, store.users.selin.id, { disabled: true });
     writeOwnedTask("VIB-3", store.users.selin.id);
 
@@ -239,7 +218,7 @@ describe("resolveTaskRunPrincipal", () => {
 
 describe("resolveUserRunPrincipal (the controller's asker)", () => {
   it("resolves the asker themselves", async () => {
-    await connectClaude(store.users.arda.id, store.users.arda.email);
+    await connectFakeBackend(store.db, store.users.arda.id, "claude");
     const resolution = resolveUserRunPrincipal(
       store.db,
       store.users.arda.id,
