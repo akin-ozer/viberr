@@ -1480,11 +1480,8 @@ export interface AcceptanceAffordance {
    * cannot just go green, or the human who accepts has no idea whose judgement
    * they are standing on — the same "a chip is evidence, never a pseudo-check"
    * rule (ruling 19) that this pass has been applying everywhere else.
-   *
-   * Optional on the interface only so hand-built affordance literals in the
-   * component tests keep compiling; every server path sets it explicitly.
    */
-  verdictSatisfiedBy?: string | null;
+  verdictSatisfiedBy: string | null;
   /**
    * Ruling 482 (F40-52): the project's gates on the revision under review, as
    * Viberr ran them — the line the PR card and the accept dialog print
