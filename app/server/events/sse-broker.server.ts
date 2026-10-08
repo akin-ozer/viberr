@@ -47,8 +47,8 @@ import { errorMessage, toError } from "~/shared/errors";
  * per event).
  */
 
-export const HEARTBEAT_INTERVAL_MS = 25_000;
-export const RING_BUFFER_SIZE = 256;
+const HEARTBEAT_INTERVAL_MS = 25_000;
+const RING_BUFFER_SIZE = 256;
 /**
  * Ruling 457 (RV-3): the stream events' own ring (`SSE_STREAM_EVENTS`: one
  * `run.log-appended` or `controller.log-appended` per console line). They used
@@ -59,7 +59,7 @@ export const RING_BUFFER_SIZE = 256;
  * Lines this ring has let go of never resync: the console fetches whatever
  * lies past its cursor on the next frame or reload.
  */
-export const STREAM_RING_BUFFER_SIZE = 256;
+const STREAM_RING_BUFFER_SIZE = 256;
 
 // ---------------------------------------------------------------- scopes
 
@@ -228,7 +228,7 @@ function formatSseMessage(id: number, name: string, json: string): string {
 }
 
 /** Heartbeat comment — clients ignore it, proxies see traffic. */
-export const HEARTBEAT_CHUNK = ": hb\n\n";
+const HEARTBEAT_CHUNK = ": hb\n\n";
 
 /** The hello a connection opens with — its `headId` is where a client that
  *  never receives a data event resumes from after a reconnect. */
@@ -513,7 +513,7 @@ export function runProcessShutdown(): void {
 }
 
 /** Graceful shutdown / test teardown: closes every connection. */
-export function closeAllSseConnections(): void {
+function closeAllSseConnections(): void {
   const state = getState();
   for (const conn of state.connections.values()) {
     dropConnection(state, conn);

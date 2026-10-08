@@ -43,10 +43,10 @@ afterAll(() => {
   app.cleanup();
 });
 afterEach(async () => {
-  const { closeAllSseConnections } = await import(
+  const { resetSseBrokerForTests } = await import(
     "~/server/events/sse-broker.server"
   );
-  closeAllSseConnections();
+  resetSseBrokerForTests();
 });
 
 async function callLoader(url: string, init: { cookie?: string; headers?: HeadersInit; signal?: AbortSignal } = {}) {
