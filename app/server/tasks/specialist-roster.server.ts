@@ -654,14 +654,14 @@ export interface DeployedSpecialistView {
  * `assignReviewer`). Ruling 133 (pass 34): this is NOT the run guard for an
  * engaged deliverer any more — see {@link runEligibilityFor}.
  *
- * `board` is optional only so the pure-id call sites in tests stay readable;
- * every production caller passes the project's stages + workflow, because
- * without them a renamed or re-templated board silently disables every agent.
+ * Every caller passes the project's stages + workflow, or null when
+ * project.md cannot be read (literal ids then decide): without them a renamed
+ * or re-templated board silently disables every agent.
  */
-export function specialistEligibleForStage(
+function specialistEligibleForStage(
   spec: { stages: string[]; spanAll: boolean },
   stageId: string,
-  board?: {
+  board: {
     stages: readonly { id: string }[];
     workflow: readonly { from: string; to: string }[];
   } | null,
@@ -684,7 +684,7 @@ type EligibilityBoard = {
 function stageRefusalSentence(
   spec: { name: string; stages: string[]; spanAll: boolean },
   stageId: string,
-  board?: EligibilityBoard | null,
+  board: EligibilityBoard | null,
 ): string {
   const nameOf = (id: string): string => (board ? stageName(board.stages, id) : id);
   const scopedTo = board
@@ -703,7 +703,7 @@ function stageRefusalSentence(
 export function assertStageEligible(
   spec: { name: string; stages: string[]; spanAll: boolean },
   stageId: string,
-  board?: EligibilityBoard | null,
+  board: EligibilityBoard | null,
 ): void {
   if (specialistEligibleForStage(spec, stageId, board)) return;
   throw AppError.validation(stageRefusalSentence(spec, stageId, board));
@@ -733,7 +733,7 @@ export function runEligibilityFor(
   engagements: readonly { profileId: string; delivers: boolean }[],
   profileId: string,
   stageId: string,
-  board?: EligibilityBoard | null,
+  board: EligibilityBoard | null,
 ): RunEligibility {
   if (specialistEligibleForStage(spec, stageId, board)) return { ok: true, why: "declared" };
   if (engagements.some((e) => e.profileId === profileId && e.delivers)) {

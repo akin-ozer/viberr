@@ -449,12 +449,18 @@ describe("createProject — policy preset shapes REAL governance", () => {
   // DELETED because it created a todo/doing/done board while the preinstalled
   // roster's eligible stages are the governed ids — no specialist was ever
   // stage-eligible and the operator could not hand work off. The rule this
-  // pins: WHATEVER board creation produces, every preinstalled specialist must
-  // be eligible for at least one stage on it. (The old test passed
-  // `template: "light"`; there is no such input any more.)
-  it("AP-04: every preinstalled specialist is stage-eligible on the board creation produced", async () => {
+  // pins: every stage a preinstalled specialist declares is a stage of the
+  // board creation produced. Eligibility drops a declared id the board does
+  // not have, and reads a declaration left with none as unrestricted
+  // (stage-eligibility.ts, rule 3), so a misspelt id would change where an
+  // agent may work without a word. CANARY: misspell a declared stage in
+  // agent-catalog.server.ts.
+  it("AP-04: every stage a preinstalled specialist declares is a stage of the board creation produced", async () => {
     const store = setupTestStore(ctx);
     seedConnection(store.db, store.users.arda.id);
+    // The profiles an instance seeds at boot: a deployment reads what it
+    // declares from them, and without them every view declares nothing.
+    seedDefaultAgentAssets(store.dataRoot);
     answeringGithub();
     const r = await createProject(
       store.db,
@@ -469,16 +475,14 @@ describe("createProject — policy preset shapes REAL governance", () => {
     const { effectiveProfileView } = await import(
       "~/features/agents/agents-query.server"
     );
-    const { specialistEligibleForStage } = await import("~/server/tasks/specialist-roster.server");
     const specialists = f.agents
       .map((a) => effectiveProfileView(a, store.dataRoot, "direct"))
       .filter((v) => v.kind === "specialist");
-    expect(specialists.length).toBeGreaterThan(0);
+    expect(specialists.flatMap((spec) => spec.stages)).not.toHaveLength(0);
     for (const spec of specialists) {
-      const eligible = boardStages.filter((stageId) =>
-        specialistEligibleForStage(spec, stageId),
-      );
-      expect(eligible, `${spec.name} has no eligible stage`).not.toHaveLength(0);
+      for (const stageId of spec.stages) {
+        expect(boardStages, `${spec.name} declares ${stageId}`).toContain(stageId);
+      }
     }
   });
 
