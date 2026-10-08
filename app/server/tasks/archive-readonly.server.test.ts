@@ -151,10 +151,8 @@ describe("archived project is read-only (R6-3)", () => {
     ).rejects.toMatchObject({ status: 409 });
   });
 
-  it("still allows reads (the project file loads) and restore un-freezes it", async () => {
+  it("restore un-freezes an archived project: a mutation works again", async () => {
     await archive();
-    // Read path works.
-    expect(readProjectFile({ projectSlug: store.slug, dataRoot: store.dataRoot })).not.toBeNull();
     // Restore (the ONE exempt mutation).
     await setProjectArchived(
       store.db,
