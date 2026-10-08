@@ -1,7 +1,6 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { RouterContextProvider } from "react-router";
 import { z } from "zod";
-import { setupAppTest, type AppTestContext } from "../../../test-support/test-app";
+import { routeArgs, setupAppTest, type AppTestContext } from "../../../test-support/test-app";
 import type { SeedUserIds } from "../../../test-support/demo-data";
 
 /**
@@ -83,13 +82,7 @@ async function callLoader(
   const { cookie } = await app.cookieFor(userId);
   const request = app.request(path, { cookie });
   try {
-    const res = await loader({
-      request,
-      url: new URL(request.url),
-      params: {},
-      pattern: ARTIFACT_ROUTES[mod],
-      context: new RouterContextProvider(),
-    });
+    const res = await loader(routeArgs(request, {}, ARTIFACT_ROUTES[mod]));
     return { status: res.status, body: await res.text() };
   } catch (thrown) {
     const refusal = thrownRefusalSchema.safeParse(thrown);

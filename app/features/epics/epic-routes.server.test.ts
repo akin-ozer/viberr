@@ -1,7 +1,6 @@
-import { RouterContextProvider } from "react-router";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { z } from "zod";
-import { setupAppTest, type AppTestContext } from "../../../test-support/test-app";
+import { routeArgs, setupAppTest, type AppTestContext } from "../../../test-support/test-app";
 import type { SeedUserIds } from "../../../test-support/demo-data";
 import { EPIC_FILTER_NONE, matchesEpicFilter } from "~/features/board/board-filters";
 import { cardStatus } from "~/features/board/card-status";
@@ -39,16 +38,14 @@ beforeAll(async () => {
 });
 afterAll(() => app.cleanup());
 
-/** The whole envelope a server loader or action is handed, so the direct
- *  calls below are checked against the real route signatures. */
-function routeArgs<Params extends Record<string, string>>(
+/** The route arguments of a request to `path`, sent as `init` says. */
+function argsFor<Params extends Record<string, string>>(
   path: string,
   pattern: string,
   params: Params,
   init: RequestInit & { cookie?: string },
 ) {
-  const request = app.request(path, init);
-  return { request, url: new URL(request.url), params, pattern, context: new RouterContextProvider() };
+  return routeArgs(app.request(path, init), params, pattern);
 }
 
 const EPICS_PATTERN = "/projects/:slug/epics";
@@ -57,14 +54,14 @@ const EPIC_PATTERN = "/projects/:slug/epics/:epicId";
 async function epicsPage(userId: string) {
   const { loader } = await import("~/routes/project.epics");
   const { cookie } = await app.sessionFor(userId);
-  return loader(routeArgs(`/projects/${SLUG}/epics`, EPICS_PATTERN, { slug: SLUG }, { cookie }));
+  return loader(argsFor(`/projects/${SLUG}/epics`, EPICS_PATTERN, { slug: SLUG }, { cookie }));
 }
 
 async function epicPage(userId: string, epicId: string) {
   const { loader } = await import("~/routes/project.epic");
   const { cookie } = await app.sessionFor(userId);
   return loader(
-    routeArgs(`/projects/${SLUG}/epics/${epicId}`, EPIC_PATTERN, { slug: SLUG, epicId }, { cookie }),
+    argsFor(`/projects/${SLUG}/epics/${epicId}`, EPIC_PATTERN, { slug: SLUG, epicId }, { cookie }),
   );
 }
 
@@ -72,7 +69,7 @@ async function board(userId: string, search = "") {
   const { loader } = await import("~/routes/project.board");
   const { cookie } = await app.sessionFor(userId);
   const loaded = await loader(
-    routeArgs(`/projects/${SLUG}/board${search}`, "/projects/:slug/board", { slug: SLUG }, { cookie }),
+    argsFor(`/projects/${SLUG}/board${search}`, "/projects/:slug/board", { slug: SLUG }, { cookie }),
   );
   return { cards: [...loaded.columns.flatMap((c) => c.tasks), ...loaded.orphanTasks], epics: loaded.epics };
 }
@@ -85,7 +82,7 @@ async function postEpics(userId: string, fields: Record<string, string>) {
   const { action } = await import("~/routes/project.epics");
   const { cookie, csrf } = await app.sessionFor(userId);
   return action(
-    routeArgs(`/projects/${SLUG}/epics`, EPICS_PATTERN, { slug: SLUG }, {
+    argsFor(`/projects/${SLUG}/epics`, EPICS_PATTERN, { slug: SLUG }, {
       method: "POST",
       cookie,
       body: postBody(csrf, fields),
@@ -97,7 +94,7 @@ async function postEpic(userId: string, epicId: string, fields: Record<string, s
   const { action } = await import("~/routes/project.epic");
   const { cookie, csrf } = await app.sessionFor(userId);
   return action(
-    routeArgs(`/projects/${SLUG}/epics/${epicId}`, EPIC_PATTERN, { slug: SLUG, epicId }, {
+    argsFor(`/projects/${SLUG}/epics/${epicId}`, EPIC_PATTERN, { slug: SLUG, epicId }, {
       method: "POST",
       cookie,
       body: postBody(csrf, fields),
@@ -109,7 +106,7 @@ async function postTask(userId: string, key: string, fields: Record<string, stri
   const { action } = await import("~/routes/project.task");
   const { cookie, csrf } = await app.sessionFor(userId);
   return action(
-    routeArgs(`/projects/${SLUG}/tasks/${key}`, "/projects/:slug/tasks/:key", { slug: SLUG, key }, {
+    argsFor(`/projects/${SLUG}/tasks/${key}`, "/projects/:slug/tasks/:key", { slug: SLUG, key }, {
       method: "POST",
       cookie,
       body: postBody(csrf, fields),

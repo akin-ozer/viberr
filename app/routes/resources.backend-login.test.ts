@@ -1,6 +1,6 @@
-import { RouterContextProvider } from "react-router";
 import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest";
 import {
+  routeArgs,
   setupAppTest,
   type AppTestContext,
 } from "../../test-support/test-app";
@@ -60,13 +60,7 @@ async function poll(
     `/resources/backend-login${query}`,
     cookie ? { cookie } : {},
   );
-  const response = await loader({
-    request,
-    url: new URL(request.url),
-    params: {},
-    pattern: "/resources/backend-login",
-    context: new RouterContextProvider(),
-  });
+  const response = await loader(routeArgs(request, {}, "/resources/backend-login"));
   return { status: response.status, body: await response.json() };
 }
 

@@ -1,9 +1,8 @@
-import { RouterContextProvider } from "react-router";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { countSql } from "../../test-support/perf-counters";
 import { pinPerfClock } from "../../test-support/perf-clock";
 import { expectWithinBudget } from "../../test-support/perf-ratchet";
-import { setupAppTest, type AppTestContext } from "../../test-support/test-app";
+import { routeArgs, setupAppTest, type AppTestContext } from "../../test-support/test-app";
 
 /**
  * Ruling 457 (LIVE-9): every console line a viewer watches costs one
@@ -59,13 +58,7 @@ describe("run-log tail cost (ruling 457)", () => {
     const { cookie } = await app.cookieFor(ardaId);
     const request = app.request(`/resources/run-log?runId=${RUN_ID}&since=9`, { cookie });
     const probe = countSql(app.db);
-    const res = await loader({
-      request,
-      url: new URL(request.url),
-      params: {},
-      pattern: "/resources/run-log",
-      context: new RouterContextProvider(),
-    });
+    const res = await loader(routeArgs(request, {}, "/resources/run-log"));
     const sql = probe.stop().sql;
     expect(res.status).toBe(200);
 

@@ -1,6 +1,5 @@
-import { RouterContextProvider } from "react-router";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { setupAppTest, type AppTestContext } from "../../test-support/test-app";
+import { routeArgs, setupAppTest, type AppTestContext } from "../../test-support/test-app";
 
 /**
  * Ruling 457 (owner, 2026-09-24; FL-4 / SRV-6): the bell's list is its own
@@ -26,13 +25,7 @@ afterAll(() => app.cleanup());
 async function load(cookie?: string) {
   const { loader } = await import("~/routes/resources.notifications");
   const request = app.request("/resources/notifications", cookie ? { cookie } : {});
-  return loader({
-    request,
-    url: new URL(request.url),
-    params: {},
-    pattern: "/resources/notifications",
-    context: new RouterContextProvider(),
-  });
+  return loader(routeArgs(request, {}, "/resources/notifications"));
 }
 
 describe("/resources/notifications (ruling 457)", () => {

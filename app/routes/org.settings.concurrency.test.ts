@@ -1,6 +1,6 @@
-import { RouterContextProvider } from "react-router";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import {
+  routeArgs,
   setupAppTest,
   type AppTestContext,
 } from "../../test-support/test-app";
@@ -39,13 +39,7 @@ async function setCap(
     body: fd,
     cookie,
   });
-  const result = await action({
-    request,
-    url: new URL(request.url),
-    pattern: "/org/settings",
-    params: {},
-    context: new RouterContextProvider(),
-  });
+  const result = await action(routeArgs(request, {}, "/org/settings"));
   const body = "data" in result ? result.data : result;
   const status = "init" in result ? (result.init?.status ?? 200) : 200;
   return { status, body };

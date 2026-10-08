@@ -1,7 +1,7 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { RouterContextProvider } from "react-router";
 import { z } from "zod";
 import {
+  routeArgs,
   setupAppTest,
   type AppTestContext,
 } from "../../../test-support/test-app";
@@ -23,22 +23,6 @@ beforeAll(async () => {
 });
 afterAll(() => app.cleanup());
 
-/**
- * A server loader is handed the request, the match pattern, the dynamic params
- * and a middleware context. Building the whole envelope rather than a partial
- * stand-in is what keeps the direct calls below type-checked against the real
- * route signature. The route takes no path params.
- */
-function routeArgs(request: Request, pattern: string) {
-  return {
-    request,
-    url: new URL(request.url),
-    params: {},
-    pattern,
-    context: new RouterContextProvider(),
-  };
-}
-
 /** The producing actor a stream line renders: either absent, or named. The
  *  rows come off SQL joins, so the shape is parsed rather than trusted. */
 const producingActorSchema = z.object({ name: z.string() }).nullable();
@@ -46,10 +30,7 @@ const producingActorSchema = z.object({ name: z.string() }).nullable();
 async function runLoader(cookie?: string) {
   const { loader } = await import("~/routes/notifications");
   return loader(
-    routeArgs(
-      app.request("/notifications", cookie ? { cookie } : {}),
-      "/notifications",
-    ),
+    routeArgs(app.request("/notifications", cookie ? { cookie } : {}), {}),
   );
 }
 

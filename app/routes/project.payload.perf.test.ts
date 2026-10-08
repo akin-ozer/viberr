@@ -1,11 +1,10 @@
 import { readdirSync, readFileSync } from "node:fs";
 import path from "node:path";
-import { RouterContextProvider } from "react-router";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { pinPerfClock } from "../../test-support/perf-clock";
 import { expectWithinBudget } from "../../test-support/perf-ratchet";
 import { rowsMatching, tallyServerReads } from "../../test-support/perf-counters";
-import { setupAppTest, type AppTestContext } from "../../test-support/test-app";
+import { routeArgs, setupAppTest, type AppTestContext } from "../../test-support/test-app";
 
 /**
  * Ruling 457, journeys `task-open` / `board-live` / `server`: what the
@@ -41,14 +40,7 @@ afterAll(() => {
 /** One Request's loader arguments: single fetch hands every loader of a
  *  request the same ones. */
 function argsFor<P extends Record<string, string>>(url: string, params: P) {
-  const request = app.request(url, { cookie });
-  return {
-    request,
-    url: new URL(request.url),
-    params,
-    pattern: url,
-    context: new RouterContextProvider(),
-  };
+  return routeArgs(app.request(url, { cookie }), params, url);
 }
 
 /** Rows the bell's list query returned (`listNotifications`). */

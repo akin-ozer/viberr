@@ -1,9 +1,9 @@
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { existsSync } from "node:fs";
 import path from "node:path";
-import { RouterContextProvider } from "react-router";
 import { z } from "zod";
 import {
+  routeArgs,
   setupAppTest,
   type AppTestContext,
 } from "../../../test-support/test-app";
@@ -30,26 +30,14 @@ afterAll(() => app.cleanup());
 const HOME_PATTERN = "/";
 const PROJECT_PATTERN = "/projects/:slug";
 
-/**
- * A server loader/action is handed the request, the match pattern, the dynamic
- * params and a middleware context. Building the whole envelope rather than a
- * partial stand-in is what keeps the direct calls below type-checked against
- * the real route signatures.
- */
+/** The route arguments of a GET to `url`, signed in when `cookie` is given. */
 function loaderArgs<Params extends Record<string, string>>(
   url: string,
   pattern: string,
   params: Params,
   cookie?: string,
 ) {
-  const request = app.request(url, cookie ? { cookie } : {});
-  return {
-    request,
-    url: new URL(request.url),
-    params,
-    pattern,
-    context: new RouterContextProvider(),
-  };
+  return routeArgs(app.request(url, cookie ? { cookie } : {}), params, pattern);
 }
 
 type RouteActionResult = Awaited<
@@ -484,13 +472,7 @@ describe("notification read actions", () => {
         cookie,
         body: new URLSearchParams({ _csrf: csrf, ...body }),
       });
-      return action({
-        request,
-        url: new URL(request.url),
-        params: {},
-        pattern: "/notifications/read",
-        context: new RouterContextProvider(),
-      });
+      return action(routeArgs(request, {}, "/notifications/read"));
     };
 
     const one = await post({ intent: "read", id: "n-142-packet" });
@@ -521,13 +503,7 @@ describe("theme action", () => {
       body: new URLSearchParams({ _csrf: csrf, theme: "dark" }),
     });
     const result = actionOutcome(
-      await action({
-        request,
-        url: new URL(request.url),
-        params: {},
-        pattern: "/prefs/theme",
-        context: new RouterContextProvider(),
-      }),
+      await action(routeArgs(request, {}, "/prefs/theme")),
     );
     expect(result.payload).toEqual({ ok: true, theme: "dark" });
     expect(result.headers?.get("Set-Cookie")).toContain("viberr_theme=dark");
@@ -590,13 +566,7 @@ describe("create-project action (home)", () => {
         policy: "strict",
       }),
     });
-    return action({
-      request,
-      url: new URL(request.url),
-      params: {},
-      pattern: HOME_PATTERN,
-      context: new RouterContextProvider(),
-    });
+    return action(routeArgs(request, {}, HOME_PATTERN));
   }
 
   it("writes project.md from the template and projects it", async () => {
@@ -658,13 +628,7 @@ describe("create-project action (home)", () => {
       if (delivers) fields.set("delivers", delivers);
       const request = app.request("/", { method: "POST", cookie, body: fields });
       return actionOutcome(
-        await action({
-          request,
-          url: new URL(request.url),
-          params: {},
-          pattern: HOME_PATTERN,
-          context: new RouterContextProvider(),
-        }),
+        await action(routeArgs(request, {}, HOME_PATTERN)),
       );
     };
     const refused = await post("Half Named", "HLF", null, "akin-ozer");
@@ -710,13 +674,7 @@ describe("create-project action (home)", () => {
       }),
     });
     const result = actionOutcome(
-      await action({
-        request,
-        url: new URL(request.url),
-        params: {},
-        pattern: HOME_PATTERN,
-        context: new RouterContextProvider(),
-      }),
+      await action(routeArgs(request, {}, HOME_PATTERN)),
     );
     expect(result.ok).toBe(true);
     expect(result.slug).toBe("member-made");
@@ -769,13 +727,7 @@ describe("create-project action (home)", () => {
           createRepository: "public",
         }),
       });
-      const result = await action({
-        request,
-        url: new URL(request.url),
-        params: {},
-        pattern: HOME_PATTERN,
-        context: new RouterContextProvider(),
-      });
+      const result = await action(routeArgs(request, {}, HOME_PATTERN));
       expect(actionOutcome(result).ok).toBe(true);
       expect("repoNote" in result ? result.repoNote : null).toBe(
         "Created akin-ozer/brand-site on GitHub (public).",

@@ -1,8 +1,7 @@
-import { RouterContextProvider } from "react-router";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { z } from "zod";
 import { untilRunSettled } from "../../test-support/fake-runtime";
-import { setupAppTest, type AppTestContext } from "../../test-support/test-app";
+import { routeArgs, setupAppTest, type AppTestContext } from "../../test-support/test-app";
 
 /**
  * The `interrupt` intent on both controller pages.
@@ -54,23 +53,11 @@ async function post(surface: Surface, userId: string, fields: Record<string, str
   if (surface === "instance") {
     const { action } = await import("~/routes/controller");
     const request = app.request("/controller", { method: "POST", body, cookie });
-    return action({
-      request,
-      url: new URL(request.url),
-      params: {},
-      pattern: "/controller",
-      context: new RouterContextProvider(),
-    });
+    return action(routeArgs(request, {}, "/controller"));
   }
   const { action } = await import("~/routes/project.controller");
   const request = app.request(`/projects/${SLUG}/controller`, { method: "POST", body, cookie });
-  return action({
-    request,
-    url: new URL(request.url),
-    params: { slug: SLUG },
-    pattern: "/projects/:slug/controller",
-    context: new RouterContextProvider(),
-  });
+  return action(routeArgs(request, { slug: SLUG }, "/projects/:slug/controller"));
 }
 
 /** A conversation of selin's on the given surface, with a turn still working. */
@@ -341,13 +328,7 @@ describe("the controller page's opening thread (U33-8)", () => {
     const { cookie } = await app.cookieFor(userId);
     const request = app.request(`/controller${query}`, { cookie });
     return pageView.parse(
-      await loader({
-        request,
-        url: new URL(request.url),
-        params: {},
-        pattern: "/controller",
-        context: new RouterContextProvider(),
-      }),
+      await loader(routeArgs(request, {}, "/controller")),
     );
   }
 
@@ -356,13 +337,7 @@ describe("the controller page's opening thread (U33-8)", () => {
     const { cookie } = await app.cookieFor(userId);
     const request = app.request(`/projects/${SLUG}/controller${query}`, { cookie });
     return pageView.parse(
-      await loader({
-        request,
-        url: new URL(request.url),
-        params: { slug: SLUG },
-        pattern: "/projects/:slug/controller",
-        context: new RouterContextProvider(),
-      }),
+      await loader(routeArgs(request, { slug: SLUG }, "/projects/:slug/controller")),
     );
   }
 

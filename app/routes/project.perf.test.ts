@@ -1,4 +1,3 @@
-import { RouterContextProvider } from "react-router";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { pinPerfClock } from "../../test-support/perf-clock";
 import { expectWithinBudget } from "../../test-support/perf-ratchet";
@@ -7,7 +6,7 @@ import {
   statementsMatching,
   tallyServerReads,
 } from "../../test-support/perf-counters";
-import { setupAppTest, type AppTestContext } from "../../test-support/test-app";
+import { routeArgs, setupAppTest, type AppTestContext } from "../../test-support/test-app";
 
 /**
  * Ruling 457, journey `board-live` / `server`: what one board revalidation
@@ -43,13 +42,7 @@ async function revalidateBoard(cookie: string) {
     import("~/routes/project.board"),
   ]);
   const request = app.request(`/projects/${SLUG}/board.data`, { cookie });
-  const args = {
-    request,
-    url: new URL(request.url),
-    params: { slug: SLUG },
-    pattern: "/projects/:slug/board",
-    context: new RouterContextProvider(),
-  };
+  const args = routeArgs(request, { slug: SLUG }, "/projects/:slug/board");
   // Ruling 457 (BOARD-6): the columns are the board route's own loader, run
   // beside the layout's on the same Request.
   return Promise.all([root.loader(args), layout.loader(args), board.loader(args)]);

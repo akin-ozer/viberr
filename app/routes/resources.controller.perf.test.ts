@@ -1,10 +1,9 @@
 import { readFileSync, writeFileSync } from "node:fs";
-import { RouterContextProvider } from "react-router";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { pinPerfClock } from "../../test-support/perf-clock";
 import { expectWithinBudget } from "../../test-support/perf-ratchet";
 import { tallyServerReads } from "../../test-support/perf-counters";
-import { setupAppTest, type AppTestContext } from "../../test-support/test-app";
+import { routeArgs, setupAppTest, type AppTestContext } from "../../test-support/test-app";
 
 /**
  * Ruling 457, journey `controller`: the dock's two data routes run on every
@@ -45,22 +44,12 @@ afterAll(() => {
   app.cleanup();
 });
 
-function args(request: Request, pattern: string) {
-  return {
-    request,
-    url: new URL(request.url),
-    params: {},
-    pattern,
-    context: new RouterContextProvider(),
-  };
-}
-
 describe("controller dock routes (ruling 457)", () => {
   it("the unseen check stays within its server-read budgets", async () => {
     const { loader } = await import("~/routes/resources.controller-unseen");
     const { cookie } = await app.cookieFor(arda);
     const call = () =>
-      loader(args(app.request("/resources/controller-unseen", { cookie }), "/resources/controller-unseen"));
+      loader(routeArgs(app.request("/resources/controller-unseen", { cookie }), {}, "/resources/controller-unseen"));
     await call();
     const { result, tally } = await tallyServerReads(app.dataRoot, call);
     // Every call here is signed in, so each loader answers its own data; only
@@ -76,7 +65,7 @@ describe("controller dock routes (ruling 457)", () => {
     const { cookie } = await app.cookieFor(arda);
     const query = `?project=${SLUG}&task=VIB-142`;
     const call = () =>
-      loader(args(app.request(`/resources/controller${query}`, { cookie }), "/resources/controller"));
+      loader(routeArgs(app.request(`/resources/controller${query}`, { cookie }), {}, "/resources/controller"));
     await call();
     const { result, tally } = await tallyServerReads(app.dataRoot, call);
     if (!("view" in result)) throw new Error(`expected the view, got ${JSON.stringify(result)}`);
@@ -96,7 +85,7 @@ describe("controller dock routes (ruling 457)", () => {
     const { loader } = await import("~/routes/resources.controller");
     const { cookie } = await app.cookieFor(arda);
     const named = await loader(
-      args(app.request(`/resources/controller?project=${SLUG}&task=VIB-142`, { cookie }), "/resources/controller"),
+      routeArgs(app.request(`/resources/controller?project=${SLUG}&task=VIB-142`, { cookie }), {}, "/resources/controller"),
     );
     if (!("view" in named)) throw new Error(`expected the view, got ${JSON.stringify(named)}`);
     expect(named.view.controllerName).toBe("Switchboard");

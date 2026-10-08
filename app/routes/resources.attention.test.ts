@@ -1,6 +1,5 @@
-import { RouterContextProvider } from "react-router";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { setupAppTest, type AppTestContext } from "../../test-support/test-app";
+import { routeArgs, setupAppTest, type AppTestContext } from "../../test-support/test-app";
 
 /**
  * Ruling 481(c) (F40-51): the snapshot the attention watcher reads, the
@@ -28,13 +27,7 @@ afterAll(() => app.cleanup());
 async function load(cookie?: string): Promise<Response> {
   const { loader } = await import("~/routes/resources.attention");
   const request = app.request("/resources/attention", cookie ? { cookie } : {});
-  return loader({
-    request,
-    url: new URL(request.url),
-    params: {},
-    pattern: "/resources/attention",
-    context: new RouterContextProvider(),
-  });
+  return loader(routeArgs(request, {}, "/resources/attention"));
 }
 
 describe("/resources/attention (ruling 481)", () => {

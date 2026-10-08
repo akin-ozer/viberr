@@ -1,6 +1,5 @@
-import { RouterContextProvider } from "react-router";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { setupAppTest, type AppTestContext } from "../../test-support/test-app";
+import { routeArgs, setupAppTest, type AppTestContext } from "../../test-support/test-app";
 import type { RunLog } from "~/server/runtimes/run-service.server";
 import { ERROR_CODES } from "~/server/errors/error-codes";
 
@@ -76,13 +75,7 @@ async function load(query: string, cookie?: string, runId = RUN_ID): Promise<Res
     `/resources/run-log?runId=${runId}&${query}`,
     cookie ? { cookie } : {},
   );
-  return loader({
-    request,
-    url: new URL(request.url),
-    params: {},
-    pattern: "/resources/run-log",
-    context: new RouterContextProvider(),
-  });
+  return loader(routeArgs(request, {}, "/resources/run-log"));
 }
 
 async function get(query: string): Promise<RunLog> {
@@ -165,13 +158,7 @@ describe("GET /resources/run-log for the console (ruling 457)", () => {
     const { loader } = await import("~/routes/resources.run-log");
     const { cookie } = await app.cookieFor(ardaId);
     const request = app.request(`/resources/run-log?runId=${RUN_ID}&window=1`, { cookie });
-    const res = await loader({
-      request,
-      url: new URL(request.url),
-      params: {},
-      pattern: "/resources/run-log",
-      context: new RouterContextProvider(),
-    });
+    const res = await loader(routeArgs(request, {}, "/resources/run-log"));
     expect(res.status).toBe(200);
     // SAFETY: a 200 from the route's `window=1` branch, which answers
     // `Response.json({ data: runLogWindowFor(...) })` (`RunLogWindowPage`).

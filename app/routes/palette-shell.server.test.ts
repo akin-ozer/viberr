@@ -1,6 +1,6 @@
-import { RouterContextProvider } from "react-router";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import {
+  routeArgs,
   setupAppTest,
   type AppTestContext,
 } from "../../test-support/test-app";
@@ -31,13 +31,7 @@ async function loadShell(path: string, userId?: string) {
   const { loader } = await import("~/routes/palette-shell");
   const cookie = userId ? (await app.cookieFor(userId)).cookie : undefined;
   const request = app.request(path, cookie ? { cookie } : {});
-  return loader({
-    request,
-    url: new URL(request.url),
-    pattern: "/",
-    params: {},
-    context: new RouterContextProvider(),
-  });
+  return loader(routeArgs(request, {}, "/"));
 }
 
 describe("palette-shell loader (ruling 145)", () => {

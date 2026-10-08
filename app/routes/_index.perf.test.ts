@@ -1,9 +1,8 @@
-import { RouterContextProvider } from "react-router";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { pinPerfClock } from "../../test-support/perf-clock";
 import { expectWithinBudget } from "../../test-support/perf-ratchet";
 import { rowsMatching, tallyServerReads } from "../../test-support/perf-counters";
-import { setupAppTest, type AppTestContext } from "../../test-support/test-app";
+import { routeArgs, setupAppTest, type AppTestContext } from "../../test-support/test-app";
 
 /**
  * Ruling 457, journey `fresh-load` (FL-4): what Home's loader ships. The bell's
@@ -38,13 +37,7 @@ describe("Home payload (ruling 457)", () => {
     const { cookie } = await app.cookieFor(ardaId);
     const load = () => {
       const request = app.request("/.data", { cookie });
-      return loader({
-        request,
-        url: new URL(request.url),
-        params: {},
-        pattern: "/",
-        context: new RouterContextProvider(),
-      });
+      return loader(routeArgs(request, {}, "/"));
     };
     await load();
     const { result, tally } = await tallyServerReads(app.dataRoot, load);

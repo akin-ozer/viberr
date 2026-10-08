@@ -1,6 +1,5 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { RouterContextProvider } from "react-router";
-import { setupAppTest, type AppTestContext } from "../../test-support/test-app";
+import { routeArgs, setupAppTest, type AppTestContext } from "../../test-support/test-app";
 import { connectFakeBackend } from "../../test-support/backend-credentials";
 import {
   drainRunCompletions,
@@ -60,13 +59,7 @@ async function post(fields: Record<string, string>) {
     cookie,
     body: new URLSearchParams({ _csrf: csrf, ...fields }),
   });
-  return action({
-    request,
-    url: new URL(request.url),
-    params: { slug: SLUG, key: TASK },
-    pattern: PATTERN,
-    context: new RouterContextProvider(),
-  });
+  return action(routeArgs(request, { slug: SLUG, key: TASK }, PATTERN));
 }
 
 /**

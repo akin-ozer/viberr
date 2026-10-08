@@ -1,9 +1,8 @@
-import { RouterContextProvider } from "react-router";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { pinPerfClock } from "../../test-support/perf-clock";
 import { expectWithinBudget } from "../../test-support/perf-ratchet";
 import { rowsMatching, tallyServerReads } from "../../test-support/perf-counters";
-import { setupAppTest, type AppTestContext } from "../../test-support/test-app";
+import { routeArgs, setupAppTest, type AppTestContext } from "../../test-support/test-app";
 import { DEAD_SESSION_ID, seedConsoleFixture } from "../../test-support/console-fixture";
 import type { RunLogWindowPage } from "~/server/runtimes/run-projection.server";
 
@@ -43,13 +42,7 @@ afterAll(() => {
 async function loadTask(cookie: string, suffix: "" | ".data") {
   const { loader } = await import("~/routes/project.task");
   const request = app.request(`/projects/${SLUG}/tasks/${KEY}${suffix}`, { cookie });
-  return loader({
-    request,
-    url: new URL(request.url),
-    params: { slug: SLUG, key: KEY },
-    pattern: "/projects/:slug/tasks/:key",
-    context: new RouterContextProvider(),
-  });
+  return loader(routeArgs(request, { slug: SLUG, key: KEY }, "/projects/:slug/tasks/:key"));
 }
 
 type TaskData = Awaited<ReturnType<typeof import("~/routes/project.task").loader>>;
@@ -116,13 +109,7 @@ describe("the console's own window request (ruling 457, owner decision 2)", () =
     const { cookie } = await app.cookieFor(ardaId);
     const document = await loadTask(cookie, "");
     const request = app.request("/resources/run-log?runId=run_dev_3&window=1", { cookie });
-    const response = await loader({
-      request,
-      url: new URL(request.url),
-      params: {},
-      pattern: "/resources/run-log",
-      context: new RouterContextProvider(),
-    });
+    const response = await loader(routeArgs(request, {}, "/resources/run-log"));
     const text = await response.text();
     // SAFETY: the route answers `Response.json({ data: runLogWindowFor(...) })`.
     const page = JSON.parse(text) as { data: RunLogWindowPage };

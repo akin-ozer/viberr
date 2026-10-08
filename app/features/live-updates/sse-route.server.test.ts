@@ -1,6 +1,6 @@
 import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest";
-import { RouterContextProvider } from "react-router";
 import {
+  routeArgs,
   setupAppTest,
   type AppTestContext,
 } from "../../../test-support/test-app";
@@ -60,13 +60,7 @@ async function callLoader(url: string, init: { cookie?: string; headers?: Header
   // params and a middleware context. Building the whole envelope rather than a
   // partial stand-in keeps this direct call type-checked against the real
   // route signature — including its Response return.
-  return loader({
-    request,
-    url: new URL(request.url),
-    params: {},
-    pattern: "/resources/events",
-    context: new RouterContextProvider(),
-  });
+  return loader(routeArgs(request, {}, "/resources/events"));
 }
 
 describe("/resources/events", () => {

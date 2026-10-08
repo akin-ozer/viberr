@@ -1,5 +1,6 @@
 import { randomBytes } from "node:crypto";
 import type { DatabaseSync } from "node:sqlite";
+import { RouterContextProvider } from "react-router";
 import { createTempDirs } from "./temp-dirs";
 
 /**
@@ -169,4 +170,18 @@ export async function setupAppTest(): Promise<AppTestContext> {
     },
   };
   return context;
+}
+
+/**
+ * The arguments React Router 8 hands a route's loader or action, built
+ * whole so a direct call type-checks against the real route signature: the
+ * request, its URL, the matched route's `params` and `pattern`, and a fresh
+ * context. Without a dynamic segment the pattern is the request's path.
+ */
+export function routeArgs<Params extends Record<string, string>>(
+  request: Request,
+  params: Params,
+  pattern: string = new URL(request.url).pathname,
+) {
+  return { request, url: new URL(request.url), params, pattern, context: new RouterContextProvider() };
 }

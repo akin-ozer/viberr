@@ -1,6 +1,5 @@
-import { RouterContextProvider } from "react-router";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { setupAppTest, type AppTestContext } from "../../test-support/test-app";
+import { routeArgs, setupAppTest, type AppTestContext } from "../../test-support/test-app";
 
 /**
  * F19-22 — the GitHub page's freshness chip needs TWO facts and the loader only
@@ -32,13 +31,7 @@ async function loadGithubPage() {
   const { loader } = await import("~/routes/project.github");
   const { cookie } = await app.cookieFor(ardaId);
   const request = app.request("/projects/viberr-core/github", { cookie });
-  return await loader({
-    request,
-    url: new URL(request.url),
-    params: { slug: "viberr-core" },
-    pattern: "/projects/:slug/github",
-    context: new RouterContextProvider(),
-  });
+  return await loader(routeArgs(request, { slug: "viberr-core" }, "/projects/:slug/github"));
 }
 
 /** Write one completed-pass audit row at a chosen age, the way a poller tick

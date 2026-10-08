@@ -1,9 +1,9 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import path from "node:path";
-import { RouterContextProvider } from "react-router";
 import { z } from "zod";
 import {
+  routeArgs,
   setupAppTest,
   type AppTestContext,
 } from "../../../test-support/test-app";
@@ -52,13 +52,7 @@ async function runLoader(
   const { loader } = await import("~/routes/project.settings");
   const { cookie } = await app.cookieFor(userId);
   const request = app.request(`/projects/${slug}/settings`, { cookie });
-  return loader({
-    request,
-    url: new URL(request.url),
-    params: { slug },
-    pattern: SETTINGS_PATTERN,
-    context: new RouterContextProvider(),
-  });
+  return loader(routeArgs(request, { slug }, SETTINGS_PATTERN));
 }
 
 async function postAction(
@@ -76,13 +70,7 @@ async function postAction(
     body,
     headers: { "Content-Type": "application/x-www-form-urlencoded" },
   });
-  return action({
-    request,
-    url: new URL(request.url),
-    params: { slug },
-    pattern: SETTINGS_PATTERN,
-    context: new RouterContextProvider(),
-  });
+  return action(routeArgs(request, { slug }, SETTINGS_PATTERN));
 }
 
 /**

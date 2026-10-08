@@ -1,8 +1,7 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { RouterContextProvider } from "react-router";
 import { z } from "zod";
 import type { SeedUserIds } from "../../test-support/demo-data";
-import { setupAppTest, type AppTestContext } from "../../test-support/test-app";
+import { routeArgs, setupAppTest, type AppTestContext } from "../../test-support/test-app";
 
 /**
  * Ruling 548: the Blocked by picker's read, as real requests against the
@@ -31,13 +30,7 @@ async function readCandidates(key: string, userId: string | null) {
     `/projects/viberr-core/tasks/${key}/dependency-candidates`,
     cookie ? { cookie } : {},
   );
-  return loader({
-    request,
-    url: new URL(request.url),
-    params: { slug: "viberr-core", key },
-    pattern: "/projects/:slug/tasks/:key/dependency-candidates",
-    context: new RouterContextProvider(),
-  });
+  return loader(routeArgs(request, { slug: "viberr-core", key }, "/projects/:slug/tasks/:key/dependency-candidates"));
 }
 
 async function refusedStatus(read: Promise<unknown>): Promise<number | null> {

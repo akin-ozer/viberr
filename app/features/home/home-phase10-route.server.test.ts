@@ -1,6 +1,6 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { RouterContextProvider } from "react-router";
 import {
+  routeArgs,
   setupAppTest,
   type AppTestContext,
 } from "../../../test-support/test-app";
@@ -36,13 +36,7 @@ afterAll(() => app.cleanup());
  *  carries the real value it would carry in a request, so the route functions
  *  can be called directly. */
 function homeRouteArgs(request: Request) {
-  return {
-    request,
-    url: new URL(request.url),
-    params: {},
-    pattern: "/",
-    context: new RouterContextProvider(),
-  };
+  return routeArgs(request, {}, "/");
 }
 
 async function runHomeLoader(cookie: string) {

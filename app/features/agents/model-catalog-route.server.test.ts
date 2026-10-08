@@ -1,6 +1,6 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { RouterContextProvider } from "react-router";
 import {
+  routeArgs,
   setupAppTest,
   type AppTestContext,
 } from "../../../test-support/test-app";
@@ -59,13 +59,7 @@ async function load(query: string, cookie?: string): Promise<Response> {
     `/resources/model-catalog${query}`,
     cookie ? { cookie } : {},
   );
-  return await loader({
-    request,
-    url: new URL(request.url),
-    params: {},
-    pattern: "/resources/model-catalog",
-    context: new RouterContextProvider(),
-  });
+  return await loader(routeArgs(request, {}, "/resources/model-catalog"));
 }
 
 async function runLoader(

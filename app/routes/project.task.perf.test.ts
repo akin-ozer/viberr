@@ -1,4 +1,3 @@
-import { RouterContextProvider } from "react-router";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { pinPerfClock } from "../../test-support/perf-clock";
 import { expectWithinBudget } from "../../test-support/perf-ratchet";
@@ -7,7 +6,7 @@ import {
   statementsMatching,
   tallyServerReads,
 } from "../../test-support/perf-counters";
-import { setupAppTest, type AppTestContext } from "../../test-support/test-app";
+import { routeArgs, setupAppTest, type AppTestContext } from "../../test-support/test-app";
 
 /**
  * Ruling 457, journey `task-open` / `server`: what one task-page revalidation
@@ -65,13 +64,7 @@ async function revalidateTaskPage(cookie: string) {
   // One Request for every loader, as single fetch hands it (react-router
   // router.js `loadRouteData`); a `.data` URL is a revalidation, not a view.
   const request = app.request(`/projects/${SLUG}/tasks/${KEY}.data`, { cookie });
-  const args = {
-    request,
-    url: new URL(request.url),
-    params: { slug: SLUG, key: KEY },
-    pattern: "/projects/:slug/tasks/:key",
-    context: new RouterContextProvider(),
-  };
+  const args = routeArgs(request, { slug: SLUG, key: KEY }, "/projects/:slug/tasks/:key");
   return Promise.all([root.loader(args), layout.loader(args), task.loader(args)]);
 }
 
@@ -80,13 +73,7 @@ describe("task-page timeline window (ruling 457)", () => {
     const { loader } = await import("~/routes/project.task");
     const { cookie } = await app.cookieFor(ardaId);
     const request = app.request(`/projects/${SLUG}/tasks/${KEY}?events=60`, { cookie });
-    const task = await loader({
-      request,
-      url: new URL(request.url),
-      params: { slug: SLUG, key: KEY },
-      pattern: "/projects/:slug/tasks/:key",
-      context: new RouterContextProvider(),
-    });
+    const task = await loader(routeArgs(request, { slug: SLUG, key: KEY }, "/projects/:slug/tasks/:key"));
     expect(task.task.timeline).toHaveLength(60);
     expect(task.timelineRemaining).toBe(9);
     expect(task.timelineNextLimit).toBe(69);

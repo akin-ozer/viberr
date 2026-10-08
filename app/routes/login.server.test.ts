@@ -1,8 +1,8 @@
-import { RouterContextProvider } from "react-router";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import {
-  setupAppTest,
   APP_TEST_PASSWORD,
+  routeArgs,
+  setupAppTest,
   type AppTestContext,
 } from "../../test-support/test-app";
 
@@ -25,23 +25,10 @@ beforeAll(async () => {
 });
 afterAll(() => app.cleanup());
 
-/** The full framework-mode handler argument set. These routes take no dynamic
- *  segments and read only `request`, but building the whole contract keeps the
- *  call sites honest instead of asserting one into place. */
-function handlerArgs(request: Request, pattern: string) {
-  return {
-    request,
-    url: new URL(request.url),
-    params: {},
-    pattern,
-    context: new RouterContextProvider(),
-  };
-}
-
 async function loginLoader(url: string, cookie?: string) {
   const { loader } = await import("~/routes/login");
   return loader(
-    handlerArgs(app.request(url, cookie ? { cookie } : {}), "/login"),
+    routeArgs(app.request(url, cookie ? { cookie } : {}), {}, "/login"),
   );
 }
 
@@ -53,7 +40,7 @@ async function loginAction(fields: Record<string, string>, cookie?: string) {
   };
   // Only carry the key when there is a session cookie to attach.
   if (cookie) init.cookie = cookie;
-  return action(handlerArgs(app.request("/login", init), "/login"));
+  return action(routeArgs(app.request("/login", init), {}, "/login"));
 }
 
 /** A refusal comes back as `data(payload, init)`; a success is a redirect. */
@@ -219,7 +206,7 @@ describe("/logout", () => {
   it("GET redirects home — logout is a POST", async () => {
     const { loader } = await import("~/routes/logout");
     const res = await caught(async () =>
-      loader(handlerArgs(app.request("/logout"), "/logout")),
+      loader(routeArgs(app.request("/logout"), {}, "/logout")),
     );
     expect(res.status).toBe(302);
     expect(res.headers.get("Location")).toBe("/");
@@ -229,7 +216,7 @@ describe("/logout", () => {
     const { action } = await import("~/routes/logout");
     const res = await caught(async () =>
       action(
-        handlerArgs(app.request("/logout", { method: "POST" }), "/logout"),
+        routeArgs(app.request("/logout", { method: "POST" }), {}, "/logout"),
       ),
     );
     expect(res.status).toBe(302);
@@ -242,12 +229,13 @@ describe("/logout", () => {
     const { action } = await import("~/routes/logout");
     const res = await caught(async () =>
       action(
-        handlerArgs(
+        routeArgs(
           app.request("/logout", {
             method: "POST",
             cookie,
             body: new URLSearchParams({ _csrf: csrf }),
           }),
+          {},
           "/logout",
         ),
       ),

@@ -1,6 +1,6 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { RouterContextProvider } from "react-router";
 import {
+  routeArgs,
   setupAppTest,
   type AppTestContext,
 } from "../../../test-support/test-app";
@@ -27,13 +27,7 @@ afterAll(() => app.cleanup());
 async function runLoader(slug: string, cookie?: string) {
   const { loader } = await import("~/routes/project.review");
   const request = app.request(`/projects/${slug}/review`, cookie ? { cookie } : {});
-  return loader({
-    request,
-    url: new URL(request.url),
-    params: { slug },
-    pattern: "/projects/:slug/review",
-    context: new RouterContextProvider(),
-  });
+  return loader(routeArgs(request, { slug }, "/projects/:slug/review"));
 }
 
 describe("/projects/:slug/review", () => {
@@ -102,13 +96,7 @@ describe("/projects/:slug/review", () => {
     const review = await runLoader("viberr-core", cookie);
     const { loader: boardLoader } = await import("~/routes/project.board");
     const request = app.request("/projects/viberr-core/board", { cookie });
-    const board = await boardLoader({
-      request,
-      url: new URL(request.url),
-      params: { slug: "viberr-core" },
-      pattern: "/projects/:slug/board",
-      context: new RouterContextProvider(),
-    });
+    const board = await boardLoader(routeArgs(request, { slug: "viberr-core" }, "/projects/:slug/board"));
     const flagged = [...board.columns.flatMap((c) => c.tasks), ...board.orphanTasks]
       .filter((t) => t.waitingOnMe)
       .map((t) => t.key)

@@ -1,7 +1,7 @@
-import { RouterContextProvider } from "react-router";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import {
   APP_TEST_PASSWORD,
+  routeArgs,
   setupAppTest,
   type AppTestContext,
 } from "../../../test-support/test-app";
@@ -56,20 +56,6 @@ afterAll(async () => {
   app.cleanup();
 });
 
-/** What React Router hands a loader/action. Both routes here read only
- *  `request`; the rest is the call the framework makes — and with no dynamic
- *  segment in either path, the matched pattern IS the pathname. */
-const routeArgs = (request: Request) => {
-  const url = new URL(request.url);
-  return {
-    request,
-    url,
-    params: {},
-    pattern: url.pathname,
-    context: new RouterContextProvider(),
-  };
-};
-
 type ActionOutcome = {
   status: number;
   data: { ok: boolean; toast?: string; error?: string };
@@ -84,7 +70,7 @@ function unwrap(result: Awaited<ReturnType<ProfileAction>>): ActionOutcome {
 
 async function runLoader(cookie?: string) {
   const { loader } = await import("~/routes/profile");
-  return loader(routeArgs(app.request("/profile", cookie ? { cookie } : {})));
+  return loader(routeArgs(app.request("/profile", cookie ? { cookie } : {}), {}));
 }
 
 async function postAction(
@@ -103,6 +89,7 @@ async function postAction(
           body,
           headers: { "Content-Type": "application/x-www-form-urlencoded" },
         }),
+        {},
       ),
     ),
   );
@@ -262,6 +249,7 @@ describe("/profile action", () => {
             body,
             headers: { "Content-Type": "application/x-www-form-urlencoded" },
           }),
+          {},
         ),
       ),
     );
@@ -350,6 +338,7 @@ describe("/profile action", () => {
           body,
           headers: { "Content-Type": "application/x-www-form-urlencoded" },
         }),
+        {},
       ),
     )) as { init?: { status?: number }; data?: { ok: boolean; error: string } };
     expect(result).not.toBeInstanceOf(Response);

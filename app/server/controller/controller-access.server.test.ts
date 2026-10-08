@@ -1,6 +1,6 @@
-import { RouterContextProvider } from "react-router";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import {
+  routeArgs,
   setupAppTest,
   type AppTestContext,
 } from "../../../test-support/test-app";
@@ -444,13 +444,7 @@ async function fetchRunLog(
   const { loader } = await import("~/routes/resources.run-log");
   const { cookie } = await app.cookieFor(userId);
   const request = app.request(`/resources/run-log?runId=${runId}`, { cookie });
-  const response = await loader({
-    request,
-    url: new URL(request.url),
-    params: {},
-    pattern: "/resources/run-log",
-    context: new RouterContextProvider(),
-  });
+  const response = await loader(routeArgs(request, {}, "/resources/run-log"));
   return { status: response.status, body: await response.text() };
 }
 

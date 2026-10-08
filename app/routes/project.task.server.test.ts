@@ -1,8 +1,7 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { RouterContextProvider } from "react-router";
 import { z } from "zod";
 import type { SeedUserIds } from "../../test-support/demo-data";
-import { setupAppTest, type AppTestContext } from "../../test-support/test-app";
+import { routeArgs, setupAppTest, type AppTestContext } from "../../test-support/test-app";
 import type { TaskLinks } from "~/shared/task-key-links";
 import type { CompletionView } from "~/server/tasks/completion-packet.server";
 import type { TookCard } from "~/server/tasks/what-it-took.server";
@@ -65,13 +64,7 @@ async function loadTask(taskKey: string): Promise<TaskLoaderData> {
   const request = app.request(`/projects/viberr-core/tasks/${taskKey}`, {
     cookie,
   });
-  return await loader({
-    request,
-    url: new URL(request.url),
-    params: { slug: "viberr-core", key: taskKey },
-    pattern: "/projects/:slug/tasks/:key",
-    context: new RouterContextProvider(),
-  });
+  return await loader(routeArgs(request, { slug: "viberr-core", key: taskKey }, "/projects/:slug/tasks/:key"));
 }
 
 /** The two columns these cases read back off a notification row. */
@@ -182,13 +175,7 @@ describe("R19-15: GETting the task route auto-reads the viewer's notifications",
     // assertion below.
     let thrown: ThrownRefusal | null = null;
     try {
-      await loader({
-        request,
-        url: new URL(request.url),
-        params: { slug: "viberr-core", key: "VIB-142" },
-        pattern: "/projects/:slug/tasks/:key",
-        context: new RouterContextProvider(),
-      });
+      await loader(routeArgs(request, { slug: "viberr-core", key: "VIB-142" }, "/projects/:slug/tasks/:key"));
     } catch (error) {
       // SAFETY: the only refusal this loader raises for a non-member is
       // `requireVisibleProject`'s thrown `data(<body>, { status: 404 })`

@@ -224,7 +224,7 @@ the only gates. Jobs run again since 2026-10-01.
 | `test-store.ts` | `setupTestStore(ctx)` → temp data root + project `viberr-core` (governed template, prefix `VIB`, next number 100, repo `akin-ozer/viberr`, no agents) with users arda (org admin, project admin), murat (maintainer), selin (contributor), elif (viewer), deniz (non-member), each with a unique `@viberr.test` email; `writeProject`, `writeTask`, `baseTaskFrontmatter`; `actorOf(user)` → the `{ userId, label }` actor a user writes as (label = email); `insertTestUser(db, id)` → a lone org-member users row (name = id, email `<id>@viberr.test`) for a test that needs a real user without the store; `REVIEW_APPROVAL_WORKFLOW` (the Standard board with a person's approval into Review) and `approveReviewEntry(store)`, which writes it onto the store's project.md; `MERGE_STAGE_BOARD` (the k9s board: a Merge stage past Review, pass 35), `REVIEW_STAGE_REVIEWER` (a verdict-capable reviewer eligible at Review only) and `OPEN_DECISION` (the operator's open input packet with one `request_edit` option, a decision `decisions.server` counts) |
 | `projected-store.ts` | `setupProjectedStore(ctx)` → `setupTestStore(ctx)` with the SQLite projection already rebuilt; `reconfigureProject(store, patch \| fn)` writes `patch` (or what `fn(current)` returns) over the frontmatter of the store's project.md and re-projects, the way a board saved in its settings reaches every reader; kept apart so a test that never projects does not load the rebuilder |
 | `stale-mount.ts` | `staleViewOf(absPath)` → `{ serve() }`: take it before a write and call `serve()` after, and the path names the file that write replaced again, same inode, bytes and mtime: the view a stale VirtioFS mount hands a reader (VIB-1, ruling 513). The writers' stale-read tests make one this way; rewriting the file in place would be another writer, which the repair lets win |
-| `test-app.ts` | `setupAppTest()` route-level harness: `NODE_ENV=test`, fresh secrets, its own temp `VIBERR_DATA_ROOT`, `VIBERR_SEED_ADMIN_*` cleared, env cache reset, fake runtime installed; `cookieFor(userId)` signs in through better-auth with `APP_TEST_PASSWORD` (hashed on the file's first sign-in and shared by every later one, since scrypt is deliberately slow; clearing that user's login rate-limit bucket first), `csrfFor(sessionId)`, `sessionFor(userId)` (one signed-in session and its CSRF token per person, made on first use; `forgetSession` drops one a test signed out), `request(url, { cookie, … })` adds `Origin: http://localhost:5173`, `cleanup()` |
+| `test-app.ts` | `setupAppTest()` route-level harness: `NODE_ENV=test`, fresh secrets, its own temp `VIBERR_DATA_ROOT`, `VIBERR_SEED_ADMIN_*` cleared, env cache reset, fake runtime installed; `cookieFor(userId)` signs in through better-auth with `APP_TEST_PASSWORD` (hashed on the file's first sign-in and shared by every later one, since scrypt is deliberately slow; clearing that user's login rate-limit bucket first), `csrfFor(sessionId)`, `sessionFor(userId)` (one signed-in session and its CSRF token per person, made on first use; `forgetSession` drops one a test signed out), `request(url, { cookie, … })` adds `Origin: http://localhost:5173`, `cleanup()`; `routeArgs(request, params, pattern?)` → the whole argument a route's loader or action is handed (`url`, `params`, `pattern`, a fresh `RouterContextProvider`; the pattern defaults to the request's path) |
 | `fake-runtime.ts` | `installFakeRuntime()`, `queueFakeRun({ lines, extraFacts, backend, occurredAt, sessionId, keepRunning, outcome, gate })`, `startedRunSpecs()`, `lastRunSpec()`; completion compaction (ruling 376): `queueFakeCompaction(backend, outcome, onCompact?)`, `compactedRunSpecs()`; `drainRunCompletions(timeoutMs = 5_000)` waits for the work a run's exit and its completion callbacks set off (a callback `void`s its effects, so nothing a test awaits covers them) — await it in `afterEach` before cleanup, or the chain meets a closed database; past the ceiling it stops waiting instead of failing; `untilRunSettled(db, runId)` waits for that run's row to leave running and queued (2 s at most), then drains. `installRunAdapters(adapters)` installs a test's own adapters with the same tracking |
 | `fake-github.ts` | `fakeGithubFetch({ "GET /user": spec \| fn })` → `{ fetchImpl, calls, callsTo }`; unmatched → 404; `unreachableFetch()`; `unreadableResponse()` → a 200 whose headers throw on read (a throw from inside a GitHub pass) |
 | `git-origin.ts` | a local GitHub stand-in for the real git paths: `createLocalOrigin(origins, { repo, files?, empty? })` → a bare repo with `advance()` (one more commit on `main`); `withLocalGithub(root, work)` rewrites `https://github.com/` to it through a temp `GIT_CONFIG_GLOBAL`; `gitOut(cwd, args)` and its sync twin `gitOutSync(cwd, args)` (runs git in `cwd`, stderr piped) → trimmed stdout |
@@ -266,7 +266,7 @@ A `test-support/` helper has no test of its own: the tests that use it are its c
 
 Import route modules **after** `setupAppTest()` so they see the test env. A route action
 takes the React Router 8 argument shape, including `url`, `pattern` and a
-`RouterContextProvider`:
+`RouterContextProvider`, which `routeArgs` builds:
 
 ```ts
 const ctx = await setupAppTest();
@@ -285,13 +285,7 @@ const request = ctx.request("/projects/viberr-core/board", {
     stage: "triage",
   }),
 });
-const res = await action({
-  request,
-  url: new URL(request.url),
-  params: { slug: "viberr-core" },
-  pattern: "/projects/:slug/board",
-  context: new RouterContextProvider(),
-});
+const res = await action(routeArgs(request, { slug: "viberr-core" }, "/projects/:slug/board"));
 ctx.cleanup();
 ```
 
