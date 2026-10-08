@@ -365,9 +365,11 @@ describe("ruling 509: a note on several lines", () => {
 
   // CANARY: re-range the note a drag began on whatever happened since
   // (`setDraft({ ...draft, … })` in moveDraft) and the release brings back the
-  // note just saved or cancelled, or replaces the one just opened; set
-  // `opener` for a note no longer open and closing the new one sends focus to
-  // the number the drag began on; open a new note on the range as the drag
+  // note just saved or cancelled, or replaces the one just opened; list the
+  // drag effect's `onMove` (or call it through useEffectEvent) and the release
+  // re-ranges the note just opened onto the dragged lines; set `opener` for a
+  // note no longer open and closing the new one sends focus to the number the
+  // drag began on; open a new note on the range as the drag
   // tracked it, or clamp it against the notes of the render the drag began in
   // (not `latest`), and it takes the line of the note saved during the drag.
   it.each([

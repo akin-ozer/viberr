@@ -598,8 +598,9 @@ function DiffLines({
       window.removeEventListener("pointercancel", drop);
       window.removeEventListener("keydown", escape);
     };
-    // The doors are the panel's; the drag reads its own state from `live`, and
-    // the notes from `latest`.
+    // Not listed: the release must call the moveDraft of the render the drag
+    // began in, whose `draft` is the note the drag began on (ChangesBody). The
+    // drag reads its own state from `live`, and the notes from `latest`.
   }, [dragging]);
 
   /** A primary mouse press on a number starts a drag. A finger or a stylus on
