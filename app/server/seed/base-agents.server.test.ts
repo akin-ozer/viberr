@@ -355,7 +355,6 @@ describe("ruling 699: the library ships a Diagrammer and a Cover Designer", () =
     // writer, which would have cost a writer's run. CANARY: drop any of the
     // three sentences.
     expect(diagrammer).toContain("**What the piece states, draw as it states it.**");
-    expect(diagrammer).toContain("Look again only when the picture itself changed.");
     expect(diagrammer).toContain("the field that lists its pictures is yours to bring up to date");
     const cover = said(dataRoot, "cover-designer-expertise");
     expect(cover).toContain("**It shows something from the piece.**");
@@ -364,24 +363,38 @@ describe("ruling 699: the library ships a Diagrammer and a Cover Designer", () =
     // the task's files, kept copies to diff against, rendered its drawing
     // again to show the kept picture still matched and pictured the notes
     // file as a page, and a one-entry fix to a field took eight minutes, five
-    // captures and a kept source of its own check. CANARY: drop any sentence.
+    // captures and a kept source of its own check. A second reader then found
+    // what a literal follower could still do (`cmp`, a count of bytes, a
+    // picture of the brief) and what the first wording would have stopped (a
+    // finding, a look after a picture moved). CANARY: drop any sentence.
     for (const manual of [diagrammer, cover]) {
       expect(manual).toContain("## What you do not prove");
-      expect(manual).toContain("Take no hash of a file, keep no copy to compare against, run no diff");
-      expect(manual).toContain("Write up no check, and keep none as a source.");
-      expect(manual).toMatch(/A rework that changes (no picture|nothing on the cover) needs no render and no look/);
-      expect(manual).toMatch(/once the (picture|cover) is kept, the (drawing|page) does not change/);
-      expect(manual).toMatch(/(That file|A file of fields) is text: read it, and do not picture it\./);
+      expect(manual).toMatch(/Your (picture|cover) is what the reviewer judges: you looked at it, and the reviewer opens it and looks again\./);
+      expect(manual).toContain("Prove nothing about a file you did not change: no checksum, no copy kept to compare it with, no diff or `cmp`, no count of lines or bytes before and after.");
+      expect(manual).toMatch(/A render is for looking: make one for the looks above, or after you change the (drawing|page)\./);
+      expect(manual).toMatch(/Picture only your (drawing|page) and the piece\. Every other file on the task \(the writer's note, a file of fields, a brief, a list of sources\) is text: read it, and do not `capture_page` it\./);
+      expect(manual).toContain("Write up no check of your own work and keep none as a source. Report every finding all the same");
+      expect(manual).toMatch(/A rework that changes (no picture and moves none|nothing on the cover and does not move it) \(an alt text, a field's entry\) needs no render and no look/);
+      expect(manual).toMatch(/Finish the (drawing|page) before you keep the (picture|cover)/);
+      expect(manual).toMatch(/after that you edit it only to fix a fault you have seen, and then you keep a new (picture|cover) over the old one/);
       expect(manual).toContain("an exact replacement of the lines it touches in the file as it stands, never a rewrite of the file");
+      expect(manual).toMatch(/On a rework that changed (no picture|nothing on the cover), only the last two apply\./);
     }
-    expect(cover).toContain("look at the piece once at the phone width");
-    // The same post went back to its writer before review, for lines of the
-    // writer's own note the two pictures had made untrue: `wc -w` of the
-    // whole file, "the post has no images", "you supply the cover".
-    // CANARY: drop either sentence.
+    expect(diagrammer).toContain("One that moves a picture gets one look at the piece at the phone width.");
+    expect(diagrammer).toContain("Look again only when the picture changed or moved. Where the piece is not a file `capture_page` takes, say so in your report.");
+    expect(diagrammer).toContain("into the field as it stands, leaving every other entry as it is");
+    expect(cover).toContain("look at the piece at the phone width after you place it (`view` chooses the width), and again only when the cover changed or moved");
+    expect(cover).toContain("Where it does not take the piece, say so in your report.");
+    expect(cover).toContain("is yours to fill, whatever stands there now");
+    // The same post went back to its writer before review, 36 minutes and
+    // $15, for lines of the writer's own note the two pictures had made
+    // untrue: `wc -w` of the whole file, "the post has no images", "you
+    // supply the cover". CANARY: drop any sentence.
     const writerOnPictures = said(dataRoot, "writer-expertise");
-    expect(writerOnPictures).toContain("say nothing in your note that they will make untrue: no count of the whole file, and not that the piece has no pictures");
-    expect(writerOnPictures).toContain("leave the fields for its pictures and its cover to the agent that makes them");
+    expect(writerOnPictures).toContain("write nothing in your note that they will make untrue: not a count of the whole file, not a line number of the piece, not that the piece has no pictures, not that the cover is the person's to supply");
+    expect(writerOnPictures).toContain("Say once that the board's drawing agent adds the diagrams and the cover afterwards.");
+    expect(writerOnPictures).toContain("Give the length as the words of the piece's text alone, without fields, picture lines or alt texts, and say that is what you counted.");
+    expect(writerOnPictures).toContain("list your own screenshots and photographs in its pictures field as usual, and leave the entries for the diagrams and the cover to the agent that makes them");
     expect(cover).toContain("Generated or stock imagery, and anything drawn to look like either.");
     expect(cover).toContain("An invented screen, output, quote or number.");
     // Read before it shipped: the recipe hid the page's overflow, and the
