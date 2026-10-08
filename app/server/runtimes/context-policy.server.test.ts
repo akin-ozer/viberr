@@ -1,10 +1,8 @@
 import { describe, expect, it } from "vitest";
 import {
   CACHE_TTL_MS,
-  CODEX_COMPACT_PROMPT,
   COMPACT_AT_COMPLETION_TOKENS,
   COMPLETION_COMPACT_INSTRUCTIONS,
-  EXTENDED_CACHE_RETENTION_MS,
   FIRST_CALL_LARGE_WRITE_TOKENS,
   OPERATOR_BURST_WINDOW_MS,
   RESUME_FRESH_CONTEXT_TOKENS,
@@ -23,9 +21,11 @@ const minutesBefore = (m: number) => new Date(Date.parse(NOW) - m * 60_000).toIS
 
 describe("ruling 370: the numbers have one home", () => {
   it("Codex carries the shared summarizer prompt and no limit; the operator carries nothing", () => {
-    expect(codexCompactionConfig("primary")).toEqual({ compact_prompt: CODEX_COMPACT_PROMPT });
-    expect(codexCompactionConfig("reviewer")).toEqual({ compact_prompt: CODEX_COMPACT_PROMPT });
-    expect(codexCompactionConfig("controller")).toEqual({ compact_prompt: CODEX_COMPACT_PROMPT });
+    const shared = codexCompactionConfig("primary").compact_prompt;
+    expect(shared).toContain("Do not invent");
+    for (const kind of ["primary", "reviewer", "controller"] as const) {
+      expect(codexCompactionConfig(kind), kind).toEqual({ compact_prompt: shared });
+    }
     expect(codexCompactionConfig("operator")).toEqual({});
   });
 
@@ -38,6 +38,7 @@ describe("ruling 370: the numbers have one home", () => {
   });
 
   it("the compaction prompt names what a Viberr run cannot recover from a summary", () => {
+    const prompt = codexCompactionConfig("primary").compact_prompt ?? "";
     for (const must of [
       "task.md",
       "read_knowledge_doc",
@@ -47,10 +48,10 @@ describe("ruling 370: the numbers have one home", () => {
       "pending",
       "Do not invent",
     ]) {
-      expect(CODEX_COMPACT_PROMPT).toContain(must);
+      expect(prompt).toContain(must);
     }
     // Generic on purpose: the per-task facts survive in developer_instructions.
-    expect(CODEX_COMPACT_PROMPT).not.toMatch(/\/data\/|VIB-\d|run_/);
+    expect(prompt).not.toMatch(/\/data\/|VIB-\d|run_/);
   });
 
   it("the TTL follows the backend and the credential kind, and an unknown kind reads as a sign-in", () => {
@@ -168,7 +169,6 @@ describe("ruling 369: start temperature and the large-write line", () => {
 
 describe("ruling 505: what Insights measures the policy by", () => {
   it("sorts resumes at every TTL the policy assumes, then at the extended retention", () => {
-    expect(EXTENDED_CACHE_RETENTION_MS).toBe(24 * 60 * 60 * 1000);
     expect([...RESUME_IDLE_EDGES_MS]).toEqual([
       5 * 60_000,
       10 * 60_000,
