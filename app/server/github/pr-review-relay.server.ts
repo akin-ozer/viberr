@@ -61,7 +61,7 @@ const RELAYED_KEEP = 500;
 const reviewRelaySchema = z.object({ relayed: z.array(z.string().min(1)) });
 
 /** The ids already relayed on this PR, or an empty set. Never throws. */
-export function readReviewRelay(pr: PrRef | null | undefined): ReadonlySet<string> {
+function readReviewRelay(pr: PrRef | null | undefined): ReadonlySet<string> {
   const parsed = reviewRelaySchema.safeParse(pr?.[REVIEW_RELAY_KEY]);
   return new Set(parsed.success ? parsed.data.relayed : []);
 }

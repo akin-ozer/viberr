@@ -21,7 +21,6 @@ import { interruptRun } from "~/server/runtimes/run-service.server";
 import { listRunsForTaskRows, upsertRun } from "~/server/runtimes/run-store.server";
 import type { Engagement } from "~/schemas/task-file.schema";
 import { reconcileTask } from "./github-reconciler.server";
-import { readReviewRelay } from "./pr-review-relay.server";
 
 /**
  * Ruling 484 (pass 40, F40-54): a project member's GitHub review of the
@@ -202,6 +201,15 @@ function taskFile() {
     .parsed;
 }
 
+/** The ids the relay recorded on the file's PR, `pr.reviewRelay.relayed`. */
+function relayed(): string[] {
+  return (
+    z
+      .object({ reviewRelay: z.object({ relayed: z.array(z.string()) }).optional() })
+      .parse(taskFile().frontmatter.pr ?? {}).reviewRelay?.relayed ?? []
+  );
+}
+
 function comments() {
   return taskFile().timeline.filter((e) => e.type === "comment");
 }
@@ -310,7 +318,7 @@ describe("ruling 484: the review relay", () => {
       expect(gh.callsTo(`GET ${REPO}/pulls/318/reviews/${id}/comments`)).toHaveLength(0);
     }
     // Recorded in the same write as the comment.
-    expect([...readReviewRelay(taskFile().frontmatter.pr)].sort()).toEqual([
+    expect(relayed().sort()).toEqual([
       "comment:101",
       "comment:102",
       "comment:103",
@@ -328,7 +336,7 @@ describe("ruling 484: the review relay", () => {
     // The reconciler carries the record for the same PR, so a quiet pass is a
     // quiet pass (no churn, and the record is still there).
     expect(second.status === "reconciled" && second.changed).toBe(false);
-    expect(readReviewRelay(taskFile().frontmatter.pr).has("review:11")).toBe(true);
+    expect(relayed()).toContain("review:11");
   });
 
   it("records a review with nothing to relay (an approval, no comments) so it is not listed again", async () => {
@@ -338,7 +346,7 @@ describe("ruling 484: the review relay", () => {
     await reconcile(gh.fetchImpl);
     expect(comments()).toHaveLength(0);
     expect(gh.callsTo(`GET ${REPO}/pulls/318/reviews/21/comments`)).toHaveLength(1);
-    expect(readReviewRelay(taskFile().frontmatter.pr).has("review:21")).toBe(true);
+    expect(relayed()).toContain("review:21");
     // Written file first, then re-projected: the projection carries it too.
     const row = z
       .object({ pr_json: z.string() })
@@ -355,7 +363,7 @@ describe("ruling 484: the review relay", () => {
     const gh = fakeGithubFetch(routes([SELIN_REVIEW], new Map([[11, SELIN_COMMENTS]])));
     await reconcile(gh.fetchImpl);
     expect(comments()).toHaveLength(0);
-    expect(readReviewRelay(taskFile().frontmatter.pr).size).toBe(0);
+    expect(relayed()).toEqual([]);
   });
 
   it("leaves a review whose comments GitHub would not list for the next pass", async () => {
@@ -363,7 +371,7 @@ describe("ruling 484: the review relay", () => {
     table[`GET ${REPO}/pulls/318/reviews/11/comments`] = { status: 502, body: { message: "bad" } };
     await reconcile(fakeGithubFetch(table).fetchImpl);
     expect(comments()).toHaveLength(0);
-    expect(readReviewRelay(taskFile().frontmatter.pr).size).toBe(0);
+    expect(relayed()).toEqual([]);
     // The next pass, with GitHub answering, relays it.
     await reconcile(fakeGithubFetch(routes([SELIN_REVIEW], new Map([[11, SELIN_COMMENTS]]))).fetchImpl);
     expect(comments()).toHaveLength(1);

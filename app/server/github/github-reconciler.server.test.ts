@@ -21,7 +21,6 @@ import { checksPill } from "~/features/github/github-pills";
 import { mapPrChecks } from "~/shared/mapping/task.server";
 import { updateUserFields } from "~/server/auth/user-store.server";
 import { readPrHumanApproval } from "./pr-human-approval.server";
-import { readReviewRelay } from "./pr-review-relay.server";
 import { readTaskFile, updateTaskFile } from "~/server/files/task-writer.server";
 import { listNotifications } from "~/server/projections/notifications.server";
 import {
@@ -4324,7 +4323,7 @@ describe("ruling 496 (F40-72): an unchanged pass writes nothing", () => {
       bodyWritten,
     });
     expect(readPrHumanApproval(pr)).toMatchObject({ status: "counted", commitSha: REV });
-    expect([...readReviewRelay(pr)]).toEqual(["review:41"]);
+    expect(pr).toMatchObject({ reviewRelay: { relayed: ["review:41"] } });
     const before = fileOf(store).content;
     const rows = reconcileRows(store);
 
