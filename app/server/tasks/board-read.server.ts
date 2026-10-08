@@ -13,8 +13,15 @@ import {
   listTaskAttachments,
   readTaskAttachment,
 } from "~/server/files/task-attachments.server";
+import { FIND_COUNT_MAX, FIND_MAX_CHARS, findWords, type TextHit } from "~/server/files/find-in-text.server";
 import { keptDeliveryMiss, listKeptDeliveries, type KeptDelivery } from "~/server/files/kept-deliveries.server";
-import { readTaskSource, readTaskSources, sourcesListing } from "~/server/files/task-sources.server";
+import {
+  findInTaskSource,
+  readTaskSource,
+  readTaskSources,
+  sourcesListing,
+  type TaskSourcesRead,
+} from "~/server/files/task-sources.server";
 import { readTaskFile } from "~/server/files/task-writer.server";
 import { listProjectTasks } from "~/server/projections/board-query.server";
 import { pageEnd } from "~/server/runtimes/read-page-budget.server";
@@ -370,12 +377,16 @@ interface SourceListRead {
  * paged like any text. A source's content is read as a task file's is
  * (`readTaskSource`): what a reviewer checks a claim against is the bytes the
  * run kept, not the page as it reads on the day of the review.
+ *
+ * Ruling 706: with `find`, the places in one source that hold those words
+ * instead of a page of it (`taskSourceSearch`).
  */
 export function readAgentTaskSource(
   deps: BoardReadContext,
   taskKey: string,
   id: string | undefined,
   offset = 0,
+  find?: string,
 ): AgentAttachmentRead {
   const key = taskKey.trim();
   if (!boardRows(deps).some((t) => t.key === key)) {
@@ -383,6 +394,8 @@ export function readAgentTaskSource(
   }
   const kept = readTaskSources(deps.projectSlug, key, deps.ctx.dataRoot);
   const wanted = id?.trim();
+  const words = findWords(find ?? "");
+  if (words.length > 0) return { text: taskSourceSearch(deps, key, kept, wanted, words, offset) };
   if (!wanted) {
     // Every kept delivery is named, one stamped while the task kept nothing
     // included: it rested on no kept source, and the list says so.
@@ -399,15 +412,7 @@ export function readAgentTaskSource(
     return { text: JSON.stringify(list, null, 1) };
   }
   const read = readTaskSource(deps.projectSlug, key, wanted, deps.ctx.dataRoot, offset);
-  if (!read) {
-    const ids = kept.sources.map((s) => s.id);
-    const have =
-      ids.length === 0
-        ? "It keeps no sources."
-        : `It keeps ${ids.length === 1 ? ids[0] : `${ids[0]} to ${ids[ids.length - 1]}`}; ` +
-          "call read_task_source without `id` to list them.";
-    return { text: `[noop] ${key} keeps no source \`${wanted}\`. ${have}` };
-  }
+  if (!read) return { text: noSuchSource(key, kept, wanted) };
   const { source, content } = read;
   if ("unreadable" in content) return { text: `[noop] ${content.unreadable}` };
   if (content.kind === "image") {
@@ -437,6 +442,97 @@ export function readAgentTaskSource(
       1,
     ),
   };
+}
+
+/** What a reader is told when the task keeps no source of that id. */
+function noSuchSource(key: string, kept: TaskSourcesRead, wanted: string): string {
+  const ids = kept.sources.map((s) => s.id);
+  const have =
+    ids.length === 0
+      ? "It keeps no sources."
+      : `It keeps ${ids.length === 1 ? ids[0] : `${ids[0]} to ${ids[ids.length - 1]}`}; ` +
+        "call read_task_source without `id` to list them.";
+  return `[noop] ${key} keeps no source \`${wanted}\`. ${have}`;
+}
+
+/**
+ * Ruling 706: one source searched for `words`, as JSON: how many places in it
+ * hold them (`found`), and the places from `offset` on (`hits`), each with
+ * its line, the offset a read of it starts at and the words where they stand.
+ * `nextOffset` is where the next search starts when the list was cut.
+ *
+ * A search answers for one source. Asked without an `id` it says so, since a
+ * list of sources in answer to a search would read as "found in none of
+ * them".
+ */
+function taskSourceSearch(
+  deps: BoardReadContext,
+  key: string,
+  kept: TaskSourcesRead,
+  id: string | undefined,
+  words: readonly string[],
+  offset: number,
+): string {
+  if (!id) {
+    return (
+      "[noop] `find` searches one source: pass that source's `id` with it. " +
+      "read_task_source without `id` and without `find` lists the sources."
+    );
+  }
+  const phrase = words.join(" ");
+  if (phrase.length > FIND_MAX_CHARS) {
+    return (
+      `[noop] \`find\` takes a word or a short phrase, up to ${FIND_MAX_CHARS} characters; this one is ${phrase.length}. ` +
+      "Search for a few words of the passage, then read it from the place found."
+    );
+  }
+  const read = findInTaskSource(deps.projectSlug, key, id, words, deps.ctx.dataRoot, offset);
+  if (!read) return noSuchSource(key, kept, id);
+  const { source, find } = read;
+  if ("unreadable" in find) return `[noop] ${find.unreadable}`;
+  const notes: string[] = [];
+  if (find.found === 0) {
+    notes.push(
+      `Nothing in ${source.id} reads this. Letters match in either case and a space matches any run of spaces and line breaks; ` +
+        "nothing else is loosened. Try fewer words, or one word the passage has to use.",
+    );
+  } else if (find.hits.length === 0) {
+    notes.push(`No place at or after offset ${offset}: every one is before it. Search again without \`offset\`.`);
+  }
+  if (find.found >= FIND_COUNT_MAX) {
+    notes.push(
+      `The count stops at ${FIND_COUNT_MAX.toLocaleString("en-US")}: these words are too common in ${source.id} to list. ` +
+        "Search for more of the passage.",
+    );
+  }
+  if (find.truncated) {
+    notes.push(`${source.id}'s text was cut where its rendering stopped, and the search covers that much of it.`);
+  }
+  const answer: TaskSourceSearch = {
+    id: source.id,
+    title: source.title,
+    from: source.from,
+    find: phrase,
+    found: find.found,
+    hits: find.hits,
+  };
+  if (find.nextOffset !== undefined) answer.nextOffset = find.nextOffset;
+  if (find.leftOut) answer.leftOut = find.leftOut;
+  if (notes.length > 0) answer.note = notes.join(" ");
+  return JSON.stringify(answer, null, 1);
+}
+
+/** What a search of one source answers. */
+interface TaskSourceSearch {
+  id: string;
+  title: string;
+  from: string;
+  find: string;
+  found: number;
+  hits: TextHit[];
+  nextOffset?: number;
+  leftOut?: string;
+  note?: string;
 }
 
 type BoardRow = ReturnType<typeof boardRows>[number];

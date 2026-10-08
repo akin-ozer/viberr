@@ -883,6 +883,7 @@ export function buildAgentToolkit(deps: AgentToolkitDeps): AgentToolkit | null {
           id: z.string().optional().describe(READ_TASK_SOURCE_FIELDS.id),
           taskKey: z.string().optional().describe(READ_TASK_SOURCE_FIELDS.taskKey),
           offset: z.number().int().min(0).optional().describe(READ_TASK_SOURCE_FIELDS.offset),
+          find: z.string().optional().describe(READ_TASK_SOURCE_FIELDS.find),
         },
         // eslint-disable-next-line @typescript-eslint/require-await
         async (args) => {
@@ -892,6 +893,7 @@ export function buildAgentToolkit(deps: AgentToolkitDeps): AgentToolkit | null {
               args.taskKey?.trim() || taskKey,
               args.id,
               args.offset ?? 0,
+              args.find,
             );
             return "text" in read ? textResult(read.text) : imageResult(read.header, read.image);
           } catch (error) {

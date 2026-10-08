@@ -1069,6 +1069,177 @@ describe("report_outcome's evidence field (P13-D-26)", () => {
     );
   });
 
+  it("ruling 706: read_task_source with `find` answers the places in one source that hold the words, each readable from the offset it gives", async () => {
+    // The finding: BLOG-7's post said a figure "isn't recorded" on the
+    // strength of one entry of a 2.25 MB decisions file, a later entry of
+    // the same file said where it is recorded, and no review of the post
+    // opened that file: it is seventy-one pages of a read. CANARY: answer `find` with
+    // a page of the source and the first assertion reads `text` where it
+    // expects `hits`.
+    const { writeTaskSource } = await import("~/server/files/task-sources.server");
+    const tools = toolkitTools({ ...BASE, comment: true, evidence: false }, "oc_find");
+    const read = tools.read_task_source!;
+    const store = lastStore;
+    writeTask(store.dataRoot, store.slug, { frontmatter: baseTaskFrontmatter("VIB-9", { stage: "review" }) });
+    rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
+    const by = { backend: "claude", profileId: "writer", roleHint: "Writer" };
+    const keep = (name: string, data: Buffer, title: string) =>
+      writeTaskSource(store.slug, "VIB-9", { name, data, title, from: `https://example.com/${name}`, by, runId: "run_w" }, store.dataRoot);
+    // A record of four hundred entries, one to a line: thirteen pages of it.
+    const filler = "The run finalizes first and the session is compacted after it, as the note on the task says. ";
+    const entry = (n: number) =>
+      n === 506
+        ? `506. **A run records what its compaction cost** (2026-09-26) ${filler.repeat(8)}Its tokens go into the run's totals. ${filler.repeat(4)}`
+        : n === 536
+          ? `536. **The completion compaction adds only its own cost** (2026-09-28) ${filler.repeat(8)}The console line states that share, with the cached part named inside the input. ${filler.repeat(4)}`
+          : n === 372
+            ? `372. **Compaction is left to the CLI** (2026-09-21) ${filler.repeat(11)}`
+            : `${n}. **An entry on another subject** (2026-09-20) ${filler.repeat(11)}`;
+    const record = Array.from({ length: 400 }, (_, i) => entry(i + 300)).join("\n");
+    expect(record.length).toBeGreaterThan(400_000);
+    keep("decisions.md", Buffer.from(record), "The decisions file");
+    keep("chart.png", Buffer.from("not searched"), "A chart");
+    // A page that embeds a picture: a read leaves the picture out (ruling
+    // 676), and a place's offset counts the text as a read returns it.
+    const embedded = `<html><img src="data:image/png;base64,${"A".repeat(60_000)}"><p>after the picture: the needle</p></html>`;
+    keep("report.html", Buffer.from(embedded), "A report");
+    // SAFETY: every text answer here is `{ content: [{ type: "text", text }] }`.
+    const text = async (args: Record<string, string | number>) =>
+      ((await read.handler({ taskKey: "VIB-9", ...args } as never, {} as never)) as { content: { text: string }[] })
+        .content[0]!.text;
+    const search = z.object({
+      id: z.string(),
+      title: z.string(),
+      from: z.string(),
+      find: z.string(),
+      found: z.number(),
+      hits: z.array(z.object({ line: z.number(), offset: z.number(), text: z.string() })),
+      nextOffset: z.number().optional(),
+      leftOut: z.string().optional(),
+      note: z.string().optional(),
+    });
+    const find = async (args: Record<string, string | number>) => search.parse(JSON.parse(await text(args)));
+
+    // The later entry, in one call: which line, which entry, the words.
+    const later = await find({ id: "S1", find: "cached part" });
+    expect(later).toMatchObject({
+      id: "S1",
+      title: "The decisions file",
+      from: "https://example.com/decisions.md",
+      find: "cached part",
+      found: 1,
+    });
+    expect(later.note).toBeUndefined();
+    expect(later.nextOffset).toBeUndefined();
+    expect(later.hits).toHaveLength(1);
+    expect(later.hits[0]!.line).toBe(237);
+    expect(later.hits[0]!.offset).toBe(record.indexOf("536. "));
+    expect(later.hits[0]!.text).toMatch(/^536\. \*\*The completion compaction adds only its own cost\*\* \(2026-09-28\) .* … .*with the cached part named inside the input\./);
+    // And the entry is read from the offset the place gives. CANARY: hand the
+    // reader an offset counted in another text than the one a read pages.
+    const page = z.object({ text: z.string(), offset: z.number() }).parse(JSON.parse(await text({ id: "S1", offset: later.hits[0]!.offset })));
+    expect(page.text.startsWith("536. **The completion compaction adds only its own cost** (2026-09-28)")).toBe(true);
+    expect(page.text).toContain("with the cached part named inside the input");
+
+    // Letters in either case, and the phrase comes back as it was sought.
+    expect(await find({ id: "S1", find: "COMPACTION adds  only" })).toMatchObject({
+      find: "COMPACTION adds only",
+      found: 1,
+      hits: [{ line: 237 }],
+    });
+    // A subject three entries write about lists the three, in order; a search
+    // from the entry the piece cites lists that entry and what stands after
+    // it. CANARY: ignore `offset` on a search and the entry of five days
+    // before the one cited is listed as if it could be the later word.
+    const subject = await find({ id: "S1", find: "compaction" });
+    expect(subject.found).toBe(3);
+    expect(subject.hits.map((h) => h.line)).toEqual([73, 207, 237]);
+    expect(subject.hits[0]!.text.startsWith("372. **Compaction is left to the CLI** (2026-09-21)")).toBe(true);
+    const cited = subject.hits[1]!.offset;
+    expect(cited).toBe(record.indexOf("506. "));
+    const after = await find({ id: "S1", find: "compaction", offset: cited });
+    expect(after.found).toBe(3);
+    expect(after.hits.map((h) => h.line)).toEqual([207, 237]);
+    expect(after.hits[0]!.text.startsWith("506. **A run records what its compaction cost**")).toBe(true);
+    // Past the last place: nothing listed, the count stands, and the answer
+    // says which way to look. CANARY: answer an empty list with no word and
+    // a reader takes "no later entry" for "no entry".
+    const past = await find({ id: "S1", find: "cached part", offset: later.hits[0]!.offset + 5_000 });
+    expect(past).toMatchObject({ found: 1, hits: [] });
+    expect(past.note).toBe(
+      `No place at or after offset ${later.hits[0]!.offset + 5_000}: every one is before it. Search again without \`offset\`.`,
+    );
+    // Nothing found says how the words were matched.
+    expect(await find({ id: "S1", find: "isn't recorded" })).toEqual({
+      id: "S1",
+      title: "The decisions file",
+      from: "https://example.com/decisions.md",
+      find: "isn't recorded",
+      found: 0,
+      hits: [],
+      note:
+        "Nothing in S1 reads this. Letters match in either case and a space matches any run of spaces and line breaks; " +
+        "nothing else is loosened. Try fewer words, or one word the passage has to use.",
+    });
+    // Words in every entry: forty places, where to search on from, and no note.
+    const common = await find({ id: "S1", find: "the session is compacted" });
+    expect(common.found).toBe(398 * 11 + 2 * 12);
+    expect(common.hits.length).toBeGreaterThan(0);
+    expect(common.hits.length).toBeLessThanOrEqual(40);
+    expect(common.nextOffset).toBeGreaterThan(common.hits.at(-1)!.offset);
+    expect(common.note).toBeUndefined();
+    expect(Buffer.byteLength(JSON.stringify(common, null, 1))).toBeLessThan(32_000);
+    // A word too common to list: the count stops, and the answer says what
+    // to do about it. CANARY: print the capped count as if it were the total.
+    const everywhere = await find({ id: "S1", find: "the" });
+    expect(everywhere.found).toBe(10_000);
+    expect(everywhere.note).toBe(
+      "The count stops at 10,000: these words are too common in S1 to list. Search for more of the passage.",
+    );
+
+    // The text searched is the text a read returns: the embedded picture is
+    // left out of both, and the answer says so.
+    const inPage = await find({ id: "S3", find: "the needle" });
+    expect(inPage.found).toBe(1);
+    expect(inPage.leftOut).toContain("1 embedded file is left out of this text");
+    expect(inPage.hits[0]!.text).toContain("[60,000 base64 characters left out]");
+    const pageRead = z.object({ text: z.string() }).parse(JSON.parse(await text({ id: "S3", offset: inPage.hits[0]!.offset })));
+    expect(pageRead.text).toContain("after the picture: the needle");
+    // Nothing of a picture's bytes is found. CANARY: search the file's bytes.
+    expect((await find({ id: "S3", find: "AAAAAAAAAAAAAAAA" })).found).toBe(0);
+
+    // What a search cannot answer, said in a sentence. CANARY: answer a
+    // search with no `id` with the list of sources, and it reads as "found in
+    // none of them".
+    expect(await text({ find: "cached part" })).toBe(
+      "[noop] `find` searches one source: pass that source's `id` with it. read_task_source without `id` and without `find` lists the sources.",
+    );
+    expect(await text({ id: "S9", find: "cached part" })).toBe(
+      "[noop] VIB-9 keeps no source `S9`. It keeps S1 to S3; call read_task_source without `id` to list them.",
+    );
+    expect(await text({ id: "S2", find: "cached part" })).toBe(
+      "[noop] `chart.png` is an image: it has no text to search. Read it without `find` to look at it.",
+    );
+    expect(await text({ id: "S1", find: "word ".repeat(41) })).toBe(
+      "[noop] `find` takes a word or a short phrase, up to 200 characters; this one is 204. Search for a few words of the passage, then read it from the place found.",
+    );
+    expect(await text({ id: "S1", find: "cached part", offset: record.length + 10 })).toBe(
+      `[noop] \`decisions.md\` reads as ${record.length.toLocaleString("en-US")} characters; offset ${(record.length + 10).toLocaleString("en-US")} is past its end.`,
+    );
+    // A `find` of nothing but spaces is no search: the source is read.
+    expect(JSON.parse(await text({ id: "S1", find: "   " }))).toMatchObject({ id: "S1", truncated: true, nextOffset: 32_000 });
+    // And the tool says it can be searched, where a run reads it. CANARY:
+    // build the search and leave the description as it was, and no run that
+    // was not told about `find` ever sends it.
+    expect(read.description).toContain(
+      "With `id` and `find`, the places in that source that hold a word or short phrase, in place of a page: a long record is searched in one call, then read from the place found.",
+    );
+    const fields = read.inputSchema["shape"] ?? {};
+    expect(Object.keys(fields)).toEqual(["id", "taskKey", "offset", "find"]);
+    expect(fields.find?.description).toContain("`found`, how many places in the source hold it, and `hits`");
+    expect(fields.offset?.description).toContain("With `find`, where the search starts.");
+  });
+
   it("capture_page hands a run the pictures of a page on its task in readable stretches, saves nothing on the task, and names a file that is not a page", async () => {
     // Ruling 691: a page judged from its source hides a broken table and a
     // layout that falls apart on a phone. CANARY: mount the tool without the

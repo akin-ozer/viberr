@@ -48,9 +48,11 @@ import { MAX_UPLOAD_BYTES } from "~/shared/attachment-kinds";
 import { sha256Hex } from "./content-hash.server";
 import { projectDir, resolveStoreSegment, storedFileName, taskDir } from "./file-store-root.server";
 import {
+  findInAttachmentContent,
   readAttachmentBytes,
   readAttachmentContent,
   type AttachmentContent,
+  type AttachmentFind,
 } from "./task-attachments.server";
 
 /** The most one source holds: what a person's upload may (10 MB). */
@@ -377,6 +379,30 @@ export function resolveTaskSource(
   }
 }
 
+/** Where a person opens a source a reader cannot take. */
+const WHERE_A_PERSON_OPENS_ONE = "under Sources on the task page";
+
+/** One source's record with its bytes, or with the sentence that says they
+ *  are gone from the store. Null for an id the task does not keep. */
+function keptSourceBytes(
+  slug: string,
+  key: string,
+  id: string,
+  dataRoot?: string,
+): { source: TaskSource; bytes: Buffer } | { source: TaskSource; unreadable: string } | null {
+  const resolved = resolveTaskSource(slug, key, id, dataRoot);
+  if (!resolved) return null;
+  const { source, abs } = resolved;
+  const read = readAttachmentBytes(abs, SOURCE_MAX_BYTES);
+  if (!read || "tooLarge" in read) {
+    return {
+      source,
+      unreadable: `${source.id} (\`${source.name}\`) is on ${key}'s list of sources, but its bytes are not in the store as they were kept.`,
+    };
+  }
+  return { source, bytes: read.bytes };
+}
+
 /** A kept source as a reader takes it. */
 export interface TaskSourceRead {
   source: TaskSource;
@@ -396,22 +422,37 @@ export function readTaskSource(
   dataRoot?: string,
   offset = 0,
 ): TaskSourceRead | null {
-  const resolved = resolveTaskSource(slug, key, id, dataRoot);
-  if (!resolved) return null;
-  const { source, abs } = resolved;
-  const read = readAttachmentBytes(abs, SOURCE_MAX_BYTES);
-  if (!read || "tooLarge" in read) {
-    return {
-      source,
-      content: {
-        unreadable: `${source.id} (\`${source.name}\`) is on ${key}'s list of sources, but its bytes are not in the store as they were kept.`,
-      },
-    };
-  }
-  return {
-    source,
-    content: readAttachmentContent(source.name, read.bytes, offset, "under Sources on the task page"),
-  };
+  const kept = keptSourceBytes(slug, key, id, dataRoot);
+  if (!kept) return null;
+  const { source } = kept;
+  if ("unreadable" in kept) return { source, content: { unreadable: kept.unreadable } };
+  return { source, content: readAttachmentContent(source.name, kept.bytes, offset, WHERE_A_PERSON_OPENS_ONE) };
+}
+
+/** A kept source as a search answers it. */
+export interface TaskSourceFind {
+  source: TaskSource;
+  find: AttachmentFind;
+}
+
+/**
+ * Ruling 706: the places in one source that hold `words`, searched in the
+ * text a read of it pages (`findInAttachmentContent`), from `offset` on. Null
+ * for an id the task does not keep.
+ */
+export function findInTaskSource(
+  slug: string,
+  key: string,
+  id: string,
+  words: readonly string[],
+  dataRoot?: string,
+  offset = 0,
+): TaskSourceFind | null {
+  const kept = keptSourceBytes(slug, key, id, dataRoot);
+  if (!kept) return null;
+  const { source } = kept;
+  if ("unreadable" in kept) return { source, find: { unreadable: kept.unreadable } };
+  return { source, find: findInAttachmentContent(source.name, kept.bytes, words, offset, WHERE_A_PERSON_OPENS_ONE) };
 }
 
 /** How much of where a source came from a row on the task page carries. */

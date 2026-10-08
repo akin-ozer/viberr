@@ -30,10 +30,11 @@ List every outside fact: numbers, quotes, versions, dates, names, statements abo
 
 - No kept source: blocking, however plausible the fact.
 - The source says something narrower, older or different: blocking, and quote both.
+- The source is a record that grows (a decisions file, a changelog, release notes, a thread) and the piece says what holds now: the entry cited is where you start, not where you stop. Search the kept record for the later entries on the same subject: what that sentence states (the figure, the setting, the behaviour it names), under the words the record uses for it. `read_task_source` with `find` lists every place that holds a word or phrase, each with its line. Read the ones dated after the entry cited. A later entry that changes what the piece states is blocking: quote the piece, the entry it rests on and the later one.
 - A claim in a headline or opening that the body later qualifies: the unqualified one is the defect.
 - Links: open each one. A link that does not resolve blocks.
 
-Check what the piece states. Do not research the subject again or re-measure what does not bear on a claim.
+Check what the piece states. Do not research the subject again or re-measure what does not bear on a claim. Reading a kept record past the line cited is neither: it is finding the words that hold now.
 
 ### 3. First person and invention
 

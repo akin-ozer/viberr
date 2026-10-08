@@ -224,6 +224,84 @@ describe("ruling 692: the library ships a Writer and an Editor", () => {
   });
 });
 
+/**
+ * Ruling 706, live on BLOG-7. The post said of a request, "How much of it
+ * comes from the cache isn't recorded", on the word of a ruling of
+ * 2026-09-26. A ruling two days later, 62 lines further down the same kept
+ * decisions file, had the product print exactly that. The Writer cited the
+ * entry it found, and the Editor checked the sentence against the line cited:
+ * at high effort in four minutes, and again at max in nineteen. Two outside
+ * checks, told only to check every claim, both found the later entry.
+ */
+describe("ruling 706: a record that grows is read to its latest entry on the subject", () => {
+  const said = (dataRoot: string, name: string) =>
+    readFileSync(path.join(dataRoot, "skills", name, "SKILL.md"), "utf8").replace(/\s+/g, " ");
+
+  it("has the Writer state what the latest entry says, and the Editor read past the entry cited", () => {
+    // CANARY: drop the Writer's bullet, or the Editor's, or the sentence that
+    // says reading the kept record further is not research.
+    const dataRoot = ctx.makeTempDir();
+    seedDefaultAgentAssets(dataRoot);
+    const writer = said(dataRoot, "writer-expertise");
+    expect(writer).toContain("**A record that grows goes stale inside itself.**");
+    expect(writer).toContain("an entry says what held on its date, and a later entry may have changed it");
+    expect(writer).toContain("search the whole record for the later entries on the same subject, read them, and state what the latest one says. Cite that one.");
+    const editor = said(dataRoot, "editor-expertise");
+    expect(editor).toContain(
+      "The source is a record that grows (a decisions file, a changelog, release notes, a thread) and the piece says what holds now: " +
+        "the entry cited is where you start, not where you stop.",
+    );
+    // What "the same subject" covers is said, so the search is of what one
+    // sentence states and not of everything the piece is about.
+    expect(editor).toContain(
+      "Search the kept record for the later entries on the same subject: what that sentence states (the figure, the setting, the behaviour it names), under the words the record uses for it.",
+    );
+    expect(editor).toContain("`read_task_source` with `find` lists every place that holds a word or phrase, each with its line. Read the ones dated after the entry cited.");
+    expect(editor).toContain("A later entry that changes what the piece states is blocking: quote the piece, the entry it rests on and the later one.");
+    // The line under the list told the Editor not to research the subject
+    // again, which reads as a reason to stop at the line cited.
+    expect(editor).toContain("Reading a kept record past the line cited is neither: it is finding the words that hold now.");
+    // Neither sentence is about one kind of writing or one kind of record.
+    for (const manual of [writer, editor]) {
+      expect(manual).toContain("decisions file, a changelog, release notes");
+      expect(manual).not.toMatch(/\bblog\b/i);
+    }
+    // A store whose copy nobody edited takes the new text at its next boot.
+    // CANARY: remove either outgoing hash.
+    expect(shippedCopyIsUnedited("skills/writer-expertise/SKILL.md", "92789f682bfe7b9bc16780687ce552ad79b729a9af4a768be5ef36b63935004f", {})).toBe(true);
+    expect(shippedCopyIsUnedited("skills/editor-expertise/SKILL.md", "4db16badd8b3fccd4e2e0bcbe9a09709da677d53584de03baf77adb230a18709", {})).toBe(true);
+  });
+
+  it("has the Reviewer every other board deploys do the same, in one sentence of its source check", () => {
+    // The Editor is one board's reviewer. A price list, a changelog or an
+    // issue thread kept on any results board goes stale the same way, and the
+    // Reviewer's manual sent it to "the source it cites" and no further.
+    // CANARY: drop the sentence, or its outgoing hash.
+    const dataRoot = ctx.makeTempDir();
+    seedDefaultAgentAssets(dataRoot);
+    const reviewer = said(dataRoot, "reviewer-expertise");
+    expect(reviewer).toContain(
+      "When the source is a record that grows (a changelog, a decisions file, a thread) and the work states what holds now, a later entry may have changed the one it cites: " +
+        "search the source for the subject (`read_task_source` with `find`), read the later entries, and report one that says otherwise.",
+    );
+    expect(shippedCopyIsUnedited("skills/reviewer-expertise/SKILL.md", "6703e3624becd424684c32a912b403fddf5d71994023d706fdac6613d724def7", {})).toBe(true);
+  });
+
+  it("has the guide deploy the Editor at high effort, with what a review took at each", () => {
+    // The owner's trial on BLOG-7: the Editor at `high` reviewed a full post
+    // in under four minutes and sent two real faults back; at `max`, on the
+    // same post and pictures, it took nineteen and found nothing more. The
+    // first board's controller had given it the writer's `max`.
+    // CANARY: drop the sentence, or its outgoing hash.
+    const dataRoot = ctx.makeTempDir();
+    seedDefaultAgentAssets(dataRoot);
+    const guide = said(dataRoot, "controller-guide");
+    expect(guide).toContain("Deploy the Editor at `high` effort");
+    expect(guide).toContain("its review of a full piece took 4 minutes at `high`, and a review of the same piece and pictures at `max` took 19 and found nothing more");
+    expect(shippedCopyIsUnedited("skills/controller-guide/SKILL.md", "a9ff90ee8fc6a085586d661a8d56cccdb5e52f489027afd4f0db9d71db5bd3e7", {})).toBe(true);
+  });
+});
+
 describe("ruling 699: the library ships a Diagrammer and a Cover Designer", () => {
   const profileOf = (id: string) => LIBRARY_AGENT_PROFILES.find((p) => p.frontmatter.id === id);
   const grantsOf = (id: string): Map<string, string> =>

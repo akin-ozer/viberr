@@ -480,14 +480,16 @@ export function buildOperatorToolkit(deps: ToolkitDeps): OperatorToolkit {
         id: z.string().optional().describe(READ_TASK_SOURCE_FIELDS.id),
         taskKey: z.string().optional().describe(READ_TASK_SOURCE_FIELDS.taskKey),
         offset: z.number().int().min(0).optional().describe(READ_TASK_SOURCE_FIELDS.offset),
+        find: z.string().optional().describe(READ_TASK_SOURCE_FIELDS.find),
       },
       // eslint-disable-next-line @typescript-eslint/require-await
-      async (args: { id?: string; taskKey?: string; offset?: number }) => {
+      async (args: { id?: string; taskKey?: string; offset?: number; find?: string }) => {
         const read = readAgentTaskSource(
           { db, ctx, projectSlug },
           args.taskKey?.trim() || taskKey,
           args.id,
           args.offset ?? 0,
+          args.find,
         );
         return "text" in read ? textResult(read.text) : imageResult(read.header, read.image);
       },
