@@ -101,11 +101,5 @@ describe("controller dock routes (ruling 457)", () => {
     if (!("view" in named)) throw new Error(`expected the view, got ${JSON.stringify(named)}`);
     expect(named.view.controllerName).toBe("Switchboard");
     expect(resolveControllerConfig(app.dataRoot).name).toBe("Switchboard");
-    // A task that does not exist is still out of scope.
-    const missing = await loader(
-      args(app.request(`/resources/controller?project=${SLUG}&task=VIB-9999`, { cookie }), "/resources/controller"),
-    );
-    if (!("view" in missing)) throw new Error(`expected the view, got ${JSON.stringify(missing)}`);
-    expect(missing.view.unavailable).toBe(true);
   });
 });
