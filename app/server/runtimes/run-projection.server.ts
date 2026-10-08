@@ -73,7 +73,7 @@ export const SDK_LABEL = {
  * The line budget is declared in runtime-types.ts, because the console reads
  * it too (ruling 457, CON-2: a tail further behind than one window re-windows).
  */
-export const RUN_LOG_WINDOW_BYTES = 384 * 1024;
+const RUN_LOG_WINDOW_BYTES = 384 * 1024;
 
 /** Backward-paging cursor + honesty markers for one agent group's console.
  *

@@ -2,11 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { RUN_LOG_WINDOW_LINES, type LogLine } from "~/features/runtime/runtime-types";
 import { createTestDbContext, type TestDbContext } from "../../../test-support/test-db";
 import { insertRunLine, patchRun, upsertRun, type InsertRunInput } from "./run-store.server";
-import {
-  RUN_LOG_WINDOW_BYTES,
-  projectRunsForTask,
-  runLogWindowFor,
-} from "./run-projection.server";
+import { projectRunsForTask, runLogWindowFor } from "./run-projection.server";
 import { getRun } from "./run-store.server";
 import { runStatePill } from "~/features/runtime/runs-helpers";
 
@@ -499,7 +495,8 @@ describe("projectRunsForTask — bounded log window", () => {
     const [view] = projectRunsForTask(db, SLUG, TASK);
     expect(view!.lines.length).toBeLessThan(30);
     const bytes = view!.raw.reduce((sum, r) => sum + r.length, 0);
-    expect(bytes).toBeLessThanOrEqual(RUN_LOG_WINDOW_BYTES);
+    // The documented window: 400 lines / 384 KiB per agent group.
+    expect(bytes).toBeLessThanOrEqual(384 * 1024);
     expect(view!.logWindow.hasMore).toBe(true);
     // Still the newest ones.
     expect(textsOf(view!.lines).at(-1)).toBe("line 29");
@@ -535,7 +532,7 @@ describe("projectRunsForTask — bounded log window", () => {
 
   it("keeps the newest line even when it alone busts the byte budget", () => {
     insert({ id: "run_huge", threadId: "primary", agentName: "dev", agentProfileId: "dev" });
-    fill("run_huge", 1, RUN_LOG_WINDOW_BYTES * 2);
+    fill("run_huge", 1, 768 * 1024);
     const [view] = projectRunsForTask(db, SLUG, TASK);
     // An empty console is a worse answer than an oversized one.
     expect(view!.lines.length).toBe(1);
