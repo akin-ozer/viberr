@@ -1,15 +1,13 @@
 import { describe, expect, it } from "vitest";
-import {
-  isMcpHealthStale,
-  isReconcileStale,
-  isStale,
-  STALE_AFTER_MS,
-} from "./freshness-policy.server";
+import { isMcpHealthStale, isStale, STALE_AFTER_MS } from "~/shared/freshness";
+import { isReconcileStale } from "./freshness-policy.server";
 
 /**
  * P13-D-32: the GitHub reconcile chip and the MCP health dot each carried their
- * own 1-hour constant, the second inside a React component. One policy now,
- * asserted through the `server/interpretation/` door the architecture names.
+ * own 1-hour constant, the second inside a React component. One policy now: the
+ * predicates live in `~/shared/freshness`, which the client component reads,
+ * and the server reads the reconcile rule through the `server/interpretation/`
+ * door the architecture names.
  */
 
 const NOW = Date.parse("2026-07-24T12:00:00.000Z");

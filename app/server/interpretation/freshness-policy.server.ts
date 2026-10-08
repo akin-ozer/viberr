@@ -16,9 +16,4 @@
  * here; add anything the UI also needs to `~/shared/freshness`.
  */
 
-export {
-  isMcpHealthStale,
-  isReconcileStale,
-  isStale,
-  STALE_AFTER_MS,
-} from "~/shared/freshness";
+export { isReconcileStale } from "~/shared/freshness";
