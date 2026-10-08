@@ -1470,12 +1470,13 @@ describe("ruling 527: a message sent while a turn works steers it", () => {
       userLabel: "selin@viberr.dev",
       projectSlug: null,
     });
-    const send = async (text: string, mode?: "queue") => {
+    const send = async (text: string, mode?: "queue", files?: ControllerTurnInput["files"]) => {
       const result = await runControllerTurn(app.db, {
         conversationId: conversation.id,
         text,
         user: { ...user, id: ownerId },
         mode,
+        files,
         dataRoot: app.dataRoot,
       });
       if (result.state === "refused") throw new Error(`refused: ${result.reason}`);
@@ -1494,7 +1495,9 @@ describe("ruling 527: a message sent while a turn works steers it", () => {
     const first = await send("Clean up the calculator agent.");
     if (first.state !== "started") throw new Error(`turn ${first.state}`);
     const queued = await send("QUEUED: then list what is left.", "queue");
-    const steering = await send("STEER: I deleted its KB already.");
+    const steering = await send("STEER: I deleted its KB already.", undefined, [
+      { name: "rvtools.xlsx", data: new Uint8Array(40_000) },
+    ]);
     expect([queued.state, steering.state]).toEqual(["queued", "steering"]);
     expect(conversationTurnState(app.db, conversation.id)).toMatchObject({
       answering: first.messageId,
@@ -1507,12 +1510,16 @@ describe("ruling 527: a message sent while a turn works steers it", () => {
     // next boot notes it as a restart).
     const channel = lastRunSpec()!.steering!;
     const delivery = channel.take();
+    // Ruling 573: its file is named after its words. CANARY: drop
+    // `withFilesNote` from `steeringText` and a file sent while a turn worked
+    // reaches it as words alone.
     expect(delivery).toEqual({
       count: 1,
       text:
         "selin@viberr.dev sent this while you were working on this turn. It is part of this turn: take it " +
         "into account from here, and answer it in the reply you write for this turn.\n\n" +
-        "STEER: I deleted its KB already.",
+        "STEER: I deleted its KB already.\n\n" +
+        "A file came with this message: `rvtools.xlsx` (39 KB). Read it with `read_message_file` before you say what it holds.",
     });
     expect(channel.take()).toBeNull();
     const byId = () => new Map(listMessages(app.db, conversation.id).map((m) => [m.id, m]));

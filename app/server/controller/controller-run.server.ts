@@ -626,7 +626,7 @@ function steeringChannel(
  * The message gets no reply of its own, so the turn's reply is where its
  * sender hears back.
  */
-export function steeringText(
+function steeringText(
   conversation: Pick<ControllerConversation, "userLabel">,
   messages: readonly (Pick<WaitingMessage, "text" | "surface"> & { files?: readonly MessageFile[] })[],
 ): string {
