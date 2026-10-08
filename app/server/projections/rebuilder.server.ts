@@ -266,7 +266,7 @@ function projectContextForTasks(
   };
 }
 
-export function rebuildProjectFile(
+function rebuildProjectFile(
   db: DatabaseSync,
   slug: string,
   options: RebuildOptions = {},

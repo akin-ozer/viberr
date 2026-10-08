@@ -21,12 +21,10 @@ describe("rebuildProjections (Phase 10 recovery hammer)", () => {
     });
     rebuildAll(store.db, { dataRoot: store.dataRoot });
 
-    // Poison a projection row to simulate drift; the rebuild must discard it.
+    // Poison a projection row whose hash still matches its file: a rescan's
+    // hash short-circuit keeps it, so only the hammer's drop clears it.
     store.db
-      .prepare(
-        `UPDATE task_projections SET title = 'stale', content_hash = 'bogus'
-         WHERE task_key = 'VIB-1'`,
-      )
+      .prepare(`UPDATE task_projections SET title = 'stale' WHERE task_key = 'VIB-1'`)
       .run();
 
     const summary = rebuildProjections(store.db, { dataRoot: store.dataRoot });
