@@ -1119,7 +1119,12 @@ them.
    unanswered."). The remedy half of each refusal ("Move the task through the workflow
    first") stays in `bypassedGates` only. A decision the force ANSWERS (ruling 471, step
    7) is not withdrawn, so `withdrawnPacket` is null and the list does not name it. The
-   force dialog lists the same gates (`AcceptanceAffordance.blockedGates`, ruling 393).
+   row and the event read one disclosure, built once with the live no-change probe the
+   acceptance closes on (ruling 705). The force dialog lists the same gates
+   (`AcceptanceAffordance.blockedGates`, ruling 393), read in the loader without the
+   probe, so on a task with no PR the record can differ from it: it names the probe's
+   "carries N commit(s) ahead" gate, which the dialog does not show, and leaves out "no
+   review pull request" when the probe found the branch empty or absent.
    Force never bypasses two facts: a
    closed unmerged PR (ruling 37) and an **archived** task (ruling 123) — restore it
    first. Both are `forceIrreducibleRefusal`, and on an archived task the affordance is

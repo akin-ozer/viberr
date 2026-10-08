@@ -193,6 +193,23 @@ function seedVerificationTask(
   rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
 }
 
+/** F28-L1's shape: a delivered task with a branch and a work revision, whose
+ *  deliverer never set `noChanges` or opened a PR, and no reviewer engaged, so
+ *  the gates that stand are the ones the live probe decides. */
+const UNCLAIMED_DELIVERY: Partial<TaskFrontmatter> = {
+  engagements: [],
+  branch: "vib-1-work",
+  workRevision: {
+    id: "rev_unclaimed",
+    headSha: BASE_SHA,
+    treeSha: "t".repeat(40),
+    branch: "vib-1-work",
+    createdAt: "2026-08-26T09:00:00.000Z",
+    sourceProfileId: "developer",
+    kind: "delivered",
+  },
+};
+
 function task() {
   return readTaskFile({
     projectSlug: store.slug,
@@ -522,19 +539,7 @@ describe("acceptance closes it — with its OWN completion event, and no merge",
     // set `noChanges`, no PR was opened, and the branch is 0 commits ahead of
     // main (e.g. a shallow-clone speculative mint, or an out-of-band branch
     // reset). No required reviewer, so the only bar is the R15-1 verdict gate.
-    seedVerificationTask({
-      engagements: [],
-      branch: "vib-1-work",
-      workRevision: {
-        id: "rev_unclaimed",
-        headSha: BASE_SHA,
-        treeSha: "t".repeat(40),
-        branch: "vib-1-work",
-        createdAt: "2026-08-26T09:00:00.000Z",
-        sourceProfileId: "developer",
-        kind: "delivered",
-      },
-    });
+    seedVerificationTask(UNCLAIMED_DELIVERY);
     // Branch exists and is verified EMPTY (0 ahead) — the R20-2 auto-detect case.
     remote({ aheadBy: 0, branch: "vib-1-work" });
 
@@ -612,6 +617,40 @@ describe("acceptance closes it — with its OWN completion event, and no merge",
     expect(completion?.text).not.toContain("completed with no changes");
     expect(listAuditEvents(store.db, { action: "task.acceptance.forced" })).toHaveLength(1);
   });
+
+  it.each([
+    // Work on the branch: the probe's counted sentence is a gate the force jumped.
+    { aheadBy: 2, gates: [/carries 2 commit\(s\) ahead of `main`/, /has delivered work but no review pull request/] },
+    // A branch verified empty: the probe cleared "no review pull request".
+    { aheadBy: 0, gates: [] },
+  ])(
+    "ruling 393: a force-accept's audit row and completion event name the gates the probe found ($aheadBy ahead)",
+    async ({ aheadBy, gates }) => {
+      // CANARY: build the audit row's disclosure without the probe — ahead by 2
+      // the row drops the counted gate the event names; ahead by 0 it names the
+      // "no review pull request" gate the probe cleared. Probe again in
+      // acceptCompletion instead of closing on the carried run, and the compare
+      // is asked twice.
+      seedVerificationTask(UNCLAIMED_DELIVERY);
+      remote({ aheadBy, branch: "vib-1-work" });
+
+      await forceAcceptCompletion(
+        store.db,
+        { projectSlug: store.slug, taskKey: "VIB-1" },
+        arda(),
+        dataCtx(),
+      );
+
+      expect(task().frontmatter.stage).toBe("done");
+      const named = gates.map((gate) => expect.stringMatching(gate));
+      const row = listAuditEvents(store.db, { action: "task.acceptance.forced" })[0]!;
+      expect(row.details?.bypassedGates).toEqual(named);
+      const clause = / Bypassed: (.+)\.$/.exec(completionEvent()!.text)?.[1];
+      expect(clause?.split("; ") ?? []).toEqual(named);
+      // One probe run: the record and the acceptance read the same answer.
+      expect(github.callsTo(`GET ${REPO}/compare/main...vib-1-work`)).toHaveLength(1);
+    },
+  );
 
   it("R19-8: the packet path runs the same check", async () => {
     // CANARY: remove the check from resolvePacket's inlined accept.

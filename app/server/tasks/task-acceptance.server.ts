@@ -762,9 +762,14 @@ export interface ForceAcceptDisclosure {
 }
 
 /**
- * U35-3 (pass 35): ONE builder for the force record, read by the audit row and
- * by the forced `completion` event, so the timeline, the audit log and the
- * confirm dialog list the same bypasses. `gates` keeps every sentence the
+ * U35-3 (pass 35): ONE builder for the force record. `forceAcceptCompletion`
+ * calls it once, with the live no-change probe the acceptance then closes on,
+ * and the audit row and the forced `completion` event both read that value, so
+ * the two name the same bypasses (ruling 393). The confirm dialog lists the
+ * gates the loader reads without the probe (it makes no GitHub call): on a
+ * PR-less task the probe can still add the counted "carries N commit(s)" gate,
+ * or clear "no review pull request" for a branch it found empty or absent, and
+ * the record names what the probe found. `gates` keeps every sentence the
  * single-reason gate would have picked first; `skippedStageIds` mirrors the
  * dialog's "Skips <stages>" row; `withdrawnPacket` its "Withdraws" row.
  */
@@ -772,15 +777,14 @@ function forceAcceptDisclosure(
   project: ProjectContext,
   parsed: { frontmatter: TaskFrontmatter; packet: TaskPacket | null; timeline: readonly TaskFileEvent[] },
   taskKey: string,
-  opts: { noChange?: AcceptanceNoChangeCheck } = {},
+  noChange: AcceptanceNoChangeCheck,
 ): ForceAcceptDisclosure {
   const fm = parsed.frontmatter;
-  const refusalOpts: AcceptanceRefusalOptions = {
+  const gates = acceptanceRefusalReasons(project, fm, taskKey, {
     blockedPacket: fm.readiness === "blocked" && parsed.packet?.type === "blocked",
+    noChange,
     subjectAuthor: reviewSubjectAuthor(fm, parsed.timeline),
-  };
-  if (opts.noChange) refusalOpts.noChange = opts.noChange;
-  const gates = acceptanceRefusalReasons(project, fm, taskKey, refusalOpts);
+  });
   const terminalId = terminalStageIdOf(project);
   const stageIndex = project.stages.findIndex((s) => s.id === fm.stage);
   const atBoundary = acceptanceStageBlockedReason(project, fm.stage, taskKey) === null;
@@ -1429,6 +1433,10 @@ export interface AcceptanceAffordance {
    * confirmed "Bypassing: Waiting on 1 required reviewer approval of the
    * current revision." and the audit row recorded that gate AND the project's
    * required-reviewer rule.
+   *
+   * Read without the live no-change probe (a loader makes no GitHub call), so
+   * on a PR-less task the force record can still differ from it in the two
+   * gates the probe decides (see `forceAcceptDisclosure`).
    */
   blockedGates: string[];
   /**
@@ -2155,7 +2163,12 @@ export async function acceptCompletion(
   input: {
     projectSlug: string;
     taskKey: string;
-    force?: boolean;
+    /** DG-2: the audited admin override, as `forceAcceptCompletion` read it
+     *  before the write: the live no-change probe and the disclosure built with
+     *  it (U35-3). The acceptance closes on that probe run and its completion
+     *  event names that disclosure's gates, the ones the audit row records, so
+     *  neither is read a second time here (ruling 393). */
+    force?: { noChange: AcceptanceNoChangeCheck; disclosure: ForceAcceptDisclosure };
     /** Ruling 88 (F21-2) — the acceptance disclosure the human acknowledged.
      *  Three states, documented on `assertAcceptanceDisclosure`: an echo to
      *  verify, an explicit `null` from a door whose request carried none (a
@@ -2206,13 +2219,11 @@ export async function acceptCompletion(
   // pull request" refusal used to throw here first, so the probe (and the
   // auto-detect built to accept exactly this) never ran. R19-8 still holds: a
   // stale `noChanges` claim on a branch that has since gained commits fails
-  // closed via `noChange.refusal` below.
-  const noChange = await acceptanceNoChangeCheck(
-    db,
-    ctx,
-    input.projectSlug,
-    input.taskKey,
-  );
+  // closed via `noChange.refusal` below. A forced acceptance carries the probe
+  // its record was built with (ruling 393).
+  const noChange =
+    input.force?.noChange ??
+    (await acceptanceNoChangeCheck(db, ctx, input.projectSlug, input.taskKey));
 
   // Every acceptance gate — graph position, required reviewers, the R15-1
   // verdict gate, blocked packet, closed/conflicting PR, archived task — comes
@@ -2394,13 +2405,10 @@ export async function acceptCompletion(
   if (noChange.applies) {
     event.text += emptyBranchNote(branchDisposition, input.taskKey);
   }
-  // U35-3 (pass 35): a forced acceptance says on the record what it jumped,
-  // the same list the confirm dialog showed and the audit row carries.
+  // U35-3 (pass 35): a forced acceptance says on the record what it jumped:
+  // the disclosure its audit row carries too (ruling 393).
   if (input.force) {
-    event.text += forceBypassClause(
-      project,
-      forceAcceptDisclosure(project, existing.parsed, input.taskKey, { noChange }),
-    );
+    event.text += forceBypassClause(project, input.force.disclosure);
   }
   const acceptance: Parameters<typeof applyAcceptanceWrite>[2] = {
     projectSlug: input.projectSlug,
@@ -2540,7 +2548,8 @@ export async function cleanUpEmptyTaskBranch(
  * Admin-only override of the acceptance gate (DG-2). When a task is wedged —
  * a required reviewer that can no longer record a verdict, or a stale blocked
  * packet — a plain accept throws forever. An admin may force it: we record the
- * exact reason being bypassed to the audit log, then accept with `force: true`.
+ * exact reason being bypassed to the audit log, then accept with `force`
+ * carrying that same record.
  */
 export async function forceAcceptCompletion(
   db: DatabaseSync,
@@ -2605,7 +2614,15 @@ export async function forceAcceptCompletion(
   // one the single-reason helper happened to pick (KNC-10: the record said a
   // stage boundary was skipped and never that a failing verdict was
   // overridden). `bypassed` stays a string for its existing readers.
-  const disclosure = forceAcceptDisclosure(project, existing.parsed, input.taskKey);
+  // Ruling 393: the live no-change probe decides two of those gates (a branch
+  // carrying commits adds the counted sentence, a branch it found empty or
+  // absent clears "no review pull request"). It runs ONCE, here:
+  // `acceptCompletion` closes on this run and writes the completion event from
+  // this disclosure, so the row and the event name the same gates. A row read
+  // without the probe left out a gate the event named, or kept one the probe
+  // had cleared.
+  const noChange = await acceptanceNoChangeCheck(db, ctx, input.projectSlug, input.taskKey);
+  const disclosure = forceAcceptDisclosure(project, existing.parsed, input.taskKey, noChange);
   const bypassed =
     disclosure.gates.length > 0
       ? disclosure.gates.join(" | ")
@@ -2615,7 +2632,7 @@ export async function forceAcceptCompletion(
   const forced: Parameters<typeof acceptCompletion>[1] = {
     projectSlug: input.projectSlug,
     taskKey: input.taskKey,
-    force: true,
+    force: { noChange, disclosure },
   };
   if ("ack" in input) forced.ack = input.ack ?? null;
   const accepted = await acceptCompletion(db, forced, actor, ctx);
