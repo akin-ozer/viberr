@@ -230,8 +230,9 @@ scan run from inside an agent worktree under `.claude/` sees no files at all.
   `nextList`, `difference`). A `.find()` per item over one project's deployed agents
   (settings-actions `validateRequiredReviewerRules`, one per submitted rule, stopping at the
   first refusal), over one task's engagements (task-acceptance `refreshAndReview`, one per
-  reviewer it starts) and over the page renderer's widths (page-capture.server.ts
-  `render`'s `views.find` per reported shot, at most the two of PAGE_CAPTURE_VIEWS). The
+  reviewer it starts) and over the page renderer's views (page-capture.server.ts
+  `render`'s `views.find` per reported shot: the widths of PAGE_CAPTURE_VIEWS a run asked
+  for, at most two, or the one box it named, ruling 698). The
   other way round, a loop over the renderer's widths: page-capture.server.ts
   `captureReplyText` runs `page.shots.find` and `page.ended.find` once per width of
   PAGE_CAPTURE_VIEWS (two per reply), over the page's reported shots and ends, which
