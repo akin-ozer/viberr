@@ -39,22 +39,16 @@ async function setSpendCap(
   fd.set("maxRunSpendUsd", value);
   fd.set("_csrf", csrf);
   const request = app.request("/org/settings", { method: "POST", body: fd, cookie });
-  try {
-    const result = await action({
-      request,
-      url: new URL(request.url),
-      pattern: "/org/settings",
-      params: {},
-      context: new RouterContextProvider(),
-    });
-    const body = "data" in result ? result.data : result;
-    const status = "init" in result ? (result.init?.status ?? 200) : 200;
-    return { status, body };
-  } catch (thrown) {
-    // requireRoleAuth throws a Response for a non-admin.
-    if (thrown instanceof Response) return { status: thrown.status, body: { ok: false } };
-    throw thrown;
-  }
+  const result = await action({
+    request,
+    url: new URL(request.url),
+    pattern: "/org/settings",
+    params: {},
+    context: new RouterContextProvider(),
+  });
+  const body = "data" in result ? result.data : result;
+  const status = "init" in result ? (result.init?.status ?? 200) : 200;
+  return { status, body };
 }
 
 describe("org-settings set-run-spend-cap (ruling 175)", () => {
