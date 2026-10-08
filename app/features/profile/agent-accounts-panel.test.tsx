@@ -46,6 +46,21 @@ const HEALTH_NONE = {
   accountName: null,
 } as const;
 
+/** A backend's connected sign-in (Claude's claude.ai flow, Codex's device
+ *  flow), verified and connected on 2026-09-01. */
+const connectedHealth = (name: "claude" | "codex") => ({
+  ...HEALTH_NONE,
+  backend: name,
+  userId: "u_arda",
+  available: true,
+  kind: "login" as const,
+  method: name === "claude" ? ("claudeai" as const) : ("device" as const),
+  verification: "file" as const,
+  verifiedAt: "2026-09-01T10:00:00.000Z",
+  connectedAt: "2026-09-01T10:00:00.000Z",
+  detail: null,
+});
+
 function backend(
   name: "claude" | "codex",
   overrides: Partial<ProfileBackend> = {},
@@ -384,20 +399,7 @@ describe("AgentAccountsPanel", () => {
   it("connected: names the method, dates the connection and offers Disconnect", () => {
     const { container, getByText, getByRole } = renderPanel([
       backend("claude", {
-        health: {
-          ...HEALTH_NONE,
-          backend: "claude",
-          userId: "u_arda",
-          available: true,
-          kind: "login",
-          method: "claudeai",
-          verification: "file",
-          verifiedAt: "2026-09-01T10:00:00.000Z",
-          connectedAt: "2026-09-01T10:00:00.000Z",
-          detail: null,
-          accountId: "ubc_claude",
-          accountName: "person@example.com",
-        },
+        health: { ...connectedHealth("claude"), accountId: "ubc_claude", accountName: "person@example.com" },
       }),
       backend("codex", {
         health: {
@@ -459,21 +461,9 @@ describe("AgentAccountsPanel", () => {
 
   it("ruling 130(d): a connected card shows the last refusal Viberr observed on the account, or a spent window as a neutral pill", () => {
     // Canary: remove the `lastRefusal` render branch and both pills vanish.
-    const connected = (name: "claude" | "codex") => ({
-      ...HEALTH_NONE,
-      backend: name,
-      userId: "u_arda",
-      available: true,
-      kind: "login" as const,
-      method: name === "claude" ? ("claudeai" as const) : ("device" as const),
-      verification: "file" as const,
-      verifiedAt: "2026-09-01T10:00:00.000Z",
-      connectedAt: "2026-09-01T10:00:00.000Z",
-      detail: null,
-    });
     const { container } = renderPanel([
       backend("claude", {
-        health: connected("claude"),
+        health: connectedHealth("claude"),
         lastRefusal: {
           kind: "credential",
           providerText: "The account's organization does not allow Claude Code (oauth_org_not_allowed).",
@@ -484,7 +474,7 @@ describe("AgentAccountsPanel", () => {
         },
       }),
       backend("codex", {
-        health: connected("codex"),
+        health: connectedHealth("codex"),
         lastRefusal: {
           kind: "quota",
           providerText: "You've hit your usage limit.",
@@ -530,22 +520,7 @@ describe("AgentAccountsPanel", () => {
   });
 
   it("C6: the connected-on and verified dates hydrate safely — the UTC day first, the viewer's calendar date after hydration", () => {
-    const backends = [
-      backend("claude", {
-        health: {
-          ...HEALTH_NONE,
-          backend: "claude",
-          userId: "u_arda",
-          available: true,
-          kind: "login",
-          method: "claudeai",
-          verification: "file",
-          verifiedAt: "2026-09-01T10:00:00.000Z",
-          connectedAt: "2026-09-01T10:00:00.000Z",
-          detail: null,
-        },
-      }),
-    ];
+    const backends = [backend("claude", { health: connectedHealth("claude") })];
     // The server pass depends on the timestamp alone: the SSR host's zone is
     // not the viewer's, and a calendar date rendered in it hydrates to
     // different text near midnight (React #418).
@@ -781,19 +756,6 @@ describe("AgentAccountsPanel", () => {
  * name the wrong day and claims precision the record never had.
  */
 describe("the usage-window reset renders at the precision it has", () => {
-  const connectedHealth = (name: "claude" | "codex") => ({
-    ...HEALTH_NONE,
-    backend: name,
-    userId: "u_arda",
-    available: true,
-    kind: "login" as const,
-    method: name === "claude" ? ("claudeai" as const) : ("device" as const),
-    verification: "file" as const,
-    verifiedAt: "2026-09-01T10:00:00.000Z",
-    connectedAt: "2026-09-01T10:00:00.000Z",
-    detail: null,
-  });
-
   it("a prose-derived reset shows the UTC day; an exact one keeps its clock", () => {
     // Canary: drop `resetsAtPrecision` from the card (render every reset with
     // `LocalDayDotTime`) — the prose case regains a minute it never had.
@@ -841,16 +803,9 @@ describe("the usage-window reset renders at the precision it has", () => {
  */
 describe("ruling 294: copy the sign-in link", () => {
   const CONNECTED_CLAUDE = {
-    ...HEALTH_NONE,
-    backend: "claude" as const,
-    userId: "u_arda",
-    available: true,
-    kind: "login" as const,
-    method: "claudeai" as const,
-    verification: "file" as const,
+    ...connectedHealth("claude"),
     verifiedAt: "2026-09-15T09:00:00.000Z",
     connectedAt: "2026-09-15T09:00:00.000Z",
-    detail: null,
   };
 
   function clipboardSpy() {
@@ -1025,21 +980,7 @@ function account(
     name,
     label,
     active,
-    health: {
-      ...HEALTH_NONE,
-      backend: "claude",
-      userId: "u_arda",
-      available: true,
-      kind: "login",
-      method: "claudeai",
-      verification: "file",
-      verifiedAt: "2026-09-01T10:00:00.000Z",
-      connectedAt: "2026-09-01T10:00:00.000Z",
-      detail: null,
-      accountId: id,
-      accountName: name,
-      ...health,
-    },
+    health: { ...connectedHealth("claude"), accountId: id, accountName: name, ...health },
   };
 }
 
