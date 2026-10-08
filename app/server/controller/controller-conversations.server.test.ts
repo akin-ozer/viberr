@@ -587,7 +587,7 @@ describe("a working turn streams to its owner", () => {
   it("publishes controller.log-appended per line and controller.updated for the lifecycle", async () => {
     // Canary: drop `controller` from the sink's line publish and the owner
     // receives the lifecycle references but never a line.
-    const { connectSseClient } = await import("~/server/events/sse-broker.server");
+    const { recordSse } = await import("../../../test-support/sse-client");
     const { createConversation } = await import("./controller-conversations.server");
     const { runControllerTurn } = await import("./controller-run.server");
     const { queueFakeRun } = await import("../../../test-support/fake-runtime");
@@ -599,13 +599,8 @@ describe("a working turn streams to its owner", () => {
       projectSlug: null,
     });
     const listen = (userId: string) => {
-      const writes: string[] = [];
-      connectSseClient({ userId, scopes: [{ kind: "user" }], lastEventId: null, write: (c) => { writes.push(c); } });
-      return () =>
-        writes
-          .flatMap((chunk) => chunk.split("\n"))
-          .filter((line) => line.startsWith("data: "))
-          .map((line) => sseEventSchema.parse(JSON.parse(line.slice("data: ".length))));
+      const sse = recordSse(userId);
+      return () => sse.data().map((data) => sseEventSchema.parse(JSON.parse(data)));
     };
     const owner = listen(ownerId);
     const other = listen(otherMemberId);

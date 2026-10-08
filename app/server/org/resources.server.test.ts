@@ -988,7 +988,7 @@ describe("MCP probe crash-safety, honesty, and teardown (pass 20)", () => {
     // tab kept rendering the server as up until a manual reload.
     // Canary: drop the publishResourceUpdated call and no event arrives.
     const { db } = setup();
-    const { connectSseClient } = await import("~/server/events/sse-broker.server");
+    const { recordSse } = await import("../../../test-support/sse-client");
     const { mcp } = await saveMcpServer(
       db,
       { name: "everything", transport: "stdio", target: "npx -y @mcp/everything", cred: "" },
@@ -996,24 +996,14 @@ describe("MCP probe crash-safety, honesty, and teardown (pass 20)", () => {
       { spawnImpl: fakeMcpSpawn(16) },
     );
 
-    const writes: string[] = [];
-    const handle = connectSseClient({
-      userId: "u_watcher",
-      scopes: [{ kind: "user" }],
-      lastEventId: null,
-      write: (chunk) => writes.push(chunk),
-    });
+    const sse = recordSse("u_watcher");
     try {
       markMcpServerUnreachableFromRun(db, "everything", "it failed to start");
-      const events = writes
-        .flatMap((chunk) => chunk.split("\n"))
-        .filter((line) => line.startsWith("event: "))
-        .map((line) => line.slice("event: ".length));
-      expect(events).toContain("resource.updated");
+      expect(sse.names()).toContain("resource.updated");
       // …naming the row that actually changed.
-      expect(writes.join("")).toContain(mcp.id);
+      expect(sse.wire()).toContain(mcp.id);
     } finally {
-      handle.close();
+      sse.close();
     }
   });
 

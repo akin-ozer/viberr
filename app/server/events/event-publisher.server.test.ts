@@ -5,7 +5,7 @@ import {
   startEventPublisher,
   translateProjectionEvent,
 } from "./event-publisher.server";
-import { connectSseClient } from "./sse-broker.server";
+import { recordSse } from "../../../test-support/sse-client";
 
 const AT = "2026-07-05T09:41:00.000Z";
 
@@ -152,12 +152,7 @@ describe("translateProjectionEvent shapes (docs/architecture/decisions.md payloa
 describe("startEventPublisher wiring", () => {
   it("bridges the projection emitter to broker connections", () => {
     startEventPublisher();
-    const writes: string[] = [];
-    connectSseClient({
-      userId: "u_arda",
-      scopes: [{ kind: "user" }],
-      write: (chunk) => writes.push(chunk),
-    });
+    const sse = recordSse("u_arda");
 
     emitProjectionEvent({
       type: "notification.created",
@@ -170,7 +165,7 @@ describe("startEventPublisher wiring", () => {
       occurredAt: AT,
     });
 
-    const joined = writes.join("");
+    const joined = sse.wire();
     expect(joined).toContain("event: notification.created");
     expect(joined).toContain("u_arda");
     expect(joined).not.toContain("u_elif");
@@ -179,22 +174,14 @@ describe("startEventPublisher wiring", () => {
   it("is idempotent — double start does not double-publish", () => {
     startEventPublisher();
     startEventPublisher();
-    const writes: string[] = [];
-    connectSseClient({
-      userId: "u1",
-      scopes: [{ kind: "user" }],
-      write: (chunk) => writes.push(chunk),
-    });
+    const sse = recordSse("u1");
 
     emitProjectionEvent({
       type: "notification.created",
       userId: "u1",
       occurredAt: AT,
     });
-    const count = writes
-      .join("")
-      .split("\n")
-      .filter((l) => l === "event: notification.created").length;
+    const count = sse.names().filter((name) => name === "notification.created").length;
     expect(count).toBe(1);
   });
 });
