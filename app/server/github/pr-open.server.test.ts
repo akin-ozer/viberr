@@ -1,5 +1,7 @@
+import { createHash } from "node:crypto";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { z } from "zod";
+import { withEnv } from "../../../test-support/env";
 import { createTestDbContext } from "../../../test-support/test-db";
 import {
   baseTaskFrontmatter,
@@ -23,7 +25,7 @@ import { findOpenScopeViolation } from "~/server/projections/policy-violations.s
 import { rebuildAll } from "~/server/projections/rebuilder.server";
 import { createPat, setProjectCredential } from "~/server/secrets/pat-store.server";
 import { resetEnvCacheForTests } from "~/server/config/env.server";
-import { composePrBody, openTaskPr, prBodySha256 } from "./pr-open.server";
+import { openTaskPr } from "./pr-open.server";
 
 const ctx = createTestDbContext();
 afterEach(ctx.cleanup);
@@ -56,6 +58,12 @@ const createPrRequest = z.object({
   base: z.string(),
   body: z.string(),
 });
+
+/** Ruling 474's `pr.bodyWritten.sha256` as the file records it: the SHA-256 of
+ *  the body Viberr sent, in hex. */
+function sha256Hex(text: string): string {
+  return createHash("sha256").update(text, "utf8").digest("hex");
+}
 
 /** The delivered revision an adoptable PR's head has to be (R16-1). */
 const DELIVERED_SHA = "d3l1ver3dsha0000000000000000000000000000";
@@ -105,47 +113,6 @@ function openPr(store: TestStore, gh: FakeGithub) {
   );
 }
 
-describe("composePrBody", () => {
-  it("carries the absolute Viberr task back-link, goal, and change summary", () => {
-    const body = composePrBody({
-      taskKey: "VIB-201",
-      projectSlug: "core",
-      title: "Attach workspace",
-      goal: "Wire the workspace.",
-      appOrigin: "https://viberr.example",
-      changeSummary: "3 files changed.",
-      evidence: ["unit tests pass"],
-    });
-    expect(body).toContain(
-      "[VIB-201 · Attach workspace](https://viberr.example/projects/core/tasks/VIB-201)",
-    );
-    expect(body).toContain("## Goal");
-    expect(body).toContain("Wire the workspace.");
-    expect(body).toContain("## Change summary");
-    expect(body).toContain("## Evidence");
-    expect(body).toContain("unit tests pass");
-  });
-
-  // N20-4 (§5a): with no configured public origin the back-link used to be a
-  // RELATIVE `/projects/…` path that 404s on github.com — worse than none. The
-  // composer now omits the link and names the task by its store key instead.
-  // Canary: put the relative fallback back and the "no link" assertions go red.
-  it("omits the link and writes the plain store key when no origin is configured", () => {
-    const body = composePrBody({
-      taskKey: "VIB-1",
-      projectSlug: "core",
-      title: "Wire it",
-      goal: "Wire.",
-      appOrigin: null,
-    });
-    expect(body).toContain("**Viberr task:** VIB-1 · Wire it");
-    // No markdown link at all, and no relative path a github.com reader could
-    // click into a 404.
-    expect(body).not.toContain("](");
-    expect(body).not.toContain("/projects/core/tasks/VIB-1");
-  });
-});
-
 describe("openTaskPr", () => {
   useAppOrigin("https://viberr.example");
 
@@ -176,8 +143,10 @@ describe("openTaskPr", () => {
     const sent = createPrRequest.parse(post.body);
     expect(sent.title).toBe("[VIB-201] Attach execution workspace to task runtime");
     expect(sent.head).toBe(BRANCH);
-    expect(sent.body).toContain("https://viberr.example/projects/");
-    expect(sent.body).toContain("VIB-201");
+    expect(sent.body).toContain(
+      "**Viberr task:** [VIB-201 · Attach execution workspace to task runtime](https://viberr.example/projects/viberr-core/tasks/VIB-201)\n\n" +
+        "## Goal\nWire the runtime workspace to the canonical task so runs anchor on it.",
+    );
     // No evidence on the task and no compare to derive rows from: no section.
     expect(sent.body).not.toContain("## Evidence");
 
@@ -186,6 +155,28 @@ describe("openTaskPr", () => {
     const fm = readTaskFile({ projectSlug: store.slug, taskKey: "VIB-201", dataRoot: store.dataRoot })!.parsed.frontmatter;
     expect(fm.pr).toMatchObject({ number: 42, state: "review" });
     expect(listAuditEvents(store.db, {}).map((a) => a.action)).toContain("github.pr.opened");
+  });
+
+  // N20-4 (§5a): with no configured public origin the back-link used to be a
+  // RELATIVE `/projects/…` path that 404s on github.com — worse than none. The
+  // body omits the link and names the task by its store key instead.
+  // Canary: put the relative fallback back and the "no link" assertions go red.
+  it("N20-4: with no configured origin the body names the task by its key and links nowhere", async () => {
+    const store = setupWithBranch();
+    const gh = fakeGithubFetch({
+      [`GET ${REPO_PATH}/pulls`]: { body: [] },
+      [`POST ${REPO_PATH}/pulls`]: {
+        status: 201,
+        body: { number: 42, html_url: "https://github.com/akin-ozer/viberr/pull/42", title: "[VIB-201] x", state: "open" },
+      },
+    });
+    await withEnv({ BETTER_AUTH_URL: "" }, () => openPr(store, gh));
+    const sent = createPrRequest.parse(gh.callsTo(`POST ${REPO_PATH}/pulls`)[0]!.body);
+    expect(sent.body).toContain("**Viberr task:** VIB-201 · Attach execution workspace to task runtime");
+    // No markdown link at all, and no relative path a github.com reader could
+    // click into a 404.
+    expect(sent.body).not.toContain("](");
+    expect(sent.body).not.toContain("/projects/");
   });
 
   it("F22-10: the PR body's change-summary + evidence come from the LIVE compare, not stale fm.github", async () => {
@@ -221,7 +212,7 @@ describe("openTaskPr", () => {
     expect(res.status).toBe("ok");
     const sent = createPrRequest.parse(gh.callsTo(`POST ${REPO_PATH}/pulls`)[0]!.body);
     // The live compare wins: 1 file / +5, 1 commit.
-    expect(sent.body).toContain("1 file(s) changed (+5/-0).");
+    expect(sent.body).toContain("## Change summary\n1 file(s) changed (+5/-0).");
     expect(sent.body).toContain("1 file(s) changed on `" + BRANCH + "` · +5 · −0");
     expect(sent.body).toContain("1 commit(s) delivered");
     // The stale reconciled numbers must NOT appear.
@@ -1251,7 +1242,7 @@ describe("ruling 135: writePrToTask and the PR head", () => {
       number: 43,
       state: "review",
       title: "[VIB-201] t",
-      bodyWritten: { sha256: prBodySha256(sent.body), revision: null },
+      bodyWritten: { sha256: sha256Hex(sent.body), revision: null },
     });
   });
 });
@@ -1265,21 +1256,23 @@ describe("ruling 474: a reused PR's body follows the delivery it describes", () 
   const REWORK_SHA = "cc9aa30" + "2".repeat(33);
   const PR_PATH = `${REPO_PATH}/pulls/2`;
   const PR_TITLE = "[VIB-201] Attach execution workspace to task runtime";
-  const FIRST_BODY = composePrBody({
-    taskKey: "VIB-201",
-    projectSlug: "core",
-    title: "Attach execution workspace to task runtime",
-    goal: "Wire the runtime workspace to the canonical task so runs anchor on it.",
-    appOrigin: "https://viberr.example",
-    changeSummary: "10 file(s) changed (+814/-15).",
-    evidence: [
-      `10 file(s) changed on \`${BRANCH}\` · +814 · −15`,
-      "3 commit(s) delivered, revision 7cf1edc",
-    ],
-  });
+  /** The description PR #2 was opened with, for revision 7cf1edc. */
+  const FIRST_BODY = [
+    "**Viberr task:** [VIB-201 · Attach execution workspace to task runtime](https://viberr.example/projects/viberr-core/tasks/VIB-201)",
+    "",
+    "## Goal",
+    "Wire the runtime workspace to the canonical task so runs anchor on it.",
+    "",
+    "## Change summary",
+    "10 file(s) changed (+814/-15).",
+    "",
+    "## Evidence",
+    `- 10 file(s) changed on \`${BRANCH}\` · +814 · −15`,
+    "- 3 commit(s) delivered, revision 7cf1edc",
+  ].join("\n");
   /** What the service PATCHes: the fake records the request body as `unknown`. */
   const patchRequest = z.object({ body: z.string() });
-  const recordedFirst: PrBodyWritten = { sha256: prBodySha256(FIRST_BODY), revision: FIRST_SHA };
+  const recordedFirst: PrBodyWritten = { sha256: sha256Hex(FIRST_BODY), revision: FIRST_SHA };
 
   function reworkRevision(): TaskFrontmatter["workRevision"] {
     return {
@@ -1387,7 +1380,7 @@ describe("ruling 474: a reused PR's body follows the delivery it describes", () 
     expect(sent[0]).toContain("_Opened by Viberr for task VIB-201.");
 
     expect(readParsed(store).frontmatter.pr?.bodyWritten).toEqual({
-      sha256: prBodySha256(sent[0]!),
+      sha256: sha256Hex(sent[0]!),
       revision: REWORK_SHA,
     });
     const audit = listAuditEvents(store.db, { action: "github.pr.body_updated" });
@@ -1501,7 +1494,7 @@ describe("ruling 474: a reused PR's body follows the delivery it describes", () 
     expect(sent).toHaveLength(1);
     expect(sent[0]).toContain("5 commit(s) delivered, revision cc9aa30");
     expect(readParsed(store).frontmatter.pr?.bodyWritten).toEqual({
-      sha256: prBodySha256(sent[0]!),
+      sha256: sha256Hex(sent[0]!),
       revision: REWORK_SHA,
     });
     expect(listAuditEvents(store.db, { action: "github.pr.body_updated" })[0]!.details).toEqual({
