@@ -212,13 +212,14 @@ describe("resources/model-catalog", () => {
   // model `unavailable` from the `model_availability` marks — the picker then
   // disables + explains a model a real run proved this account can't use.
   it("stamps a provider-refused model unavailable so the picker can disable it", async () => {
-    const { markModelUnavailable, clearModelMark } = await import(
+    const { noteModelAvailabilityFromFailure, clearModelMark } = await import(
       "~/server/runtimes/model-availability.server"
     );
-    markModelUnavailable(app.db, {
+    noteModelAvailabilityFromFailure(app.db, {
+      runId: "run_refused",
       backend: "codex",
       model: "gpt-5.6-sol",
-      reason:
+      providerText:
         "The 'gpt-5.6-sol' model is not supported when using Codex with a ChatGPT account.",
     });
     try {

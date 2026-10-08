@@ -27,7 +27,7 @@ import {
 } from "./model-catalog.server";
 import {
   clearModelMark,
-  markModelUnavailable,
+  noteModelAvailabilityFromFailure,
 } from "./model-availability.server";
 
 /**
@@ -575,10 +575,12 @@ describe("R20-3 (F20-4): the catalog stamps provider-refused models unavailable"
 
   it("stamps a marked model in the curated (codex) catalog", async () => {
     const db = dbCtx.makeDb();
-    markModelUnavailable(db, {
+    noteModelAvailabilityFromFailure(db, {
+      runId: "run_1",
       backend: "codex",
       model: "gpt-5.6-sol",
-      reason: "not supported on this account",
+      providerText:
+        "The 'gpt-5.6-sol' model is not supported when using Codex with a ChatGPT account.",
     });
     const cat = await getModelCatalog("codex", { db });
     const sol = cat.models.find((m) => m.value === "gpt-5.6-sol");
@@ -591,10 +593,11 @@ describe("R20-3 (F20-4): the catalog stamps provider-refused models unavailable"
 
   it("stamps the LIVE-enhanced claude catalog too", async () => {
     const db = dbCtx.makeDb();
-    markModelUnavailable(db, {
+    noteModelAvailabilityFromFailure(db, {
+      runId: "run_1",
       backend: "claude",
       model: "opus",
-      reason: "model unavailable for this deployment",
+      providerText: "model unavailable for this deployment",
     });
     const cat = await getModelCatalog("claude", {
       db,
@@ -617,13 +620,20 @@ describe("R20-3 (F20-4): the catalog stamps provider-refused models unavailable"
     });
     expect(before.models[0]!.unavailable).toBeUndefined();
     // Mark it — no cache reset — the very next call reflects it.
-    markModelUnavailable(db, { backend: "claude", model: "sonnet", reason: "gone" });
+    noteModelAvailabilityFromFailure(db, {
+      runId: "run_1",
+      backend: "claude",
+      model: "sonnet",
+      providerText: "The 'sonnet' model is not supported for this account",
+    });
     const after = await getModelCatalog("claude", {
       db,
       claudeQueryFn: queryFn,
       credential: VIEWER_CREDENTIAL,
     });
-    expect(after.models[0]!.unavailable?.reason).toBe("gone");
+    expect(after.models[0]!.unavailable?.reason).toBe(
+      "The 'sonnet' model is not supported for this account",
+    );
     // And clearing it takes effect the next call with no reset either.
     clearModelMark(db, "claude", "sonnet");
     const cleared = await getModelCatalog("claude", {
