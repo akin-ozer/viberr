@@ -492,14 +492,18 @@ describe("openTaskPr", () => {
     // the discovery is the link `openTaskPr` itself minted — refreshing it is
     // not adoption and must not need a head match (a re-delivery can advance
     // the revision between the push and this read).
+    // CANARY: put the cached number through `decidePrAdoption` as well and the
+    // task's own PR #7 is refused as a `branch_collision`.
     const store = setupWithBranch("VIB-201", {
       pr: { number: 7, state: "review", title: "[VIB-201] x" },
       workRevision: deliveredRevision(),
     });
     const gh = fakeGithubFetch({
-      // Step 0 confirms the cached PR is still open on GitHub and reuses it.
-      [`GET ${REPO_PATH}/pulls/7`]: {
-        body: { number: 7, html_url: "https://github.com/akin-ozer/viberr/pull/7", title: "[VIB-201] x", state: "open", head: { sha: "moved-on-since" } },
+      // Step 0 cannot confirm the cached PR (`GET /pulls/7` answers 404), so the
+      // head listing decides, and it names #7 at a head that is NOT the
+      // delivered revision.
+      [`GET ${REPO_PATH}/pulls`]: {
+        body: [{ number: 7, html_url: "https://github.com/akin-ozer/viberr/pull/7", title: "[VIB-201] x", state: "open", head: { sha: "moved-on-since" } }],
       },
       [`POST ${REPO_PATH}/pulls`]: { status: 500, body: { message: "should not be called" } },
     });
