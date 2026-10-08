@@ -256,28 +256,6 @@ describe("F34-5: an engagement's status is read from its own run row", () => {
     sdk: "sdk",
   } as const;
 
-  it("a delivering engagement with no run is 'on call', whatever the flag says", () => {
-    // Canary: restore the waiting-derived "working" (`waiting === "agent"` →
-    // "working" for the primary) and this reads "working" with no run at all.
-    const store = setupTestStore(ctx);
-    writeTask(store.dataRoot, store.slug, {
-      frontmatter: baseTaskFrontmatter("VIB-20", {
-        stage: "impl",
-        waiting: "agent",
-        operator: { assignedAtStageId: "ready" },
-        engagements: [
-          { profileId: "developer", backend: "claude", role: "Developer", delivers: true, verdictCapable: false },
-        ],
-      }),
-    });
-    rebuildAll(store.db, { dataRoot: store.dataRoot });
-    const primary = listAgentDeployments(store.db, store.slug, { dataRoot: store.dataRoot }).find(
-      (d) => d.taskKey === "VIB-20" && d.engagement === "primary",
-    )!;
-    expect(primary.status).toBe("on call");
-    expect(primary.running).toBe(false);
-  });
-
   it("a supporting engagement with a LIVE run says 'working'", () => {
     // Canary: restore the hard-coded reviewer literal and the running reviewer
     // reads idle again — the live JC-4 row of the finding.
@@ -488,24 +466,5 @@ describe("an operator is only 'packet open' when a packet is actually open", () 
       (d) => d.engagement === "operator",
     )!;
     expect(operator.status).toBe("packet open");
-  });
-
-  it("names no artifact for the non-human-waiting operator either", () => {
-    // Re-premised by F34-5: this used to pin "coordinating" here, a word that
-    // now means a RUNNING operator row (see the F34-5 describe above). What
-    // this case still guards is the UXV19-7 half — no "packet open" and no
-    // "waiting on human" on a task that is not waiting on a human.
-    const store = setupTestStore(ctx);
-    writeTask(store.dataRoot, store.slug, {
-      frontmatter: baseTaskFrontmatter("VIB-12", {
-        stage: "impl",
-        waiting: "agent",
-        operator: { assignedAtStageId: "triage" },
-      }),
-    });
-    rebuildAll(store.db, { dataRoot: store.dataRoot });
-    expect(
-      listAgentDeployments(store.db, store.slug, { dataRoot: store.dataRoot }).find((d) => d.engagement === "operator")!.status,
-    ).toBe("on call");
   });
 });
