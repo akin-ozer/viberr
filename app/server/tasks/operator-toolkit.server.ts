@@ -194,9 +194,10 @@ interface ToolkitDeps {
    * (`operatorMcpResolution`). Passed in so the toolkit mounts exactly what the
    * system prompt announced: resolving a second time here would re-mount a
    * stdio server the pre-flight just dropped, and the prompt and the mount would
-   * disagree about what the run has. Omitted, nothing mounts beside `viberr`.
+   * disagree about what the run has. Required, so no caller builds a toolkit
+   * without a resolution in hand; an empty one mounts nothing beside `viberr`.
    */
-  orgMcpServers?: Record<string, SpecialistMcpServerConfig>;
+  orgMcpServers: Record<string, SpecialistMcpServerConfig>;
 }
 
 // Every model-emitted prose string crosses into the store through here —
@@ -1471,7 +1472,7 @@ export function buildOperatorToolkit(deps: ToolkitDeps): OperatorToolkit {
   // failed to start was dropped from the prompt but would be mounted anyway.
   // Ruling 176: that resolution withholds a server's marked write tools, since
   // the operator never writes.
-  const orgServers = deps.orgMcpServers ?? {};
+  const orgServers = deps.orgMcpServers;
   for (const name of Object.keys(orgServers)) {
     allowed.push(`mcp__${name}`);
   }

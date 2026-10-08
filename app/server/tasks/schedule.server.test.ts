@@ -1121,7 +1121,7 @@ describe("ruling 487: the operator's schedule_task_action and cancel_task_schedu
   // `operatorAuthority()` grants no `dispatch-agents`, which resolves to the
   // catalog default `direct` (ruling 98(b)).
   const toolkitFor = (taskKey: string, authority = operatorAuthority()) =>
-    buildOperatorToolkit({ db: store.db, ctx: dctx(), projectSlug: store.slug, taskKey, authority });
+    buildOperatorToolkit({ db: store.db, ctx: dctx(), projectSlug: store.slug, taskKey, authority, orgMcpServers: {} });
   const replyText = z
     .object({ content: z.array(z.object({ text: z.string() })).min(1) })
     .transform((r) => r.content[0]!.text);

@@ -1369,6 +1369,7 @@ describe("ruling 421: a dispatch that puts the completeness question says so", (
       projectSlug: store.slug,
       taskKey: "VIB-1",
       authority: authority("supervised"),
+      orgMcpServers: {},
     });
     const runAgent = toolkit.tools.find((t) => t.name === "run_agent")!;
     // SAFETY: the handler validates its own arguments; this is the shape the
@@ -1462,6 +1463,7 @@ describe("ruling 583: a dispatch that must not judge withholds the verdict", () 
       projectSlug: store.slug,
       taskKey: "VIB-1",
       authority: authority("supervised"),
+      orgMcpServers: {},
     });
     const runAgent = toolkit.tools.find((t) => t.name === "run_agent")!;
     // SAFETY: the handler validates its own arguments; this is the shape the
@@ -5881,6 +5883,7 @@ describe("delegated-ask disclosure is mechanical, not just prose (R20-9)", () =>
       projectSlug: store.slug,
       taskKey: "VIB-1",
       authority: authority("full"),
+      orgMcpServers: {},
     });
   }
 
@@ -6870,6 +6873,7 @@ describe("ruling 138: edit_goal options carry an explicit goalDraft", () => {
       projectSlug: store.slug,
       taskKey: "VIB-1",
       authority: authority("full"),
+      orgMcpServers: {},
     });
     const tool = toolkit.tools.find((t) => t.name === "open_decision_packet")!;
     const dueAt = new Date(Date.now() + 3_600_000).toISOString();
@@ -8162,6 +8166,7 @@ describe("ruling 584: the operator edits or deletes an agent's comment, silently
         projectSlug: store.slug,
         taskKey: "VIB-1",
         authority: authority("supervised"),
+        orgMcpServers: {},
       });
     deployRoster(DEFAULT_POLICY);
     seedComments();

@@ -636,6 +636,7 @@ describe("what the review of ruling 672 found (each a refusal or a record that w
       projectSlug: store.slug,
       taskKey: "VIB-1",
       authority: authority(store),
+      orgMcpServers: {},
     });
     expect(
       await callToolText(toolkit.tools, "ask_for_repository", { reason: REASON, repository: "github.com/acme/site" }),
