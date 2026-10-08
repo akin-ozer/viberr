@@ -149,7 +149,7 @@ describe("F10-17: rolling-session renewal reaches the browser", () => {
 
     const document = await call("/");
     expect(document.csrf).toEqual(expect.any(String));
-    expect(document.theme).toBeDefined();
+    expect(document.theme).toBe("system"); // no viberr_theme cookie: the default
     expect("liveHead" in document ? document.liveHead : undefined).toBe(41);
 
     // A `.data` answer seeds nothing: the tab's streams are already under way.

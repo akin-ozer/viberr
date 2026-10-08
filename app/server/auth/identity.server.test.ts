@@ -155,9 +155,11 @@ describe("identity provisioning", () => {
       asResponse: true,
     });
     expect(good.status).toBe(200);
-    await expect(
-      a.api.signInEmail({ body: { email: "p@viberr.dev", password: "old-password-1" } }),
-    ).rejects.toBeTruthy();
+    const stale = await a.api.signInEmail({
+      body: { email: "p@viberr.dev", password: "old-password-1" },
+      asResponse: true,
+    });
+    expect(stale.status).toBe(401);
   });
 
   it("a legacy/unverifiable credential hash reads as a wrong password (401), not a 500 (P11-01)", async () => {
