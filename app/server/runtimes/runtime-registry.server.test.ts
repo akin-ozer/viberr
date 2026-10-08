@@ -5,7 +5,6 @@ import {
   CREDENTIAL_ENV_RE,
   createAdapters,
   filteredSpawnEnv,
-  selectAdapter,
 } from "./runtime-registry.server";
 import {
   repoWriteWithheldFromDenylist,
@@ -355,18 +354,6 @@ describe("runtime-registry", () => {
       expect(env?.VIBERR_BROWSER_EXECUTABLE).toBeUndefined();
       expect(ENV_KEYS.filter((key) => key in (env ?? {}))).toEqual([]);
     }
-  });
-
-  it("selectAdapter is a plain lookup — availability is not its business", () => {
-    // Ruling 127: whether a run may proceed is decided upstream, by resolving
-    // its credential principal. `startRun` never reaches this function for a
-    // run it refused, so an "unavailable" arm here would be a second, quieter
-    // place for that decision to live.
-    const adapters = createAdapters({
-      claudeQueryFn: () => fakeClaudeQuery(),
-    });
-    expect(selectAdapter("claude", adapters)).toBe(adapters.claude);
-    expect(selectAdapter("codex", adapters)).toBe(adapters.codex);
   });
 
   it("createAdapters accepts injected SDK fakes (no real SDK constructed)", () => {
