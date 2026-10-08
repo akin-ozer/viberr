@@ -491,26 +491,11 @@ describe("pushWorkspaceBranch (F-GH3)", () => {
     expect(git.calls.some((c) => c.includes("push"))).toBe(false);
   });
 
-  it("never auto-commits onto the default branch (HEAD on main)", async () => {
-    bindPat();
-    const git = fakeGit({ branch: "main", ahead: 0, dirty: true });
-    const res = await push(git);
-    expect(res.status).toBe("no_branch");
-    expect(git.calls.some((c) => c.includes("commit"))).toBe(false);
-  });
-
   it("degrades to no_pat when the project has no credential", async () => {
     const git = fakeGit({ branch: "vib-1-work", ahead: 3 });
     const res = await push(git);
     expect(res.status).toBe("no_pat");
     expect(git.calls.some((c) => c.includes("push"))).toBe(false);
-  });
-
-  it("does not push from a detached/default-branch HEAD", async () => {
-    bindPat();
-    const git = fakeGit({ branch: "main", ahead: 5 });
-    const res = await push(git);
-    expect(res.status).toBe("no_branch");
   });
 
   /**
@@ -561,11 +546,13 @@ describe("pushWorkspaceBranch (F-GH3)", () => {
       const git = fakeGit({ branch: "main", ahead: 2 });
       const res = await push(git);
       expect(res).toMatchObject({
+        status: "no_branch",
         defaultBranchEvidence: {
           verified: false,
           why: "it carries 2 local commits that origin/main does not",
         },
       });
+      expect(git.calls.some((c) => c.includes("push"))).toBe(false);
     });
 
     it("an ABANDONED task branch is not a verified no-change — the run did branch", async () => {
@@ -629,19 +616,6 @@ describe("pushWorkspaceBranch (F-GH3)", () => {
       // Not even probed: a detached HEAD is not the default branch.
       expect(git.calls.some((c) => c.includes("for-each-ref"))).toBe(false);
     });
-  });
-
-  it("returns push_failed when git push errors", async () => {
-    bindPat();
-    const git = fakeGit({
-      branch: "vib-1-work",
-      ahead: 1,
-      pushOk: false,
-      pushStderr: "remote: error: GH006: Protected branch update failed",
-    });
-    const res = await push(git);
-    expect(res.status).toBe("push_failed");
-    expect(res.status === "push_failed" && res.detail).toContain("GH006");
   });
 
   it("F19-18: a rejected push carries git's own reason, scrubbed, instead of 'returned non-zero'", async () => {
