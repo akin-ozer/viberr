@@ -6,6 +6,7 @@ import {
   diffRows,
   noteLine,
   noteRange,
+  REVIEW_NOTE_MAX_CHARS,
   type DiffRow,
   type NoteLine,
   type NoteRow,
@@ -778,7 +779,7 @@ function NoteEditor({
         className="goal-textarea"
         aria-label={label}
         rows={3}
-        maxLength={4000}
+        maxLength={REVIEW_NOTE_MAX_CHARS}
         value={text}
         placeholder={
           range ? "What should change on these lines?" : "What should change on this line?"

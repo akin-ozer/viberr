@@ -6,6 +6,7 @@ import {
 } from "~/schemas/task-file.schema";
 import { AppError } from "~/server/errors/app-error.server";
 import { readTaskFile } from "~/server/files/task-writer.server";
+import { REVIEW_NOTE_MAX_CHARS } from "~/shared/diff-rows";
 import { agentMentionHandle } from "./agent-reply.server";
 import { listDeployedSpecialists } from "./specialist-roster.server";
 import { taskRef, type TaskMutationContext } from "./task-mutation.server";
@@ -44,9 +45,9 @@ export interface ReviewNote {
   body: string;
 }
 
-/** The most notes one post carries, and the longest note. */
+/** The most notes one post carries (the longest note is
+ *  `REVIEW_NOTE_MAX_CHARS`, which the panel's box reads too). */
 const REVIEW_NOTES_MAX = 50;
-const REVIEW_NOTE_MAX_CHARS = 4_000;
 
 /** A panel note as the `review-notes` intent receives it (JSON). A note on
  *  several lines (ruling 509) also names its first line and that line's side;

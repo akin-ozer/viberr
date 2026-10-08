@@ -34,6 +34,16 @@ export interface NoteRow extends NoteLine {
   row: number;
 }
 
+/**
+ * The longest note a person leaves on a changed line. The panel's box stops a
+ * longer paste (`maxLength`), the `review-notes` intent refuses one, and a
+ * longer comment relayed from GitHub is cut and says where the rest is
+ * (`review-notes.server.ts`). One number here, because the box is a client
+ * component and the guard is server-only: ruling 315's reason for
+ * `PACKET_NOTE_MAX`.
+ */
+export const REVIEW_NOTE_MAX_CHARS = 4_000;
+
 const HUNK_RE = /^@@ -(\d+)(?:,\d+)? \+(\d+)(?:,\d+)? @@/;
 
 export function diffRows(patch: string): DiffRow[] {
