@@ -547,7 +547,12 @@ history opens with "Converted from goal-N …", and the project's Activity colum
   file, or a page past the 40 one record names. No note at all on a files delivery means
   the deployment names no browser, the delivery held no page, or the task's delivery is
   a revision. A picture that shows boxes where text should be is a script the image has
-  no font for (it ships Liberation and an emoji font). A page that opens `alert()`,
+  no font for (it ships Liberation, an emoji font and three families a drawn picture can
+  name: Inter, as `Inter Variable` or plain `Inter`, `EB Garamond` and `JetBrains Mono`).
+  A sized `capture_page` that answers "the picture is N bytes, over the 3,750,000 a capture
+  hands back" made a PNG too large to hand to a model: a lower `scale`, or fewer gradients
+  and photographs, brings it under (a 2,400 by 1,260 px cover with one gradient is about
+  1 MB). A page that opens `alert()`,
   `confirm()` or `prompt()` as it loads is pictured with the dialog dismissed, and the
   note says so. Renders are one at a time for the whole instance, so a burst of
   deliveries queues; an agent's `capture_page` goes ahead of waiting deliveries and

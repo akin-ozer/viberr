@@ -1573,6 +1573,140 @@ describe("applyAgentCompletionEffects (the shared effects)", () => {
     expect(currentVerdicts(fm).map((v) => v.result)).toEqual(["request_changes"]);
   });
 
+  /** Ruling 699: the delivered and objected task of ruling 587, with a
+   *  supporting agent that holds no verdict engaged beside the reviewer and
+   *  one file each of them saved earlier on the timeline. */
+  function writeTaskWithAPictureMaker(savedAt: string): void {
+    writeDeliveredAndObjectedTask(savedAt);
+    const file = taskFile().parsed;
+    const entry = (profileId: string, roleHint: string, text: string, attachments: string[]) => ({
+      occurredAt: savedAt,
+      type: "comment" as const,
+      actor: { kind: "agent" as const, backend: "claude" as const, profileId, roleHint },
+      title: null,
+      text,
+      toAgent: false,
+      evidence: null,
+      attachments,
+    });
+    writeTask(store.dataRoot, store.slug, {
+      frontmatter: {
+        ...file.frontmatter,
+        engagements: [
+          ...file.frontmatter.engagements,
+          { profileId: "illustrator", backend: "claude", role: "Cover", delivers: false, verdictCapable: false },
+        ],
+      },
+      goal: file.goal,
+      timeline: [
+        ...file.timeline,
+        // It saved the piece too, when it placed the cover in it.
+        entry("illustrator", "Cover", "The cover is saved on the task and named in assumptions.md.", ["cover.png", "assumptions.md"]),
+        entry("reviewer", "Review & validation", "My reading notes are saved on the task.", ["review-notes.md"]),
+      ],
+    });
+    rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
+  }
+  const completeRunAs = (runId: string, profileId: string, role: string) =>
+    applyAgentCompletionEffects(
+      store.db,
+      { dataRoot: store.dataRoot },
+      {
+        projectSlug: store.slug,
+        taskKey: "VIB-1",
+        backend: "claude",
+        profileId,
+        role,
+        delivers: false,
+        workdir: null,
+        agentHandle: profileId,
+      },
+      { id: runId, state: "finished" },
+    );
+
+  it("ruling 699: a supporting agent with no verdict that saves again a file it saved before moves the delivery, and the verdict on it goes stale", async () => {
+    // Read before it shipped: a cover sent back was replaced under its own
+    // name, the stamp stayed, the kept delivery and the page's pictures still
+    // showed the old cover, and the reviewer's second objection read as one
+    // on unchanged work. CANARY: count the deliverer's entries alone in
+    // `deliveryMakers`, as ruling 587 did, and `deliveredAt` stays put.
+    const savedAt = "2026-09-29T09:47:34.900Z";
+    writeTaskWithAPictureMaker(savedAt);
+    const runId = await finishedRunWith("Replaced cover.png with the cover the review asked for.");
+    saveInRunWindow(runId, ["cover.png"]);
+    await completeRunAs(runId, "illustrator", "Cover");
+    const fm = taskFile().parsed.frontmatter;
+    expect(fm.deliveredAt).not.toBe(savedAt);
+    expect(currentVerdicts(fm)).toEqual([]);
+    // The reworked picture is kept with the delivery the next review reads.
+    expect(listKeptDeliveries(store.slug, "VIB-1", store.dataRoot)[0]).toEqual({
+      deliveredAt: fm.deliveredAt,
+      files: ["cover.png"],
+    });
+  });
+
+  it("ruling 699: a new file of such an agent moves nothing, and neither does a file a reviewer saved before", async () => {
+    // A first save is not yet part of what anybody judged (ruling 587's own
+    // case), and a reviewer's notes are never the delivery: saving them again
+    // must not move the subject under its own verdict. CANARY: let every
+    // engaged agent's files count in `deliveryMakers` and the second half
+    // moves the delivery.
+    const savedAt = "2026-09-29T09:47:34.900Z";
+    writeTaskWithAPictureMaker(savedAt);
+    const first = await finishedRunWith("Drew a second picture, request-path.png.");
+    saveInRunWindow(first, ["request-path.png"]);
+    await completeRunAs(first, "illustrator", "Cover");
+    expect(taskFile().parsed.frontmatter.deliveredAt).toBe(savedAt);
+    const second = await finishedRunWith("Added to my reading notes in review-notes.md.");
+    saveInRunWindow(second, ["review-notes.md"]);
+    await completeRunAs(second, "reviewer", "Review & validation");
+    const fm = taskFile().parsed.frontmatter;
+    expect(fm.deliveredAt).toBe(savedAt);
+    expect(currentVerdicts(fm).map((v) => v.result)).toEqual(["request_changes"]);
+  });
+
+  it("ruling 699: beside another specialist run a maker still claims the picture it saved before, and never the deliverer's file", async () => {
+    // Read before it shipped: a review that sent the text and a picture back
+    // at once has the writer and the picture's maker running together, and
+    // ruling 627's filter dropped every name the delivery holds, the maker's
+    // own earlier picture among them: its rework claimed nothing and moved
+    // nothing. CANARY: drop `stillItsOwn` from the filter and `deliveredAt`
+    // stays; let it pass a name the deliverer's entries claim and
+    // `assumptions.md`, which the live deliverer saved, is the maker's.
+    const savedAt = "2026-09-29T09:47:34.900Z";
+    writeTaskWithAPictureMaker(savedAt);
+    const runId = await finishedRunWith("Replaced cover.png. assumptions.md is as the writer left it.");
+    insertSiblingRun("primary", null);
+    saveInRunWindow(runId, ["cover.png", "assumptions.md"]);
+    await completeRunAs(runId, "illustrator", "Cover");
+    const parsed = taskFile().parsed;
+    expect(parsed.frontmatter.deliveredAt).not.toBe(savedAt);
+    const claimed = parsed.timeline
+      .filter((e) => e.actor.kind === "agent" && e.actor.profileId === "illustrator" && e.occurredAt !== savedAt)
+      .flatMap((e) => e.attachments ?? []);
+    expect(claimed).toEqual(["cover.png"]);
+  });
+
+  it("ruling 699: where the delivery is a revision, a maker's file is beside it and saving it again moves nothing", async () => {
+    // On a board with a repository the review binds to the commit. CANARY:
+    // count makers whatever the delivery is and this stamps `deliveredAt`
+    // and keeps a copy of the whole folder for a change nobody reviews.
+    const savedAt = "2026-09-29T09:47:34.900Z";
+    writeTaskWithAPictureMaker(savedAt);
+    const file = taskFile().parsed;
+    writeTask(store.dataRoot, store.slug, {
+      frontmatter: { ...file.frontmatter, workRevision: workRev(), verdicts: [] },
+      goal: file.goal,
+      timeline: file.timeline,
+    });
+    rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
+    const runId = await finishedRunWith("Replaced cover.png.");
+    saveInRunWindow(runId, ["cover.png"]);
+    await completeRunAs(runId, "illustrator", "Cover");
+    expect(taskFile().parsed.frontmatter.deliveredAt).toBe(savedAt);
+    expect(listKeptDeliveries(store.slug, "VIB-1", store.dataRoot)).toEqual([]);
+  });
+
   it("ruling 627: beside another specialist run, a delivered file it names is not its, and the delivery stays", async () => {
     // A reviewer names the file it reviewed; the deliverer, live beside it,
     // is the one that saved it again. Claiming it would move the delivery

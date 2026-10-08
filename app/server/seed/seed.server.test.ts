@@ -60,10 +60,11 @@ describe("runSeed (clean-sheet product seed)", () => {
       userPrefs: 0,
     });
 
-    // The built-in catalog templates are on disk: the base roster's three, and
-    // the library's Writer and Editor (ruling 692).
-    expect(summary.agentProfiles).toBe(5);
-    for (const id of ["operator", "developer", "reviewer", "writer", "editor"]) {
+    // The built-in catalog templates are on disk: the base roster's three, the
+    // library's Writer and Editor (ruling 692), and its Diagrammer and Cover
+    // Designer (ruling 699).
+    expect(summary.agentProfiles).toBe(7);
+    for (const id of ["operator", "developer", "reviewer", "writer", "editor", "diagrammer", "cover-designer"]) {
       expect(existsSync(agentProfileFilePath(id, dataRoot)), id).toBe(true);
     }
 

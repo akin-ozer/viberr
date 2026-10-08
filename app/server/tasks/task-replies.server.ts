@@ -17,6 +17,7 @@ import type { FileLease } from "~/shared/file-leases";
 import { isRelayComment } from "./task-relay.server";
 import type { DatabaseSync } from "node:sqlite";
 import {
+  activeWorkRevision,
   currentVerdicts,
   deliveringEngagement,
   type ParsedTaskFile,
@@ -492,8 +493,67 @@ export function stampNonCommitDelivery(
 }
 
 /**
+ * Ruling 699: who makes what a files delivery holds: its deliverer, and every
+ * supporting agent engaged on the task that holds no verdict.
+ *
+ * Ruling 587 counted the deliverer's files alone, and "a file of its own moves
+ * nothing" was written for a reviewer's notes: a reviewer that saves its
+ * evidence must not move the subject its verdict is about to bind to. A
+ * supporting agent with no verdict is not that. It makes a part of the result
+ * (ruling 610: a results board's deliverable is several agents' files), such
+ * as the picture a piece shows. Read before it shipped, the rework of such a
+ * picture replaced `cover.png` under its own name and moved nothing: the kept
+ * delivery still held the old picture, Viberr's pictures of the page still
+ * showed it, the reviewer's second objection read as one on unchanged work,
+ * and an approval given before a later change went on vouching for a picture
+ * its reviewer never saw. So a file such an agent saved before counts as
+ * held by the delivery, and saving it again moves the delivery as the
+ * deliverer's own file does. Its first save of a new name still moves
+ * nothing, and a verdict-capable agent's files never count.
+ *
+ * Only where the delivery is the files themselves. Where it is a revision
+ * the review binds to the commit, and a supporting agent's file on the task
+ * is beside the delivery, not in it: counted there, its re-save would stamp
+ * and keep a copy of the whole folder and change nothing anybody reviews.
+ */
+function deliveryMakers(fm: Pick<TaskFrontmatter, "engagements" | "workRevision">): Set<string> {
+  const revision = activeWorkRevision(fm.workRevision) !== null;
+  return new Set(
+    fm.engagements.filter((e) => e.delivers || (!revision && !e.verdictCapable)).map((e) => e.profileId),
+  );
+}
+
+/** The names an agent's own entries claim: what it saved on the task, as the
+ *  timeline has it, less the browser's working files and what a relay carried. */
+export function filesClaimedBy(timeline: readonly TaskFileEvent[], profileIds: ReadonlySet<string>): Set<string> {
+  const names = new Set<string>();
+  for (const e of timeline) {
+    if (e.actor.kind !== "agent" || !profileIds.has(e.actor.profileId)) continue;
+    if (isRelayComment(e)) continue;
+    for (const name of e.attachments ?? []) {
+      if (!isBrowserWorkingArtifact(name)) names.add(name);
+    }
+  }
+  return names;
+}
+
+/**
+ * The files the task's deliverer itself saved: ruling 587's first set, which
+ * two readers still need apart from the makers' files ruling 699 added. The
+ * page order puts the deliverer's own pages first, and a picture's drawing
+ * must not go ahead of the piece; and beside another specialist run a maker
+ * may claim its own earlier file but never the deliverer's (ruling 627).
+ */
+export function deliverersOwnFileNames(fm: TaskFrontmatter, timeline: readonly TaskFileEvent[]): Set<string> {
+  const deliverer = deliveringEngagement(fm);
+  if (!fm.deliveredAt || !deliverer) return new Set();
+  return filesClaimedBy(timeline, new Set([deliverer.profileId]));
+}
+
+/**
  * Ruling 587: the files the task's delivery holds: those the delivering
- * engagement's runs saved, as the timeline claims them, less the browser's
+ * engagement's runs saved, and (ruling 699) those a supporting agent that
+ * holds no verdict saved, as the timeline claims them, less the browser's
  * working files (ruling 570) and what a relay carried in (ruling 538).
  *
  * A delivery that is not a commit is reviewed as `files:<deliveredAt>` (ruling
@@ -507,17 +567,9 @@ export function stampNonCommitDelivery(
  * on vouching for content its reviewer never read.
  */
 export function deliveredFileNames(fm: TaskFrontmatter, timeline: readonly TaskFileEvent[]): Set<string> {
-  const names = new Set<string>();
   const deliverer = deliveringEngagement(fm);
-  if (!fm.deliveredAt || !deliverer) return names;
-  for (const e of timeline) {
-    if (e.actor.kind !== "agent" || e.actor.profileId !== deliverer.profileId) continue;
-    if (isRelayComment(e)) continue;
-    for (const name of e.attachments ?? []) {
-      if (!isBrowserWorkingArtifact(name)) names.add(name);
-    }
-  }
-  return names;
+  if (!fm.deliveredAt || !deliverer) return new Set();
+  return filesClaimedBy(timeline, deliveryMakers(fm));
 }
 
 /**

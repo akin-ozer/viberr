@@ -557,8 +557,13 @@ Playwright (`npm run e2e -- e2e/01-home-board.spec.ts`).
    section one screen tall in a picture three screens tall, that the page's image, fetch
    and navigation to another loopback port and to a remote host loaded nothing (a
    listener on that port records no request of the page), the report naming what the page
-   asked for, the dialog dismissed and counted, no process of the uid left running, and
-   the image's fonts (`system-ui` proportional, an emoji font present). It is the only
+   asked for, the dialog dismissed and counted, no process of the uid left running, a
+   picture of an exact size (ruling 698: a page and an SVG drawing at scale 2, 0.5 and 1.5,
+   each PNG exactly the box times its scale, the page drawn at device scale 2 and not
+   enlarged, a layout larger than the box reported at its own size, the saved PNG readable
+   by a second agent uid), and the image's fonts (`system-ui` proportional, an emoji font
+   present, the generic families still the Liberation faces, and Inter under both its
+   names, EB Garamond and JetBrains Mono each drawn when a page names it). It is the only
    proof that a real browser loads nothing but the page server's answers, and the only
    run of the renderer as another uid: the unit suites assert the launch flags and, with
    isolation on, the refusal a test host meets where it has no agent group.

@@ -51,10 +51,21 @@ interface View {
   maxHeight: number;
   mobile: boolean;
   from: number;
+  box?: { scale: number };
 }
 
 const DESKTOP: View = { id: "desktop", width: 1280, height: 800, maxHeight: 4800, mobile: false, from: 0 };
 const PHONE: View = { id: "phone", width: 390, height: 844, maxHeight: 5064, mobile: true, from: 0 };
+/** A picture of an exact size, as the server asks for one. */
+const box = (width: number, height: number, scale: number): View => ({
+  id: "desktop",
+  width,
+  height,
+  maxHeight: height,
+  mobile: false,
+  from: 0,
+  box: { scale },
+});
 
 const temp = createTempDirs();
 afterAll(temp.cleanup);
@@ -91,7 +102,10 @@ function bench(files: Record<string, string>): Bench {
         out,
         profile: path.join(dir, "profile"),
         browser: browser.executable,
-        pages: input.pages.map((file) => ({ file, kind: file.endsWith(".md") ? "markdown" : "html" })),
+        pages: input.pages.map((file) => ({
+          file,
+          kind: file.endsWith(".md") ? "markdown" : file.endsWith(".svg") ? "svg" : "html",
+        })),
         views: input.views ?? [DESKTOP, PHONE],
         pageTimeoutMs: input.pageTimeoutMs ?? 20_000,
         maxBytes: input.maxBytes ?? 3_750_000,
@@ -283,10 +297,11 @@ describe("the page capture's renderer child (ruling 691)", () => {
       ],
     ]);
     expect(pngSize(path.join(b.out, "3-phone.png"))).toEqual({ width: 390, height: 5064 });
-    // Each view loads the page at its own viewport.
+    // Each view loads the page at its own viewport, at one picture px to a
+    // CSS px: a stretch is what a reader's screen shows.
     expect(b.browser.pages().slice(0, 2).map((page) => page.metrics)).toEqual([
-      { width: 1280, height: 800, mobile: false },
-      { width: 390, height: 844, mobile: true },
+      { width: 1280, height: 800, deviceScaleFactor: 1, mobile: false },
+      { width: 390, height: 844, deviceScaleFactor: 1, mobile: true },
     ]);
 
     // A stretch for an agent: from 2,000 px down, at most 2,000 px tall.
@@ -356,6 +371,91 @@ describe("the page capture's renderer child (ruling 691)", () => {
       shots: [],
       error: "the picture of one screen of it is too large to keep",
     });
+  });
+
+  it("pictures a box of an exact size once: laid out in a viewport that is the box, drawn at the device scale asked for, cut to the box and never retaken smaller", async () => {
+    const b = bench({
+      "cover.html": "<p>a cover that fits its box</p>",
+      "long.html": "<p>a layout that does not fit: fake-height:900 fake-width:1400</p>",
+    });
+    // Ruling 698.
+    const twice = await b.run({ pages: ["cover.html"], views: [box(1200, 630, 2)] });
+    expect(twice.pages[0]).toMatchObject({
+      error: null,
+      // The page's size is in the box's own CSS px, whatever it was drawn at.
+      shots: [{ view: "desktop", width: 2400, height: 1260, from: 0, contentHeight: 630, contentWidth: 1200, scale: 1, cut: false }],
+    });
+    expect(pngSize(path.join(b.out, "1-desktop.png"))).toEqual({ width: 2400, height: 1260 });
+    // The page itself is loaded at device scale 2, so what it draws by its
+    // own `devicePixelRatio` (a canvas, a `srcset`) is drawn at 2x. CANARY:
+    // leave the device scale at 1 and scale the screenshot instead
+    // (`deviceScaleFactor: 1`, `clip.scale: 2`): the PNG is the same size and
+    // the page was told it is on a 1x screen.
+    expect(b.browser.pages()[0]!.metrics).toEqual({ width: 1200, height: 630, deviceScaleFactor: 2, mobile: false });
+    expect(b.browser.shots()[0]!.clip).toEqual({ x: 0, y: 0, width: 1200, height: 630, scale: 1 });
+
+    // Under 1 the page is still drawn for a 1x screen and the picture of it
+    // is scaled down, as a thumbnail is. Each side is rounded by itself.
+    // CANARY: hand the browser the scale as the device scale whatever it is
+    // and this page is told it is on a 0.5x screen.
+    const half = await b.run({ pages: ["cover.html"], views: [box(1201, 631, 0.5)] });
+    expect(half.pages[0]!.shots).toEqual([
+      { view: "desktop", width: 601, height: 316, from: 0, contentHeight: 631, contentWidth: 1201, scale: 1, cut: false },
+    ]);
+    expect(b.browser.pages().at(-1)!.metrics).toEqual({ width: 1201, height: 631, deviceScaleFactor: 1, mobile: false });
+    expect(b.browser.shots().at(-1)!.clip).toEqual({ x: 0, y: 0, width: 1201, height: 631, scale: 0.5 });
+
+    // A layout taller and wider than the box is cut to the box, and the
+    // report says how large it is: that is how its author learns it does not
+    // fit. CANARY: picture a box as a stretch is pictured (drop the `box` arm
+    // of `pictureView`) and this comes back 900 px tall.
+    const long = await b.run({ pages: ["long.html"], views: [box(1200, 630, 1)] });
+    expect(long.pages[0]!.shots).toEqual([
+      { view: "desktop", width: 1200, height: 630, from: 0, contentHeight: 900, contentWidth: 1400, scale: 1, cut: true },
+    ]);
+    expect(b.browser.shots().at(-1)!.clip).toEqual({ x: 0, y: 0, width: 1200, height: 630, scale: 1 });
+
+    // A box has one size, so a picture too large to hand back is said and
+    // not retaken shorter: one screenshot, and a reason that names the way
+    // out. The stand-in's pictures weigh 1,000 bytes per px of height here.
+    // CANARY: send a box through the stretch's retry loop and the reason is
+    // "the picture of one screen of it is too large to keep", which tells
+    // the run nothing it can change.
+    const taken = b.browser.shots().length;
+    const heavy = await b.run({ pages: ["cover.html"], views: [box(400, 300, 1)], mode: "big", maxBytes: 200_000 });
+    expect(heavy.pages[0]!.shots).toEqual([]);
+    expect(heavy.pages[0]!.error).toMatch(
+      /^the picture is 30\d,\d{3} bytes, over the 200,000 a capture hands back; lower the scale or simplify the picture$/,
+    );
+    expect(b.browser.shots()).toHaveLength(taken + 1);
+  });
+
+  it("sets an SVG drawing as a page that holds nothing but the drawing, inline, so a file saved beside it is still served by name", async () => {
+    const drawing =
+      '<?xml version="1.0" encoding="UTF-8"?>\n<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="630">' +
+      '<foreignObject width="200" height="100"><img src="logo.png"/></foreignObject><text y="40">Q3 &amp; Q4</text></svg>\n';
+    // Saved with a byte order mark, as some editors save one.
+    const b = bench({ "diagram.svg": `\uFEFF${drawing}`, "logo.png": "the logo" });
+    const report = await b.run({ pages: ["diagram.svg"], views: [box(1200, 630, 1)] });
+    expect(report.pages[0]).toMatchObject({ file: "diagram.svg", error: null, missing: [] });
+    expect(report.pages[0]!.shots).toHaveLength(1);
+    const [served] = b.browser.pages();
+    // CANARY: open the drawing at its own address, or leave `svg` out of the
+    // kinds that are set as a page, and the browser is sent to `diagram.svg`:
+    // a drawing opened by itself is laid out by the window, not by a page
+    // whose margins and box are known.
+    expect(new URL(served!.url).pathname).toMatch(/^\/[0-9a-f]{16}\/\.viberr-render\.html$/);
+    // The drawing's own markup, whole and inline, in a page named for it.
+    expect(served!.html).toContain(`<body>\n${drawing}\n</body>`);
+    expect(served!.html).toContain("<title>diagram.svg</title>");
+    // CANARY: set the source as it was read and the mark is text ahead of
+    // the drawing, a line of its own that moves it down.
+    expect(served!.html).not.toContain("\uFEFF");
+    // Served from the folder the drawing is in, so the name beside it is the
+    // file beside it. What the page's own few rules do to a drawing (no
+    // margin, no text line under it, a percent height) only a real browser
+    // shows: `scripts/check-page-capture.sh` pictures one in the image.
+    expect(served!.resources).toEqual([{ src: "logo.png", status: 200, bytes: 8 }]);
   });
 
   it("dismisses a dialog a page opens while it loads, pictures the page behind it, and says the page opened one", async () => {

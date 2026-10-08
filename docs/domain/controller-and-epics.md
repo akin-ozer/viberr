@@ -114,6 +114,16 @@ own pieces:
   published work or from asking. Their voice comes from their own writing, turned into a
   voice guide on a task the controller files for the Writer and continues from on
   acceptance (ruling 685), with a sample itself kept only as `kind: "sample"`.
+- When the result carries pictures somebody has to draw, the guide adds the shipped
+  Diagrammer and Cover Designer (ruling 699): `diagrammer` and `cover-designer`, each
+  deployed at the stage where its step happens, after the piece is written and before it
+  is reviewed. They are supporting agents whose save of the piece with the picture placed
+  puts the assembled piece under review (ruling 587). The piece's reviewer judges every
+  picture by opening it, the operator's playbook names the stage a finding on a picture
+  goes back to and runs the two one after the other (each saves the piece), and the
+  rulings say the board's diagrams and cover are theirs, so its writer draws none, and
+  hold the size and format the destination takes pictures in and where the person's
+  earlier covers are.
 - A result that states facts keeps its sources (`keep_source`, ruling 690), and a result
   that is a page is pictured at a desktop and a phone width before it is accepted
   (`capture_page`, ruling 691).
