@@ -46,7 +46,7 @@ import {
   agentMentionHandle,
   ambiguousBackendHandle,
   ambiguousBackendHandleNote,
-  extractReplyText,
+  fullReplyTextForRun,
   normalizeWorkspacePaths,
   resumeWorkdir,
   resolveMentionedAgent,
@@ -702,12 +702,36 @@ describe("agentMentionHandle (P14-RT-12)", () => {
   });
 });
 
-/* ---------------------------------------------------------- extractReplyText */
+/* ------------------------------------------------------- fullReplyTextForRun */
 
-describe("extractReplyText", () => {
+describe("fullReplyTextForRun", () => {
   const line = (partial: Partial<LogLine>): LogLine => ({
     t: "", ev: "text", tag: "assistant", text: "", ...partial,
   });
+  let runs = 0;
+  /** Persist `lines` as a fresh run's log, then read its reply back. */
+  function replyOf(lines: LogLine[]): string | null {
+    runs += 1;
+    const runId = `run_reply_${runs}`;
+    upsertRun(store.db, {
+      id: runId,
+      projectSlug: store.slug,
+      taskKey: "VIB-1",
+      threadId: runId,
+      role: "developer",
+      kind: "primary",
+      backend: "claude",
+      model: "sonnet",
+      sdk: "claude",
+      agentName: "dev",
+      agentProfileId: "dev",
+      state: "finished",
+    });
+    lines.forEach((display, seq) => {
+      insertRunLine(store.db, { runId, seq, occurredAt: new Date().toISOString(), raw: "", display });
+    });
+    return fullReplyTextForRun(store.db, runId);
+  }
 
   it("prefers the last substantial assistant/agent_message text line", () => {
     const lines = [
@@ -717,7 +741,7 @@ describe("extractReplyText", () => {
       line({ tag: "assistant", text: "the actual reply" }),
       line({ ev: "result", tag: "result", text: "done" }),
     ];
-    expect(extractReplyText(lines)).toBe("the actual reply");
+    expect(replyOf(lines)).toBe("the actual reply");
   });
 
   it("does NOT fall back to the result line — those are runtime STATS (P13-RT-09)", () => {
@@ -735,40 +759,31 @@ describe("extractReplyText", () => {
       line({ ev: "init", tag: "system·init", text: "boot" }),
       line({ ev: "result", tag: "result", text: "success · 3 turns · 12s · $0.02" }),
     ];
-    expect(extractReplyText(claudeStats)).toBeNull();
+    expect(replyOf(claudeStats)).toBeNull();
 
     const codexStats = [
       line({ ev: "init", tag: "thread.started", text: "boot" }),
       line({ ev: "result", tag: "turn.completed", text: "in 4.1k (cached 2.0k) · out 0.3k tokens" }),
     ];
-    expect(extractReplyText(codexStats)).toBeNull();
+    expect(replyOf(codexStats)).toBeNull();
 
     // A real report still wins, even with a stats line after it.
     const withReport = [
       line({ tag: "agent_message", text: "Split the CLI docs into their own page." }),
       line({ ev: "result", tag: "turn.completed", text: "in 4.1k · out 0.3k tokens" }),
     ];
-    expect(extractReplyText(withReport)).toBe(
+    expect(replyOf(withReport)).toBe(
       "Split the CLI docs into their own page.",
     );
   });
 
   it("returns null when nothing usable was produced", () => {
-    expect(extractReplyText([line({ ev: "tool", tag: "tool_use", text: "ls" })])).toBeNull();
+    expect(replyOf([line({ ev: "tool", tag: "tool_use", text: "ls" })])).toBeNull();
   });
 
-  it("truncates a huge reply but keeps it readable, pointing at the agent logs", () => {
+  it("returns the untruncated text (verdicts classify on this)", () => {
     const big = "x".repeat(5000);
-    const out = extractReplyText([line({ tag: "assistant", text: big })])!;
-    expect(out.length).toBeLessThan(5000);
-    expect(out).toContain("…");
-    expect(out.endsWith("_(truncated; full report in the agent logs)_")).toBe(true);
-  });
-
-  it("extractFullReplyText returns the untruncated text (verdicts classify on this)", async () => {
-    const big = "x".repeat(5000);
-    const { extractFullReplyText } = await import("./agent-reply.server");
-    const out = extractFullReplyText([line({ tag: "assistant", text: big })])!;
+    const out = replyOf([line({ tag: "assistant", text: big })])!;
     expect(out.length).toBe(5000);
   });
 
@@ -777,7 +792,7 @@ describe("extractReplyText", () => {
       "See [the doc](/Users/akinozer/projects/viberr/data/store/projects/viberr-core/tasks/VIB-2/workspace/viberr/docs/x.md) " +
       "and also /Users/akinozer/.../tasks/PLG-1/workspace/my-repo/src/index.ts — " +
       "full report at https://example.com/tasks/VIB-2/workspace/viberr/docs/x.md";
-    const out = extractReplyText([line({ tag: "assistant", text: reply })])!;
+    const out = replyOf([line({ tag: "assistant", text: reply })])!;
     // Workspace-absolute host paths collapse to repo-relative.
     expect(out).toContain("[the doc](docs/x.md)");
     expect(out).toContain(" src/index.ts ");
