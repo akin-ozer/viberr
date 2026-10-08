@@ -26,9 +26,6 @@ export interface PromptPrefix {
   dynamic: string[];
 }
 
-/** Re-exported so callers never spell the SDK's marker themselves. */
-export { SYSTEM_PROMPT_DYNAMIC_BOUNDARY };
-
 /** A prompt as the run spec carries it: the split, or a plain string a caller
  *  built without one (tests; a persona-less run). */
 export type RunPrompt = string | PromptPrefix;

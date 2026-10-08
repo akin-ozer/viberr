@@ -1,6 +1,5 @@
 import { describe, expect, it } from "vitest";
 import {
-  SYSTEM_PROMPT_DYNAMIC_BOUNDARY,
   claudeSystemPromptBlocks,
   dynamicPromptText,
   isPromptPrefix,
@@ -13,14 +12,13 @@ import {
 
 describe("ruling 370: prompt prefix ordering", () => {
   it("Claude gets static, the SDK's boundary, then dynamic", () => {
+    // The marker is the SDK's own, never a look-alike.
     expect(claudeSystemPromptBlocks({ static: ["a", "b"], dynamic: ["c"] })).toEqual([
       "a",
       "b",
-      SYSTEM_PROMPT_DYNAMIC_BOUNDARY,
+      "__SYSTEM_PROMPT_DYNAMIC_BOUNDARY__",
       "c",
     ]);
-    // The marker is the SDK's own, never a look-alike.
-    expect(SYSTEM_PROMPT_DYNAMIC_BOUNDARY).toBe("__SYSTEM_PROMPT_DYNAMIC_BOUNDARY__");
   });
 
   it("an empty dynamic block carries no boundary", () => {
