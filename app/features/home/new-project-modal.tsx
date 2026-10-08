@@ -232,15 +232,9 @@ export function NewProjectModal({
   /** UI-09: per-owner credential health for the chip list. */
   connectionHealth: Record<string, "valid" | "unvalidated" | "failed">;
   storeRoot: string | null;
-  /**
-   * Pass-19 UX audit #14: does this reader hold the ORG admin role — i.e. can
-   * they follow a pointer into /org/settings at all? Optional only so the one
-   * caller can adopt it without a lockstep edit; until it is passed we fall
-   * back to the admin fact the loader ALREADY encoded in `storeRoot`
-   * (`user.role === "admin" ? VIBERR_DATA_ROOT : null`, routes/_index.tsx), so
-   * the gate is honest either way and never guesses "admin" for a member.
-   */
-  isAdmin?: boolean;
+  /** Pass-19 UX audit #14: does this reader hold the ORG admin role — i.e. can
+   *  they follow a pointer into /org/settings at all? */
+  isAdmin: boolean;
   /** Q26-3: task keys already in use by other projects. Task keys are project-
    *  scoped (the slug disambiguates), so a collision is allowed, not blocked —
    *  but the auto-derived key can silently match another project's, so we NOTE
@@ -248,7 +242,6 @@ export function NewProjectModal({
   existingKeys?: string[];
   onClose: () => void;
 }) {
-  const admin = isAdmin ?? storeRoot !== null;
   const [name, setName] = useState("");
   const [nameTouched, setNameTouched] = useState(false);
   const [key, setKey] = useState("");
@@ -412,7 +405,7 @@ export function NewProjectModal({
               health={connectionHealth}
               connOwner={connOwner}
               setConnOwner={setConnOwner}
-              isAdmin={admin}
+              isAdmin={isAdmin}
             />
             <NewProjectRepoField
               repoRef={repoRef}

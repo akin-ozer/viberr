@@ -49,6 +49,7 @@ function renderModal(
             connections={[]}
             connectionHealth={{}}
             storeRoot={null}
+            isAdmin={false}
             onClose={() => {}}
             {...props}
           />
@@ -92,17 +93,6 @@ describe("#14: the zero-connections note never hands a member a 403", () => {
     // Not merely link-less: the member is left with a next step they can take.
     expect(text).toContain("An org admin adds the PAT");
     expect(text).toContain("Ask an admin");
-  });
-
-  it("falls back to the loader's own admin fact when `isAdmin` is not passed", () => {
-    // `storeRoot` is `user.role === "admin" ? VIBERR_DATA_ROOT : null`
-    // (routes/_index.tsx), so a null store root IS a non-admin reader. The gate
-    // must never default to "admin" for someone who is not one.
-    expect(orgSettingsLink(renderSoftware({ storeRoot: null }).container)).toBeNull();
-    cleanup();
-    expect(
-      orgSettingsLink(renderSoftware({ storeRoot: "/data" }).container),
-    ).not.toBeNull();
   });
 });
 
@@ -555,6 +545,7 @@ describe("the create request in flight", () => {
           <NewProjectModal
             {...withConnection}
             storeRoot={null}
+            isAdmin={false}
             existingKeys={keys}
             onClose={() => {}}
           />
