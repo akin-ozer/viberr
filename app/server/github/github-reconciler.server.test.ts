@@ -3739,6 +3739,7 @@ describe("ruling 187: a workspace commit the remote does not have", () => {
   it("is marked NOT pushed instead of being rendered as repository state", async () => {
     const { store, actor } = setup();
     seedCached(store, "3aad6ff", "[VIB-301] Define identity service slice");
+    const before = fileOf(store).timeline.length;
     await reconcileWith(store, actor, phantomRoutes());
     // The entry SURVIVES — it is real work somebody did — and carries the one
     // fact that was missing: the remote does not have it. Live, SHOP-2's
@@ -3746,19 +3747,14 @@ describe("ruling 187: a workspace commit the remote does not have", () => {
     expect(fileOf(store).frontmatter.github?.commits).toEqual([
       { sha: "3aad6ff", msg: "[VIB-301] Define identity service slice", pushed: false },
     ]);
-  });
-
-  it("never claims the work is LOST — a pending commit and an abandoned one look identical here", async () => {
-    const { store, actor } = setup();
-    seedCached(store, "3aad6ff", "[VIB-301] Define identity service slice");
-    await reconcileWith(store, actor, phantomRoutes());
-    // The first version of this fix DROPPED the entry and announced "Work
-    // lost". Live, that fired on SHOP-7 seconds before Viberr pushed the very
-    // commit it had just called lost: at reconcile time a commit awaiting
-    // delivery and one whose workspace is gone are indistinguishable — neither
-    // is on the remote, neither carries `pushedAt`. "Not pushed" is the only
-    // claim this code can honestly make.
-    expect(fileOf(store).timeline.some((e) => e.text.includes("Work lost"))).toBe(false);
+    // And nothing is announced, in any wording. The first version of this fix
+    // DROPPED the entry and announced "Work lost"; live, that fired on SHOP-7
+    // seconds before Viberr pushed the very commit it had just called lost. At
+    // reconcile time a commit awaiting delivery and one whose workspace is gone
+    // are indistinguishable, so "not pushed" is the only claim this code can
+    // honestly make.
+    // CANARY: append any note when an entry is stamped `pushed: false`.
+    expect(fileOf(store).timeline).toHaveLength(before);
   });
 
   /**
