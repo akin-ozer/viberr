@@ -1867,7 +1867,7 @@ describe("pr-diverged turn instruction (both backends)", () => {
       ...over,
     });
   }
-  const { buildOperatorTurnPrompt, buildCodexOperatorPrompt, agentReportBlock } = operatorPrompts;
+  const { buildOperatorTurnPrompt, buildCodexOperatorPrompt } = operatorPrompts;
 
   it("ruling 649: every turn, on both backends, closes with the people rule", () => {
     // Live on the AWS board the operator wrote "his words" on AWSC-43 and
@@ -2197,18 +2197,20 @@ describe("pr-diverged turn instruction (both backends)", () => {
   });
 
   it("ruling 415: a tool-less operator gets a long report whole, and an honest note when even that is cut", () => {
+    // The report block alone: the rest of a Codex prompt names `get_task` in
+    // its capability-gap note.
+    const report = (prompt: string) => prompt.slice(prompt.indexOf("# Agent report"), prompt.indexOf("# Your decision"));
     const long = `${"finding ".repeat(1200)}`; // ~9,600 chars: past 4,000, inside 16,000
-    const codex = agentReportBlock("agent-reply", long, { toolless: true });
-    // CANARY: cap the tool-less report at 4,000 again and the findings past it
-    // are gone with nowhere to fetch them from, the SHOP-42 loss on Codex.
+    const codex = report(buildCodexOperatorPrompt(snapshot(), "agent-reply", undefined, long));
+    // CANARY: cap the tool-less report at 4,000 again, or drop `{ toolless:
+    // true }` at the Codex call site, and the findings past it are gone with
+    // nowhere to fetch them from, the SHOP-42 loss on Codex.
     expect(codex).toContain(long.trim());
     expect(codex).not.toContain("is CUT");
     const huge = "x".repeat(AGENT_REPORT_CAP_TOOLLESS + 10);
-    const cut = agentReportBlock("agent-reply", huge, { toolless: true });
+    const cut = report(buildCodexOperatorPrompt(snapshot(), "agent-reply", undefined, huge));
     expect(cut).toContain("this turn cannot fetch the rest");
     expect(cut).not.toMatch(/get_task|read_timeline_entry/);
-    // An operator with tools keeps ruling 285's cut and its address.
-    expect(agentReportBlock("agent-reply", long)).toContain("read_timeline_entry");
   });
 
   /**
