@@ -1090,13 +1090,17 @@ describe("R15-2 safety net (b): manual delivery from the task page", () => {
         dataCtx(),
       ),
     ).rejects.toMatchObject({ status: 403 });
-    const outcome = await manualDeliverForReview(
+    await manualDeliverForReview(
       store.db,
       { projectSlug: store.slug, taskKey: "VIB-1" },
       actorOf(store.users.selin), // contributor OWNER
       dataCtx(),
     );
-    expect(outcome.status).not.toBe(undefined);
+    // The owner's delivery ran and is audited as theirs; the viewer was
+    // refused before any delivery, so it wrote no row.
+    expect(
+      listAuditEvents(store.db, { action: "github.delivery.manual" }).map((row) => row.actorUserId),
+    ).toEqual([store.users.selin.id]);
 
     // Ownership moved elsewhere → the same contributor is refused.
     seed({ stage: "review", branch: "vib-1", ownerUserId: store.users.murat.id });
