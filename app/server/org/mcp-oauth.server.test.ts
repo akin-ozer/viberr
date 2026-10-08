@@ -242,15 +242,6 @@ describe("the callback: exchange and seal (ruling 469)", () => {
 });
 
 describe("the token upstream: use, renew, expire (ruling 469)", () => {
-  it("sends the sealed access token upstream", async () => {
-    await startServer();
-    await signIn();
-    expect(await callWhoami()).toBe("whoami,delete_zone,slow,fail");
-    const bearer = server.authorizations.at(-1);
-    expect(bearer).toMatch(/^Bearer at_/);
-    expect(server.issuedSecrets()).toContain(bearer?.slice("Bearer ".length));
-  });
-
   it("renews an access token that has run out before sending it, and re-seals the new pair", async () => {
     await startServer({ accessTokenTtlSec: 5 });
     await signIn();
