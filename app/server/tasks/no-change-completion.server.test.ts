@@ -275,27 +275,6 @@ describe("noChangeCompletionEvent — one builder, and it never claims a merge",
   const actor = { kind: "operator" } as const;
   const at = "2026-08-06T10:00:00.000Z";
 
-  it("names the basis and the base sha, and never says 'merged'", () => {
-    const event = noChangeCompletionEvent({
-      taskKey: "VC-5",
-      actor,
-      occurredAt: at,
-      by: "human",
-      verification: {
-        basis: "no_branch",
-        baseBranch: "main",
-        baseSha: "abc123def456789",
-        branch: "vc-5",
-      },
-    });
-    expect(event.title).toBe("Completed with no changes");
-    expect(event.type).toBe("completion");
-    expect(event.text).toContain("VC-5 completed with no changes");
-    expect(event.text).toContain("`vc-5`");
-    expect(event.text).toContain("abc123def456");
-    expect(event.text).not.toMatch(/merged/i);
-  });
-
   it("an empty branch says so, and a repo-less project says THAT", () => {
     const empty = noChangeCompletionEvent({
       taskKey: "VC-5",

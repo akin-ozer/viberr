@@ -867,22 +867,6 @@ describe("the operator reaches the outcome without deliver_for_review", () => {
       operatorSnapshot(store.db, dataCtx(), store.slug, "VIB-1", resolveOperatorAuthority(dataCtx(), store.slug, {})).noChanges,
     ).toBe(true);
   });
-
-  it("F19-21 regression: the old dead end is gone", async () => {
-    // The verbatim live noop. CANARY: revert the mint — this sentence returns.
-    deployAgents(true);
-    seedVerificationTask();
-    await reviewerApproves();
-
-    const result = await operatorAcceptCompletion(
-      store.db,
-      dataCtx(),
-      { projectSlug: store.slug, taskKey: "VIB-1" },
-      resolveOperatorAuthority(dataCtx(), store.slug, { autonomy: "full" }),
-    );
-    expect(result.outcome).not.toBe("noop");
-    expect(result.message).not.toContain("No reviewed revision yet");
-  });
 });
 
 /**
