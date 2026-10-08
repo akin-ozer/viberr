@@ -454,11 +454,11 @@ describe("R20-1 — a settled recovery decision re-queues the operator", () => {
     expect(parsed.packet).toBeNull();
     expect(parsed.frontmatter.schedules).toHaveLength(1);
 
-    // Settled far longer than a re-queue needs: the sibling test above resolves
-    // `block_on_policy` on this same harness and sees its call, so a call here
-    // would be observable — "not called" is a real absence, not a race won by
-    // being too fast.
-    await new Promise((r) => setTimeout(r, 1_000));
+    // A re-queue would already have landed: `autoInvokeOperator`'s only await
+    // before `runOperator` is the import of a module packet-resolution has
+    // already loaded, so its call lands before `resolvePacket` returns. After
+    // one more settle, "not called" is a real absence.
+    await flush();
     // CANARY: remove `wait_for_window` from NO_REQUEUE and this fires — a run
     // against the very quota the decision exists to wait out, which live on
     // SHOP-18 was refused and opened a NEW packet asking the same question.
@@ -530,7 +530,7 @@ describe("R20-1 — a settled recovery decision re-queues the operator", () => {
     expect(decision.text).toContain("waits on VIB-2");
     expect(decision.text).not.toContain("unblocked");
 
-    await new Promise((r) => setTimeout(r, 1_000));
+    await flush();
     // CANARY: remove `block_on_dependencies` from NO_REQUEUE.
     expect(runOp).not.toHaveBeenCalled();
   });
@@ -583,7 +583,7 @@ describe("R20-1 — a settled recovery decision re-queues the operator", () => {
     expect(note!.text).toContain("set what it waits on from the task page");
     // And still no run: the decision was "do not run", and a failed side effect
     // does not turn that into a dispatch.
-    await new Promise((r) => setTimeout(r, 300));
+    await flush();
     expect(runOp).not.toHaveBeenCalled();
   });
 
