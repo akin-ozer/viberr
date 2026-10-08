@@ -107,12 +107,16 @@ describe("ruling 372: the resume verdict", () => {
 
   it("Codex is ten minutes on every credential kind until measured", () => {
     const at = { nowIso: NOW, contextTokens: 200_000 };
-    expect(
-      resumeVerdict({ backend: "codex", credentialKind: "login", finishedAt: minutesBefore(11), ...at }).fresh,
-    ).toBe(true);
-    expect(
-      resumeVerdict({ backend: "codex", credentialKind: "login", finishedAt: minutesBefore(9), ...at }).fresh,
-    ).toBe(false);
+    for (const credentialKind of ["login", "api_key", "access_token"] as const) {
+      expect(
+        resumeVerdict({ backend: "codex", credentialKind, finishedAt: minutesBefore(11), ...at }).fresh,
+        credentialKind,
+      ).toBe(true);
+      expect(
+        resumeVerdict({ backend: "codex", credentialKind, finishedAt: minutesBefore(9), ...at }).fresh,
+        credentialKind,
+      ).toBe(false);
+    }
   });
 
   it("an unknown size never starts fresh, and a never-finished row is idle for ever", () => {
