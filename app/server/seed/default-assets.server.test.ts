@@ -5,7 +5,6 @@ import path from "node:path";
 import { afterAll, afterEach, describe, expect, it, vi } from "vitest";
 import { readdirSync } from "node:fs";
 import { z } from "zod";
-import type { CapabilityMode } from "~/schemas/project-file.schema";
 import { sha256Hex } from "~/server/files/content-hash.server";
 import { logger } from "~/server/logging/logger.server";
 import { getBuildInfo } from "~/server/ops/build-info.server";
@@ -13,6 +12,7 @@ import { DONE_SIGNAL_RULE } from "~/server/tasks/done-signal.server";
 import { listAuditEvents } from "../../../test-support/audit-log";
 import { createTestDbContext } from "../../../test-support/test-db";
 import { SEED_AGENT_PROFILES } from "./agent-catalog.server";
+import { operatorAuthority } from "../../../test-support/operator-snapshot";
 
 /**
  * P13 regression: the shipped agent assets must load under EVERY runtime, not
@@ -1196,23 +1196,7 @@ describe("the seeded-prompt sweep: the shipped prompts say what the code does", 
     const { buildOperatorSystemPrompt } = await import("~/server/runtimes/operator-prompt.server");
     const dataRoot = seededStore();
     seedDefaultAgentAssets(dataRoot);
-    const { prompt } = buildOperatorSystemPrompt(
-      {
-        policy: new Map<string, CapabilityMode>([["transition-to-done", "human"]]),
-        autonomy: "supervised",
-        backend: "claude",
-        model: "sonnet",
-        effort: "",
-        name: "Operator",
-        skills: [],
-        kb: [],
-        mcps: [],
-        persona: null,
-        deployed: true,
-        humanGatedBeforeWork: false,
-      },
-      dataRoot,
-    );
+    const { prompt } = buildOperatorSystemPrompt(operatorAuthority({ "transition-to-done": "human" }), dataRoot);
     // The store copy was read, not the baked fallback.
     expect(prompt).toContain("triage quality gate");
     expect(prompt).not.toContain("advancing a single `auto` boundary");

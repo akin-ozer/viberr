@@ -54,6 +54,7 @@ import {
 import { reconfigureProject } from "../../../test-support/projected-store";
 import { createPat, setProjectCredential } from "~/server/secrets/pat-store.server";
 import type { TaskActionContext } from "./task-action-core.server";
+import { operatorAuthority } from "../../../test-support/operator-snapshot";
 
 const pushMock = vi.fn<typeof pushWorkspaceBranch>();
 const openPrMock = vi.fn<typeof openTaskPr>();
@@ -129,20 +130,7 @@ function authority(
   autonomy: "supervised" | "full" = "supervised",
   humanGatedBeforeWork = false,
 ): OperatorAuthority {
-  return {
-    policy: new Map(Object.entries(modes)),
-    autonomy,
-    backend: "claude",
-    model: "sonnet",
-    effort: "",
-    name: "Operator",
-    skills: [],
-    kb: [],
-    mcps: [],
-    persona: null,
-    deployed: true,
-    humanGatedBeforeWork,
-  };
+  return operatorAuthority(modes, { autonomy, humanGatedBeforeWork });
 }
 
 /** Every entry point gets the injected doubles; the canned transport rides

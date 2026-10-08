@@ -37,6 +37,7 @@ import {
   operatorPlanSchemaFor,
   operatorPlanToolsFor,
 } from "~/server/runtimes/operator-codex-plan.server";
+import { operatorAuthority } from "../../../test-support/operator-snapshot";
 
 const ctxDb = createTestDbContext();
 afterEach(() => ctxDb.cleanup());
@@ -44,27 +45,17 @@ afterEach(() => ctxDb.cleanup());
 const ACTOR = { userId: "u_t", label: "t@test" };
 
 function authority(mcps: string[]): OperatorAuthority {
-  return {
-    policy: new Map([
-      ["assign-primary-specialist", "direct"],
-      ["summon-reviewers", "direct"],
-      ["generate-packets", "direct"],
-      ["append-typed-events", "direct"],
-      ["stage-transitions", "recommend"],
-      ["completion-for-acceptance", "recommend"],
-    ]),
-    autonomy: "supervised",
-    backend: "claude",
-    model: "sonnet",
-    effort: "",
-    name: "Operator",
-    skills: [],
-    kb: [],
-    mcps,
-    persona: null,
-    deployed: true,
-    humanGatedBeforeWork: false,
-  };
+  return operatorAuthority(
+    {
+      "assign-primary-specialist": "direct",
+      "summon-reviewers": "direct",
+      "generate-packets": "direct",
+      "append-typed-events": "direct",
+      "stage-transitions": "recommend",
+      "completion-for-acceptance": "recommend",
+    },
+    { mcps },
+  );
 }
 
 /** The toolkit for task P-1 of a project `p` that holds nothing: what the
@@ -195,12 +186,7 @@ describe("buildOperatorToolkit ↔ operatorPlanToolsFor governed-action parity (
         .map((t) => RENAME.get(t) ?? t),
     );
 
-  const withPolicy = (
-    policy: Record<string, "direct" | "recommend" | "off">,
-  ): OperatorAuthority => ({
-    ...authority([]),
-    policy: new Map(Object.entries(policy)),
-  });
+  const withPolicy = (policy: Record<string, "direct" | "recommend" | "off">) => operatorAuthority(policy);
 
   const ALL_CAPS = [
     "append-typed-events",

@@ -7,6 +7,7 @@ import { HUMANIZER_PROMPT_SECTION } from "./humanizer.server";
 import type { OperatorAuthority } from "~/server/tasks/operator-authority.server";
 import type { CapabilityMode } from "~/schemas/project-file.schema";
 import { createTempDirs } from "../../../test-support/temp-dirs";
+import { operatorAuthority } from "../../../test-support/operator-snapshot";
 
 // After the whole file, not each test: three describes below make one data
 // root at collection time and share it across their cases.
@@ -14,20 +15,7 @@ const temp = createTempDirs();
 afterAll(temp.cleanup);
 
 function authorityWith(kb: string[]): OperatorAuthority {
-  return {
-    policy: new Map(),
-    autonomy: "supervised",
-    backend: "claude",
-    model: "sonnet",
-    effort: "",
-    name: "Operator",
-    skills: [],
-    kb,
-    mcps: [],
-    persona: null,
-    deployed: true,
-    humanGatedBeforeWork: false,
-  };
+  return operatorAuthority({}, { kb });
 }
 
 describe("buildOperatorSystemPrompt — KB injection (F6, FR9)", () => {
@@ -426,12 +414,7 @@ describe("authoredPacketOptions — recommended index (P11-27)", () => {
 describe("buildOperatorSystemPrompt — whose policy is this? (F21-16, F21-14)", () => {
   const dataRoot = () => temp.make("viberr-op-scope-");
 
-  const withPolicy = (
-    rows: Record<string, CapabilityMode>,
-  ): OperatorAuthority => ({
-    ...authorityWith([]),
-    policy: new Map(Object.entries(rows)),
-  });
+  const withPolicy = (rows: Record<string, CapabilityMode>) => operatorAuthority(rows);
 
   it("labels the map as the OPERATOR's own and points elsewhere for an agent's grants", () => {
     // Canary: restore the bare "# Live authority / Capability policy" heading

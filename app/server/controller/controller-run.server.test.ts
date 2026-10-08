@@ -8,6 +8,7 @@ import {
 } from "../../../test-support/test-app";
 import { withEnv } from "../../../test-support/env";
 import type { ControllerToolUser } from "./controller-tool-guards.server";
+import { operatorAuthority } from "../../../test-support/operator-snapshot";
 
 /**
  * Ruling 107 — what a controller turn MOUNTS, and what it is told about it.
@@ -852,21 +853,7 @@ describe("ruling 293: the coordinators can read the evidence", () => {
       ctx: { dataRoot: app.dataRoot },
       projectSlug: "viberr-core",
       taskKey: "VIB-1",
-      authority: {
-        policy: new Map(),
-        autonomy: "supervised",
-        configuredAutonomy: "supervised",
-        kb: [],
-        skills: [],
-        mcps: [],
-        persona: null,
-        deployed: false,
-        backend: "claude",
-        model: "",
-        effort: "",
-        name: "Operator",
-        humanGatedBeforeWork: false,
-      },
+      authority: operatorAuthority({}, { configuredAutonomy: "supervised", deployed: false, model: "" }),
     });
     expect(operator.allowedTools).toContain("mcp__viberr__read_task_attachment");
   });

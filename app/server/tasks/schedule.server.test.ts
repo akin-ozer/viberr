@@ -1,11 +1,9 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { z } from "zod";
 import { rebuildAll } from "~/server/projections/rebuilder.server";
-import type { CapabilityMode } from "~/schemas/project-file.schema";
 import { defaultModelFor } from "~/server/runtimes/model-catalog.server";
 import { buildOperatorToolkit } from "./operator-toolkit.server";
 import { operatorScheduleRun } from "./operator-dispatch.server";
-import type { OperatorAuthority } from "./operator-authority.server";
 import { createTestDbContext, type TestDbContext } from "../../../test-support/test-db";
 import {
   baseTaskFrontmatter,
@@ -36,6 +34,7 @@ import {
   fireDueSchedules,
   scheduleTaskAction,
 } from "./schedule.server";
+import { operatorAuthority } from "../../../test-support/operator-snapshot";
 
 let ctx: TestDbContext;
 let store: TestStore;
@@ -1040,24 +1039,8 @@ describe("fireDueSchedules", () => {
  * attributed to the operator and gated like its immediate dispatch.
  */
 describe("ruling 487: the operator's schedule_task_action and cancel_task_schedule", () => {
-  /** An operator whose `dispatch-agents` grant is absent, which resolves to
-   *  the catalog default `direct` (ruling 98(b)). */
-  function operatorAuthority(policy: Record<string, CapabilityMode> = {}): OperatorAuthority {
-    return {
-      policy: new Map(Object.entries(policy)),
-      autonomy: "supervised",
-      backend: "claude",
-      model: "sonnet",
-      effort: "",
-      name: "Operator",
-      skills: [],
-      kb: [],
-      mcps: [],
-      persona: null,
-      deployed: true,
-      humanGatedBeforeWork: false,
-    };
-  }
+  // `operatorAuthority()` grants no `dispatch-agents`, which resolves to the
+  // catalog default `direct` (ruling 98(b)).
   const toolkitFor = (taskKey: string, authority = operatorAuthority()) =>
     buildOperatorToolkit({ db: store.db, ctx: dctx(), projectSlug: store.slug, taskKey, authority });
   const replyText = z

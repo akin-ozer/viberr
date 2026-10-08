@@ -18,7 +18,6 @@ import { startRun } from "~/server/runtimes/run-service.server";
 import { type InsertRunInput, upsertRun } from "~/server/runtimes/run-store.server";
 import { recordAgentCompletion } from "./agent-completion.server";
 import { openAgentQuestionPacket } from "./agent-toolkit.server";
-import type { OperatorAuthority } from "./operator-authority.server";
 import { operatorTransitionStage, operatorWriteCompletionPacket } from "./operator-moves.server";
 import { operatorOpenPacket } from "./operator-packets.server";
 import { resolvePacket } from "./packet-resolution.server";
@@ -28,6 +27,7 @@ import { dismissRecommendation } from "./task-recommendations.server";
 import { relayToTask } from "./task-relay.server";
 import { transitionStage } from "./task-transitions.server";
 import { whatItTookFor } from "./what-it-took.server";
+import { operatorAuthority } from "../../../test-support/operator-snapshot";
 
 /**
  * Ruling 693: what a task took, read from its run rows and its own record.
@@ -116,24 +116,11 @@ function run(
 }
 
 /** The operator's own authority, built by hand: this board deploys no agent. */
-const OPERATOR: OperatorAuthority = {
-  policy: new Map([
-    ["generate-packets", "direct"],
-    ["stage-transitions", "recommend"],
-    ["completion-for-acceptance", "recommend"],
-  ]),
-  autonomy: "supervised",
-  backend: "claude",
-  model: "sonnet",
-  effort: "",
-  name: "Operator",
-  skills: [],
-  kb: [],
-  mcps: [],
-  persona: null,
-  deployed: true,
-  humanGatedBeforeWork: false,
-};
+const OPERATOR = operatorAuthority({
+  "generate-packets": "direct",
+  "stage-transitions": "recommend",
+  "completion-for-acceptance": "recommend",
+});
 
 const DEVELOPER = {
   kind: "agent",

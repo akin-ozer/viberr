@@ -82,7 +82,7 @@ import {
 } from "../../../test-support/test-db";
 import { createLocalOrigin, withLocalGithub } from "../../../test-support/git-origin";
 import { listAuditEvents } from "../../../test-support/audit-log";
-import { operatorSnapshot } from "../../../test-support/operator-snapshot";
+import { operatorAuthority, operatorSnapshot } from "../../../test-support/operator-snapshot";
 import { reconfigureProject } from "../../../test-support/projected-store";
 import { emptyRunFailureFacts, type RunFailureFacts } from "~/shared/run-failure";
 
@@ -1526,20 +1526,7 @@ describe("operatorPlanToolsFor — the schema mirrors the capability policy (P13
     modes: Record<string, CapabilityMode>,
     autonomy: OperatorAutonomy = "supervised",
   ): OperatorAuthority {
-    return {
-      policy: new Map(Object.entries(modes)),
-      autonomy,
-      backend: "codex",
-      model: defaultModelFor("codex"),
-      effort: "",
-      name: "Operator",
-      skills: [],
-      kb: [],
-      mcps: [],
-      persona: null,
-      deployed: true,
-      humanGatedBeforeWork: false,
-    };
+    return operatorAuthority(modes, { autonomy, backend: "codex", model: defaultModelFor("codex") });
   }
 
   it("drops the tools whose capability is withheld", () => {
@@ -2226,25 +2213,17 @@ describe("pr-diverged turn instruction (both backends)", () => {
    */
   it("ruling 409: the plan schema and the guidance both say a question_reviewer names its reviewer", () => {
     const schema = JSON.stringify(
-      operatorPlanSchemaFor({
-        policy: new Map<string, CapabilityMode>([
-          ["append-typed-events", "direct"],
-          ["generate-packets", "direct"],
-          ["stage-transitions", "direct"],
-          ["dispatch-agents", "direct"],
-        ]),
-        autonomy: "supervised",
-        backend: "codex",
-        model: defaultModelFor("codex"),
-        effort: "",
-        name: "Operator",
-        skills: [],
-        kb: [],
-        mcps: [],
-        persona: null,
-        deployed: true,
-        humanGatedBeforeWork: false,
-      }),
+      operatorPlanSchemaFor(
+        operatorAuthority(
+          {
+            "append-typed-events": "direct",
+            "generate-packets": "direct",
+            "stage-transitions": "direct",
+            "dispatch-agents": "direct",
+          },
+          { backend: "codex", model: defaultModelFor("codex") },
+        ),
+      ),
     );
     // CANARY: restore "retry_other_backend only" and the first two fail.
     expect(schema).toContain("question_reviewer");

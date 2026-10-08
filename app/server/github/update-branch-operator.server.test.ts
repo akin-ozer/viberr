@@ -36,6 +36,7 @@ import {
   operatorUpdateBranchFromBase,
   updateBranchGate,
 } from "./update-branch-operator.server";
+import { operatorAuthority } from "../../../test-support/operator-snapshot";
 
 /**
  * N19-9, decision half. The owner ruled this operator-decided: the operator
@@ -72,24 +73,7 @@ beforeEach(() => {
 afterEach(() => ctx.cleanup());
 
 function authority(patch: Partial<OperatorAuthority> = {}): OperatorAuthority {
-  return {
-    policy: new Map([
-      ["generate-packets", "direct"],
-      ["append-typed-events", "direct"],
-    ]),
-    autonomy: "supervised",
-    backend: "claude",
-    model: "sonnet",
-    effort: "",
-    name: "Operator",
-    skills: [],
-    kb: [],
-    mcps: [],
-    persona: null,
-    deployed: true,
-    humanGatedBeforeWork: false,
-    ...patch,
-  };
+  return operatorAuthority({ "generate-packets": "direct", "append-typed-events": "direct" }, patch);
 }
 
 /** A fake git whose merge either succeeds or conflicts. */
