@@ -13,7 +13,6 @@ import type {
 import {
   assertEffortForBackend,
   assertModelForBackend,
-  curatedCatalog,
   effortsFor,
   defaultEffortFor,
   defaultModelFor,
@@ -101,8 +100,8 @@ describe("resolveRunModel — the SDK-safety sanitizer", () => {
 });
 
 describe("curated catalog", () => {
-  it("claude curated: sonnet/opus/haiku aliases, effort levels, defaults", () => {
-    const cat = curatedCatalog("claude");
+  it("claude curated: sonnet/opus/haiku aliases, effort levels, defaults", async () => {
+    const cat = await getModelCatalog("claude");
     expect(cat.models.map((m) => m.value)).toEqual(["sonnet", "opus", "haiku"]);
     expect(cat.models.every((m) => m.supportsEffort)).toBe(true);
     expect(cat.efforts).toEqual(["low", "medium", "high", "xhigh", "max"]);
@@ -118,7 +117,7 @@ describe("curated catalog", () => {
     const { CLAUDE_MODEL_ALIASES, claudeModelRunsVerbatim } = await import(
       "~/shared/model-ids"
     );
-    expect(curatedCatalog("claude").models.map((m) => m.value)).toEqual([
+    expect((await getModelCatalog("claude")).models.map((m) => m.value)).toEqual([
       ...CLAUDE_MODEL_ALIASES,
     ]);
     // And the shared predicate agrees with isKnownModel on its static half.
@@ -128,8 +127,8 @@ describe("curated catalog", () => {
     expect(claudeModelRunsVerbatim("gpt-5-codex")).toBe(false);
   });
 
-  it("codex curated: the pinned CLI's bundled models + low…max efforts, per model", () => {
-    const cat = curatedCatalog("codex");
+  it("codex curated: the pinned CLI's bundled models + low…max efforts, per model", async () => {
+    const cat = await getModelCatalog("codex");
     // Ruling 687: GPT-6.1 Sol is listed FIRST, so it is the fallback a
     // model-less operator or profile runs on (it replaced F20-33's Terra).
     // The rest follow the 0.160.1 bundled catalog's priority order, its
@@ -160,15 +159,15 @@ describe("curated catalog", () => {
     expect(cat.defaultEffort).toBe("medium");
   });
 
-  it("returns fresh copies (callers cannot mutate the shared constant)", () => {
-    const a = curatedCatalog("claude");
+  it("returns fresh copies (callers cannot mutate the shared constant)", async () => {
+    const a = await getModelCatalog("claude");
     a.models[0]!.value = "mutated";
-    expect(curatedCatalog("claude").models[0]!.value).toBe("sonnet");
+    expect((await getModelCatalog("claude")).models[0]!.value).toBe("sonnet");
   });
 
-  it("defaultModel is the FIRST available model (not a separate hardcoded id)", () => {
+  it("defaultModel is the FIRST available model (not a separate hardcoded id)", async () => {
     for (const backend of ["claude", "codex"] as const) {
-      const cat = curatedCatalog(backend);
+      const cat = await getModelCatalog(backend);
       expect(cat.defaultModel).toBe(cat.models[0]!.value);
       // defaultModelFor mirrors the catalog default (what run/reply fall back to).
       expect(defaultModelFor(backend)).toBe(cat.models[0]!.value);
