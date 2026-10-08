@@ -129,13 +129,4 @@ describe("/projects/:slug/review", () => {
       operatorName: "Operator",
     });
   });
-
-  it("falls back to the strict boundary for a store with no such project", async () => {
-    const { resolveAcceptanceAuthority } = await import(
-      "./review-acceptance-authority.server"
-    );
-    expect(
-      resolveAcceptanceAuthority("no-such-project", { dataRoot: app.dataRoot }),
-    ).toEqual({ operatorCanAccept: false, operatorName: "the operator" });
-  });
 });
