@@ -303,27 +303,18 @@ describe("setBackendApiKey", () => {
     expect(listAuditEvents(db, { action: "profile.backend.connected" })).toEqual([]);
   });
 
-  it("names the host it could not reach — and never the key it was sending", async () => {
-    const provider = unreachableProvider(CLAUDE_KEY);
+  it.each([
+    ["claude", CLAUDE_KEY, "api.anthropic.com"],
+    ["codex", OPENAI_KEY, "api.openai.com"],
+  ] as const)("names the %s host it could not reach — and never the key it was sending", async (backend, secret, host) => {
     const error = await thrownFromAsync(() =>
-      setBackendApiKey(db, actor, "claude", "api_key", CLAUDE_KEY, {
-        fetchImpl: provider.fetchImpl,
+      setBackendApiKey(db, actor, backend, "api_key", secret, {
+        fetchImpl: unreachableProvider(secret).fetchImpl,
       }),
     );
-    expect(error?.userMessage).toContain("api.anthropic.com");
-    expect(error?.userMessage).not.toContain(CLAUDE_KEY);
-    expect(getBackendCredential(db, actor.userId, "claude")).toBeNull();
-  });
-
-  it("names the OpenAI host on a codex network failure", async () => {
-    const provider = unreachableProvider(OPENAI_KEY);
-    const error = await thrownFromAsync(() =>
-      setBackendApiKey(db, actor, "codex", "api_key", OPENAI_KEY, {
-        fetchImpl: provider.fetchImpl,
-      }),
-    );
-    expect(error?.userMessage).toContain("api.openai.com");
-    expect(error?.userMessage).not.toContain(OPENAI_KEY);
+    expect(error?.userMessage).toContain(host);
+    expect(error?.userMessage).not.toContain(secret);
+    expect(getBackendCredential(db, actor.userId, backend)).toBeNull();
   });
 
   it("stores a ChatGPT workspace access token UNVERIFIED, with no probe at all", async () => {
