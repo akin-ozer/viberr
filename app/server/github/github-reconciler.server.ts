@@ -1904,7 +1904,7 @@ export interface ProjectReconcileSummary {
  * for every project. Four in flight keeps a human-triggered sweep fast without
  * spending the hour's budget in one burst.
  */
-export const RECONCILE_TASK_CONCURRENCY = 4;
+const RECONCILE_TASK_CONCURRENCY = 4;
 
 /**
  * Per-project task budget for one BUDGETED pass (the background poller).

@@ -49,7 +49,6 @@ import {
 
 import {
   mergeTaskPr,
-  RECONCILE_TASK_CONCURRENCY,
   recheckOpenReviewPrs,
   reconcileProject,
   reconcileTask,
@@ -426,11 +425,17 @@ describe("reconcileTask", () => {
       actor,
     );
     setProjectCredential(store.db, { projectSlug: store.slug, patId: pat.id }, actor);
-    // No `rev...head` compare route registered — if the reconciler asked for one
-    // (it must not, the shas are equal) the fake would throw an unknown route.
-    await reconcileVib301(store, actor, fakeGithubFetch(happyRoutes()).fetchImpl);
+    // No `rev...head` compare route is registered, and the fake answers an
+    // unknown route 404 (which reads as a never-pushed revision), so the call
+    // itself is what gets asserted: the shas are equal and none is made.
+    // CANARY: drop the equal-sha short cut and the compare is requested and
+    // `unpushedRevision` is written.
+    const gh = fakeGithubFetch(happyRoutes());
+    await reconcileVib301(store, actor, gh.fetchImpl);
     const fm = readVib301(store)!.parsed.frontmatter;
     expect(fm.pr?.revisionDrift).toBeUndefined();
+    expect(fm.pr?.unpushedRevision).toBeUndefined();
+    expect(gh.callsTo(`GET ${REPO_PATH}/compare/headsha318...headsha318`)).toHaveLength(0);
   });
 
   it("R15-15: a PR this task did NOT open is never adopted — a task-key branch is not unique", async () => {
@@ -2402,7 +2407,7 @@ describe("reconcileProject fan-out control", () => {
     return { fetchImpl, peak: () => peak };
   }
 
-  it("keeps at most RECONCILE_TASK_CONCURRENCY reconciles in flight", async () => {
+  it("keeps at most 4 reconciles in flight (B-GH5)", async () => {
     const { store, actor } = boardOf(12);
     const probe = concurrencyProbe();
     const summary = await reconcileProject(store.db, store.slug, actor, {
@@ -2410,8 +2415,10 @@ describe("reconcileProject fan-out control", () => {
       fetchImpl: probe.fetchImpl,
     });
     expect(summary.results).toHaveLength(13); // 12 + the setup task
-    // Fails on main: Promise.all put all 13 in flight at once.
-    expect(probe.peak()).toBeLessThanOrEqual(RECONCILE_TASK_CONCURRENCY);
+    // Fails on main: Promise.all put all 13 in flight at once. The bound is
+    // the pool docs/domain/github-delivery.md states, not the constant under
+    // test, so a pool that grows past it fails too.
+    expect(probe.peak()).toBeLessThanOrEqual(4);
   });
 
   /** Every branch compares clean and carries no PR — enough for a real
@@ -3074,6 +3081,7 @@ describe("ruling 132: drift is classified, not counted", () => {
     // (`fullSha`, `parents`) never reach the file — ruling 132. Ruling 187 adds
     // exactly one more, `pushed`, which is schema'd and deliberate; the guard
     // stays so a THIRD field cannot arrive by accident.
+    expect(fm.github?.commits).toHaveLength(2);
     for (const c of fm.github?.commits ?? [])
       expect(Object.keys(c).sort()).toEqual(["msg", "pushed", "sha"]);
   });
