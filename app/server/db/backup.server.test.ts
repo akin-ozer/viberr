@@ -447,16 +447,27 @@ describe("restoreStoreFile", () => {
 
   it("refuses paths outside the file-native store", () => {
     const f = fixture();
-    const backup = createBackup({ dataRoot: f.dataRoot, destination: f.out });
-    for (const bad of [
-      "state/projection.sqlite",
-      "runtimes/users/u_arda/codex-home/auth.json",
-      "../../etc/passwd",
-      "/etc/passwd",
-    ]) {
-      expect(() =>
-        restoreStoreFile({ artefact: backup.dir, dataRoot: f.dataRoot, relPath: bad }),
-      ).toThrow();
+    // The artefact DOES carry a person's live sign-in, so only the refusal
+    // keeps it off the root. CANARY: drop the FILE_RESTORE_ROOTS check in
+    // normalizeStoreRelPath and the runtimes row restores the credential.
+    const home = path.join(f.dataRoot, "runtimes", "users", "u_arda", "codex-home");
+    mkdirSync(home, { recursive: true });
+    writeFileSync(path.join(home, "auth.json"), "{}");
+    const backup = createBackup({
+      dataRoot: f.dataRoot,
+      destination: f.out,
+      includeRuntimes: true,
+    });
+    for (const [bad, reason] of [
+      ["state/projection.sqlite", /single-file restore only writes into/],
+      ["runtimes/users/u_arda/codex-home/auth.json", /single-file restore only writes into/],
+      ["../../etc/passwd", /escapes the store/],
+      ["/etc/passwd", /single-file restore only writes into/],
+    ] as const) {
+      expect(
+        () => restoreStoreFile({ artefact: backup.dir, dataRoot: f.dataRoot, relPath: bad }),
+        bad,
+      ).toThrow(reason);
     }
   });
 
