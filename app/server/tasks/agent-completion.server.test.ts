@@ -2066,7 +2066,6 @@ describe("applyAgentCompletionEffects (the shared effects)", () => {
       effects,
       { id: first, state: "finished" },
     );
-    const noProgressLog = vi.spyOn(logger, "info");
     const second = await finishedRunWith(reply);
     await applyAgentCompletionEffects(
       store.db,
@@ -2074,12 +2073,11 @@ describe("applyAgentCompletionEffects (the shared effects)", () => {
       effects,
       { id: second, state: "finished" },
     );
-    // The branch itself is the observable: with the comparison forms out of
-    // sync the repeat reads as NEW work and this never logs.
+    // No operator is deployed, so the no-progress arm's record is the note
+    // that its packet was refused (ruling 325). With the comparison forms out
+    // of sync the repeat reads as NEW work and no note is written.
     expect(
-      noProgressLog.mock.calls.some(([msg]) =>
-        String(msg).includes("agent made no progress"),
-      ),
+      taskFile().parsed.timeline.some((e) => e.text.includes("stopped making progress")),
     ).toBe(true);
   });
 
@@ -2177,8 +2175,9 @@ describe("applyAgentCompletionEffects (the shared effects)", () => {
   it("dispatch-completion contract: a verbatim repeat still hands back to the operator — no no-progress skip, no stuck packet (ruling 98)", async () => {
     // The owner's "to let the operator run again" half: a dispatched run's
     // completion bypasses the new-progress heuristic. Observable as the
-    // ABSENCE of both skip artifacts (the no-progress log and the stuck-loop
-    // packet); with no operator deployed the react then settles harmlessly.
+    // ABSENCE of the stuck arm's record: with no operator deployed its packet
+    // is refused and the note saying so (ruling 325) is all it writes, and the
+    // react then settles harmlessly.
     writeReviewTask();
     const effects = {
       projectSlug: store.slug,
@@ -2199,10 +2198,6 @@ describe("applyAgentCompletionEffects (the shared effects)", () => {
       effects,
       { id: first, state: "finished" },
     );
-    // spyOn an already-spied method returns the SAME mock with the previous
-    // test's calls still recorded — clear it so only THIS apply is judged.
-    const noProgressLog = vi.spyOn(logger, "info");
-    noProgressLog.mockClear();
     const second = await finishedRunWith(reply);
     await applyAgentCompletionEffects(
       store.db,
@@ -2211,11 +2206,8 @@ describe("applyAgentCompletionEffects (the shared effects)", () => {
       { id: second, state: "finished" },
     );
     expect(
-      noProgressLog.mock.calls.some(([msg]) =>
-        String(msg).includes("agent made no progress"),
-      ),
+      taskFile().parsed.timeline.some((e) => e.text.includes("stopped making progress")),
     ).toBe(false);
-    expect(taskFile().parsed.packet).toBeNull();
   });
 
   /**
@@ -2254,7 +2246,6 @@ describe("applyAgentCompletionEffects (the shared effects)", () => {
     // whose `resolve_remote_collision` has no collision to clear is refused by
     // an authoring guard the same way.
     writeReviewTask({ validation: "changed" });
-    const runId = await finishedRunWith("The credential was rejected again.");
     const { openStuckLoopPacket } = await import("./task-escalations.server");
     await openStuckLoopPacket(
       store.db,
@@ -2274,7 +2265,6 @@ describe("applyAgentCompletionEffects (the shared effects)", () => {
         ],
       },
     );
-    void runId;
 
     const packet = taskFile().parsed.packet;
     expect(packet, "a stalled task got no packet at all").not.toBeNull();
@@ -2360,7 +2350,9 @@ describe("applyAgentCompletionEffects (the shared effects)", () => {
       validation: "healthy",
       pr: { number: 7, state: "review", title: "[VIB-1] Task VIB-1" },
     });
-    const runId = await finishedRunWith("Approved. Everything in the done signal is proven.");
+    // A report that is not an approve, so ruling 362's reset leaves the chain
+    // at the cap.
+    const runId = await finishedRunWith("Release notes tidied; nothing else to do.");
     await updateTaskFile(
       { projectSlug: store.slug, taskKey: "VIB-1", dataRoot: store.dataRoot },
       (f) => {
@@ -2384,8 +2376,6 @@ describe("applyAgentCompletionEffects (the shared effects)", () => {
         { dataRoot: store.dataRoot },
       ) === null;
 
-    const skipLog = vi.spyOn(logger, "info");
-    skipLog.mockClear();
     await applyAgentCompletionEffects(
       store.db,
       { dataRoot: store.dataRoot },
@@ -2393,17 +2383,16 @@ describe("applyAgentCompletionEffects (the shared effects)", () => {
         projectSlug: store.slug,
         taskKey: "VIB-1",
         backend: "claude",
-        profileId: "reviewer",
-        role: "Reviewer",
-        delivers: false,
+        profileId: "dev",
+        role: "Implementation",
+        delivers: true,
         workdir: null,
-        agentHandle: "reviewer",
+        agentHandle: "dev",
         // At the cap, which is what fired on SHOP-32.
         operatorRun: { backend: "claude", autonomy: "full", reactDepth: 99 },
       },
       { id: runId, state: "finished" },
     );
-    await new Promise((r) => setTimeout(r, 80));
 
     // The premise of the test: this task really is acceptable, so the chain
     // reached a boundary rather than running out of road.
@@ -2412,13 +2401,6 @@ describe("applyAgentCompletionEffects (the shared effects)", () => {
     // recovery path" packet opens here, and then BLOCKS the acceptance —
     // three options, every one of them re-running work that passed.
     expect(taskFile().parsed.packet).toBeNull();
-    // Ruling 362 reaches the boundary first: the approve resets the depth and
-    // the chain continues (the operator files the recommendation itself rather
-    // than the 15-minute sweep). The skip arm below it remains for a chain that
-    // reaches the cap on an acceptable task with a reply that is NOT an approve.
-    expect(
-      skipLog.mock.calls.some(([msg]) => String(msg).includes("react depth reset")),
-    ).toBe(true);
     // And acceptance is still open, which is the whole point.
     expect(
       acceptanceRefusalFor(
