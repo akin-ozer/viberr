@@ -173,9 +173,35 @@ RUN npm install -g pnpm@12.9.1 && npm cache clean --force
 # Other scripts (CJK, Arabic, Indic) still have no font here and draw as boxes:
 # fonts-noto-cjk alone is about 90 MB installed, so it waits for a board that
 # needs it.
+#
+# Ruling 698: an agent also DRAWS with this browser. `capture_page` with a size
+# pictures an HTML page or an SVG as a PNG of exactly that size (a diagram, a
+# cover image), and a drawing set in Liberation alone looks like a default.
+# Three families a drawing can name, each with its Installed-Size per
+# `apt-cache show` (trixie, 2026-10-08):
+#   - fonts-inter-variable, 1.8 MB: Inter, under the family name
+#     `Inter Variable`, every weight in one file. By itself plain `Inter` was
+#     NOT answered with it (measured: `font-family: Inter` was drawn in the
+#     next family of its list, a serif, without a word), and `Inter` is the
+#     name a drawing asks for. So /etc/fonts/local.conf says the two names are
+#     one family (`binding="same"`: Chromium takes a family under another name
+#     only when the configuration says they are the same, and a weak alias
+#     fails its name check);
+#   - fonts-ebgaramond, 1.2 MB: `EB Garamond`, regular, italic and one bold;
+#   - fonts-jetbrains-mono, 7.5 MB: `JetBrains Mono`, eight weights.
+# They are there to be named. /etc/fonts/local.conf below leaves the four
+# generic families as they were, so `system-ui`, `sans-serif`, `serif` and
+# `monospace` still mean the Liberation faces. Two things do change for a
+# delivered page: one whose list names `Inter` is now pictured in Inter, which
+# is what its reader gets where the page loads that font, and a character
+# Liberation lacks is drawn from one of the three where it was a box or a
+# colour emoji (a check mark, a star, a diagonal arrow).
+# `scripts/check-page-capture.sh` asks fontconfig for all four generic
+# families and Chromium for each name, plain `Inter` included.
 # hadolint ignore=DL3008
 RUN apt-get update \
     && apt-get install -y --no-install-recommends chromium fonts-liberation fonts-noto-color-emoji \
+       fonts-inter-variable fonts-ebgaramond fonts-jetbrains-mono \
     && rm -rf /var/lib/apt/lists/* \
     && printf '%s\n' \
        '<?xml version="1.0"?>' \
@@ -185,6 +211,7 @@ RUN apt-get update \
        '  <alias><family>serif</family><prefer><family>Liberation Serif</family></prefer></alias>' \
        '  <alias><family>monospace</family><prefer><family>Liberation Mono</family></prefer></alias>' \
        '  <alias><family>system-ui</family><prefer><family>Liberation Sans</family></prefer></alias>' \
+       '  <alias binding="same"><family>Inter</family><prefer><family>Inter Variable</family></prefer></alias>' \
        '</fontconfig>' \
        > /etc/fonts/local.conf \
     && fc-cache -f

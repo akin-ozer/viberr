@@ -21,7 +21,10 @@ import { z } from "zod";
  * page's content height, content width and phone scale; without them a page
  * is one screen. `fake-crash-at:390` ends the browser when the page is loaded
  * at that viewport width, so one width is pictured and the other is not. A
- * screenshot is a real PNG of the clip it was asked for.
+ * screenshot is a real PNG of the clip it was asked for, at the clip's own
+ * scale times the device scale the viewport was set to, as a browser draws
+ * it; `fake-short-by:1` makes it that many px shorter, as a browser that
+ * rounded a side the other way would.
  *
  * It records itself in the evidence directory: `launches.jsonl` (argv, the
  * whole environment, the uid), `pages.jsonl` (one line per page load: the
@@ -71,7 +74,7 @@ function evidence(name, record) {
 evidence("launches.jsonl", { argv: process.argv.slice(2), env: process.env, uid: process.getuid() });
 
 const send = (message) => fs.writeSync(4, JSON.stringify(message) + "\\0");
-const metrics = { width: 0, height: 0, mobile: false };
+const metrics = { width: 0, height: 0, deviceScaleFactor: 1, mobile: false };
 let page = { url: "about:blank", html: "" };
 
 function get(url) {
@@ -185,7 +188,12 @@ function handle(message) {
     case "Audits.enable":
       return reply({});
     case "Emulation.setDeviceMetricsOverride":
-      Object.assign(metrics, { width: message.params.width, height: message.params.height, mobile: message.params.mobile });
+      Object.assign(metrics, {
+        width: message.params.width,
+        height: message.params.height,
+        deviceScaleFactor: message.params.deviceScaleFactor,
+        mobile: message.params.mobile,
+      });
       return reply({});
     case "Page.navigate":
       return void navigate(message);
@@ -213,8 +221,8 @@ function handle(message) {
     }
     case "Page.captureScreenshot": {
       const clip = message.params.clip;
-      const width = Math.round(clip.width * clip.scale);
-      const height = Math.round(clip.height * clip.scale);
+      const width = Math.round(clip.width * clip.scale * metrics.deviceScaleFactor);
+      const height = Math.round(clip.height * clip.scale * metrics.deviceScaleFactor) - declared("short-by", 0);
       const padding = modeFor(page.url, page.html) === "big" ? height * 1000 : 0;
       evidence("shots.jsonl", { url: page.url, clip, width, height });
       return reply({ data: png(width, height, padding).toString("base64") });
@@ -274,7 +282,7 @@ const pageSchema = z.object({
   status: z.number(),
   headers: z.record(z.string(), z.union([z.string(), z.array(z.string())])),
   html: z.string(),
-  metrics: z.object({ width: z.number(), height: z.number(), mobile: z.boolean() }),
+  metrics: z.object({ width: z.number(), height: z.number(), deviceScaleFactor: z.number(), mobile: z.boolean() }),
   resources: z.array(z.object({ src: z.string(), status: z.number().nullable(), bytes: z.number().optional() })),
 });
 export type FakeBrowserPage = z.infer<typeof pageSchema>;

@@ -40,7 +40,9 @@ import { z } from "zod";
  *    folder is flat), opened without following a link. Loaded over http and
  *    not `file://`, a page cannot pull a file off the disk into the picture.
  *  - **Sets a markdown file as an article first**, with the pipeline the app's
- *    own preview uses (react-markdown with remark-gfm and no raw HTML).
+ *    own preview uses (react-markdown with remark-gfm and no raw HTML), and
+ *    **an SVG drawing as a page that holds nothing else**, inline, so it loads
+ *    the files saved beside it as an HTML page does.
  *  - **Starts one browser for the page** with no way out: every request but
  *    the page server's goes to a closed proxy port, and the page's own
  *    response carries a policy that allows only itself. The picture shows what
@@ -52,6 +54,10 @@ import { z } from "zod";
  *    view's cap. A picture too large to hand to an agent is retaken shorter,
  *    and a width at which the page ends before `from` is reported as ended
  *    while the other width is still pictured.
+ *  - **Or pictures it as one box of an exact size** (ruling 698, a view with
+ *    `box`): laid out in a viewport of that size and cut to it from the top
+ *    left, as a PNG of exactly the box times its scale. That one is never
+ *    retaken shorter: a picture of another size is not the one asked for.
  *  - **Dismisses a dialog the page opens.** `alert()`, `confirm()` and
  *    `prompt()` stop a page until somebody answers, and nobody is there: each
  *    is dismissed and counted, so the page loads on and the report says so.
@@ -76,7 +82,7 @@ const jobSchema = z.object({
   profile: z.string().min(1),
   /** The browser executable. */
   browser: z.string().min(1),
-  pages: z.array(z.object({ file: z.string().min(1), kind: z.enum(["html", "markdown"]) })),
+  pages: z.array(z.object({ file: z.string().min(1), kind: z.enum(["html", "markdown", "svg"]) })),
   views: z.array(
     z.object({
       id: z.string().min(1),
@@ -87,11 +93,16 @@ const jobSchema = z.object({
       mobile: z.boolean(),
       /** Where on the page the picture starts, in px from the top. */
       from: z.number().int().nonnegative(),
+      /** Set for a picture of an exact size: the view is one box, `width` by
+       *  `height` CSS px from the page's top left, and `scale` is how many
+       *  picture px draw one CSS px. Absent for a stretch of the page. */
+      box: z.object({ scale: z.number().positive() }).optional(),
     }),
   ),
   /** How long one page gets for all its views, browser start included. */
   pageTimeoutMs: z.number().int().positive(),
-  /** The largest PNG a view may be; over it the picture is retaken shorter. */
+  /** The largest PNG a view may be; over it a stretch is retaken shorter and
+   *  a box, which has one size, is not kept. */
   maxBytes: z.number().int().positive(),
 });
 type Job = z.infer<typeof jobSchema>;
@@ -106,7 +117,9 @@ interface Shot {
   height: number;
   /** Where on the page it starts. */
   from: number;
-  /** The page's full height and width at this view, in the picture's px. */
+  /** The page's full height and width at this view, in the picture's px. For
+   *  a box they are in CSS px, the unit the box itself is given in, whatever
+   *  scale it was drawn at. */
   contentHeight: number;
   contentWidth: number;
   /** Under 1 when a phone shrank a page it lays out wider than its screen. */
@@ -141,11 +154,14 @@ interface PageReport {
 
 /** A markdown source past this is not set as a page. */
 const MARKDOWN_MAX_BYTES = 2 * 1024 * 1024;
+/** Nor is an SVG source past this. */
+const DRAWING_MAX_BYTES = 10 * 1024 * 1024;
 /** How many hosts and missing names one page's report lists. */
 const REPORT_LIST_MAX = 12;
-/** The name a markdown file's article is served under: a dot name, so it can
- *  never be a task file (the page server refuses every other dot name). */
-const ARTICLE_NAME = ".viberr-render.html";
+/** The name the page a source is set as is served under (a markdown file's
+ *  article, a drawing's page): a dot name, so it can never be a task file
+ *  (the page server refuses every other dot name). */
+const SET_PAGE_NAME = ".viberr-render.html";
 /** After its window is asked to close, how long a browser has before its
  *  group is killed. */
 const CLOSE_GRACE_MS = 2_000;
@@ -221,6 +237,34 @@ function articlePage(file: string, source: string): string {
     '<meta name="viewport" content="width=device-width, initial-scale=1">\n' +
     `<title>${escapeHtml(file)}</title>\n<style>\n${ARTICLE_CSS}\n</style>\n</head>\n` +
     `<body>\n<main>\n${body}\n</main>\n</body>\n</html>\n`
+  );
+}
+
+/**
+ * The stylesheet a drawing is set in: nothing but the page's own box.
+ * Measured in the image (Debian Chromium 154, 2026-10-08), in a 1200 by 630
+ * viewport: an inline `<svg>` sits on a text line, so a drawing 630 px tall
+ * made a page 634 px tall, which would be said to overflow its box
+ * (`display: block`); and one sized `height="100%"` was 150 px tall, the
+ * default, where the same file opened by itself fills the window
+ * (`height: 100%` on the page).
+ */
+const DRAWING_CSS = ["html, body { margin: 0; height: 100%; }", "body > svg { display: block; }"].join("\n");
+
+/**
+ * Ruling 698: an SVG source as a whole page, the drawing itself, inline, at
+ * the page's top left. Inline and not as an `<img>` on purpose: a drawing shown as an
+ * image loads nothing, and this one asks the page server for the files saved
+ * beside it (a picture, a font) by name, as an HTML page does. Its markup is
+ * the page's, so a script in it runs as one in an HTML page would.
+ */
+function drawingPage(file: string, source: string): string {
+  return (
+    '<!doctype html>\n<html lang="en">\n<head>\n<meta charset="utf-8">\n' +
+    `<title>${escapeHtml(file)}</title>\n<style>\n${DRAWING_CSS}\n</style>\n</head>\n` +
+    // A byte order mark would be text ahead of the drawing: a line of its
+    // own, which moved the drawing 18 px down (measured as above).
+    `<body>\n${source.replace(/^\uFEFF/, "")}\n</body>\n</html>\n`
   );
 }
 
@@ -308,9 +352,10 @@ interface PageServer {
   /** `<origin>/<token>/`. */
   base: string;
   port: number;
-  /** Set the article served for a markdown page (null for an HTML page) and
-   *  start a fresh list of what was asked for and not served. */
-  begin(article: string | null): void;
+  /** Set the page a markdown file or a drawing is served as (null for an
+   *  HTML page, which is served as it is) and start a fresh list of what was
+   *  asked for and not served. */
+  begin(setPage: string | null): void;
   missing(): string[];
   close(): Promise<void>;
 }
@@ -320,7 +365,7 @@ const listenAddressSchema = z.looseObject({ port: z.number().int().positive() })
 function startPageServer(root: string, names: readonly string[] | undefined): Promise<PageServer> {
   const token = randomBytes(8).toString("hex");
   const prefix = `/${token}/`;
-  let article: string | null = null;
+  let setPage: string | null = null;
   let missing = new Set<string>();
 
   const refuse = (res: ServerResponse): void => {
@@ -352,9 +397,9 @@ function startPageServer(root: string, names: readonly string[] | undefined): Pr
       refuse(res);
       return;
     }
-    if (name === ARTICLE_NAME && article !== null) {
+    if (name === SET_PAGE_NAME && setPage !== null) {
       res.writeHead(200, { ...PAGE_HEADERS, "content-type": "text/html; charset=utf-8" });
-      res.end(req.method === "HEAD" ? undefined : article);
+      res.end(req.method === "HEAD" ? undefined : setPage);
       return;
     }
     const file = servable(name) ? openStored(root, name, names) : null;
@@ -389,7 +434,7 @@ function startPageServer(root: string, names: readonly string[] | undefined): Pr
         base: `${origin}${prefix}`,
         port,
         begin(next) {
-          article = next;
+          setPage = next;
           missing = new Set();
         },
         missing: () => [...missing].slice(0, REPORT_LIST_MAX),
@@ -731,6 +776,80 @@ function pngSize(bytes: Buffer): PictureSize | null {
   return { width: bytes.readUInt32BE(16), height: bytes.readUInt32BE(20) };
 }
 
+/** Load the page at a view's viewport and device scale, walk it, and read
+ *  how it was laid out. */
+async function loadView(ctx: ViewContext, view: JobView, deviceScaleFactor: number): Promise<z.infer<typeof layoutSchema>> {
+  const { browser, sessionId } = ctx;
+  await browser.send(
+    "Emulation.setDeviceMetricsOverride",
+    { width: view.width, height: view.height, deviceScaleFactor, mobile: view.mobile },
+    sessionId,
+  );
+  const loaded = nextLoad(browser, sessionId);
+  const navigated = navigateResultSchema.parse(await browser.send("Page.navigate", { url: ctx.url }, sessionId));
+  if (navigated.errorText) throw new Error(`the page did not load (${navigated.errorText})`);
+  await loaded;
+  await walkPage(ctx, view);
+  return layoutSchema.parse(await browser.send("Page.getLayoutMetrics", {}, sessionId));
+}
+
+/**
+ * Ruling 698: picture the page as one box of an exact size, `view.width` by
+ * `view.height` CSS px from its top left, laid out in a viewport of that size,
+ * as a PNG of that box times `scale`. Taken once: content past the box is
+ * reported and left out, and a picture too large to keep is said, never
+ * retaken smaller.
+ *
+ * How the scale is drawn, measured against Debian Chromium 154 (2026-10-08).
+ * At 1 and over it is the device scale: the page itself is rendered at it
+ * (its `devicePixelRatio`, a canvas sized by that, a `srcset`), so a 2x
+ * picture is drawn at 2x and not enlarged. The screenshot's own scale also
+ * re-draws lines and text at 2x, but leaves the page at 1x, so a canvas in it
+ * is enlarged. Under 1 the device scale stays 1 and the screenshot is scaled
+ * down, as a thumbnail of the page is: a device scale under 1 gave the same
+ * pixels and told the page it is on a screen no reader has. The clip is the
+ * box as given, in whole CSS px (the browser drops a fraction of one before
+ * it scales), and the browser rounded each side times the scale as
+ * `Math.round` does on every one of 266 boxes tried at 19 scales; the server
+ * still reads the size from the PNG's own header.
+ */
+async function pictureBox(ctx: ViewContext, view: JobView, scale: number, file: string): Promise<Shot> {
+  const deviceScaleFactor = Math.max(1, scale);
+  const layout = await loadView(ctx, view, deviceScaleFactor);
+  const shot = screenshotSchema.parse(
+    await ctx.browser.send(
+      "Page.captureScreenshot",
+      {
+        format: "png",
+        captureBeyondViewport: true,
+        clip: { x: 0, y: 0, width: view.width, height: view.height, scale: scale / deviceScaleFactor },
+      },
+      ctx.sessionId,
+    ),
+  );
+  const bytes = Buffer.from(shot.data, "base64");
+  if (bytes.length > ctx.maxBytes) {
+    throw new Error(
+      `the picture is ${count(bytes.length)} bytes, over the ${count(ctx.maxBytes)} a capture hands back; ` +
+        "lower the scale or simplify the picture",
+    );
+  }
+  const size = pngSize(bytes);
+  if (!size) throw new Error("the browser returned a picture that is not a PNG");
+  writeFileSync(path.join(ctx.out, file), bytes);
+  const contentHeight = Math.round(layout.cssContentSize.height);
+  return {
+    view: view.id,
+    width: size.width,
+    height: size.height,
+    from: 0,
+    contentHeight,
+    contentWidth: Math.round(layout.cssContentSize.width),
+    scale: 1,
+    cut: contentHeight > view.height,
+  };
+}
+
 /** Picture the page at one view. The stretch starts at `view.from`, is never
  *  less than one screen and never more than the view's cap. Heights and
  *  widths are in the picture's own px: what the screen shows, after a phone
@@ -739,18 +858,9 @@ function pngSize(bytes: Buffer): PictureSize | null {
  *  failure: a phone lays a page out taller than a desktop does, so a stretch
  *  further down one may not exist on the other. */
 async function pictureView(ctx: ViewContext, view: JobView, file: string): Promise<Shot | Ended> {
+  if (view.box) return pictureBox(ctx, view, view.box.scale, file);
   const { browser, sessionId } = ctx;
-  await browser.send(
-    "Emulation.setDeviceMetricsOverride",
-    { width: view.width, height: view.height, deviceScaleFactor: 1, mobile: view.mobile },
-    sessionId,
-  );
-  const loaded = nextLoad(browser, sessionId);
-  const navigated = navigateResultSchema.parse(await browser.send("Page.navigate", { url: ctx.url }, sessionId));
-  if (navigated.errorText) throw new Error(`the page did not load (${navigated.errorText})`);
-  await loaded;
-  await walkPage(ctx, view);
-  const layout = layoutSchema.parse(await browser.send("Page.getLayoutMetrics", {}, sessionId));
+  const layout = await loadView(ctx, view, 1);
   const scale = Math.min(Math.max(layout.cssVisualViewport.scale, 0.1), 5);
   const contentWidth = Math.round(layout.cssContentSize.width * scale);
   const contentHeight = Math.round(layout.cssContentSize.height * scale);
@@ -818,7 +928,7 @@ async function picturePage(job: Job, server: PageServer, page: JobPage, index: n
   });
 
   let url = server.base + encodeURIComponent(page.file);
-  let article: string | null = null;
+  let setPage: string | null = null;
   // Opened here first, by the page server's own rule: a name it would not
   // answer (a dot name, a path), one that is gone, or a link would otherwise
   // be pictured as the server's "not found".
@@ -829,13 +939,20 @@ async function picturePage(job: Job, server: PageServer, page: JobPage, index: n
       if (source.size > MARKDOWN_MAX_BYTES) {
         return report(`the markdown file is ${source.size} bytes; one of up to ${MARKDOWN_MAX_BYTES} is set as a page`);
       }
-      article = articlePage(page.file, readFileSync(source.fd, "utf8"));
-      url = server.base + ARTICLE_NAME;
+      setPage = articlePage(page.file, readFileSync(source.fd, "utf8"));
+    } else if (page.kind === "svg") {
+      if (source.size > DRAWING_MAX_BYTES) {
+        return report(`the drawing is ${source.size} bytes; one of up to ${DRAWING_MAX_BYTES} is set as a page`);
+      }
+      setPage = drawingPage(page.file, readFileSync(source.fd, "utf8"));
     }
+    // Served from the folder the source is in, so a name beside it still
+    // resolves to the file of that name.
+    if (setPage !== null) url = server.base + SET_PAGE_NAME;
   } finally {
     closeSync(source.fd);
   }
-  server.begin(article);
+  server.begin(setPage);
 
   const profile = path.join(job.profile, String(index + 1));
   mkdirSync(profile, { recursive: true });

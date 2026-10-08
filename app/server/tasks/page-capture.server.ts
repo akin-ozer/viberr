@@ -97,7 +97,9 @@ import { isRelayComment } from "./task-relay.server";
  *    nothing unless the delivery is still files under the task file's lock.
  *    An agent can ask for the same picture of any page on its task
  *    ({@link captureTaskPage}, the `capture_page` tool) before it delivers or
- *    while it reviews.
+ *    while it reviews, and (ruling 698), given a size, for one picture of
+ *    exactly that size of a page or an SVG drawing: how an agent that draws a
+ *    diagram or a cover image gets its PNG.
  *  - **Off every request path, one at a time.** A serial queue for the whole
  *    instance, the gates' reasoning: a burst of deliveries must not start
  *    several browsers on a shared host. A newer delivery of a task replaces
@@ -150,8 +152,44 @@ const TOOL_QUEUE_WAIT_MS = 15_000;
 /** The tallest stretch an agent is handed: legible to a model, and inside the
  *  model API's 2000 px limit once a request holds more than 20 images. */
 const TOOL_STRETCH_PX = 2_000;
+/** The most px a picture of an exact size holds: 4,000 by 4,000 at scale 1.
+ *  Measured in the image (Debian Chromium 154): a flat picture of that many
+ *  px is taken in 0.13 s. */
+const BOX_MAX_PX = 16_000_000;
+
+/** Ruling 698: a picture of an exact size, as an agent asks for it: a box in
+ *  CSS px, and how many picture px draw one of them. */
+interface PictureBox {
+  width: number;
+  height: number;
+  scale: number;
+}
+
+/** The PNG a box is saved as, in its own px. The renderer and its browser
+ *  come to the same two numbers (`pictureBox` in the child says how that was
+ *  measured), and a picture of any other size is not kept. */
+function boxPicture(box: PictureBox) {
+  return { width: Math.round(box.width * box.scale), height: Math.round(box.height * box.scale) };
+}
+
+/**
+ * What `capture_page` can picture: a page, or (given a size) a drawing. Apart
+ * from {@link pageKindOf} on purpose: that one decides which delivered files
+ * Viberr pictures by itself, at a desktop and a phone width, and a drawing has
+ * neither. It is pictured at the size somebody asks for.
+ */
+type PictureKind = PageKind | "svg";
+
+function pictureKindOf(name: string): PictureKind | null {
+  return pageKindOf(name) ?? (path.extname(name).toLowerCase() === ".svg" ? "svg" : null);
+}
+
 /** The largest source set as a page, by kind. */
-const SOURCE_MAX_BYTES = { html: 10 * 1024 * 1024, markdown: 2 * 1024 * 1024 } satisfies Record<PageKind, number>;
+const SOURCE_MAX_BYTES = {
+  html: 10 * 1024 * 1024,
+  markdown: 2 * 1024 * 1024,
+  svg: 10 * 1024 * 1024,
+} satisfies Record<PictureKind, number>;
 /** A delivery's files are copied where the renderer can read them: each up to
  *  this, and this much in all. */
 const CARRIED_FILE_MAX_BYTES = 25 * 1024 * 1024;
@@ -302,11 +340,14 @@ interface ChildView {
   maxHeight: number;
   mobile: boolean;
   from: number;
+  /** Set for a picture of an exact size: the viewport itself is the box, and
+   *  `scale` is how many picture px draw one of its CSS px. */
+  box?: { scale: number };
 }
 
 interface PageInput {
   file: string;
-  kind: PageKind;
+  kind: PictureKind;
 }
 
 /** The job the renderer child is handed. */
@@ -712,16 +753,15 @@ async function render(request: RenderRequest): Promise<Render> {
       const file = path.join(out, `${index + 1}-${view.id}.png`);
       const read = readAttachmentBytes(file, IMAGE_READ_MAX_BYTES);
       const header = read && "bytes" in read ? imageHeader(read.bytes) : null;
-      if (
-        !read ||
-        !("bytes" in read) ||
-        !header ||
-        header.mimeType !== "image/png" ||
-        header.width !== view.width ||
-        header.height < 1 ||
-        header.height > view.maxHeight
-      ) {
-        error ??= `its ${view.id} picture did not come back as a PNG of the size asked for`;
+      // A box has one size, to the px; a stretch has its width and a cap.
+      const exact = view.box ? boxPicture({ width: view.width, height: view.height, scale: view.box.scale }) : null;
+      const sized =
+        header !== null &&
+        (exact
+          ? header.width === exact.width && header.height === exact.height
+          : header.width === view.width && header.height >= 1 && header.height <= view.maxHeight);
+      if (!read || !("bytes" in read) || !header || header.mimeType !== "image/png" || !sized) {
+        error ??= `its ${exact ? "" : `${view.id} `}picture did not come back as a PNG of the size asked for`;
         continue;
       }
       shots.push({
@@ -927,7 +967,7 @@ interface SourceRefusal {
   sharedByTool: boolean;
 }
 
-function sourceRefusal(file: string, kind: PageKind, bytes: number): SourceRefusal | null {
+function sourceRefusal(file: string, kind: PictureKind, bytes: number): SourceRefusal | null {
   const cap = SOURCE_MAX_BYTES[kind];
   if (bytes > cap) {
     return {
@@ -1312,6 +1352,17 @@ export interface PageCaptureAsk {
   view?: PageCaptureViewId | undefined;
   /** Where the stretch starts, in px from the top. */
   from?: number | undefined;
+  /** An exact size, in CSS px: with both, one picture of that box and no
+   *  stretches. */
+  width?: number | undefined;
+  height?: number | undefined;
+  /** How many picture px draw one CSS px of the box; 1 when absent. */
+  scale?: number | undefined;
+  /** False for a run that holds the verdict: it judges pictures and makes
+   *  none, so a sized reply does not tell it how one is kept on the task.
+   *  Told, a reviewer is one copy away from replacing the file it was asked
+   *  to judge with its own render of it. */
+  keeps?: boolean | undefined;
   /** The run that asks. Its pictures are kept for it under its own folder of
    *  the scratch and go when it ends; null when the caller cannot name it. */
   runId: string | null;
@@ -1337,6 +1388,20 @@ function endedClause(end: EndedView): string {
   return `at ${px(end.pageHeight)} px at the ${view.id} width (${view.width} px)`;
 }
 
+/** What a page did as it loaded, in a reply's words: the dialog it opened,
+ *  and what it asked for and did not get. */
+function loadRemarks(page: RenderedPage): string[] {
+  const parts: string[] = [];
+  if (page.dialogs > 0) parts.push(`It opens ${DIALOG_REMARK}`);
+  const asks: string[] = [];
+  const asked = askedClause(page);
+  if (asked) asks.push(`${asked}, which a capture never loads`);
+  for (const clause of missingClauses(page, new Set())) asks.push(`for ${clause}`);
+  if (asks.length > 0) parts.push(`It asked ${asks.join(", and ")}.`);
+  if (page.error) parts.push(`Not every picture was made: ${page.error}.`);
+  return parts;
+}
+
 function captureReplyText(name: string, page: RenderedPage, from: number, scratchNote: string): string {
   const parts = [`[done] ${code(name)} as a reader sees it.`];
   for (const view of PAGE_CAPTURE_VIEWS) {
@@ -1351,14 +1416,65 @@ function captureReplyText(name: string, page: RenderedPage, from: number, scratc
     const width = widthRemark(shot, "it");
     if (width) parts.push(width);
   }
-  if (page.dialogs > 0) parts.push(`It opens ${DIALOG_REMARK}`);
-  const asks: string[] = [];
-  const asked = askedClause(page);
-  if (asked) asks.push(`${asked}, which a capture never loads`);
-  for (const clause of missingClauses(page, new Set())) asks.push(`for ${clause}`);
-  if (asks.length > 0) parts.push(`It asked ${asks.join(", and ")}.`);
-  if (page.error) parts.push(`Not every picture was made: ${page.error}.`);
+  parts.push(...loadRemarks(page), scratchNote);
+  return parts.join(" ");
+}
+
+/** How a run keeps the picture it was just told the path of. The tool itself
+ *  saves nothing on the task: the run's own copy is a file it saved, claimed
+ *  and kept like any other. */
+const KEEP_PICTURE =
+  "Copying that file into the task's attachments folder under a name ending `.png` keeps it as a file of the task.";
+
+/** Said in place of a picture too large to hand back. The file is saved all
+ *  the same: only the look is at a lower scale. */
+const NOT_SHOWN = `It is over ${px(TOOL_STRETCH_PX)} px on a side, so it is saved and not shown here: the same box at a lower scale is the same layout, and shows you it.`;
+
+/** Whether a picture is handed back as an image block: a stretch always is
+ *  (it is cut to fit), a box only while both its sides are within what a
+ *  model is handed once a request holds more than 20 images. A run that draws
+ *  looks at many pictures, and one refused image ends it. */
+function shownToTheRun(shot: RenderedShot): boolean {
+  return shot.width <= TOOL_STRETCH_PX && shot.height <= TOOL_STRETCH_PX;
+}
+
+/**
+ * The reply to a picture of an exact size: what was asked and what was saved,
+ * then what of the page the box left out. That is how the run that drew the
+ * page learns its layout does not fit: the picture alone shows a cut edge and
+ * not how much lies past it.
+ */
+function boxReplyText(
+  name: string,
+  page: RenderedPage,
+  box: PictureBox,
+  scratchNote: string,
+  keeps: boolean,
+  shown: boolean,
+): string {
+  const parts: string[] = [];
+  for (const shot of page.shots) {
+    parts.push(
+      `[done] ${code(name)} as a picture of the size asked: ${px(box.width)} by ${px(box.height)} px at scale ${box.scale}, ` +
+        `saved as a PNG of ${px(shot.width)} by ${px(shot.height)} px.`,
+    );
+    if (shot.contentHeight > box.height) {
+      parts.push(
+        `It is laid out ${px(shot.contentHeight)} px tall in a box ${px(box.height)} px tall, ` +
+          "so the picture leaves out what is below the box.",
+      );
+    }
+    if (shot.contentWidth > box.width) {
+      parts.push(
+        `It is laid out ${px(shot.contentWidth)} px wide in a box ${px(box.width)} px wide, ` +
+          "so the picture leaves out what is to the right of the box.",
+      );
+    }
+  }
+  parts.push(...loadRemarks(page));
+  if (!shown) parts.push(NOT_SHOWN);
   parts.push(scratchNote);
+  if (keeps) parts.push(KEEP_PICTURE);
   return parts.join(" ");
 }
 
@@ -1368,7 +1484,9 @@ interface AskedPage {
   name: string;
   /** The name the folder holds it under (ruling 675): what the renderer opens. */
   stored: string;
-  kind: PageKind;
+  kind: PictureKind;
+  /** The exact size asked for, or null for the page in stretches. */
+  box: PictureBox | null;
 }
 
 async function capturePage(
@@ -1379,7 +1497,7 @@ async function capturePage(
   found: Renderer,
 ): Promise<PageCaptureReply> {
   const { projectSlug, taskKey } = ask;
-  const { name, stored, kind } = asked;
+  const { name, stored, kind, box } = asked;
   const file = readTaskFile(taskRef(ctx, projectSlug, taskKey));
   if (!file) return said(`[noop] ${code(name)} is not a page on ${taskKey}.`);
   const owner = file.parsed.frontmatter.ownerUserId;
@@ -1402,9 +1520,11 @@ async function capturePage(
     );
   }
   const from = ask.from ?? 0;
-  const views = PAGE_CAPTURE_VIEWS.filter((view) => !ask.view || view.id === ask.view).map(
-    (view): ChildView => ({ ...childView(view), maxHeight: TOOL_STRETCH_PX, from }),
-  );
+  const views = box
+    ? [boxView(box)]
+    : PAGE_CAPTURE_VIEWS.filter((view) => !ask.view || view.id === ask.view).map(
+        (view): ChildView => ({ ...childView(view), maxHeight: TOOL_STRETCH_PX, from }),
+      );
   let rendered: Render;
   try {
     rendered = await render({
@@ -1453,16 +1573,75 @@ async function capturePage(
     runFolder(ask.runId) !== null
       ? `Saved for this run at ${paths}: scratch, your next capture replaces it, and it goes when this run ends.`
       : `Saved at ${paths}: scratch, and the next capture on this task replaces it.`;
+  // A stretch is cut to what a model reads well. A box is the size its
+  // author asked for, up to 8,000 px a side: past 2,000 it is saved and not
+  // handed back, and the reply says to look at a lower scale.
+  const shown = !box || page.shots.every(shownToTheRun);
   return {
-    text: captureReplyText(name, page, from, kept),
-    images: page.shots.map((shot) => ({ data: shot.bytes.toString("base64"), mimeType: "image/png" })),
+    text: box
+      ? boxReplyText(name, page, box, kept, ask.keeps !== false, shown)
+      : captureReplyText(name, page, from, kept),
+    images: shown ? page.shots.map((shot) => ({ data: shot.bytes.toString("base64"), mimeType: "image/png" })) : [],
   };
 }
 
 /**
+ * The view a box is pictured at: its own viewport, laid out as the desktop
+ * view lays a page out (never as a phone), so the renderer is told it, and
+ * reports it, under that view's id.
+ */
+function boxView(box: PictureBox): ChildView {
+  return {
+    ...childView(pageCaptureView("desktop")),
+    width: box.width,
+    height: box.height,
+    maxHeight: box.height,
+    from: 0,
+    box: { scale: box.scale },
+  };
+}
+
+/**
+ * The box an ask names: null when it names none, or the refusal of a size
+ * that cannot be pictured. Each side and the scale are held to their ranges
+ * where the call is parsed (`CAPTURE_PAGE_BOX`), on both backends.
+ */
+function askedBox(ask: PageCaptureAsk, name: string): PictureBox | PageCaptureReply | null {
+  const { width, height, scale } = ask;
+  const refused = (why: string): PageCaptureReply => said(`[noop] ${code(name)} was not pictured: ${why}`);
+  if (width === undefined && height === undefined) {
+    return scale === undefined
+      ? null
+      : refused("`scale` goes with a size. Give `width` and `height` too, or leave `scale` out.");
+  }
+  if (width === undefined || height === undefined) {
+    const [given, wanted] = width === undefined ? ["height", "width"] : ["width", "height"];
+    return refused(`a size is \`width\` and \`height\` together, and this call gave only \`${given}\`. Give \`${wanted}\` too.`);
+  }
+  if (ask.view !== undefined || ask.from !== undefined) {
+    return refused(
+      "a size makes one picture of the box it names, so it goes with neither `view` nor `from`. " +
+        "Give the size alone, or leave it out to look at the page in stretches.",
+    );
+  }
+  const box: PictureBox = { width, height, scale: scale ?? 1 };
+  const picture = boxPicture(box);
+  if (picture.width * picture.height > BOX_MAX_PX) {
+    return refused(
+      `${px(width)} by ${px(height)} px at scale ${box.scale} is a picture of ${px(picture.width)} by ${px(picture.height)} px, ` +
+        `${px(picture.width * picture.height)} px in all, and a capture makes one of up to ${px(BOX_MAX_PX)}. ` +
+        "Lower the scale or the size.",
+    );
+  }
+  return box;
+}
+
+/**
  * `capture_page`: one page on the run's task as a reader sees it, in a stretch
- * a model can read. Saves nothing on the task, writes no audit row and no
- * timeline entry (it changes nothing, like `read_task_attachment`).
+ * a model can read, or (given a size) a page or a drawing as one picture of
+ * exactly that size. Saves nothing on the task, writes no audit row and no
+ * timeline entry (it changes nothing, like `read_task_attachment`): a picture
+ * a run wants kept is the run's to copy from the scratch the reply names.
  */
 export function captureTaskPage(
   db: DatabaseSync,
@@ -1475,6 +1654,9 @@ export function captureTaskPage(
   }
   const { projectSlug, taskKey } = ask;
   const name = ask.name.trim();
+  // What the call itself gets wrong is said before any file is looked for.
+  const box = askedBox(ask, name);
+  if (box && "text" in box) return Promise.resolve(box);
   let size: number | null = null;
   let stored = name;
   // A dot name is no file of the task to any reader, this one included: the
@@ -1497,24 +1679,30 @@ export function captureTaskPage(
     // The reader's own sentence.
     return Promise.resolve(said(noSuchAttachment({ db, ctx, projectSlug }, taskKey, name)));
   }
-  const kind = pageKindOf(name);
+  const kind = pictureKindOf(name);
   if (!kind) {
     return Promise.resolve(
       said(
-        `[noop] ${code(name)} is not a page. capture_page renders ${PAGE_EXTENSIONS_TEXT} files; ` +
-          "read any other file with read_task_attachment.",
+        `[noop] ${code(name)} is not a page. capture_page renders ${PAGE_EXTENSIONS_TEXT} files, ` +
+          "and a .svg drawing given `width` and `height`; read any other file with read_task_attachment.",
       ),
+    );
+  }
+  if (kind === "svg" && !box) {
+    return Promise.resolve(
+      said(`[noop] ${code(name)} is a drawing, and a drawing is pictured at a size: give \`width\` and \`height\`.`),
     );
   }
   const cap = SOURCE_MAX_BYTES[kind];
   if (size > cap) {
     return Promise.resolve(
       said(
-        `[noop] ${code(name)} is ${(size / 1024 / 1024).toFixed(0)} MB; capture_page renders a page of up to ${cap / 1024 / 1024} MB.`,
+        `[noop] ${code(name)} is ${(size / 1024 / 1024).toFixed(0)} MB; capture_page renders ` +
+          `${kind === "svg" ? "a drawing" : "a page"} of up to ${cap / 1024 / 1024} MB.`,
       ),
     );
   }
-  const asked: AskedPage = { name, stored, kind };
+  const asked: AskedPage = { name, stored, kind, box };
   return new Promise((resolve) => {
     const job: QueuedJob = {
       kind: "tool",

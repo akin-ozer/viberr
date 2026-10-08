@@ -188,13 +188,20 @@ The image ships everything needed to run real agents: the Claude/Codex SDKs' nat
 linux binaries (inside the production `node_modules` from the `prod-deps` stage) plus, in
 the runtime stage, `git` and a CA bundle (a real run clones the task's repo and the coding
 agent shells out to git), `make`, `curl` and a pinned `pnpm` (ruling 196), Debian
-`chromium` with `fonts-liberation` and `fonts-noto-color-emoji` for the governed browser
+`chromium` with `fonts-liberation` and `fonts-noto-color-emoji`, and with
+`fonts-inter-variable`, `fonts-ebgaramond` and `fonts-jetbrains-mono` (ruling 698: 1.8, 1.2
+and 7.5 MB installed, so a picture an agent draws can name Inter, EB Garamond or JetBrains
+Mono; Inter is installed as the family `Inter Variable`, and `/etc/fonts/local.conf` says
+plain `Inter` is the same family), for the governed browser
 and the page capture (`VIBERR_BROWSER_EXECUTABLE=/usr/bin/chromium`; ruling 691: the emoji
 font, 11 MB installed, and `/etc/fonts/local.conf`, which names the Liberation face each
 generic family means, because with `fonts-liberation` alone an emoji drew as an empty box
 and a page set in `system-ui` was pictured in a monospace face; no font is installed for
 CJK, Arabic or Indic scripts, which draw as boxes in a picture until one is added:
-`fonts-noto-cjk` is about 90 MB), `poppler-utils` (`pdftoppm`, `pdftotext`,
+`fonts-noto-cjk` is about 90 MB; the four generic families still mean the Liberation
+faces, a page whose list names `Inter` is now pictured in it, and a character Liberation
+lacks is drawn from one of the three new families where it was a box or a colour emoji),
+`poppler-utils` (`pdftoppm`, `pdftotext`,
 `pdfinfo`) so an agent can look at the pages of a PDF it delivers or judges (ruling 566),
 and `uv`/`uvx` for Python stdio MCP
 servers (their caches live under `runtimes/uv-cache` and `runtimes/uv-python` on the
@@ -405,8 +412,8 @@ longer shares the container's.
 
 **The image fetches its Debian packages over HTTPS.** The runtime stage installs from
 `deb.debian.org` in four `apt-get` layers (`git` + `ca-certificates`, then `make` +
-`curl`, then `chromium` + `fonts-liberation` + `fonts-noto-color-emoji`, then `poppler-utils`), each refreshing a
-package index of about 10 MB before fetching its archives (roughly 25 MB, 1 MB, 192 MB
+`curl`, then `chromium` + `fonts-liberation` + `fonts-noto-color-emoji` + `fonts-inter-variable` + `fonts-ebgaramond` + `fonts-jetbrains-mono`, then `poppler-utils`), each refreshing a
+package index of about 10 MB before fetching its archives (roughly 25 MB, 1 MB, 194 MB
 and a few MB, a 15.2 MB layer once installed). The base image names
 that mirror over plain HTTP, and on a connection that shapes port 80 (measured on the
 owner's Mac: 20–50 KB/s to every Debian mirror over HTTP, 3.6 MB/s to the same host over
@@ -839,7 +846,8 @@ goes with the server's `rmdir`, never through an agent's link (ruling 495), the 
 included, PDEATHSIG takes the agent down with the server, `--reap` finds a detached process
 by its marker, and every refusal holds), runs `scripts/check-page-capture.sh` the same way
 (ruling 691: the page capture's renderer against the image's own Chromium as an agent
-uid, its pictures' widths and pixels, a page's requests to another loopback port and to a
+uid, its pictures' widths and pixels, a picture of an exact size at scale 2, 0.5 and 1.5
+and an SVG drawing set as a page (ruling 698), a page's requests to another loopback port and to a
 remote host loading nothing, and the image's fonts), passes the base URL to Playwright as
 `VIBERR_E2E_BASE_URL`, and tears the stack down with its volume afterwards unless
 `VIBERR_E2E_KEEP=1`. Details:

@@ -49,6 +49,8 @@ import {
   READ_TIMELINE_ENTRY_AT_DESCRIPTION,
   READ_TIMELINE_ENTRY_DESCRIPTION,
   READ_TIMELINE_ENTRY_TASK_KEY_DESCRIPTION,
+  captureBoxScale,
+  captureBoxSide,
   keepSourceDescription,
   keepSourceFields,
 } from "~/server/mcp-proxy/board-tool.server";
@@ -899,10 +901,11 @@ export function buildAgentToolkit(deps: AgentToolkitDeps): AgentToolkit | null {
         },
       ),
     );
-    // Ruling 691: one page of this task as a reader sees it. Same gate, and
-    // only on a server that can render one: a tool that cannot answer is
-    // never listed. It saves nothing on the task; the Codex twin is the
-    // gateway's board server.
+    // Ruling 691: one page of this task as a reader sees it, or (given a
+    // size) as one picture of exactly that size. Same gate, and only on a
+    // server that can render one: a tool that cannot answer is never listed.
+    // It saves nothing on the task; the Codex twin is the gateway's board
+    // server, and the two parse a size with the same two schemas.
     if (pageCaptureStatus().available) {
       tools.push(
         tool(
@@ -912,6 +915,9 @@ export function buildAgentToolkit(deps: AgentToolkitDeps): AgentToolkit | null {
             name: z.string().describe(CAPTURE_PAGE_FIELDS.name),
             view: z.enum(["desktop", "phone"]).optional().describe(CAPTURE_PAGE_FIELDS.view),
             from: z.number().int().min(0).max(PAGE_CAPTURE_MAX_FROM).optional().describe(CAPTURE_PAGE_FIELDS.from),
+            width: captureBoxSide.optional().describe(CAPTURE_PAGE_FIELDS.width),
+            height: captureBoxSide.optional().describe(CAPTURE_PAGE_FIELDS.height),
+            scale: captureBoxScale.optional().describe(CAPTURE_PAGE_FIELDS.scale),
           },
           async (args) => {
             try {
@@ -921,6 +927,14 @@ export function buildAgentToolkit(deps: AgentToolkitDeps): AgentToolkit | null {
                 name: args.name,
                 view: args.view,
                 from: args.from,
+                width: args.width,
+                height: args.height,
+                scale: args.scale,
+                // Told how a picture is kept: a run that can post files and
+                // holds no verdict (ruling 698). One that holds the verdict
+                // judges pictures and makes none, and one that cannot post
+                // was told never to write into that folder.
+                keeps: collab.evidence && !collab.verdict,
                 // The run this toolkit serves: its pictures go when it ends.
                 runId: runIdForOutcomeKey(db, outcomeKey),
               });

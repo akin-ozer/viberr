@@ -85,6 +85,7 @@ import {
   keepSourceArgsSchema,
   keepSourceResult,
   keepSourceTool,
+  pageCaptureArgsRefusal,
   pageCaptureArgsSchema,
   pageCaptureResult,
   taskAttachmentArgsSchema,
@@ -1468,7 +1469,7 @@ async function openBoardSession(grant: RunGrant, server: string, mount: BoardMou
     // Ruling 691: one page of the run's own task, as a reader sees it.
     if (tool === PAGE_CAPTURE_TOOL.name && tools.includes(PAGE_CAPTURE_TOOL)) {
       const args = pageCaptureArgsSchema.safeParse(raw);
-      return args.success ? await pageCaptureResult(context, args.data) : boardArgsRefusal(PAGE_CAPTURE_TOOL);
+      return args.success ? await pageCaptureResult(context, args.data) : pageCaptureArgsRefusal();
     }
     return null;
   });

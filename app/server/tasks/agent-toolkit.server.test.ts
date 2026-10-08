@@ -339,6 +339,8 @@ describe("report_outcome's evidence field (P13-D-26)", () => {
      *  a name this repo cannot rename, hence the literal. A tool registered
      *  with the raw record instead carries the fields directly. */
     inputSchema: { "shape"?: AdvertisedFields };
+    /** What the tool tells every run that holds it. */
+    description?: string;
   }
 
   /** The registrations as the MOUNTED server carries them: `createSdkMcpServer`
@@ -1141,7 +1143,14 @@ describe("report_outcome's evidence field (P13-D-26)", () => {
       writeFileSync(path.join(dir, "endless.html"), "<p>fake-height:50000</p>");
       writeFileSync(path.join(dir, ".draft.html"), "<p>a dot name is no file of the task to any reader</p>");
       type Block = { type: "text"; text: string } | { type: "image"; data: string; mimeType: string };
-      const call = async (args: { name: string; view?: string; from?: number }) => {
+      const call = async (args: {
+        name: string;
+        view?: string;
+        from?: number;
+        width?: number;
+        height?: number;
+        scale?: number;
+      }) => {
         // SAFETY: the tool answers with text and image blocks, the SDK's own
         // tool-result shape; the handler's second argument is never read.
         const { content } = (await capture.handler(args as never, {} as never)) as { content: Block[] };
@@ -1205,6 +1214,78 @@ describe("report_outcome's evidence field (P13-D-26)", () => {
         "Desktop, 1280 px wide: 40,000 to 42,000 px of 50,000; the page runs on, and a stretch starts no further down than 40,000 px.",
       );
 
+      // Given a size it is one picture of exactly that size. CANARY: leave
+      // `width`, `height` or `scale` out of what the handler passes on and
+      // this is the page in stretches, a refusal that names a field the run
+      // did give, or a 1x picture.
+      const sized = await call({ name: "short.html", width: 1200, height: 630, scale: 2 });
+      expect(sized.text).toMatch(
+        new RegExp(
+          "^\\[done\\] `short\\.html` as a picture of the size asked: 1,200 by 630 px at scale 2, " +
+            "saved as a PNG of 2,400 by 1,260 px\\. " +
+            "It is over 2,000 px on a side, so it is saved and not shown here: " +
+            "the same box at a lower scale is the same layout, and shows you it\\. " +
+            "Saved for this run at `\\S+/\\.captures/run_capture/cap_\\S+/out/1-desktop\\.png`: " +
+            // This run holds the verdict, so the reply stops here: a run that
+            // judges pictures is not told how one is kept on the task.
+            "scratch, your next capture replaces it, and it goes when this run ends\\.$",
+        ),
+      );
+      expect(sized.pictures).toEqual([]);
+      // At a scale that fits, the picture itself comes back.
+      expect((await call({ name: "short.html", width: 1200, height: 630 })).pictures).toEqual([
+        { mimeType: "image/png", width: 1200, height: 630 },
+      ]);
+      // Nor does the tool's own description tell a run to copy anything: what
+      // it says reaches every run that holds the tool, a reviewer included.
+      // CANARY: put the copy instruction back in CAPTURE_PAGE_DESCRIPTION.
+      expect(capture.description).toContain("where the PNG was saved for this run");
+      expect(capture.description).not.toMatch(/copy that file|keeps it as a file/);
+      // A run that makes pictures is told: it can post files and holds no
+      // verdict. CANARY: pass `keeps: true` from the handler whatever the run
+      // holds, and a reviewer is one copy away from replacing the file under
+      // review with its own render of it, and a run told never to write into
+      // that folder is told to; pass `keeps: false` and a maker is left with
+      // a path in a scratch that goes with its run.
+      const onlooker = toolkitTools({ ...BASE, verdict: false, comment: true, evidence: false }, "oc_capture_onlooker").capture_page!;
+      const onlookerDir = taskAttachmentsDir(lastStore.slug, "VIB-3", lastStore.dataRoot);
+      mkdirSync(onlookerDir, { recursive: true });
+      writeFileSync(path.join(onlookerDir, "cover.html"), "<p>a cover</p>");
+      // SAFETY: as in `call` above.
+      const looked = (await onlooker.handler({ name: "cover.html", width: 1200, height: 630 } as never, {} as never)) as { content: Block[] };
+      expect(looked.content.flatMap((block) => (block.type === "text" ? [block.text] : [])).join("")).not.toContain("keeps it as a file");
+      // And a reviewer that can also post files, as the shipped Editor can,
+      // is still not told: holding the verdict is what decides.
+      const editor = toolkitTools({ ...BASE, verdict: true, comment: true, evidence: true }, "oc_capture_editor").capture_page!;
+      const editorDir = taskAttachmentsDir(lastStore.slug, "VIB-3", lastStore.dataRoot);
+      mkdirSync(editorDir, { recursive: true });
+      writeFileSync(path.join(editorDir, "cover.html"), "<p>a cover</p>");
+      // SAFETY: as in `call` above.
+      const judged = (await editor.handler({ name: "cover.html", width: 1200, height: 630 } as never, {} as never)) as { content: Block[] };
+      expect(judged.content.flatMap((block) => (block.type === "text" ? [block.text] : [])).join("")).not.toContain("keeps it as a file");
+      const maker = toolkitTools({ ...BASE, verdict: false, comment: true, evidence: true }, "oc_capture_maker").capture_page!;
+      const makerDir = taskAttachmentsDir(lastStore.slug, "VIB-3", lastStore.dataRoot);
+      mkdirSync(makerDir, { recursive: true });
+      writeFileSync(path.join(makerDir, "cover.html"), "<p>a cover</p>");
+      // SAFETY: as in `call` above.
+      const made = (await maker.handler({ name: "cover.html", width: 1200, height: 630 } as never, {} as never)) as { content: Block[] };
+      expect(made.content.flatMap((block) => (block.type === "text" ? [block.text] : [])).join("")).toMatch(
+        /Copying that file into the task's attachments folder under a name ending `\.png` keeps it as a file of the task\.$/,
+      );
+      // The fields it advertises hold a size to what a capture makes: a side
+      // of 100 to 4,000 CSS px in whole px, and one of five scales. CANARY:
+      // declare `width` as any number and a 99 px or a 12,000 px box reaches
+      // the browser; take any scale in a range and 0.7 does.
+      const fields = capture.inputSchema["shape"] ?? {};
+      const takes = (field: string, value: number) => fields[field]?.safeParse(value).success;
+      expect(["width", "height"].flatMap((side) => [99, 100, 630.5, 4000, 4001].map((value) => takes(side, value)))).toEqual([
+        false, true, false, true, false,
+        false, true, false, true, false,
+      ]);
+      expect([0.2, 0.25, 0.5, 0.7, 1, 1.5, 2, 2.5].map((value) => takes("scale", value))).toEqual([
+        false, true, true, false, true, true, true, false,
+      ]);
+
       // It saved nothing on the task: no file, no entry, no audit row.
       expect(readdirSync(dir).sort()).toEqual([".draft.html", "data.csv", "endless.html", "post.html", "short.html"]);
       const file = readTaskFile({ projectSlug: store.slug, taskKey: "VIB-3", dataRoot: store.dataRoot })!.parsed;
@@ -1214,8 +1295,8 @@ describe("report_outcome's evidence field (P13-D-26)", () => {
 
       // What it does not render, in the reader's own words.
       expect((await call({ name: "data.csv" })).text).toBe(
-        "[noop] `data.csv` is not a page. capture_page renders .html, .htm, .md and .markdown files; " +
-          "read any other file with read_task_attachment.",
+        "[noop] `data.csv` is not a page. capture_page renders .html, .htm, .md and .markdown files, " +
+          "and a .svg drawing given `width` and `height`; read any other file with read_task_attachment.",
       );
       const missing = (await call({ name: "nope.html" })).text;
       expect(missing).toMatch(/^\[noop\] VIB-3 has no attachment `nope\.html`\. It holds: /);

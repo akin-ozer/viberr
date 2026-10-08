@@ -715,8 +715,58 @@ describe("ruling 691: the gateway's board server pictures a page for a Codex run
         width: 1280,
         height: 2000,
       });
+      // Arguments that are not the tool's are answered with what each field
+      // is. CANARY: answer with the board server's own "takes ... as text"
+      // and a run that sent 99 for a width is told to send text.
+      const notTheTools =
+        "capture_page takes `name` as text, `view` as `desktop` or `phone`, `from` as a whole number of px up to 40000, " +
+        "and, for a picture of an exact size, `width` and `height` as whole numbers of px from 100 to 4000 " +
+        "and `scale` as one of 0.25, 0.5, 1, 1.5 and 2. Nothing was pictured.";
       const refused = await client.callTool({ name: "capture_page", arguments: { name: "post.html", view: "tablet" } });
       expect(refused.isError).toBe(true);
+      expect(z.array(z.object({ text: z.string() })).parse(refused.content)[0]!.text).toBe(notTheTools);
+
+      // Given a size, the same one picture of exactly that size a Claude run
+      // gets, and the same word on how it is kept. CANARY: leave `width`,
+      // `height` and `scale` out of pageCaptureArgsSchema (zod drops a key it
+      // does not declare) or out of what pageCaptureResult passes on, and the
+      // run that asked for a 2,400 by 1,260 px picture is handed the page in
+      // stretches.
+      const sized = z
+        .array(
+          z.union([
+            z.object({ type: z.literal("text"), text: z.string() }),
+            z.object({ type: z.literal("image"), data: z.string(), mimeType: z.string() }),
+          ]),
+        )
+        .parse(
+          (await client.callTool({ name: "capture_page", arguments: { name: "post.html", width: 800, height: 630, scale: 2 } }))
+            .content,
+        );
+      expect(sized[0]?.type === "text" ? sized[0].text : "").toMatch(
+        /^\[done\] `post\.html` as a picture of the size asked: 800 by 630 px at scale 2, saved as a PNG of 1,600 by 1,260 px\. It is laid out 2,600 px tall in a box 630 px tall, so the picture leaves out what is below the box\. Saved for this run at `\S+\/\.captures\/run_\S+\/cap_\S+\/out\/1-desktop\.png`: scratch, your next capture replaces it, and it goes when this run ends\. Copying that file into the task's attachments folder under a name ending `\.png` keeps it as a file of the task\.$/,
+      );
+      expect(sized[1]?.type === "image" ? imageHeader(Buffer.from(sized[1].data, "base64")) : null).toEqual({
+        mimeType: "image/png",
+        width: 1600,
+        height: 1260,
+      });
+      // What the tool tells a Codex run it takes for a size, and holds it to:
+      // a side of 100 to 4,000 CSS px in whole px, and one of five scales.
+      // CANARY: take any scale from 0.25 to 2 and 0.7 reaches the browser,
+      // which on some boxes answers one px off the size the door keeps.
+      // CANARY: parse `width` as any number and a 99 px box is pictured.
+      const listed = (await client.listTools()).tools.find((tool) => tool.name === "capture_page");
+      expect(listed?.inputSchema.properties).toMatchObject({
+        width: { type: "integer", minimum: 100, maximum: 4000 },
+        height: { type: "integer", minimum: 100, maximum: 4000 },
+        scale: { type: "number", enum: [0.25, 0.5, 1, 1.5, 2] },
+      });
+      for (const size of [{ width: 99, height: 630 }, { width: 1200, height: 4001 }, { width: 1200.5, height: 630 }, { width: 1200, height: 630, scale: 2.5 }, { width: 1200, height: 630, scale: 0.7 }]) {
+        const outside = await client.callTool({ name: "capture_page", arguments: { name: "post.html", ...size } });
+        expect(outside.isError).toBe(true);
+        expect(z.array(z.object({ text: z.string() })).parse(outside.content)[0]!.text).toBe(notTheTools);
+      }
       await client.close();
     });
 
