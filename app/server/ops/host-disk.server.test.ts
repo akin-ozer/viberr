@@ -6,7 +6,6 @@ import { afterEach, describe, expect, it } from "vitest";
 import {
   BUILD_CACHE_KEEP_BYTES,
   buildRoomRefusal,
-  MIN_FREE_FOR_BUILD_BYTES,
   supersededImagesToRemove,
   tightestHostDisk,
 } from "./host-disk.server";
@@ -62,9 +61,8 @@ describe("buildRoomRefusal", () => {
   });
 
   it("lets a build start when the host has the room", () => {
-    expect(
-      buildRoomRefusal({ path: "/x", freeBytes: MIN_FREE_FOR_BUILD_BYTES, totalBytes: 239 * GB }),
-    ).toBeNull();
+    // Ruling 603(b): the refusal is below 8 GB, and none at it.
+    expect(buildRoomRefusal({ path: "/x", freeBytes: 8 * GB, totalBytes: 239 * GB })).toBeNull();
   });
 });
 

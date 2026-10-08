@@ -13,7 +13,7 @@ import { dfReading, formatBytes, type RawDiskReading } from "./disk-space.server
  */
 
 /** A cold build measured 5-6 GB; the rest is room for the running instance. */
-export const MIN_FREE_FOR_BUILD_BYTES = 8 * 1024 ** 3;
+const MIN_FREE_FOR_BUILD_BYTES = 8 * 1024 ** 3;
 
 export interface HostDiskReading extends RawDiskReading {
   path: string;

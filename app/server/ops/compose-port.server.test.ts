@@ -2,7 +2,7 @@ import { readFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
-import { COMPOSE_DEFAULT_PORT, composePort } from "./compose-port.server";
+import { composePort } from "./compose-port.server";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.resolve(HERE, "..", "..", "..");
@@ -34,10 +34,9 @@ describe("composePort (the port `npm run deploy` verifies on)", () => {
   it("defaults to the port compose.yml and the Dockerfile default to", () => {
     // CANARY: the bug this module replaced was the deploy script and compose
     // disagreeing about a port. Change either default and this fails.
-    expect(read("compose.yml")).toContain(
-      `"\${PORT:-${COMPOSE_DEFAULT_PORT}}:\${PORT:-${COMPOSE_DEFAULT_PORT}}"`,
-    );
-    expect(read("Dockerfile")).toMatch(new RegExp(`^ENV PORT=${COMPOSE_DEFAULT_PORT}$`, "m"));
+    const port = composePort({}, null);
+    expect(read("compose.yml")).toContain(`"\${PORT:-${port}}:\${PORT:-${port}}"`);
+    expect(read("Dockerfile")).toMatch(new RegExp(`^ENV PORT=${port}$`, "m"));
   });
 
   it("is what scripts/deploy.ts polls, not a literal port", () => {
