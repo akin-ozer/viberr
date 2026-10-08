@@ -25,6 +25,7 @@ import { saveMcpServer } from "~/server/org/resources.server";
 import { buildOperatorToolkit } from "./operator-toolkit.server";
 import { CREATE_TASK_BASE_NOTE } from "./operator-packets.server";
 import type { OperatorAuthority } from "./operator-authority.server";
+import type { SpecialistMcpServerConfig } from "./specialist-mcp.server";
 import { DONE_SIGNAL_RULE } from "./done-signal.server";
 import {
   operatorPlanSchemaFor,
@@ -73,23 +74,20 @@ function authority(mcps: string[]): OperatorAuthority {
 }
 
 /**
- * P13-KM-03 — the operator's DECLARED org MCP servers now actually mount.
- * Live evidence for the bug: a project granted the operator `everything-mcp`
- * and the operator reported "MCP servers/tools I can call: none … No
- * `everything-mcp` tools are registered for me", while the grant UI showed it
- * attached. `OperatorAuthority` carried skills + kb only.
+ * P13-KM-03 — the operator's DECLARED org MCP servers mount. Live evidence for
+ * the bug: a project granted the operator `everything-mcp` and the operator
+ * reported "MCP servers/tools I can call: none … No `everything-mcp` tools are
+ * registered for me", while the grant UI showed it attached.
+ *
+ * F21-3 — what mounts is the run's own pre-flighted resolution
+ * (`operatorMcpResolution`). A second resolve inside the toolkit would
+ * re-mount a server the pre-flight had just dropped, so the prompt would
+ * announce one set and the run would mount another.
  */
-describe("buildOperatorToolkit — org MCP grants", () => {
-  const build = (db: ReturnType<typeof ctxDb.makeDb>, mcps: string[]) =>
-    buildOperatorToolkit({
-      db,
-      ctx: { dataRoot: ctxDb.makeTempDir() },
-      projectSlug: "p",
-      taskKey: "P-1",
-      authority: authority(mcps),
-    });
-
-  it("mounts a granted org MCP server alongside the in-process viberr toolkit", async () => {
+describe("buildOperatorToolkit — the org MCP servers the run resolved", () => {
+  it("mounts exactly those beside the in-process viberr toolkit, and approves each", async () => {
+    // `everything-mcp` IS registered and granted, so a second resolve inside
+    // the toolkit would mount it: what makes the dropped case a real pin.
     const db = ctxDb.makeDb();
     await saveMcpServer(
       db,
@@ -97,32 +95,28 @@ describe("buildOperatorToolkit — org MCP grants", () => {
       ACTOR,
       { spawnImpl: () => { throw new Error("no spawn in test"); } },
     );
+    const build = (orgMcpServers: Record<string, SpecialistMcpServerConfig>) =>
+      buildOperatorToolkit({
+        db,
+        ctx: { dataRoot: ctxDb.makeTempDir() },
+        projectSlug: "p",
+        taskKey: "P-1",
+        authority: authority(["everything-mcp"]),
+        orgMcpServers,
+      });
 
-    const toolkit = build(db, ["everything-mcp"]);
-    expect(Object.keys(toolkit.mcpServers).sort()).toEqual([
-      "everything-mcp",
-      "viberr",
-    ]);
-    // `allowedTools` CONFINES an operator run, so mounting without allowing
-    // would leave the grant decorative in a different way.
-    expect(toolkit.allowedTools).toContain("mcp__everything-mcp");
-    expect(toolkit.allowedTools).toContain("mcp__viberr__get_task");
-  });
+    // CANARY: resolve again in the toolkit and the server the pre-flight
+    // dropped re-appears.
+    const dropped = build({});
+    expect(Object.keys(dropped.mcpServers)).toEqual(["viberr"]);
+    expect(dropped.allowedTools).not.toContain("mcp__everything-mcp");
 
-  it("mounts nothing extra when the operator declares no MCP servers", () => {
-    const db = ctxDb.makeDb();
-    const toolkit = build(db, []);
-    expect(Object.keys(toolkit.mcpServers)).toEqual(["viberr"]);
-  });
-
-  it("never lets a declared name shadow the reserved in-process viberr server", async () => {
-    const db = ctxDb.makeDb();
-    const toolkit = build(db, ["viberr"]);
-    expect(Object.keys(toolkit.mcpServers)).toEqual(["viberr"]);
-    // The reserved name resolves to the in-process governance server, not to a
-    // row a user could add under the same name.
-    expect(toolkit.allowedTools).toContain("mcp__viberr__get_task");
-    expect(toolkit.allowedTools).not.toContain("mcp__viberr");
+    // CANARY: drop the server or its approval and the grant is decorative:
+    // `allowedTools` is what lets an operator run call it unattended.
+    const mounted = build({ "everything-mcp": { command: "/bin/echo", args: ["hi"] } });
+    expect(Object.keys(mounted.mcpServers).sort()).toEqual(["everything-mcp", "viberr"]);
+    expect(mounted.allowedTools).toContain("mcp__everything-mcp");
+    expect(mounted.allowedTools).toContain("mcp__viberr__get_task");
   });
 });
 
@@ -606,62 +600,6 @@ describe("buildOperatorToolkit — read_default_branch_file (F21-21)", () => {
     });
     expect(toolkit.allowedTools).not.toContain("mcp__viberr__read_default_branch_file");
     expect(toolkit.tools.some((t) => t.name === "read_default_branch_file")).toBe(false);
-  });
-});
-
-/**
- * F21-3 — the operator run pre-flights its stdio MCP mounts now
- * (`operatorMcpResolution`), and hands the VERIFIED set here. A second resolve
- * inside the toolkit would silently re-mount a server the pre-flight had just
- * dropped, so the prompt would announce one set and the run would mount another.
- */
-describe("buildOperatorToolkit — mounts the caller's pre-flighted resolution (F21-3)", () => {
-  /** A db where `everything-mcp` IS registered and healthy — so a second
-   *  resolve inside the toolkit would happily mount it. That is what makes the
-   *  assertion below a real pin rather than an empty-registry tautology. */
-  async function dbWithRegisteredServer() {
-    const db = ctxDb.makeDb();
-    await saveMcpServer(
-      db,
-      { name: "everything-mcp", transport: "stdio", target: "/bin/echo hi", cred: "" },
-      ACTOR,
-      { spawnImpl: () => { throw new Error("no spawn in test"); } },
-    );
-    return db;
-  }
-
-  it("mounts exactly what the caller verified — a dropped server is NOT re-resolved", async () => {
-    // Canary: ignore `deps.orgMcpServers` and resolve again here; the grant
-    // re-appears and this fails.
-    const toolkit = buildOperatorToolkit({
-      db: await dbWithRegisteredServer(),
-      ctx: { dataRoot: ctxDb.makeTempDir() },
-      projectSlug: "p",
-      taskKey: "P-1",
-      authority: authority(["everything-mcp"]),
-      // What the run's pre-flight produced: the dead stdio mount was dropped.
-      orgMcpServers: {},
-    });
-    expect(Object.keys(toolkit.mcpServers)).toEqual(["viberr"]);
-    expect(toolkit.allowedTools).not.toContain("mcp__everything-mcp");
-  });
-
-  it("still resolves for a caller with no resolution of its own", async () => {
-    const db = ctxDb.makeDb();
-    await saveMcpServer(
-      db,
-      { name: "everything-mcp", transport: "stdio", target: "/bin/echo hi", cred: "" },
-      ACTOR,
-      { spawnImpl: () => { throw new Error("no spawn in test"); } },
-    );
-    const toolkit = buildOperatorToolkit({
-      db,
-      ctx: { dataRoot: ctxDb.makeTempDir() },
-      projectSlug: "p",
-      taskKey: "P-1",
-      authority: authority(["everything-mcp"]),
-    });
-    expect(Object.keys(toolkit.mcpServers).sort()).toEqual(["everything-mcp", "viberr"]);
   });
 });
 
