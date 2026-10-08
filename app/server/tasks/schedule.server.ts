@@ -360,11 +360,10 @@ const scheduleListSchema = z
  * is the one capability that acts with no human present; it must not double.
  *
  * Derived rather than re-guessed, so the invariant survives someone raising
- * `VIBERR_GIT_CLONE_TIMEOUT_MS`. Exported so a test can pin the relationship
- * rather than a magic number. A function (V19): the clone ceiling is now a
+ * `VIBERR_GIT_CLONE_TIMEOUT_MS`. A function (V19): the clone ceiling is now a
  * lazy env read, so this follows it call-by-call.
  */
-export function claimLeaseMs(): number {
+function claimLeaseMs(): number {
   return cloneTimeoutMs() + 5 * 60_000;
 }
 /** F10-16: bounded retry — after this many failed enqueue/run attempts the

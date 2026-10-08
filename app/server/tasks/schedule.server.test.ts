@@ -33,7 +33,6 @@ import { resetOperatorLeasesForTests } from "~/server/runtimes/operator-run.serv
 import type { TaskFileEvent, TaskSchedule } from "~/schemas/task-file.schema";
 import { cloneTimeoutMs } from "./git-clone-auth.server";
 import {
-  claimLeaseMs,
   cancelScheduledAction,
   fireDueSchedules,
   scheduleTaskAction,
@@ -740,23 +739,10 @@ describe("fireDueSchedules", () => {
     expect(timeline("VIB-1").some((e) => /Scheduled action failed/.test(e.text))).toBe(false);
   });
 
-  it("the claim lease outlives the slowest LEGITIMATE start (a clone), so a live drive is never re-driven", () => {
-    // R19-1 put a repository clone inside `runOperator`, BEFORE the drive
-    // starts: a healthy scheduled drive can now sit there for up to
-    // `cloneTimeoutMs()`. A lease shorter than that declares that live drive
-    // crashed, and the next tick re-drives the same occurrence — two unwatched
-    // operator turns for one scheduled action, which is the exact thing FR39
-    // exists to prevent. Pinned as a RELATIONSHIP, not a number, so raising
-    // `VIBERR_GIT_CLONE_TIMEOUT_MS` cannot silently reintroduce the overlap.
-    expect(claimLeaseMs()).toBeGreaterThan(cloneTimeoutMs());
-  });
-
   it("F10-16: re-drives a STALLED claim (crash recovery — never lost)", async () => {
     // A claim whose lease expired = the enqueuing tick crashed before finalize.
-    // Derived from the lease rather than a literal: this fixture used to say
-    // "10 minutes", which encoded the OLD 5-minute lease and silently became a
-    // FRESH claim — testing the opposite of its own name — the moment R19-1's
-    // clone forced the lease up.
+    // Claimed at the epoch: older than any lease, so raising the clone ceiling
+    // cannot quietly turn it into a FRESH claim.
     writeTask(store.dataRoot, store.slug, {
       frontmatter: baseTaskFrontmatter("VIB-1", {
         ownerUserId: store.users.arda.id,
@@ -765,7 +751,7 @@ describe("fireDueSchedules", () => {
           rawSchedule({
             id: "sch_stale",
             status: "claimed",
-            claimedAt: new Date(Date.now() - claimLeaseMs() - 60_000).toISOString(),
+            claimedAt: new Date(0).toISOString(),
           }),
         ],
       }),
@@ -857,6 +843,11 @@ describe("fireDueSchedules", () => {
   });
 
   it("F10-16: does NOT re-drive a FRESH claim (still within its lease)", async () => {
+    // R19-1: `runOperator` clones the repository before the drive starts, so a
+    // healthy drive can sit in its clone for `cloneTimeoutMs()`. VIB-2's claim
+    // is that old and still live. CANARY: size the lease without the clone
+    // ceiling (the old flat 5 minutes) and VIB-2 is re-driven: two unwatched
+    // operator turns for one scheduled occurrence, which FR39 forbids.
     writeTask(store.dataRoot, store.slug, {
       frontmatter: baseTaskFrontmatter("VIB-1", {
         ownerUserId: store.users.arda.id,
@@ -870,11 +861,25 @@ describe("fireDueSchedules", () => {
         ],
       }),
     });
+    writeTask(store.dataRoot, store.slug, {
+      frontmatter: baseTaskFrontmatter("VIB-2", {
+        ownerUserId: store.users.arda.id,
+        stage: "impl",
+        schedules: [
+          rawSchedule({
+            id: "sch_cloning",
+            status: "claimed",
+            claimedAt: new Date(Date.now() - cloneTimeoutMs()).toISOString(),
+          }),
+        ],
+      }),
+    });
     rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
 
     const res = await fireDueSchedules(store.db, dctx());
     expect(res.fired).toBe(0); // an in-flight claim is left alone
     expect(schedules("VIB-1")[0]!.status).toBe("claimed");
+    expect(schedules("VIB-2")[0]!.status).toBe("claimed");
   });
 
   it("U36-9 (pass 36): the skipped-done note names the terminal stage as the board calls it", async () => {
