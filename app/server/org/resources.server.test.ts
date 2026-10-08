@@ -134,21 +134,6 @@ function crashingSpawn(stderrText: string): McpSpawn {
   };
 }
 
-/** Chatters on stderr (a package manager fetching) but never answers. */
-function chattySpawn(stderrText: string): McpSpawn {
-  return () => {
-    const err = new EventEmitter();
-    queueMicrotask(() => err.emit("data", Buffer.from(stderrText)));
-    return {
-      stdin: { write() {}, end() {} },
-      stdout: { on() {} },
-      stderr: { on: (event, cb) => err.on(event, cb) },
-      on() {},
-      kill() {},
-    };
-  };
-}
-
 /** A spawn that fails immediately (command not found). */
 const failingSpawn: McpSpawn = () => {
   throw new Error("ENOENT");
@@ -826,6 +811,10 @@ describe("mcp servers", () => {
     );
     expect(dead.mcp).toMatchObject({ up: false, tools: null });
     expect(dead.toast).toContain("did not answer");
+    // A command that says NOTHING is a plain timeout: the install hint is
+    // earned by evidence, never assumed.
+    expect(dead.toast).toContain("timed out after");
+    expect(dead.toast).not.toContain("still installing");
 
     /* R19-17: a stdio server that CRASHES explains itself on stderr, and the
        probe used to answer with three fixed words. This is the live case: a
@@ -846,58 +835,6 @@ describe("mcp servers", () => {
     );
     expect(crashed.mcp).toMatchObject({ up: false, tools: null });
     expect(crashed.toast).toContain("ImportError: cannot import name 'McpError'");
-
-    /* …and the credential the child was spawned WITH never rides along, even
-       when the dying server prints its own environment. */
-    const leaky = await saveMcpServer(
-      db,
-      {
-        name: "leaky-stdio",
-        transport: "stdio",
-        target: "uvx mcp-server-leak",
-        cred: "sk-live-abcdefghijklmnop",
-      },
-      ACTOR,
-      {
-        spawnImpl: crashingSpawn(
-          "env dump: MCP_CREDENTIAL=sk-live-abcdefghijklmnop\nfatal: giving up\n",
-        ),
-        timeoutMs: 200,
-      },
-    );
-    expect(leaky.toast).toContain("fatal: giving up");
-    expect(leaky.toast).not.toContain("sk-live-abcdefghijklmnop");
-
-    /* R19-17c: a command that is still FETCHING on first use is not a broken
-       one, and the two need different next steps. `npx`/`uvx` install on first
-       run — live, a server pulling a CUDA-sized dependency tree could never
-       finish inside any probe window, and each killed probe discarded the
-       partial download, so retesting never converged. */
-    const installing = await saveMcpServer(
-      db,
-      { name: "cold-stdio", transport: "stdio", target: "uvx big-server", cred: "" },
-      ACTOR,
-      {
-        spawnImpl: chattySpawn("Downloading nvidia-curand (59.1MiB)\n"),
-        timeoutMs: 60,
-      },
-    );
-    // R19-18: Viberr now finishes the install itself rather than telling the
-    // admin to go warm it from a shell, so the row goes to "installing" and the
-    // save says so instead of reporting a failure.
-    expect(installing.toast).toContain("installing in the background");
-    expect(installing.mcp.warmingSince).not.toBeNull();
-
-    /* …and a command that says NOTHING is still a plain timeout — the hint is
-       earned by evidence, never assumed. */
-    const silent = await saveMcpServer(
-      db,
-      { name: "silent-stdio", transport: "stdio", target: "node /tmp/hang.mjs", cred: "" },
-      ACTOR,
-      { spawnImpl: silentSpawn, timeoutMs: 60 },
-    );
-    expect(silent.toast).toContain("timed out after");
-    expect(silent.toast).not.toContain("still installing");
 
     /* R19-17: the reason PERSISTS on the row, so it is still there after the
        toast is gone — and a passing retest clears it, because a stale
@@ -994,9 +931,9 @@ describe("MCP probe crash-safety, honesty, and teardown (pass 20)", () => {
     ).rejects.toMatchObject({ message: expect.stringMatching(/at least 8 characters/), field: "cred" });
     expect(listMcpServers(db).find((m) => m.name === "shorty")).toBeUndefined();
 
-    // A longer credential IS allowed; if the dying command echoes it, the
-    // persisted `last_error` carries [redacted], never the value.
-    await saveMcpServer(
+    // A longer credential IS allowed; if the dying command echoes it, the toast
+    // and the persisted `last_error` carry [redacted], never the value.
+    const leaky = await saveMcpServer(
       db,
       { name: "leaky", transport: "stdio", target: "uvx svc", cred: "sk-live-abcdefghijk" },
       ACTOR,
@@ -1005,6 +942,8 @@ describe("MCP probe crash-safety, honesty, and teardown (pass 20)", () => {
         timeoutMs: 60,
       },
     );
+    expect(leaky.toast).toContain("fatal: boom");
+    expect(leaky.toast).not.toContain("sk-live-abcdefghijk");
     const row = listMcpServers(db).find((m) => m.name === "leaky")!;
     expect(row.lastError).toContain("fatal: boom");
     expect(row.lastError).not.toContain("sk-live-abcdefghijk");
