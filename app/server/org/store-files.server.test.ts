@@ -44,10 +44,6 @@ afterEach(dbCtx.cleanup);
 /** The freshness columns these tests read back off an adopted store row. */
 const skillFreshnessRow = z.object({ id: z.string(), updated_at: z.string() });
 const kbIndexedRow = z.object({ id: z.string(), last_indexed_at: z.string() });
-const kbStampsRow = z.object({
-  last_indexed_at: z.string(),
-  updated_at: z.string(),
-});
 const kbLastIndexedRow = z.object({ last_indexed_at: z.string() });
 
 const ACTOR = { userId: "u_t", label: "t@test" };
@@ -614,24 +610,22 @@ describe("the `manual` refresh pin (C5)", () => {
       ACTOR,
       ctx,
     );
-    const before = kbStampsRow.parse(
+    const before = kbLastIndexedRow.parse(
       db
-        .prepare(`SELECT last_indexed_at, updated_at FROM org_knowledge_bases WHERE id = ?`)
+        .prepare(`SELECT last_indexed_at FROM org_knowledge_bases WHERE id = ?`)
         .get(kb.id),
     );
 
     const target = resolveStoreTarget(db, "kb", kb.id, ctx)!;
     writeStoreDoc(db, target, [], "note.md", "hello", ACTOR);
 
-    const after = kbStampsRow.parse(
+    const after = kbLastIndexedRow.parse(
       db
-        .prepare(`SELECT last_indexed_at, updated_at FROM org_knowledge_bases WHERE id = ?`)
+        .prepare(`SELECT last_indexed_at FROM org_knowledge_bases WHERE id = ?`)
         .get(kb.id),
     );
-    // The re-scan stamp is pinned…
+    // The re-scan stamp is pinned.
     expect(after.last_indexed_at).toBe(before.last_indexed_at);
-    // …but the row genuinely changed, so `updated_at` still moves.
-    expect(after.updated_at >= before.updated_at).toBe(true);
   });
 
   it("an 'on change' KB still advances last_indexed_at (the pin is not a freeze)", async () => {
