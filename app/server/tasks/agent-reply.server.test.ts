@@ -968,7 +968,7 @@ describe("runFailureReason (F7-RUN1)", () => {
     ).toMatchObject({ kind: "session_missing" });
   });
 
-  it("ruling 175: a spending-cap cut-off is its own kind, by record or by tag", () => {
+  it("ruling 175: a spending-cap cut-off is its own kind, by its tag", () => {
     expect(
       classify([
         errLine({
