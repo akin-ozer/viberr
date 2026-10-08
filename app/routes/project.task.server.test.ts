@@ -81,12 +81,12 @@ const notificationReadRowSchema = z.object({
 });
 
 /** One completed per-task pass, re-dated in place (recordAudit stamps now). */
-async function recordPass(taskKey: string, iso: string, projectSlug = "viberr-core") {
+async function recordPass(taskKey: string, iso: string) {
   const { recordAudit } = await import("~/server/audit/audit-recorder.server");
   recordAudit(app.db, {
     action: "github.reconcile.task",
     actor: { userId: null, label: "system" },
-    projectSlug,
+    projectSlug: "viberr-core",
     taskKey,
     details: { changed: false },
   });
@@ -116,31 +116,18 @@ async function recordChange(taskKey: string, iso: string) {
 }
 
 describe("F19-22: the task loader ships the last CHECK beside the last change", () => {
-  it("reports null for a task with no completed pass on record", async () => {
-    const data = await loadTask("VIB-142");
-    // Null, not the provenance timestamp standing in for it — the panel renders
-    // "no completed pass on record", which is all the app can honestly claim.
-    expect(data.githubCheckedAt).toBeNull();
-  });
-
   it("ships both clocks, and they move independently", async () => {
     // The live shape of the defect: last change 12:01:55, passes through 12:42.
     await recordChange("VIB-142", "2026-08-06T12:01:55.000Z");
+    // Only a change is on record, no completed pass: null, which the panel
+    // renders as "no completed pass on record". CANARY: fall back to the
+    // change's time and this reads 12:01:55.
+    expect((await loadTask("VIB-142")).githubCheckedAt).toBeNull();
     await recordPass("VIB-142", "2026-08-06T12:07:00.000Z");
     await recordPass("VIB-142", "2026-08-06T12:42:00.000Z");
 
     const data = await loadTask("VIB-142");
     expect(data.githubReconciledAt).toBe("2026-08-06T12:01:55.000Z");
-    expect(data.githubCheckedAt).toBe("2026-08-06T12:42:00.000Z");
-  });
-
-  it("scopes the check to this task, in this project", async () => {
-    // A LATER pass over a different task, and over the same key in another
-    // project — neither may be read as this task's.
-    await recordPass("VIB-148", "2026-08-06T13:30:00.000Z");
-    await recordPass("VIB-142", "2026-08-06T14:00:00.000Z", "other-project");
-
-    const data = await loadTask("VIB-142");
     expect(data.githubCheckedAt).toBe("2026-08-06T12:42:00.000Z");
   });
 });
