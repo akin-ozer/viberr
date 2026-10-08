@@ -583,7 +583,7 @@ describe("StoreBrowser document editor", () => {
   // a New document a refusal then replaces; lock only a new draft and the
   // opened document's raw text takes typing a refusal then overwrites (the
   // row that opens another document); keep it past the answer and the
-  // refused draft cannot be fixed; leave a refusal off the draft it saved and
+  // refused draft cannot be fixed, nor an opened document ever typed in again; leave a refusal off the draft it saved and
   // the first row says nothing; settle the answer against the open draft (drop
   // the opening `openNew` or `openExisting` counts) and the newer draft is
   // closed under the person or wears the old save's error; bring a refused
@@ -651,12 +651,14 @@ describe("StoreBrowser document editor", () => {
     },
     {
       answer: "a save that lands after another document opened",
-      settles: "leaves that document open",
+      settles: "leaves that document open, and it takes typing again",
       meanwhile: openOverview,
       reply: { ok: true, toast: "facts.md saved · 13 bytes" },
       after: async (view: View) => {
         await view.findByText("facts.md saved · 13 bytes");
         expect(view.getByRole("region", { name: "Preview of overview.md" })).toBeTruthy();
+        fireEvent.click(view.getByRole("button", { name: "Raw" }));
+        expect(control(view.getByLabelText("Document contents"), HTMLTextAreaElement).readOnly).toBe(false);
       },
     },
     {
