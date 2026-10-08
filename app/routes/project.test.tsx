@@ -28,8 +28,11 @@ describe("the archived banner speaks to the reader's authority", () => {
       const canRestore = roleCan(role, "edit-policy");
       const { container } = render(<ArchivedBanner canRestore={canRestore} />);
       const text = container.textContent ?? "";
-      // Every reader still learns the state itself.
+      // Every reader still learns the state itself, from a live region.
       expect(text).toContain("archived");
+      expect(
+        container.querySelector(".archived-banner")?.getAttribute("role"),
+      ).toBe("status");
       if (canRestore) {
         expect(text).toContain("Settings → Danger zone");
       } else {
@@ -38,16 +41,6 @@ describe("the archived banner speaks to the reader's authority", () => {
         // …replaced by the thing they can act on — who to ask.
         expect(text).toContain("project admin");
       }
-      cleanup();
-    }
-  });
-
-  it("keeps the banner a live-region status for both readers", () => {
-    for (const canRestore of [true, false]) {
-      const { container } = render(<ArchivedBanner canRestore={canRestore} />);
-      expect(
-        container.querySelector(".archived-banner")?.getAttribute("role"),
-      ).toBe("status");
       cleanup();
     }
   });

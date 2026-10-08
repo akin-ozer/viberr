@@ -63,20 +63,6 @@ function renderOverlay(result: { ok: boolean; error?: string }) {
 }
 
 describe("notifications overlay: mark-all-read feedback", () => {
-  it("renders a failed mark-all-read with the failure glyph", async () => {
-    const { container, getByText } = renderOverlay({
-      ok: false,
-      error: "Your session expired — sign in again.",
-    });
-    fireEvent.click(getByText("Mark all read"));
-    await waitFor(() =>
-      expect(container.querySelector(".toast")).not.toBeNull(),
-    );
-    const toast = container.querySelector(".toast")!;
-    expect(toast.textContent).toContain("Your session expired");
-    expect(toast.getAttribute("data-kind")).toBe("error");
-  });
-
   /**
    * R14-3: mark-all-read owns its own fetcher. Sharing ONE with the per-row
    * read meant a row click aborted an in-flight mark-all, and React Router
@@ -89,6 +75,8 @@ describe("notifications overlay: mark-all-read feedback", () => {
     // fetcher, the row's submit aborts the mark-all, its `{ok:true}` reaches
     // the mark-all handler, and the user is told it worked — the failure branch
     // is unreachable. With its own fetcher the mark-all reports its own result.
+    // CANARY: push the failure without its "error" kind (P13-D-10), or give the
+    // two reads one fetcher (R14-3), and the toast reads as a success.
     // SAFETY: same contract as `renderOverlay` above — `Notifications` reads
     // only `loaderData`, and that value is checked against the route's own
     // loader data type, so the rest of the props the router supplies at runtime
