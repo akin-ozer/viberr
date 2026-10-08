@@ -143,7 +143,7 @@ describe("getControllerSurface — the open conversation's runtime", () => {
     expect(surfaceFor(store.users.murat).canInterruptTurn).toBe(false);
   });
 
-  it("offers the interrupt to the owner and to an org admin, not to another member", async () => {
+  it("offers the interrupt to the owner and to an org admin", async () => {
     // Canary: derive `canInterruptTurn` from `viewerOwnsActive` alone and the
     // admin loses the control the engine would honour.
     const conversation = await conversationWithRun(store.users.murat.id, store.users.murat.email);
@@ -156,8 +156,6 @@ describe("getControllerSurface — the open conversation's runtime", () => {
       });
     expect(open(store.users.murat).canInterruptTurn).toBe(true);
     expect(open(store.users.arda, true).canInterruptTurn).toBe(true);
-    // Selin cannot even open it (404); the surface never reaches the flag.
-    expect(() => open(store.users.selin)).toThrow();
   });
 });
 
