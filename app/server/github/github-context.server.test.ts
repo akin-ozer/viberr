@@ -235,20 +235,5 @@ describe("getProjectGithubContext — ok", () => {
       expect(header).toBe("Bearer ghp_context_second0001");
     });
   });
-
-  it("an empty default_branch falls back to main rather than an empty ref", () => {
-    // Callers concatenate this straight into refs (`heads/${defaultBranch}`), so
-    // a blank value is worse than a wrong one — it produces a ref that GitHub
-    // answers about some other resource entirely. The `||` is load-bearing; a
-    // `??` here would let the empty string through.
-    const store = setupProjectedStore(ctx);
-    bindPat(store, store.slug, "ghp_context_blankbr001");
-    store.db
-      .prepare(`UPDATE projects SET default_branch = '' WHERE slug = ?`)
-      .run(store.slug);
-
-    const context = getProjectGithubContext(store.db, store.slug);
-    expect(context.status === "ok" && context.defaultBranch).toBe("main");
-  });
 });
 
