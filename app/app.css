@@ -1976,7 +1976,7 @@ button.kbd:hover { border-color: var(--border); color: var(--fg); }
 /* Ruling 169: the hero's stage and status are labelled fields (the Current
    state panel's own row keys), so a stage NAMED Ready can no longer be read as
    a status word beside "blocked". The label is the house field label
-   (.rs-lbl / .res-group .lbl): .69rem caps on --faint (ruling 625). */
+   (.flabel / .res-group .lbl): .69rem caps on --faint (ruling 625). */
 /* Ruling 666: a field gives way before the column does. Without `min-width: 0`
    the Epic field kept the whole width of its epic's name (the chip inside can
    only shorten once its parent may), and a long name made the task page scroll
@@ -5519,9 +5519,9 @@ body:has(.login-wrap), body:has(.home), body:has(.home-shell) { overflow: auto; 
   padding: 0 1.5rem;
 }
 
-/* search width + right-cluster geometry match the workspace topbar (viberr.css .top-search) */
+/* search width + right-cluster geometry match the workspace topbar (`.top-search`, above) */
 
-/* moved to viberr.css: .ntf-pop (shared by Home + workspace) */
+/* `.ntf-pop` is defined once, above (shared by Home + workspace) */
 
 /* ---------- Shell ---------- */
 .home-shell {
