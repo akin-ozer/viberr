@@ -1339,9 +1339,8 @@ export function splitMcpCommand(target: string): string[] {
  * `npx`/`bunx`/the `dlx` family are SILENT while the registry resolves, which
  * is exactly the N20-2 gap — a cold probe timed out with no warm-up. Matched on
  * argv, never the raw string, so `my-server --npx-mode` is not a false positive.
- * Exported for its test.
  */
-export function isFirstRunInstallerCommand(argv: string[]): boolean {
+function isFirstRunInstallerCommand(argv: string[]): boolean {
   const bin = (argv[0] ?? "").split(/[\\/]/).pop()?.toLowerCase() ?? "";
   const next = (argv[1] ?? "").toLowerCase();
   if (["npx", "bunx", "uvx", "pipx"].includes(bin)) return true;

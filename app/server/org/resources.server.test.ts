@@ -23,7 +23,6 @@ import {
   deleteMcpServer,
   deleteSkill,
   discoverStdioMcpTools,
-  isFirstRunInstallerCommand,
   listKnowledgeBases,
   listSkills,
   markMcpServerUnreachableFromRun,
@@ -36,7 +35,6 @@ import {
   storePathsInMcpTarget,
   mcpStoreAccessNote,
   saveSkill,
-  splitMcpCommand,
   testMcpServer,
 } from "./resources.server";
 import { resetWarmupsForTest } from "./mcp-warmup.server";
@@ -1071,29 +1069,26 @@ describe("MCP probe crash-safety, honesty, and teardown (pass 20)", () => {
     }
   });
 
-  it("R20-4: isFirstRunInstallerCommand matches package-runner argv only", () => {
-    for (const cmd of [
-      "npx -y @mcp/x",
-      "bunx thing",
-      "uvx svc",
-      "pipx run svc",
-      "pnpm dlx svc",
-      "yarn dlx svc",
-      "bun x svc",
-      "uv tool run svc",
-      "/usr/local/bin/npx svc",
-    ]) {
-      expect(isFirstRunInstallerCommand(splitMcpCommand(cmd))).toBe(true);
-    }
-    for (const cmd of [
-      "node server.js",
-      "my-npx-tool --go",
-      "/usr/local/bin/mcp-server",
-      "pnpm start",
-      "python -m svc",
-    ]) {
-      expect(isFirstRunInstallerCommand(splitMcpCommand(cmd))).toBe(false);
-    }
+  // R20-4: only a package runner's argv (never a substring of it) marks a
+  // silent timeout as a probable first-run fetch.
+  it.each([
+    ["npx -y @mcp/x", true],
+    ["bunx thing", true],
+    ["uvx svc", true],
+    ["pipx run svc", true],
+    ["pnpm dlx svc", true],
+    ["yarn dlx svc", true],
+    ["bun x svc", true],
+    ["uv tool run svc", true],
+    ["/usr/local/bin/npx svc", true],
+    ["node server.js", false],
+    ["my-npx-tool --go", false],
+    ["/usr/local/bin/mcp-server", false],
+    ["pnpm start", false],
+    ["python -m svc", false],
+  ] as const)("R20-4: a silent probe of %s reports firstRunInstaller %s", async (cmd, installer) => {
+    const disc = await discoverStdioMcpTools(cmd, { spawnImpl: silentSpawn, timeoutMs: 1 });
+    expect(disc.kind === "down" && disc.firstRunInstaller === true).toBe(installer);
   });
 
   it("R20-4: a silent npx probe reports firstRunInstaller; a silent node probe is a plain timeout", async () => {
