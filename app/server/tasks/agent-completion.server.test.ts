@@ -284,7 +284,7 @@ async function finishedRunWith(text: string, reviewSubject?: string | null): Pro
 }
 
 describe("waiting-state bookkeeping (A2)", () => {
-  it("startSpecialistRun marks waiting=agent while the run is in flight", async () => {
+  it("startAgentRun — delivering (specialist) dispatch marks waiting=agent while the run is in flight", async () => {
     await assignSpecialist(
       store.db,
       { projectSlug: store.slug, taskKey: "VIB-1", profileId: "dev" },
@@ -5143,7 +5143,7 @@ describe("applyAgentCompletionEffects (the shared effects)", () => {
 });
 
 describe("unavailable backend through the specialist start path", () => {
-  it("startSpecialistRun on an unavailable backend errors fast → blocked event with 'unavailable' copy + recovery packet", async () => {
+  it("startAgentRun — delivering (specialist) dispatch on an unavailable backend errors fast → blocked event with 'unavailable' copy + recovery packet", async () => {
     // Deploy an operator with generate-packets (opens the recovery packet).
     deployOperator();
     await assignSpecialist(
@@ -5246,7 +5246,7 @@ describe("unavailable backend through the specialist start path", () => {
 });
 
 describe("reviewer verdict on the UI Run-button path (H2/A1 regression)", () => {
-  it("startReviewerRun's own hook records the verdict when the run finishes", async () => {
+  it("startAgentRun — supporting (reviewer) dispatch: its own hook records the verdict when the run finishes", async () => {
     // A delivered revision under review, but NO pre-set reviewer engagement:
     // assignReviewer below makes `dev` the SOLE required reviewer (it carries an
     // explicit verdict grant), so its approve derives validation → healthy.

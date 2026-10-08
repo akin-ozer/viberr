@@ -7152,9 +7152,12 @@ describe("ruling 178: the snapshot carries the project's required reviewers", ()
  * never a reason to skip the call.
  */
 describe("F37-11: the operator snapshot carries the base compare", () => {
-  /** One `github.reconcile` observation row, shaped exactly as the reconciler
-   *  writes it — the fields `latestReconcileObservation` (`sync`) and
-   *  `createReconcileBehindByLookup` (`behindBy`) read back. */
+  /** One `github.reconcile` observation row as the reconciler writes it, cut
+   *  down to three of its fields. The snapshot reads it back through
+   *  `createBaseCompareLookup`: `behindBy` becomes `baseBehindBy`, and the
+   *  absent `headSha` makes it a compare that named no head. `branch` and
+   *  `sync` ride along unread here (`sync` is what the reconciler's own
+   *  `latestReconcileObservation` reads). */
   function seedCompare(behindBy: number): void {
     const details = {
       branch: "vib-1",

@@ -283,13 +283,13 @@ export interface ReviewSubject {
  * It is wrong for a base refresh, and the case is not hypothetical. A reviewer
  * whose surface reaches outside the task's owned paths — any stack or
  * integration reviewer — can block on a defect in the BASE. Viberr's own
- * `update_branch` then merges the fixed base in, `classifyRevisionDrift` reads
- * `authored: 0` and `describeRevisionDrift` says the review still stands
- * (correctly: the deliverable's tree is untouched). But the pin puts the
- * re-review back on the pre-refresh base, where the defect is still there, so
- * it objects again — on SHOP-18 twice, and the only way out was an admin
- * force-accept over a gate that had wedged because the task did exactly what it
- * was asked to do.
+ * `update_branch_from_base` then merges the fixed base in,
+ * `classifyRevisionDrift` reads `authored: 0` and `describeRevisionDrift` says
+ * the review still stands (correctly: the deliverable's tree is untouched).
+ * But the pin puts the re-review back on the pre-refresh base, where the defect
+ * is still there, so it objects again — on SHOP-18 twice, and the only way out
+ * was an admin force-accept over a gate that had wedged because the task did
+ * exactly what it was asked to do.
  *
  * So the subject moves to the refreshed head when the drift is base-refresh
  * ONLY, and the disclosure says it did. One authored commit anywhere in the

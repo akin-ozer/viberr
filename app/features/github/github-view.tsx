@@ -745,8 +745,8 @@ export function GithubViewPage({
   const rechecking = grantFetcher.state !== "idle";
   const busy = reconciling || rechecking;
 
-  // The cred-warn action slot: Re-check scopes (lives here until the
-  // Phase-9 Settings card exists) + the mock's Fix in Settings navigation.
+  // The cred-warn action slot: Re-check scopes (Settings' Repository panel
+  // offers it too) + the mock's Fix in Settings navigation.
   const warnActions = (
     <CredentialWarnActions
       canGrant={canGrant}

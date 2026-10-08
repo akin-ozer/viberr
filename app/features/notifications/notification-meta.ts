@@ -3,7 +3,8 @@ import type { IconName } from "~/ui/icon";
 /**
  * THE shared notification kind → icon/color mapping + markdown stripper
  * (contracts §4 / ruling 14 — the mock duplicates both ×3; port once).
- * The `act-*` classes are the timeline event palette in viberr.css.
+ * The `act-*` classes are the timeline event palette in app.css (ported from
+ * the mock's viberr.css).
  */
 
 export interface NtfMeta {

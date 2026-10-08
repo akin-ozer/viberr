@@ -526,7 +526,7 @@ describe("engagement uniqueness (adversarial-review)", () => {
   });
 });
 
-describe("startSpecialistRun", () => {
+describe("startAgentRun — delivering (specialist) dispatch", () => {
   async function assign(): Promise<void> {
     await assignSpecialist(
       store.db,

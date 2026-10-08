@@ -1086,7 +1086,7 @@ describe("backend quota readings (pass 29)", () => {
    *
    * Canary: return `false` from `readingWindowReset`.
    */
-  it("marks a reading whose window reset before generatedAt (ruling 481)", async () => {
+  it("marks a reading whose window reset before the summary's `nowIso` (ruling 481)", async () => {
     const db = ctx.makeDb();
     const { recordBackendRateLimit } = await import("~/server/runtimes/backend-quota.server");
     recordBackendRateLimit(db, "claude", {

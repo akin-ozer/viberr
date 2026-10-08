@@ -10,10 +10,12 @@ import { Icon } from "~/ui/icon";
 
 /**
  * THE credential card (github-view spec §7.12: one component, used by the
- * GitHub view now and Settings → RepoSettings in Phase 9, so the two can't
- * drift). Markup is the mock's `.cred-card` verbatim; the footer action
- * slot is the only variation point ("Fix in Settings" here, "Re-check scopes"
- * in Settings — this page currently renders both, see the phase report).
+ * GitHub view (`github-view.tsx`) and by the project settings page's
+ * Repository panel (`RepoCredentialSlot`, `settings-page.tsx`), so the two
+ * can't drift). Markup is the mock's `.cred-card` verbatim; the two differ
+ * only in what they hand it: the footer actions (Re-check scopes on both,
+ * plus "Fix in Settings" on the GitHub view), the manage row, and, from the
+ * GitHub view alone, the connection probe's token health (`connectionAuth`).
  *
  * States:
  * - source "pat" → cred-top + scope chips + warn/ok footer (chips render the

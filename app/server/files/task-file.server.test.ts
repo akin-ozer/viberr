@@ -342,10 +342,14 @@ describe("task.md event-body escaping (structure-like text)", () => {
 
   /**
    * The `## Goal` body had none of this protection, and it is written from the
-   * same untrusted places as an event: the task form, an agent's `update_goal`,
-   * and the controller's chain-context text. A `## ` line in it ENDS the goal
-   * section, so ordinary markdown silently truncates the goal, and a crafted
-   * one forges the timeline the acceptance decision is read from.
+   * same untrusted places as an event: the new-task forms, the controller's
+   * `create_task` and a decision's `create_task` option (`createTask`), the
+   * task page's goal edit and the controller's `update_task` (`updateTaskGoal`),
+   * the operator's `set_goal`, a person's packet answer appended as an
+   * amendment, and an old goal chain's link goal carried into its epic's task.
+   * A `## ` line in it ENDS the goal section, so ordinary markdown silently
+   * truncates the goal, and a crafted one forges the timeline the acceptance
+   * decision is read from.
    */
   const GOAL_WITH_STRUCTURE = [
     "Ship the release.",

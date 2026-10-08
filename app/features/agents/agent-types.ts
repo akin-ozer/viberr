@@ -238,7 +238,7 @@ export type MatrixProfile = Pick<
   "id" | "kind" | "name" | "icon" | "actions" | "backends" | "capabilities"
 >;
 
-/** Mock statusKind (agents.jsx): status string → pill kind. */
+/** A deployment's status string → the pill kind the Agents page draws it in. */
 export function deploymentStatusKind(
   status: string,
 ): "agent" | "input" | "info" | "neutral" {

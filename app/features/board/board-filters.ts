@@ -112,9 +112,11 @@ export function matchesBoardFilter(
       // P14-WL-03: a PR closed without merging is a DIVERGENCE the review queue
       // files under "Decision required" — the work was declined and the task
       // needs a rework/reopen/archive call from a human. It carries none of the
-      // signals above (readiness stays `in_review`, validation stays healthy,
-      // urgent is off), so the board's own attention filter hid the single class
-      // of task that most needs a person.
+      // signals above: the reconciler writes only the `pr`/`github` cache, so
+      // readiness stays what it was (`ready` on a delivered task in review,
+      // which `deriveDisplayReadiness` leaves `ready`), validation stays healthy
+      // and urgent is off. The board's own attention filter hid the single
+      // class of task that most needs a person.
       task.pr?.state === "closed"
     );
   }
