@@ -88,6 +88,8 @@ function renderBoard(
     repoAccess?: RepoAccessResult;
     /** Ruling 503: the project's epics, for the epic filter. */
     epics?: readonly EpicOption[];
+    /** Ruling 694: false for a board with no repository. */
+    hasRepository?: boolean;
     /** Server result for the board's own fetchers (reorder / rescan). The
      *  request is handed through so a case can read what the board actually
      *  POSTed (ruling 88's acknowledgment fields). */
@@ -112,6 +114,7 @@ function renderBoard(
           {...(opts.defaultBranch ? { defaultBranch: opts.defaultBranch } : {})}
           repoAccess={opts.repoAccess}
           epics={opts.epics}
+          {...(opts.hasRepository === undefined ? {} : { hasRepository: opts.hasRepository })}
         />
       </ToastProvider>
     ),
@@ -827,6 +830,43 @@ describe("R16-2: the attention chip says what it selects", () => {
     expect(container.querySelector(".board-head .sub")!.textContent).toBe(
       "1 of 2 tasks · 1 waiting on a human in this project",
     );
+  });
+});
+
+describe("ruling 694: the new-task dialog asks in the words of the board it is on", () => {
+  const dialogOf = (hasRepository?: boolean) => {
+    const r = renderBoard([task()], hasRepository === undefined ? {} : { hasRepository });
+    const btn = [...r.container.querySelectorAll("button")].find((b) =>
+      b.textContent!.includes("New task"),
+    )!;
+    fireEvent.click(btn);
+    const dialog = r.container.querySelector('dialog[aria-label="New task"]')!;
+    return {
+      title: dialog.querySelector<HTMLInputElement>("#new-task-title")!.placeholder,
+      goal: dialog.querySelector<HTMLTextAreaElement>("#new-task-goal")!.placeholder,
+      text: dialog.textContent!.replace(/\s+/g, " "),
+    };
+  };
+
+  it("a board with a repository files a change: its goal is what counts as done", () => {
+    const d = dialogOf();
+    expect(d.title).toBe("e.g. Reconcile PR state after force-push");
+    expect(d.goal).toBe("One or two sentences. A vague goal gets flagged by the operator at triage.");
+    expect(d.text).toContain("what counts as done, for the operator and the agents");
+    expect(d.text).toContain("The goal gets refined at triage before any work begins.");
+  });
+
+  it("a board with none files a piece of a person's work: what they want back, and their notes", () => {
+    // CANARY: read NEW_TASK_COPY.repository whatever the board is and a person
+    // filing a subject and a few notes is asked for a goal a triage gate would
+    // flag, under an example about a force-push.
+    const d = dialogOf(false);
+    expect(d.title).toBe("e.g. What you want back, in a few words");
+    expect(d.goal).toBe("Say what you want back and add your notes. Files go below.");
+    expect(d.text).toContain("what you want back, and what you know about it");
+    expect(d.text).toContain("The agents work from what you write here and ask you for what only you know.");
+    expect(d.text).not.toContain("triage");
+    expect(d.title + d.goal + d.text).not.toMatch(/force-push|PR state/);
   });
 });
 

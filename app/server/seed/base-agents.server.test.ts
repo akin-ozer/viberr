@@ -8,12 +8,16 @@ import { readProjectFile } from "~/server/files/project-writer.server";
 import { serializeProjectFile } from "~/server/files/project-file.server";
 import { rebuildPath } from "~/server/projections/rebuilder.server";
 import { runDemoSeed } from "../../../test-support/demo-seed";
-import { seedDefaultAgentAssets } from "./default-assets.server";
+import { seedDefaultAgentAssets, shippedCopyIsUnedited } from "./default-assets.server";
 import { ensureBaseAgentsDeployed } from "./ensure-base-agents.server";
 import {
   baseAgentDeployments,
+  defaultAgentDeployments,
+  LIBRARY_AGENT_PROFILES,
   SEED_AGENT_PROFILES,
 } from "./agent-catalog.server";
+import { SKILL_INJECTION_BUDGET } from "~/server/files/skill-body.server";
+import { splitFrontmatter } from "~/server/files/frontmatter.server";
 import { joinedPrompt } from "~/server/runtimes/prompt-prefix.server";
 import { buildSpecialistPromptPrefix } from "~/server/tasks/specialist-prompt.server";
 import { isKnownModel } from "~/server/runtimes/model-catalog.server";
@@ -116,6 +120,136 @@ describe("seedDefaultAgentAssets", () => {
     writeFileAtomic(dest, "EDITED BY A HUMAN");
     seedDefaultAgentAssets(dataRoot);
     expect(readFileSync(dest, "utf8")).toBe("EDITED BY A HUMAN");
+  });
+});
+
+describe("ruling 692: the library ships a Writer and an Editor", () => {
+  const grantsOf = (id: string): Map<string, string> => {
+    const profile = LIBRARY_AGENT_PROFILES.find((p) => p.frontmatter.id === id);
+    return new Map((profile?.frontmatter.capabilities ?? []).map((c) => [c.capabilityId, c.mode]));
+  };
+
+  it("writes both templates and their manuals into a fresh store, the persona as the template's body", () => {
+    // CANARY: take either profile out of LIBRARY_AGENT_PROFILES, or either
+    // skill out of STATIC_ASSETS, and its file is not there.
+    const dataRoot = ctx.makeTempDir();
+    seedDefaultAgentAssets(dataRoot);
+    const read = (...parts: string[]) => readFileSync(path.join(dataRoot, ...parts), "utf8");
+    const writer = read("agents", "profiles", "writer.md");
+    const editor = read("agents", "profiles", "editor.md");
+    expect(writer).toContain("You are the Writer.");
+    expect(writer).toContain("writer-expertise");
+    expect(editor).toContain("You are the Editor.");
+    expect(editor).toContain("editor-expertise");
+    expect(read("skills", "writer-expertise", "SKILL.md")).toContain("# Viberr writer expertise");
+    expect(read("skills", "editor-expertise", "SKILL.md")).toContain("# Viberr editor expertise");
+    // Like the base templates, they grant no knowledge base a bare store lacks.
+    expect(writer).toContain("kb: []");
+    expect(editor).toContain("kb: []");
+  });
+
+  it("is in no project's default roster: a board gets them when someone chooses them", () => {
+    // CANARY: move them into SEED_AGENT_PROFILES and every new project is
+    // created with a Writer and an Editor nobody asked for.
+    const defaults = defaultAgentDeployments().map((d) => d.profileId).sort();
+    expect(defaults).toEqual(["developer", "operator", "reviewer"]);
+    expect(baseAgentDeployments().map((d) => d.profileId).sort()).toEqual(["developer", "operator", "reviewer"]);
+    expect(LIBRARY_AGENT_PROFILES.map((p) => p.frontmatter.id)).toEqual(["writer", "editor"]);
+  });
+
+  it("the Writer delivers and reaches the web; the Editor holds the verdict and cannot write the piece", () => {
+    const writer = grantsOf("writer");
+    for (const id of [
+      "execute-code-or-write-repo",
+      "commit-push-branch",
+      "ask-human",
+      "attach-evidence-references",
+      "use-browser",
+      "use-web-search-fetch",
+    ]) {
+      expect(writer.get(id), `writer ${id}`).toBe("direct");
+    }
+    expect(writer.has("report-validation-verdict")).toBe(false);
+    const editor = grantsOf("editor");
+    expect(editor.get("report-validation-verdict")).toBe("direct");
+    expect(editor.get("attach-evidence-references")).toBe("direct");
+    expect(editor.get("use-web-search-fetch")).toBe("direct");
+    expect(editor.get("commit-push-branch")).toBe("human");
+    expect(editor.has("execute-code-or-write-repo")).toBe(false);
+    for (const p of LIBRARY_AGENT_PROFILES) {
+      expect(p.frontmatter.extras, `${p.frontmatter.id} has a label the catalog does not know`).toEqual([]);
+      expect(isKnownModel("claude", p.frontmatter.model), p.frontmatter.id).toBe(true);
+    }
+  });
+
+  it("each manual leaves a board's own skill half of what a run with no checkout is given", () => {
+    // On a board with no repository every skill reaches a run as prompt text
+    // under one shared budget (ruling 679), drawn in name order: a manual that
+    // filled it would cut the board's own skill off whole.
+    const dataRoot = ctx.makeTempDir();
+    seedDefaultAgentAssets(dataRoot);
+    for (const name of ["writer-expertise", "editor-expertise"]) {
+      const raw = readFileSync(path.join(dataRoot, "skills", name, "SKILL.md"), "utf8");
+      expect(splitFrontmatter(raw).body.trim().length, name).toBeLessThanOrEqual(SKILL_INJECTION_BUDGET / 2);
+    }
+  });
+
+  it("says what a piece rests on, who may speak in the first person, and what a question is for", () => {
+    // CANARY: drop a section of either manual.
+    const dataRoot = ctx.makeTempDir();
+    seedDefaultAgentAssets(dataRoot);
+    const said = (name: string) =>
+      readFileSync(path.join(dataRoot, "skills", name, "SKILL.md"), "utf8").replace(/\s+/g, " ");
+    const writer = said("writer-expertise");
+    expect(writer).toContain("rests on a source you opened in this task and kept on it");
+    expect(writer).toContain("**A fetch tool's answer is a summary, not the page.**");
+    expect(writer).toContain("Hand each source you rely on to `keep_source`");
+    // The owner's ruling on code a task cannot run (2026-10-07).
+    expect(writer).toContain("check it without running it: it parses, and every option it sets exists in the thing it configures");
+    expect(writer).toContain("never as something you tested");
+    expect(writer).toContain("comes from their notes or their answers on this task");
+    expect(writer).toContain("ask only what the person alone knows");
+    expect(writer).toContain("Do not ask them to approve choices that are yours");
+    expect(writer).toContain("no sentence, example or figure of theirs comes with you");
+    expect(writer).toContain("ask for it with `capture_page`");
+    const editor = said("editor-expertise");
+    expect(editor).toContain("read the piece once as its reader would, beside the samples of the person's own writing");
+    expect(editor).toContain("No kept source: blocking, however plausible the fact.");
+    expect(editor).toContain("name **everything you would block on in this revision**");
+    expect(editor).toContain("save no file on the task under a name the delivery holds");
+    // A piece with no page to picture is judged from its file, not sent back
+    // for a picture nobody could take.
+    expect(editor).toContain("do not block on a picture nobody could take");
+    expect(writer).toContain("Where you could not look, say so in your note.");
+    // Ruling 695: three readers out of three picked a piece whose facts all
+    // held, for a narrator who cited his own log and quoted his own messages.
+    // CANARY: drop either paragraph from the Writer's manual, or the cold
+    // read's line from the Editor's.
+    expect(writer).toContain("Their notes and answers are your material, not quotations: do not quote the person to themselves");
+    expect(writer).toContain("Quote them only where the exact words are the point of the passage.");
+    expect(writer).toContain("belongs in your notes, never in the piece's voice.");
+    expect(writer).toContain("Where only a record shows what they did or decided,");
+    expect(writer).toContain("Name or link one of their records in the piece only where its reader would want to open it.");
+    // The rule is about the person's own records. CANARY: drop this sentence
+    // and a report states a third party's figure as the person's own.
+    expect(writer).toContain("a source from outside that the reader should know of (a study, a vendor's page, someone else's words) is still named where the piece uses it");
+    // And the Editor holds the same two exceptions the Writer is given, or a
+    // letter that quotes an earlier letter is sent back for it.
+    expect(editor).toContain("A quotation whose exact words are the point of the passage, and a record the reader would want to open, are not that;");
+    expect(editor).toContain("the fix is the plain fact without \"I\", or the person's own answer");
+    expect(writer).toContain("state the outcome as a plain fact about the thing, without \"I\", and list it in your note as theirs to confirm");
+    expect(editor).toContain("what reads as put together from files: a narrator who cites their own records");
+    expect(editor).toContain("\"I chose\" or \"I decided\" on the strength of a record alone is the same defect");
+    // A store whose copy nobody edited takes the new text at its next boot.
+    // CANARY: remove either outgoing hash.
+    expect(
+      shippedCopyIsUnedited("skills/writer-expertise/SKILL.md", "7f3e87f2478e5c2b798d2b45884ff95f9e62f81f25faa5cefc92161bd1166244", {}),
+    ).toBe(true);
+    expect(
+      shippedCopyIsUnedited("skills/editor-expertise/SKILL.md", "26b0210af906fd9b5495af1f5b343654422cee54986f86808e6285c3508cf253", {}),
+    ).toBe(true);
+    // Neither manual is about one kind of writing.
+    expect(writer + editor).not.toMatch(/\bblog\b/i);
   });
 });
 

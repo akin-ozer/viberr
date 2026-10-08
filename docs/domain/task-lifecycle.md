@@ -315,7 +315,14 @@ run does not (ruling 216).
   "Changes requested"; "Review passed"; "Approval noted, rework still needed" only when
   another required reviewer requested changes (`failing`, naming them); "Approval noted,
   waiting on <names>" while required reviewers still owe a verdict (`changed`); otherwise
-  "Approval noted" (ruling 478(g)).
+  "Approval noted" (ruling 478(g)). A request for changes that sent nothing back says so
+  in its title (ruling 693, `VERDICT_NOTE_TITLE`): "Changes requested, not counted" when it
+  bound to no delivery (nothing delivered yet, ruling 583; the reviewer made the delivery
+  itself, ruling 556; the delivery moved while it read, ruling 544), and "Changes
+  requested, on unchanged work" when the same reviewer objects again to a delivery nobody
+  has reworked since its last objection (the repeat that adds no round, ruling 416). The
+  timeline draws each as the reviewer's verdict all the same; what a task took counts the
+  bare title alone (§9).
 
 **Nothing moving.** `sweepStrandedTasks` (`stranded-sweep.server.ts`, ruling 330) runs
 after each schedule tick and finds a task untouched for 15 minutes
@@ -631,6 +638,63 @@ for a person (ruling 609): the Calculator Builder's headline ask comes before th
 delivered link, so what it saved is drafts, posted under its name, and its next report
 once the question is answered is the delivery.
 
+**A task keeps the sources its result rests on** (ruling 690), apart from its files: an
+agent that may save files on the task keeps what it read to state a fact from outside (a
+page as fetched, a repository file at a commit, an API answer, a command's output) with
+`keep_source`, and the task holds it under an id, with where the agent said it came from,
+the time, the agent, the run, its size and its hash, and never overwrites it
+([file-formats.md §10](../architecture/file-formats.md)). A kept source is never a file
+of the task, before the keep or after it: the run stages it in the attachments folder
+under a name that starts with `.source-`, which no lister of that folder returns, and the
+keep removes the staged file. So no reply posts it and no delivery carries it, whichever
+run completes while it waits; a page one run had saved under an ordinary name was the
+delivery of the deliverer that finished beside it, and the keep takes only a staged name.
+When a files delivery is stamped, the ids of the sources the task holds then are recorded
+with it (`recordDeliverySources`, beside the kept copy of ruling 597), so a source a
+reviewer keeps while checking the work is on the task and not under that delivery; a
+delivery that is a revision rests on what was kept by the instant the revision was minted
+(`workRevision.createdAt`), not by the time the operator summarized it, which is after the
+reviews. The reviewers check the work's claims against these with `read_task_source`, and
+a claim with no kept source behind it reads as unsupported.
+
+**A delivered page is pictured (ruling 691).** Once a files delivery is stamped and kept
+(ruling 597) and the completion's delivery reconcile has run, Viberr renders each page in
+it, a `.html`, `.htm`, `.md` or `.markdown` file,
+in a headless browser at a desktop width (1280 px) and a phone width (390 px), and keeps
+the pictures: `<file>.capture-desktop.png` and `<file>.capture-phone.png` in the task's
+attachments, a copy in the kept delivery they picture, the `pageCaptures` record bound to
+that delivery's stamp, and one timeline note from "Page capture" that claims them and
+says what the pictures do not show by themselves (a page that runs longer than its
+picture, one a phone shrinks or that is wider than its screen, one that opens a dialog as
+it loads, what the page asked the network for, and what it asked its own folder for and
+was not served: a file that is not there, or a path from the site's root or above the
+folder). Pages a person uploaded or a relay carried
+in are inputs and are not pictured; a delivery is pictured up to 8 pages, the deliverer's
+own first, and the record names the next pages with that as the reason they have no
+picture. The next delivery's pictures replace these under the same names, a page it no
+longer holds loses its picture, and each kept delivery keeps its own. The render reads the
+kept copy and never the files as they are now (a verdict binds to the kept copy), runs as
+the task owner's agent user with no network, and is one job at a time for the whole
+instance (`page-capture.server.ts`): a newer delivery of a task replaces one still
+waiting, and a delivery that lands while an older one is being pictured gets no record,
+note or picture from the older render. The completion waits up to 45 s for it before the
+operator reacts, so the operator and the reviewers it dispatches start with the pictures
+there; a slower render finishes in the background. A page that cannot be pictured says why
+in the note and in the record, and the delivery stands without it; the note names
+`capture_page` only for a page that tool can still show (it shares the renderer, the
+owner it runs as and the source's size limit with this render). A delivery that is a
+revision is not pictured, whatever files its run saved beside the commit: its pages live
+in the pull request, and the pictures and record of an earlier files delivery are taken
+down. On a board with a repository a first delivery is stamped before the reconcile mints
+its revision, so the completion asks for the pictures only after the reconcile
+(`applyAgentCompletionEffects`), and the render puts its pictures, record and note down
+inside the task file's lock, only while the task still names that delivery and it is
+still files. With no browser named (`VIBERR_BROWSER_EXECUTABLE` unset) nothing is pictured and
+nothing is said on the task. Only the picture of a page the task holds, or one the record
+names, is Viberr's own (`pageCapturesAmong`): an agent's own file that merely ends
+`.capture-desktop.png` is claimed by its run, kept with the delivery and offered as a
+screenshot like any other.
+
 A reviewer's `report_outcome` records a **verdict** (`approve | request_changes`)
 bound to the review subject (§6). A run whose workspace could not be provisioned
 records no verdict (ruling 248). The reason is capped at 2,000 characters
@@ -747,6 +811,13 @@ packet goes away (`retryReviewDeadlockEscalation`, ruling 328).
   notes, the result files (a task delivered as files) or the pull request, the change's
   size, the operator's summary of the change and the first 40 paths it changed (a task
   delivered as a revision), and the reviewers who gave a verdict on the accepted work.
+  Ruling 690: the card, before and after the acceptance, also says how many kept sources
+  the work under review rests on and lists the first twelve (`sourcesRestedOn`: the ones
+  the delivery recorded, or for a revision the ones kept by the time it was minted, plus
+  any the task's deliverer kept afterwards, so a page a reviewer kept while checking it is
+  not counted and one the deliverer kept to answer an objection is); a result that is
+  files says so
+  when it rests on none, and a revision that rests on none says nothing.
   The diff reader is the offer's alone, and nobody is shown as still owed a verdict. A
   task accepted with no packet on file (a person's own acceptance before the operator
   offered it, or a force-accept) has no result card. A reader on another task gets the
@@ -758,6 +829,85 @@ packet goes away (`retryReviewDeadlockEscalation`, ruling 328).
   change: its size, and the diff open whole at 200 lines or fewer, else the operator's
   summary with the diff one press away. While the packet carries the diff, the Changes
   panel (ruling 484) steps aside.
+- **What a task took** (ruling 693) is printed on the same card, under the reviewers, as
+  the offer and as the result: the agent runs that started and their time, their cost
+  where a backend reported one, how many rounds a person was asked, how many times the
+  work was sent back, and the wall time from filing to the first delivery and to
+  acceptance with the share agents ran and the share it waited on a person. Nothing is
+  stored. `whatItTook` (`app/server/tasks/what-it-took.server.ts`) derives it when it is
+  read, from the task's `agent_runs` rows and the task file (frontmatter, the open
+  packet, the timeline), and reads no clock, so it does not move with the time of day.
+  Audit rows are not read: they expire at 90 days. The card gets the figure's `facts`
+  (one phrase each, a zero left out) and `notes` (one fixed sentence per thing the figure
+  misses on this task); the operator's and the controller's read of the task carry the
+  numbers ([operator.md §4](operator.md), [controller-and-epics.md](controller-and-epics.md)).
+  A project member or an org admin sees it, the run console's bar, so a task's dollars
+  are read by its project ([auth-and-rbac.md §6](auth-and-rbac.md)). Each number, where it
+  comes from and what it misses:
+  - `runs.total`, `runs.operator`: the run rows the store stamped as started (`started_at`
+    set; the operator's by `kind`). That is the store's own meaning of a run, and the run
+    console's: a run refused before its agent was launched (no credential, a launch that
+    could not be prepared) is stamped as started and ended in error by the run service, so
+    it is in the total, with no time and no cost. A run waiting behind the run cap is
+    counted in `runs.queued` and one dropped from there before it started in
+    `runs.neverStarted`, neither in the total. A controller turn spent on the task is not a
+    task run and is not counted. The rows live in the projection database alone: when
+    agents that ran on the task wrote on its timeline and no row is left (a rebuilt or
+    restored database), `runs.recordKept` is false and the card says the runs, agent time
+    and cost are not known. A comment another task's agent relayed here (ruling 488) is no
+    trace of a run on this task, so a task that was only relayed to reads as not run.
+  - `runs.agentMinutes`: the sum of `finished_at - started_at` over ended runs. A run cut
+    by a restart is left out and counted in `runs.unmeasured.cutByRestart` (boot recovery
+    stamps its `finished_at` with the boot instant, so the gap is the outage); a run still
+    going is counted in `runs.unmeasured.live`.
+  - `cost.usd`: the sum of the costs the runs reported, each run's own share (ruling 542).
+    Null when no run reported one, never zero. `cost.unreported` counts the ended runs
+    with none, by backend: every Codex run, and a Claude run that ended without the result
+    its cost comes with (refused before launch, stopped, or failed). The card's note says
+    what the row shows: the run ended without reporting a cost, so it is not in the dollar
+    figure.
+  - `asked.rounds`: the decisions a person recorded (an entry by a person, or by the
+    controller for one, that opens with `**Decision:**` and is not a comment: a comment is
+    free prose, and no answer to a packet is written as one), plus one while a decision is
+    open (`asked.open`). One packet is one round, whoever raised it and however many
+    options it carried. Not counted: a declined recommendation (nobody was asked a
+    question), a packet withdrawn or superseded unanswered, and a decision answered by
+    accepting, which is the acceptance. So an open decision that offers acceptance is not
+    counted while it waits (accepting it leaves no decision entry, and any other answer
+    leaves one), and the count never falls when a person answers. It falls by one only
+    when an open decision is withdrawn or superseded unanswered. A packet decided and kept
+    open for its goal edit is counted once, by its entry. `asked.byAgents` counts the
+    questions agents raised themselves (`**Question for a human:**`), on either backend.
+  - `sentBack.byReviewers`: the reviewers' requests for changes that bound to a delivery
+    and fought a round, read from the `quality` notes titled "Changes requested" and
+    nothing more, because the `verdicts[]` row is one reviewer's current answer and an
+    approval on the same delivery replaces the objection. Two reviewers objecting to one
+    delivery count two. An objection that bound to nothing ("Changes requested, not
+    counted") and the same reviewer's repeat on work nobody reworked ("Changes requested,
+    on unchanged work") sent nothing back and are not counted; the writer titles them
+    apart (§6). A note written before ruling 693 carries the bare title in those cases
+    too, and is counted.
+  - `sentBack.byPeople`: a person's moves of the task to an earlier stage, by the board's
+    stage order and names as they stand now (the move's own sentence on the timeline). A
+    decision answered with a request for changes is an asked round, not a send-back, and
+    an `@agent` comment that restarts work is counted in neither.
+  - `wall.firstDelivery`: from `createdAt` to the earliest trace of a delivery:
+    `deliveredAt`, the delivered revision's `createdAt`, a `files:<stamp>` subject a
+    verdict or a run was bound to, or, for a revision that was reworked (the file keeps
+    the newest revision's time alone), the first run dispatched on the one before it,
+    which is an upper bound and is said in a note. Null on a task with nothing to deliver
+    (`noChanges`) or nothing delivered.
+  - `wall.acceptance`: from `createdAt` to the newest `completion` entry of a task at the
+    terminal stage. Every door to that stage writes one.
+  - Each span's `agentMinutes` is the wall time some ended run covered (two agents running
+    at once count once); its `waitedOnPersonMinutes` is, for each entry a person wrote in
+    the span, the time since the entry before it less the time an agent ran in between.
+    A run cut by a restart (from its start to the boot that ended it) and a run still
+    going (from its start on) are taken out of the wait as well and added to no agent
+    time: nobody was waited on while one may have been running, and how long it worked is
+    not known, so that stretch is in neither part.
+    That is a proxy: time a run sat queued behind the run cap just before a person acted
+    reads as waiting on them, and a wait still open is not counted until the person acts.
 - **Schedules** live in `task.md` `schedules[]`: `run-operator` (optional steer) or
   `run-agent` (a profile id and prompt; the profile must be deployed when the entry is
   created). Creating one needs `run-agents`, through the task page's run controls or

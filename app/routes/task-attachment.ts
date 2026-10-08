@@ -2,10 +2,9 @@ import path from "node:path";
 import type { Route } from "./+types/task-attachment";
 import { requireProjectMember } from "~/server/auth/require-project.server";
 import {
-  attachmentContentType,
-  attachmentDisposition,
   readAttachmentBytes,
   resolveTaskAttachment,
+  servedFileResponse,
 } from "~/server/files/task-attachments.server";
 
 /**
@@ -23,7 +22,9 @@ import {
  *    "no file");
  *  - `X-Content-Type-Options: nosniff` + `Content-Security-Policy: sandbox`
  *    on every response, and only whitelisted types render inline — HTML/SVG
- *    saved by a browsing agent must never execute on this origin.
+ *    saved by a browsing agent must never execute on this origin. Ruling 690:
+ *    `servedFileResponse` writes those headers, for this route, the
+ *    controller's files and a task's kept sources alike.
  */
 
 /** Memory bound for the read-into-buffer serve; larger files are refused. */
@@ -47,23 +48,7 @@ export async function loader({ request, params }: Route.LoaderArgs) {
     return new Response("Attachment too large to serve.", { status: 413 });
   }
 
-  const { type, inline } = attachmentContentType(params.file);
-  // Ruling 105: the in-app text viewer's Download button asks for the same
-  // URL with `?download=1` — force the save dialog instead of inline render.
-  const forceDownload =
-    new URL(request.url).searchParams.get("download") === "1";
-  return new Response(new Uint8Array(read.bytes), {
-    headers: {
-      "content-type": type,
-      "content-length": String(read.bytes.length),
-      // Ruling 675: a name outside Latin-1 cannot stand in a header as it is.
-      "content-disposition": attachmentDisposition(path.basename(abs), inline && !forceDownload),
-      "x-content-type-options": "nosniff",
-      // Even the inline types render inert: no scripts, no plugins reaching
-      // back into the origin. Browsers that refuse to show a sandboxed PDF
-      // inline fall back to downloading it — acceptable.
-      "content-security-policy": "sandbox; default-src 'none'",
-      "cache-control": "private, max-age=300",
-    },
-  });
+  // The stored name: a typed name finds the file in either Unicode form
+  // (ruling 675), and the header carries the one the folder holds.
+  return servedFileResponse(request, path.basename(abs), read.bytes);
 }

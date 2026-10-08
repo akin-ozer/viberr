@@ -35,9 +35,12 @@ import {
 } from "./operator-recommendations";
 import type { TaskRunPrincipalView } from "./run-principal-view";
 import { AttachmentsPanel } from "./attachments-panel";
+import { SourcesPanel } from "./sources-panel";
+import type { TaskSourceRow } from "~/server/tasks/task-sources.server";
 import { ChangesPanel } from "./changes-slot";
 import { CompletionPacket, type CompletionDiff } from "./completion-packet";
 import type { CompletionView } from "~/server/tasks/completion-packet.server";
+import type { TookCard } from "~/server/tasks/what-it-took.server";
 import { MoveBackConfirm } from "./move-back-confirm";
 import type { TaskAttachmentEntry } from "~/server/files/task-attachments.server";
 import { Timeline, type TimelineFilterId } from "./timeline";
@@ -147,6 +150,9 @@ function regionPlace(
     : TASK_TIMELINE_ANCHOR;
 }
 
+/** Ruling 690: a task that keeps no sources, as one list every render. */
+const NO_SOURCES: TaskSourceRow[] = [];
+
 export function TaskDetailPage({
   task,
   labelSuggestions = [],
@@ -155,9 +161,13 @@ export function TaskDetailPage({
   attachmentsTotal,
   attachmentProducers = {},
   attachmentsBase = null,
+  sources = NO_SOURCES,
+  sourcesTotal = 0,
+  sourcesBase = null,
   changesUrl = null,
   dependencyCandidatesUrl = null,
   completion = null,
+  whatItTook = null,
   runtime: loadedRuntime,
   deployedSpecialists,
   operatorBackend,
@@ -214,6 +224,14 @@ export function TaskDetailPage({
    *  built by the route component (the one place that knows the params).
    *  Null hides the panel and the evidence links (e.g. bare test renders). */
   attachmentsBase?: string | null;
+  /** Ruling 690: the sources the task keeps (loader; absent for a task that
+   *  keeps none and for a non-member), newest first. */
+  sources?: TaskSourceRow[];
+  /** How many it keeps in all: the list stops at the newest hundred. */
+  sourcesTotal?: number;
+  /** `/projects/<slug>/tasks/<KEY>/sources`, the route that serves one by
+   *  its id, built by the route component. Null draws no source as a link. */
+  sourcesBase?: string | null;
   /** Ruling 484: `/projects/<slug>/tasks/<KEY>/changes`, the Changes panel's
    *  read, built by the route component. Null hides the panel. */
   changesUrl?: string | null;
@@ -225,6 +243,10 @@ export function TaskDetailPage({
    *  summary and screenshots, each reviewer's verdict, the change's size);
    *  null while nothing is delivered. */
   completion?: CompletionView | null;
+  /** Ruling 693: what the task took, as the completion card prints it; null
+   *  when the loader shipped none (nothing delivered, or a viewer who may not
+   *  see the runs). */
+  whatItTook?: TookCard | null;
   /** Per-task run projection (Phase 8). */
   runtime: RunView[];
   /** Deployed specialists the run-agent selector offers (loader). */
@@ -824,9 +846,11 @@ export function TaskDetailPage({
       <CompletionPacket
         view={completion}
         attachmentsBase={attachmentsBase}
+        sourcesBase={sourcesBase}
         verdictSatisfiedBy={acceptance.verdictSatisfiedBy ?? null}
         diff={completionDiff}
         standalone={!acceptanceDecision}
+        took={whatItTook}
         result={
           resultShown
             ? {
@@ -1165,6 +1189,12 @@ export function TaskDetailPage({
             // this is what stops a person meeting the refusal).
             canAttach={roleCan(role, "attach-file") && !archived}
           />
+        ) : null}
+
+        {/* Ruling 690: what the work rests on, under the files of the work.
+            Nothing on a task that keeps no sources. */}
+        {sourcesBase && sources.length > 0 ? (
+          <SourcesPanel base={sourcesBase} sources={sources} total={sourcesTotal} />
         ) : null}
 
         <Timeline

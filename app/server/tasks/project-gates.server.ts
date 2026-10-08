@@ -1,9 +1,6 @@
-import { spawn, type ChildProcessByStdio } from "node:child_process";
 import { existsSync, readdirSync, writeFileSync } from "node:fs";
-import { constants as osConstants } from "node:os";
 import path from "node:path";
 import type { DatabaseSync } from "node:sqlite";
-import type { Readable } from "node:stream";
 import {
   normalizeEvidenceRows,
   type GateResult,
@@ -13,7 +10,6 @@ import {
 } from "~/schemas/task-file.schema";
 import { GATE_DEFAULT_TIMEOUT_SECONDS, type ProjectGate } from "~/schemas/project-file.schema";
 import { AppError } from "~/server/errors/app-error.server";
-import { ERROR_CODES } from "~/server/errors/error-codes";
 import { recordAudit, SYSTEM_ACTOR } from "~/server/audit/audit-recorder.server";
 import {
   resolveStoreSegment,
@@ -30,16 +26,17 @@ import {
 import { logger } from "~/server/logging/logger.server";
 import { rebuildPath } from "~/server/projections/rebuilder.server";
 import {
-  agentGitLaunchFor,
-  launchEnv,
-  launchedSignal,
-  launchesAgents,
   resolveExecutable,
   shareDirWithAgentsOrWarn,
   type AgentLaunch,
 } from "~/server/runtimes/agent-isolation.server";
 import { removeAgentTree } from "~/server/runtimes/agent-trees.server";
-import { reapRunProcesses, RUN_MARKER_ENV } from "~/server/runtimes/run-processes.server";
+import {
+  runPersonCommand,
+  taskOwnerLaunch,
+  type PersonCommandOutcome,
+} from "~/server/runtimes/person-command.server";
+import { RUN_MARKER_ENV } from "~/server/runtimes/run-processes.server";
 import { filteredSpawnEnv } from "~/server/runtimes/spawn-env.server";
 import { newId } from "~/shared/ids/new-id.server";
 import { errorMessage, toError } from "~/shared/errors";
@@ -132,13 +129,6 @@ export interface GateRequestInput {
   deps?: Pick<TaskActionDeps, "runOperator"> | undefined;
 }
 
-/** Output kept per gate log: the first part and the last part, the middle cut. */
-const LOG_HEAD_BYTES = 256 * 1024;
-const LOG_TAIL_BYTES = 1792 * 1024;
-/** After a timeout's SIGTERM, how long a gate has before its group is killed. */
-const KILL_GRACE_MS = 5_000;
-/** The leftover sweep after a gate exits (daemons it forked). */
-const REAP_GRACE_MS = 2_000;
 const GIT_TIMEOUT_MS = 10 * 60_000;
 /** How much of a could-not-run reason the record keeps. */
 const FAILURE_MAX_CHARS = 600;
@@ -425,60 +415,12 @@ async function patchRun(
  *  (isolation off) the server's own user. Throws when isolation is on and
  *  nobody can be named — ruling 460(h): never the server instead. */
 function gateLaunch(db: DatabaseSync, ownerUserId: string | null, dataRoot?: string): AgentLaunch | null {
-  if (!launchesAgents()) return null;
-  if (!ownerUserId) {
-    throw new AppError({
-      code: ERROR_CODES.RUN_UNAVAILABLE,
-      status: 409,
-      userMessage:
-        "the task has no owner to run them as (ruling 460: a gate runs as its person's agent user, never as the server)",
-    });
-  }
-  return agentGitLaunchFor(db, ownerUserId, dataRoot);
-}
-
-/** The combined output of one gate, bounded: the head and the tail are kept,
- *  the middle is cut with a marker saying how much. */
-class BoundedLog {
-  private head: Buffer[] = [];
-  private headBytes = 0;
-  private tail: Buffer[] = [];
-  private tailBytes = 0;
-  private cut = 0;
-
-  push(chunk: Buffer): void {
-    let rest = chunk;
-    if (this.headBytes < LOG_HEAD_BYTES) {
-      const room = LOG_HEAD_BYTES - this.headBytes;
-      const take = rest.subarray(0, room);
-      this.head.push(take);
-      this.headBytes += take.length;
-      rest = rest.subarray(take.length);
-    }
-    if (rest.length === 0) return;
-    this.tail.push(rest);
-    this.tailBytes += rest.length;
-    while (this.tailBytes > LOG_TAIL_BYTES && this.tail.length > 0) {
-      const first = this.tail[0]!;
-      const over = this.tailBytes - LOG_TAIL_BYTES;
-      if (first.length <= over) {
-        this.tail.shift();
-        this.tailBytes -= first.length;
-        this.cut += first.length;
-      } else {
-        this.tail[0] = first.subarray(over);
-        this.tailBytes -= over;
-        this.cut += over;
-      }
-    }
-  }
-
-  text(): string {
-    const head = Buffer.concat(this.head).toString("utf8");
-    const tail = Buffer.concat(this.tail).toString("utf8");
-    if (this.cut === 0) return head + tail;
-    return `${head}\n[… ${this.cut} bytes of output cut …]\n${tail}`;
-  }
+  return taskOwnerLaunch(
+    db,
+    ownerUserId,
+    dataRoot,
+    "the task has no owner to run them as (ruling 460: a gate runs as its person's agent user, never as the server)",
+  );
 }
 
 interface GateCommandInput {
@@ -491,96 +433,33 @@ interface GateCommandInput {
   marker: string;
 }
 
-interface GateCommandOutcome {
-  exitCode: number | null;
-  timedOut: boolean;
-  wallMs: number;
-  output: string;
-  /** The process could not be spawned at all. */
-  spawnError: string | null;
-}
+type GateCommandOutcome = PersonCommandOutcome;
 
 /** `sh -c <command>` as `launch` (or as the server), its own process group,
- *  killed with its group at the timeout. Never rejects. */
+ *  killed with its group at the timeout (`runPersonCommand`, the home ruling
+ *  691 gave it). Never rejects. */
 function runGateCommand(input: GateCommandInput): Promise<GateCommandOutcome> {
-  return new Promise((resolve) => {
-    const started = Date.now();
-    const log = new BoundedLog();
-    let settled = false;
-    const settle = (outcome: Omit<GateCommandOutcome, "wallMs" | "output">): void => {
-      if (settled) return;
-      settled = true;
-      resolve({ ...outcome, wallMs: Date.now() - started, output: log.text() });
-    };
-    let child: ChildProcessByStdio<null, Readable, Readable>;
-    try {
-      const sh = resolveExecutable("sh", input.env.PATH ?? process.env.PATH ?? "");
-      const file = input.launch ? input.launch.launcher : sh;
-      const env = input.launch ? launchEnv(input.launch, sh, input.env) : input.env;
-      child = spawn(file, ["-c", input.command], {
-        cwd: input.cwd,
-        env,
-        detached: true,
-        stdio: ["ignore", "pipe", "pipe"],
-        windowsHide: true,
-      });
-    } catch (error) {
-      settle({ exitCode: null, timedOut: false, spawnError: errorMessage(error) });
-      return;
-    }
-    const pid = child.pid ?? null;
-    const signalGroup = (requested: NodeJS.Signals): void => {
-      const signal = input.launch ? launchedSignal(requested) : requested;
-      if (pid !== null && pid > 1) {
-        try {
-          process.kill(-pid, signal);
-          return;
-        } catch {
-          // The group is gone; the process alone, below.
-        }
-      }
-      try {
-        child.kill(signal);
-      } catch {
-        // Already gone.
-      }
-    };
-    let timedOut = false;
-    let killTimer: ReturnType<typeof setTimeout> | null = null;
-    const timer = setTimeout(() => {
-      timedOut = true;
-      log.push(Buffer.from(`\n[viberr] the gate ran past its ${Math.round(input.timeoutMs / 1000)} s timeout and was stopped\n`));
-      signalGroup("SIGTERM");
-      killTimer = setTimeout(() => signalGroup("SIGKILL"), KILL_GRACE_MS);
-      killTimer.unref?.();
-    }, input.timeoutMs);
-    timer.unref?.();
-    child.stdout.on("data", (chunk: Buffer) => log.push(chunk));
-    child.stderr.on("data", (chunk: Buffer) => log.push(chunk));
-    child.stdout.on("error", () => {});
-    child.stderr.on("error", () => {});
-    let spawnError: string | null = null;
-    child.on("error", (error) => {
-      spawnError = errorMessage(error);
-      clearTimeout(timer);
-      if (killTimer) clearTimeout(killTimer);
-      settle({ exitCode: null, timedOut: false, spawnError });
+  let sh: string;
+  try {
+    sh = resolveExecutable("sh", input.env.PATH ?? process.env.PATH ?? "");
+  } catch (error) {
+    return Promise.resolve({
+      exitCode: null,
+      timedOut: false,
+      wallMs: 0,
+      output: "",
+      spawnError: errorMessage(error),
     });
-    child.on("close", (code, signal) => {
-      clearTimeout(timer);
-      if (killTimer) clearTimeout(killTimer);
-      // A process a signal ended reports the shell's convention, 128 + n, so
-      // "killed" never reads as "did not start".
-      const signalled =
-        signal !== null ? 128 + (osConstants.signals[signal] ?? 0) : null;
-      const exitCode = timedOut ? null : (code ?? signalled);
-      void reapRunProcesses(
-        { runIds: [input.marker], groupLeader: pid, launched: input.launch !== null },
-        { graceMs: REAP_GRACE_MS },
-      )
-        .catch(() => undefined)
-        .finally(() => settle({ exitCode, timedOut, spawnError }));
-    });
+  }
+  return runPersonCommand({
+    file: sh,
+    args: ["-c", input.command],
+    cwd: input.cwd,
+    timeoutMs: input.timeoutMs,
+    launch: input.launch,
+    env: input.env,
+    marker: input.marker,
+    timeoutNote: `\n[viberr] the gate ran past its ${Math.round(input.timeoutMs / 1000)} s timeout and was stopped\n`,
   });
 }
 

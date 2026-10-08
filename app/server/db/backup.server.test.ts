@@ -490,6 +490,16 @@ describe("createBackup — re-derivable git trees stay out of the artefact", () 
     const mirror = path.join(proj, ".repo-mirror", "acme__app.git", "objects");
     mkdirSync(mirror, { recursive: true });
     writeFileSync(path.join(mirror, "pack.idx"), "binary");
+    // Ruling 691: what a page render works in is beside the workspace. Its
+    // browser profile is a folder only the renderer's uid can enter, which
+    // stopped the copy of everything. Canary: drop the RENDER_WORK_DIRS
+    // clause and both folders are in the artefact.
+    const profile = path.join(proj, "tasks", "VIB-1", ".captures", "no.run", "cap_1", "profile");
+    mkdirSync(profile, { recursive: true });
+    writeFileSync(path.join(profile, "Cookies"), "a browser's own");
+    const carried = path.join(proj, "tasks", "VIB-1", ".capture-input", "cap_1");
+    mkdirSync(carried, { recursive: true });
+    writeFileSync(path.join(carried, "post.html"), "<h1>a copy of a kept delivery</h1>");
 
     const backup = createBackup({ dataRoot: f.dataRoot, destination: f.out });
     const stored = path.join(backup.dir, "store", "projects", "viberr-core");
@@ -502,6 +512,9 @@ describe("createBackup — re-derivable git trees stay out of the artefact", () 
       existsSync(path.join(stored, ".repo-mirror")),
       "a bare mirror is re-fetchable, not backed up",
     ).toBe(false);
+    expect(existsSync(path.join(stored, "tasks", "VIB-1", ".captures"))).toBe(false);
+    expect(existsSync(path.join(stored, "tasks", "VIB-1", ".capture-input"))).toBe(false);
+    expect(readManifest(backup.dir).excludes.some((line) => line.includes(".captures/"))).toBe(true);
     // The canonical file beside them still is.
     expect(existsSync(path.join(stored, "tasks", "VIB-1", "task.md"))).toBe(true);
     // And the manifest says so instead of leaving an operator to guess.

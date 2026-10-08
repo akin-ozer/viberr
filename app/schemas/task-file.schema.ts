@@ -1332,6 +1332,52 @@ const gateRunSchema = z
   .loose();
 export type GateRun = z.infer<typeof gateRunSchema>;
 
+// ------------------------------------------- page captures (ruling 691)
+
+/** One picture of one delivered page. */
+const pageCaptureShotSchema = z
+  .object({
+    /** The width it was taken at. */
+    view: z.enum(["desktop", "phone"]),
+    /** The picture's name in the task's attachments store. */
+    name: z.string().min(1),
+    /** The page runs on below the picture. */
+    cut: z.boolean().default(false),
+  })
+  .loose();
+
+/** One delivered page and the pictures made of it, or why there is none. */
+const pageCapturePageSchema = z
+  .object({
+    /** The page's own name in the task's attachments store. */
+    file: z.string().min(1),
+    shots: z.array(pageCaptureShotSchema).default([]),
+    /** Why the page could not be pictured; null when it was. */
+    error: z.string().nullable().default(null),
+  })
+  .loose();
+
+/**
+ * Ruling 691: the pictures Viberr made of the pages of one files delivery.
+ *
+ * Written by the server alone (`page-capture.server.ts`), once the render of a
+ * stamped delivery has finished. Bound to the delivery it pictured, like a
+ * verdict: a reader pairs a picture with a file only while `deliveredAt` is
+ * the task's own, so a picture of an earlier delivery never shows beside a
+ * newer one. The latest delivery only; each kept delivery holds its own
+ * pictures as files.
+ */
+const pageCapturesSchema = z
+  .object({
+    /** The `deliveredAt` stamp of the delivery pictured. */
+    deliveredAt: z.string().min(1),
+    /** When the render finished. */
+    at: z.string().min(1),
+    pages: z.array(pageCapturePageSchema).default([]),
+  })
+  .loose();
+export type PageCaptures = z.infer<typeof pageCapturesSchema>;
+
 // ------------------------------------------- completion packet (ruling 521)
 
 /** One screenshot the operator put on the completion packet. */
@@ -1577,6 +1623,9 @@ const taskFrontmatterFields = {
   /** Ruling 482: the project's gates as Viberr last ran them on this task
    *  (absent until a run is first asked for). */
   gateRun: gateRunSchema.optional(),
+  /** Ruling 691: Viberr's own pictures of the pages of the files delivery
+   *  under review (absent until a delivery with a page is pictured). */
+  pageCaptures: pageCapturesSchema.optional(),
   /** Ruling 521: the operator's summary of the finished work, for the person
    *  who accepts it (absent until the operator first writes one). */
   completionPacket: completionPacketSchema.optional(),
@@ -2015,6 +2064,8 @@ export const TASK_FRONTMATTER_KEYS: readonly (keyof TaskFrontmatter)[] = [
   "headCheckWaiver",
   // Ruling 482: the server's own gate evidence.
   "gateRun",
+  // Ruling 691: the server's own pictures of the delivered pages.
+  "pageCaptures",
   // Ruling 521: the operator's summary for the person who accepts.
   "completionPacket",
   "github",
@@ -2431,6 +2482,17 @@ export function parseTaskFrontmatter(
       data,
       "gateRun",
       taskFrontmatterFields.gateRun,
+      undefined,
+    ),
+    // Ruling 691: absent means no delivery was pictured. A malformed record
+    // falls back to absent with a diagnostic, which reads as "no picture of
+    // this delivery": the card draws none, and the next delivery's render
+    // rewrites the whole record.
+    pageCaptures: tolerant(
+      diagnostics,
+      data,
+      "pageCaptures",
+      taskFrontmatterFields.pageCaptures,
       undefined,
     ),
     // Ruling 521: absent means the operator never wrote one. A malformed

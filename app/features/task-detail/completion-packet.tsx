@@ -1,6 +1,8 @@
-import { useId } from "react";
+import { Fragment, useId } from "react";
 import type { CompletionVerdictRow, CompletionView } from "~/server/tasks/completion-packet.server";
+import type { TookCard } from "~/server/tasks/what-it-took.server";
 import { COMPLETION_NOTES, COMPLETION_SMALL_CHANGE_LINES } from "~/shared/completion-packet";
+import { pageCaptureView } from "~/shared/page-capture";
 import { Collapsible } from "~/ui/collapsible";
 import { Icon, type IconName } from "~/ui/icon";
 import { LocalRelative } from "~/ui/local-time";
@@ -31,6 +33,18 @@ import { ChangesPanel } from "./changes-slot";
  * the result. A task delivered as a revision shows no files: its pull request
  * holds them, so the result names the pull request, the change's size and the
  * paths it changed.
+ *
+ * Ruling 693: under the reviewers the card says what the task took: its runs
+ * and their agent time, their cost, the times a person was asked and the work
+ * was sent back, and the wall time to the first delivery and to acceptance.
+ * The server builds the phrases and the sentences saying what they miss
+ * (`what-it-took.server.ts`), so this draws them and formats nothing. It
+ * stays on the Result card.
+ *
+ * Ruling 691: a result file that is a page (HTML or markdown) carries Viberr's
+ * own pictures of it under its row, at a desktop and a phone width, or the
+ * reason there is none. The source still opens from the row; the picture is
+ * what a reader of the page gets. Operator names none of them.
  */
 export interface CompletionDiff {
   url: string;
@@ -109,14 +123,19 @@ function VerdictRow({ row, subject }: { row: CompletionVerdictRow; subject: stri
 export function CompletionPacket({
   view,
   attachmentsBase,
+  sourcesBase = null,
   verdictSatisfiedBy = null,
   diff = null,
   standalone = false,
   result = null,
+  took = null,
 }: {
   view: CompletionView;
   /** The attachments serving route's base, or null where there is none. */
   attachmentsBase: string | null;
+  /** Ruling 690: the route that serves a kept source by its id, or null
+   *  where there is none: the card then says how many and lists none. */
+  sourcesBase?: string | null;
   /** R19-B: a person's GitHub approval that carries the verdict gate. */
   verdictSatisfiedBy?: string | null;
   /** The diff reader's read, while the review PR is open on the delivered
@@ -127,6 +146,9 @@ export function CompletionPacket({
   standalone?: boolean;
   /** Ruling 668: the task is accepted, so this is its result. */
   result?: CompletionResult | null;
+  /** Ruling 693: what the task took and what that figure misses, or null for
+   *  a viewer the loader sent none. */
+  took?: TookCard | null;
 }) {
   const id = useId();
   const lightbox = useAttachmentLightbox();
@@ -137,6 +159,9 @@ export function CompletionPacket({
   const href = (name: string) => `${attachmentsBase}/${encodeURIComponent(name)}`;
   const shots = attachmentsBase && packet ? packet.screenshots : [];
   const files = attachmentsBase && packet ? packet.files : [];
+  const sources = view.sources ?? null;
+  // Listed where there is a route to open one by, as the files are.
+  const sourceRows = sourcesBase && sources ? sources.shown : [];
   const small = change?.small ?? false;
   // On an accepted task nobody is still owed a verdict.
   const verdicts = result ? view.verdicts.filter((v) => v.result !== "pending") : view.verdicts;
@@ -213,6 +238,38 @@ export function CompletionPacket({
                       {f.caption ? <span className="cmp-file-what">{f.caption}</span> : null}
                     </span>
                   </a>
+                  {f.page && f.page.shots.length > 0 ? (
+                    <div className="attach-grid cmp-shots">
+                      {f.page.shots.map((s) => {
+                        const view = pageCaptureView(s.view);
+                        // The version is for the browser's cache alone (the
+                        // route ignores it): a rework replaces the picture
+                        // under the same name.
+                        const url = `${href(s.name)}?v=${encodeURIComponent(s.at)}`;
+                        return (
+                          <AttachmentThumb
+                            key={s.name}
+                            variant="panel"
+                            href={url}
+                            name={s.name}
+                            openLabel={`Open the ${view.id} picture of ${f.name}`}
+                            onOpen={lightbox({ name: s.name, url })}
+                          >
+                            <span className="cmp-caption">
+                              {view.label}
+                              {s.cut ? ", the top of a longer page" : ""}
+                            </span>
+                          </AttachmentThumb>
+                        );
+                      })}
+                    </div>
+                  ) : null}
+                  {f.page?.note ? (
+                    <p className="cmp-none">
+                      {f.page.shots.length > 0 ? "Not every picture of this page was made" : "No picture of this page"}
+                      : {f.page.note}
+                    </p>
+                  ) : null}
                 </li>
               );
             })}
@@ -225,6 +282,49 @@ export function CompletionPacket({
           {packet.hiddenFiles === 1 ? "is" : "are"} not shown: attachments are for project
           members, and a file removed since is gone.
         </p>
+      ) : null}
+
+      {/* Ruling 690: what the result rests on. A fact it states from outside
+          is checked against these, kept as the run read them; a result that
+          is files says so when it rests on none. */}
+      {sources ? (
+        <>
+          <Label className="cmp-k">Sources</Label>
+          <p className="cmp-none">
+            {sources.count === 0
+              ? "This result rests on no kept source."
+              : `This result rests on ${plural(sources.count, "kept source", "kept sources")}.`}
+          </p>
+          {sourceRows.length > 0 ? (
+            <ul className="cmp-files">
+              {sourceRows.map((source) => {
+                const url = `${sourcesBase}/${encodeURIComponent(source.id)}`;
+                return (
+                  <li key={source.id}>
+                    <a
+                      className="attach-file cmp-file"
+                      href={url}
+                      target="_blank"
+                      rel="noreferrer"
+                      onClick={lightbox({ name: source.name, url })}
+                    >
+                      <span className="cmp-file-ext">{source.id}</span>
+                      <span className="cmp-file-main">
+                        <span className="cmp-file-name">{source.title}</span>
+                        <span className="cmp-file-what">{source.from}</span>
+                      </span>
+                    </a>
+                  </li>
+                );
+              })}
+            </ul>
+          ) : null}
+          {sourceRows.length > 0 && sources.count > sourceRows.length ? (
+            <p className="cmp-none">
+              and {sources.count - sourceRows.length} more, listed under Sources.
+            </p>
+          ) : null}
+        </>
       ) : null}
 
       {notes.map((note) => (
@@ -258,6 +358,31 @@ export function CompletionPacket({
           ) : null}
         </ul>
       )}
+
+      {took && took.facts.length + took.notes.length > 0 ? (
+        <>
+          <Label className="cmp-k">What it took</Label>
+          {took.facts.length > 0 ? (
+            <p className="cmp-stat">
+              {took.facts.map((fact, i) => (
+                <Fragment key={fact}>
+                  {i > 0 ? (
+                    <span className="cmp-sep" aria-hidden="true">
+                      ·
+                    </span>
+                  ) : null}
+                  <span>{fact}</span>
+                </Fragment>
+              ))}
+            </p>
+          ) : null}
+          {took.notes.map((note) => (
+            <p key={note} className="cmp-none">
+              {note}
+            </p>
+          ))}
+        </>
+      ) : null}
 
       {shots.length > 0 ? (
         <>

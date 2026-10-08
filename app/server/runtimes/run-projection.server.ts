@@ -344,6 +344,14 @@ function pickRepresentative(rows: AgentRunRow[]): AgentRunRow {
  */
 export type ConsoleShipping = "all" | "shown" | "none" | "withheld";
 
+/** How {@link projectRunsForTask} reads a task's runs. */
+export interface RunsForTaskOptions {
+  console?: ConsoleShipping;
+  /** The task's run rows as `listRunsForTaskRows` returns them, when the
+   *  caller holds them already (ruling 693). */
+  rows?: AgentRunRow[];
+}
+
 /**
  * The group the console opens on when nothing is selected, the same rule
  * `AgentLogsPanel` applies: the running one, else the first.
@@ -361,14 +369,18 @@ function shownGroupIndex(representatives: AgentRunRow[]): number {
  * Grouping preserves the representatives' created_at order (the first group a
  * key appears defines its slot), so a task with an operator + a primary "dev"
  * (with many resume runs) + an optional reviewer shows 2–3 named entries.
+ *
+ * Ruling 693: a caller that has already read the task's run rows hands them
+ * in (`rows`), so the task page reads them once for this and for what the
+ * task took; without them this reads its own.
  */
 export function projectRunsForTask(
   db: DatabaseSync,
   projectSlug: string,
   taskKey: string,
-  { console: shipping = "all" }: { console?: ConsoleShipping } = {},
+  { console: shipping = "all", rows }: RunsForTaskOptions = {},
 ): ProjectedRunView[] {
-  const groups = groupRuns(listRunsForTaskRows(db, projectSlug, taskKey));
+  const groups = groupRuns(rows ?? listRunsForTaskRows(db, projectSlug, taskKey));
   if (groups.length === 0) return [];
   const representatives = groups.map(pickRepresentative);
   // Ruling 457 (TASK-1): one COUNT/MAX for the task, not one per run.

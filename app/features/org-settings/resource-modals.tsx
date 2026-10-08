@@ -681,7 +681,7 @@ export function McpModal({
           <Icon name="lock" />
           <span>
             A selected tool is removed from every run whose agent withholds{" "}
-            <strong>Execute code or write to the repo</strong>, and from every operator
+            <strong>Write to the repository</strong>, and from every operator
             run, on Claude and Codex. Viberr makes no claim about the tools you leave
             unselected.
           </span>

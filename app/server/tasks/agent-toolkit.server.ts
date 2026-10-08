@@ -19,7 +19,15 @@ import {
 import { recordAudit, type AuditActor } from "~/server/audit/audit-recorder.server";
 import { runAgentGithubRead } from "~/server/github/agent-github-read.server";
 import { encodeActorRef, agentRoleDisplay } from "~/server/files/actor-ref.server";
-import { readAgentTaskAttachment, readBoardList, readBoardTask, readTimelineEntry } from "./board-read.server";
+import {
+  readAgentTaskAttachment,
+  readAgentTaskSource,
+  readBoardList,
+  readBoardTask,
+  readTimelineEntry,
+} from "./board-read.server";
+import { PAGE_CAPTURE_MAX_FROM } from "~/shared/page-capture";
+import { captureTaskPage, pageCaptureStatus } from "./page-capture.server";
 import {
   KB_DOC_KB_DESCRIPTION,
   KB_DOC_OFFSET_DESCRIPTION,
@@ -29,13 +37,20 @@ import {
 } from "~/server/files/kb-injection.server";
 import { KB_CORRECTION_FIELDS, KB_CORRECTION_SPECIALIST_DESCRIPTION } from "~/server/mcp-proxy/knowledge-tool.server";
 import {
+  KEEP_SOURCE_NAME,
   READ_BOARD_DESCRIPTION,
   READ_BOARD_TASK_KEY_DESCRIPTION,
   READ_TASK_ATTACHMENT_DESCRIPTION,
+  CAPTURE_PAGE_DESCRIPTION,
+  CAPTURE_PAGE_FIELDS,
   READ_TASK_ATTACHMENT_FIELDS,
+  READ_TASK_SOURCE_DESCRIPTION,
+  READ_TASK_SOURCE_FIELDS,
   READ_TIMELINE_ENTRY_AT_DESCRIPTION,
   READ_TIMELINE_ENTRY_DESCRIPTION,
   READ_TIMELINE_ENTRY_TASK_KEY_DESCRIPTION,
+  keepSourceDescription,
+  keepSourceFields,
 } from "~/server/mcp-proxy/board-tool.server";
 import {
   appendTimelineEvent,
@@ -44,6 +59,7 @@ import {
 } from "~/server/files/task-writer.server";
 import { logger } from "~/server/logging/logger.server";
 import {
+  ASK_HUMAN_ONLY_NOTE,
   ASK_HUMAN_RECOMMEND_NOTE,
   ASK_HUMAN_REPLY_NOTE,
   RELAY_FIELD_NOTE,
@@ -59,6 +75,7 @@ import {
 } from "./agent-outcome.server";
 import { normalizeEscapedNewlines } from "./model-prose.server";
 import { correctKnowledgeDoc } from "./kb-correction-actions.server";
+import { keepTaskSource } from "./task-sources.server";
 import { RELAY_MAX_ENTRIES, type RelayEntry } from "./task-relay.server";
 import {
   notifyMentionedUsers,
@@ -84,6 +101,7 @@ import {
   type OfferWithdrawalCause,
 } from "./task-mutation.server";
 import { toError } from "~/shared/errors";
+import { QUESTION_LEAD } from "~/shared/timeline-leads";
 import { pageEnd } from "~/server/runtimes/read-page-budget.server";
 
 /**
@@ -101,6 +119,9 @@ import { pageEnd } from "~/server/runtimes/read-page-budget.server";
  *                    recorded ATOMICALLY with the reply at completion); its
  *                    optional `evidence` field is separately gated on
  *                    attach-evidence-references (P13-D-26)
+ *   keep_source    → attach-evidence-references (ruling 690: the grant that
+ *                    lets a run save files on its task lets it keep the
+ *                    sources its result rests on)
  *
  * Codex runs cannot mount these (the codex SDK ignores tool policy and its
  * MCP config leaks credentials into argv) — they get the same envelope through
@@ -132,6 +153,10 @@ interface AgentToolkitDeps {
    *  Their documents are indexed into the prompt, not injected, so the run
    *  needs a way to pull one — and may pull only from these. */
   kb: readonly string[];
+  /** Ruling 690: the run's `use-web-search-fetch` grant, for what
+   *  `keep_source` says a run can keep: a page it fetched, or only what a run
+   *  without the web can reach. */
+  webEgress: boolean;
 }
 
 const prose = normalizeEscapedNewlines;
@@ -321,7 +346,7 @@ export async function openAgentQuestionPacket(
       type: "blocked",
       actor: input.actorRef,
       title: null,
-      text: askedEntryText(`**Question for a human:** ${packet.title}`, packet),
+      text: askedEntryText(`${QUESTION_LEAD} ${packet.title}`, packet),
       toAgent: false,
       evidence: null,
     });
@@ -426,7 +451,9 @@ export function buildAgentToolkit(deps: AgentToolkitDeps): AgentToolkit | null {
     tools.push(
       tool(
         "ask_human",
-        "Ask the humans on this task a question you are blocked on; it opens a decision card they resolve from the task page. Use it ONLY for a genuine decision you cannot make (ambiguous requirement, conflicting instructions, a choice only a human may make). Give 2-4 concrete answer options when they exist. The answer does not arrive during THIS run: end this run with a report of what you did and what is pending. You WILL be resumed with the decision, in this same session, so you can carry on from where you stopped; do not restart your work or re-ask.",
+        "Ask the humans on this task a question you are blocked on; it opens a decision card they resolve from the task page. Use it ONLY for a genuine decision you cannot make (ambiguous requirement, conflicting instructions, a choice only a human may make). " +
+          ASK_HUMAN_ONLY_NOTE +
+          " Give 2-4 concrete answer options when they exist. The answer does not arrive during THIS run: end this run with a report of what you did and what is pending. You WILL be resumed with the decision, in this same session, so you can carry on from where you stopped; do not restart your work or re-ask.",
         {
           title: z.string().describe("The question, one sentence."),
           body: z
@@ -705,6 +732,47 @@ export function buildAgentToolkit(deps: AgentToolkitDeps): AgentToolkit | null {
     );
   }
 
+  // Ruling 690: a run that may save files on its task keeps the sources its
+  // result rests on. Gated on `attach-evidence-references` and on nothing
+  // wider: that grant is what makes the attachments folder the run's to write,
+  // and the keep takes a file from there. The Codex twin is the gateway's
+  // board server, whose mount carries the same grant.
+  if (collab.evidence) {
+    const keepFields = keepSourceFields(deps.webEgress);
+    tools.push(
+      tool(
+        KEEP_SOURCE_NAME,
+        keepSourceDescription(deps.webEgress),
+        {
+          file: z.string().describe(keepFields.file),
+          from: z.string().describe(keepFields.from),
+          title: z.string().describe(keepFields.title),
+        },
+        // eslint-disable-next-line @typescript-eslint/require-await
+        async (args) => {
+          try {
+            return textResult(
+              keepTaskSource(db, ctx, {
+                projectSlug,
+                taskKey,
+                file: args.file,
+                from: args.from,
+                title: args.title,
+                actorRef,
+                // The run's row carries this toolkit's staging key, so the
+                // record names the run that called.
+                runId: runIdForOutcomeKey(db, outcomeKey),
+              }),
+            );
+          } catch (error) {
+            logger.warn("agent keep_source failed", { taskKey, err: toError(error) });
+            return textResult("[error] The source could not be kept.");
+          }
+        },
+      ),
+    );
+  }
+
   // Ruling 281 (pass 37, F37-114): an agent can read its repository and not the
   // board it works on. Its whole Viberr toolkit was post_comment, ask_human,
   // report_outcome and (with a grant) github_read — so a task key it is TOLD
@@ -803,7 +871,68 @@ export function buildAgentToolkit(deps: AgentToolkitDeps): AgentToolkit | null {
           }
         },
       ),
+      // Ruling 690: the sources a task of this project keeps, listed or
+      // opened by id. Same gate, read-only: a reviewer that holds no file
+      // grant still checks a claim against the source it cites.
+      tool(
+        "read_task_source",
+        READ_TASK_SOURCE_DESCRIPTION,
+        {
+          id: z.string().optional().describe(READ_TASK_SOURCE_FIELDS.id),
+          taskKey: z.string().optional().describe(READ_TASK_SOURCE_FIELDS.taskKey),
+          offset: z.number().int().min(0).optional().describe(READ_TASK_SOURCE_FIELDS.offset),
+        },
+        // eslint-disable-next-line @typescript-eslint/require-await
+        async (args) => {
+          try {
+            const read = readAgentTaskSource(
+              { db, ctx, projectSlug },
+              args.taskKey?.trim() || taskKey,
+              args.id,
+              args.offset ?? 0,
+            );
+            return "text" in read ? textResult(read.text) : imageResult(read.header, read.image);
+          } catch (error) {
+            logger.warn("agent read_task_source failed", { taskKey, err: toError(error) });
+            return textResult("[error] The sources could not be read.");
+          }
+        },
+      ),
     );
+    // Ruling 691: one page of this task as a reader sees it. Same gate, and
+    // only on a server that can render one: a tool that cannot answer is
+    // never listed. It saves nothing on the task; the Codex twin is the
+    // gateway's board server.
+    if (pageCaptureStatus().available) {
+      tools.push(
+        tool(
+          "capture_page",
+          CAPTURE_PAGE_DESCRIPTION,
+          {
+            name: z.string().describe(CAPTURE_PAGE_FIELDS.name),
+            view: z.enum(["desktop", "phone"]).optional().describe(CAPTURE_PAGE_FIELDS.view),
+            from: z.number().int().min(0).max(PAGE_CAPTURE_MAX_FROM).optional().describe(CAPTURE_PAGE_FIELDS.from),
+          },
+          async (args) => {
+            try {
+              const reply = await captureTaskPage(db, ctx, {
+                projectSlug,
+                taskKey,
+                name: args.name,
+                view: args.view,
+                from: args.from,
+                // The run this toolkit serves: its pictures go when it ends.
+                runId: runIdForOutcomeKey(db, outcomeKey),
+              });
+              return reply.images.length > 0 ? imageResult(reply.text, reply.images) : textResult(reply.text);
+            } catch (error) {
+              logger.warn("agent capture_page failed", { taskKey, err: toError(error) });
+              return textResult("[error] The page could not be captured.");
+            }
+          },
+        ),
+      );
+    }
   }
 
   // Ruling 283: a knowledge base is INDEXED into the prompt now, not injected,

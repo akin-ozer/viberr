@@ -37,11 +37,11 @@ SOFTWARE.
 
 ## Humanizer
 
-Ruling 502: the writing guide every operator run and controller turn carries
-(`app/server/runtimes/humanizer/SKILL.md`, read by
+Rulings 502 and 689: the writing guide every operator run, controller turn and
+specialist run carries (`app/server/runtimes/humanizer/SKILL.md`, read by
 `app/server/runtimes/humanizer.server.ts`) is the Humanizer skill by Siqi Chen
-(<https://github.com/blader/humanizer>), version 3.0.0, copied unchanged from
-commit `9862685f575c65a8247f90369951df1b3416e3d6`. Its licence file sits beside
+(<https://github.com/blader/humanizer>), version 3.1.0, copied unchanged from
+commit `225a6f39ac85f76ee48dbad772ea4abe4ed6c9d8`. Its licence file sits beside
 it as `app/server/runtimes/humanizer/LICENSE`.
 
 ```

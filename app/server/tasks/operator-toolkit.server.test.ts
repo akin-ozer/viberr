@@ -3,16 +3,23 @@ import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { z } from "zod";
 import { createTestDbContext } from "../../../test-support/test-db";
-import { publishedSchemas, toolLoading } from "../../../test-support/mcp-tool-meta";
+import { callToolText, publishedSchemas, toolLoading } from "../../../test-support/mcp-tool-meta";
 import {
   baseTaskFrontmatter,
   setupTestStore,
   writeTask,
 } from "../../../test-support/test-store";
+import { settle } from "../../../test-support/polling";
 import { rebuildAll } from "~/server/projections/rebuilder.server";
+import { upsertRun } from "~/server/runtimes/run-store.server";
+import { buildCodexOperatorPrompt } from "~/server/runtimes/operator-prompt.server";
+import { operatorSnapshot } from "./operator-snapshot.server";
+import { resolvePacket } from "./packet-resolution.server";
+import type { TaskTook } from "./what-it-took.server";
 import { writeTaskAttachment } from "~/server/files/task-attachments.server";
 import { taskAttachmentsDir } from "~/server/files/file-store-root.server";
 import { keepDelivery } from "~/server/files/kept-deliveries.server";
+import { writeTaskSource } from "~/server/files/task-sources.server";
 import { readTaskFile } from "~/server/files/task-writer.server";
 import { saveMcpServer } from "~/server/org/resources.server";
 import { buildOperatorToolkit } from "./operator-toolkit.server";
@@ -175,6 +182,8 @@ describe("buildOperatorToolkit ↔ operatorPlanToolsFor governed-action parity (
     "read_timeline_entry",
     // Ruling 293: the evidence a report only claims. A read like its siblings.
     "read_task_attachment",
+    // Ruling 690: the sources a result's claims are checked against. A read.
+    "read_task_source",
   ]);
   const RENAME = new Map([
     ["open_decision_packet", "open_packet"],
@@ -448,10 +457,13 @@ describe("buildOperatorToolkit — no operator deployed (A4)", () => {
     // whole comment this returns, so withholding it from the coordinator
     // withholds nothing from anyone. (`read_knowledge_doc` is NOT here: it is
     // gated on the run's own KB grants, and this authority holds none.)
+    // Ruling 690: `read_task_source` joins the floor as `read_task_attachment`
+    // did: what a task keeps is on its page for every member to open.
     expect(toolkit.allowedTools).toEqual([
       "mcp__viberr__get_task",
       "mcp__viberr__read_board",
       "mcp__viberr__read_task_attachment",
+      "mcp__viberr__read_task_source",
       "mcp__viberr__read_timeline_entry",
     ]);
     for (const write of [
@@ -1017,6 +1029,61 @@ describe("buildOperatorToolkit — open_decision_packet declares goalDraft (ruli
     expect(await text({ name: "summary.md", delivery: "2026-09-30T01:55:33.089Z" })).toContain(
       "[noop] VIB-1 kept no delivery at `2026-09-30T01:55:33.089Z`.",
     );
+  });
+
+  it("ruling 690: read_task_source lists and opens the sources of the operator's own task, and of another task with taskKey", async () => {
+    // The operator checks a result's claims against what its runs kept
+    // before it offers the result for acceptance. CANARY: read the toolkit's
+    // own task whatever `taskKey` says and VIB-2's source comes back as
+    // VIB-1's; drop `args.id` on the way to the reader and an id is answered
+    // with the list.
+    const store = setupTestStore(ctxDb);
+    for (const key of ["VIB-1", "VIB-2"]) {
+      writeTask(store.dataRoot, store.slug, { frontmatter: baseTaskFrontmatter(key, { stage: "review" }) });
+    }
+    rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
+    const keepOn = (key: string, name: string, body: string) =>
+      writeTaskSource(
+        store.slug,
+        key,
+        {
+          name,
+          data: Buffer.from(body),
+          title: `The page ${name}`,
+          from: `https://aws.amazon.com/${name}`,
+          by: { backend: "claude", profileId: "researcher", roleHint: "Researcher" },
+          runId: "run_abc",
+        },
+        store.dataRoot,
+      );
+    keepOn("VIB-1", "ec2-pricing.html", "t3.medium $0.0416 per hour");
+    keepOn("VIB-2", "rds-pricing.html", "db.t3.medium $0.068 per hour");
+    const toolkit = buildOperatorToolkit({
+      db: store.db,
+      ctx: { dataRoot: store.dataRoot },
+      projectSlug: store.slug,
+      taskKey: "VIB-1",
+      authority: authority([]),
+    });
+    // SAFETY: every answer here is `{ content: [{ type: "text", text }] }`.
+    const read = async (args: Record<string, string>) =>
+      z.record(z.string(), z.unknown()).parse(
+        JSON.parse(
+          ((await toolkit.tools.find((t) => t.name === "read_task_source")!.handler(args as never, {} as never)) as {
+            content: { text: string }[];
+          }).content[0]!.text,
+        ),
+      );
+    const own = await read({});
+    expect(own).toMatchObject({ task: "VIB-1", kept: 1 });
+    expect(own.text).toContain("S1 · ec2-pricing.html · 26 bytes");
+    expect(await read({ id: "S1" })).toMatchObject({ id: "S1", name: "ec2-pricing.html", text: "t3.medium $0.0416 per hour" });
+    expect(await read({ taskKey: "VIB-2" })).toMatchObject({ task: "VIB-2", kept: 1 });
+    expect(await read({ taskKey: "VIB-2", id: "S1" })).toMatchObject({
+      id: "S1",
+      name: "rds-pricing.html",
+      text: "db.t3.medium $0.068 per hour",
+    });
   });
 
   it("ruling 569: a verdict's report is read whole from its Review verdict comment, not the stored excerpt", async () => {
@@ -1586,5 +1653,99 @@ describe("buildOperatorToolkit — the completion packet goes with the acceptanc
     ).toMatchObject({ gaps: "Detaching a repository is not covered.", assumptions: null, files: [] });
     expect(await call("open_decision_packet", decision)).toContain("[done]");
     expect(packet()!.options.map((o) => o.kind)).toEqual(["accept_completion", "request_edit"]);
+  });
+});
+
+/**
+ * Ruling 693: the operator reads what the task took on either backend. Claude
+ * calls `get_task`; Codex calls nothing and is handed the snapshot in its
+ * prompt. Both are one `operatorSnapshot`, so both carry one figure. What the
+ * figure counts is `what-it-took.server.test.ts`'s; this owns its carriage.
+ */
+describe("ruling 693: the operator's read of what a task took", () => {
+  it("ruling 693: get_task carries what the task took, and a Codex operator reads the same figure in its snapshot", async () => {
+    // CANARY: (a) leave the key out of `operatorSnapshot` and both operators
+    // lose the figure; (b) leave it out of a `toolless` snapshot alone (or
+    // build it in the `get_task` handler instead) and the Codex prompt, which
+    // calls no tool, goes without.
+    const store = setupTestStore(ctxDb);
+    writeTask(store.dataRoot, store.slug, {
+      frontmatter: baseTaskFrontmatter("VIB-1", { stage: "impl", ownerUserId: store.users.arda.id }),
+    });
+    rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
+    for (const [id, kind, finishedAt, totalCostUsd] of [
+      ["run_took_op", "operator", "2026-07-01T09:05:00.000Z", 0.5],
+      ["run_took_dev", "primary", "2026-07-01T09:20:00.000Z", 2],
+    ] as const) {
+      upsertRun(store.db, {
+        id,
+        projectSlug: store.slug,
+        taskKey: "VIB-1",
+        threadId: `th-${id}`,
+        role: kind === "operator" ? "Operator" : "Implementation",
+        kind,
+        backend: "claude",
+        model: "sonnet",
+        sdk: "test",
+        agentName: kind === "operator" ? "Operator" : "Developer",
+        agentProfileId: kind === "operator" ? "operator" : "developer",
+        state: "finished",
+        startedAt: "2026-07-01T09:00:00.000Z",
+        finishedAt,
+        totalCostUsd,
+      });
+    }
+    const toolkit = buildOperatorToolkit({
+      db: store.db,
+      ctx: { dataRoot: store.dataRoot },
+      projectSlug: store.slug,
+      taskKey: "VIB-1",
+      authority: authority([]),
+    });
+    const call = (name: string, args: Parameters<typeof callToolText>[2]) =>
+      callToolText(toolkit.tools, name, args);
+
+    // One decision, put by the operator's own tool and answered by a person.
+    expect(
+      await call("open_decision_packet", {
+        packetType: "input",
+        title: "Migrate in one step or two?",
+        options: [
+          { kind: "redirect", title: "One step", recommended: true },
+          { kind: "request_edit", title: "Two steps" },
+        ],
+      }),
+    ).toContain("[done]");
+    await resolvePacket(
+      store.db,
+      { projectSlug: store.slug, taskKey: "VIB-1", optionIndex: 0 },
+      { userId: store.users.arda.id, label: store.users.arda.email },
+      { dataRoot: store.dataRoot },
+    );
+    // The answer hands the task to an operator this board does not deploy.
+    await settle();
+
+    // SAFETY: `get_task` answers the snapshot as JSON; `whatItTook` is the key
+    // under test, and a reply without it fails the first assertion below.
+    const claude = (JSON.parse(await call("get_task", {})) as { whatItTook?: TaskTook }).whatItTook;
+    expect(claude?.runs.total).toBe(2);
+    expect(claude?.runs.operator).toBe(1);
+    expect(claude?.cost.usd).toBe(2.5);
+    expect(claude?.asked).toEqual({ rounds: 1, byAgents: 0, open: false });
+    expect(claude?.byAgent.map((a) => [a.agent, a.role, a.agentMinutes])).toEqual([
+      ["Developer", "delivering", 20],
+      ["Operator", "operator", 5],
+    ]);
+
+    // Codex: the same snapshot, printed in the prompt it plans from.
+    const prompt = buildCodexOperatorPrompt(
+      operatorSnapshot(store.db, { dataRoot: store.dataRoot }, store.slug, "VIB-1", authority([]), 30, {
+        toolless: true,
+      }),
+      "manual",
+    );
+    const block = /^# Task snapshot\n\n```json\n([\s\S]*?)\n```/.exec(prompt)?.[1] ?? "{}";
+    // SAFETY: the block is `JSON.stringify(snapshot)`, read back as above.
+    expect((JSON.parse(block) as { whatItTook?: TaskTook }).whatItTook).toEqual(claude);
   });
 });

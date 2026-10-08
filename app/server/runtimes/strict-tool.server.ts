@@ -16,13 +16,21 @@ export function textResult(text: string) {
   return { content: [{ type: "text" as const, text }] };
 }
 
+/** A picture as a tool hands it over: base64 and its type. */
+export interface ToolImage {
+  data: string;
+  mimeType: string;
+}
+
 /** Ruling 533: a text block, then the picture itself. A coordinator handed a
- *  screenshot a person attached sees it, instead of reasoning from its name. */
-export function imageResult(text: string, image: { data: string; mimeType: string }) {
+ *  screenshot a person attached sees it, instead of reasoning from its name.
+ *  Ruling 691: or several, so one reply carries a page at both its widths. */
+export function imageResult(text: string, image: ToolImage | readonly ToolImage[]) {
+  const images = Array.isArray(image) ? image : [image];
   return {
     content: [
       { type: "text" as const, text },
-      { type: "image" as const, data: image.data, mimeType: image.mimeType },
+      ...images.map((one: ToolImage) => ({ type: "image" as const, data: one.data, mimeType: one.mimeType })),
     ],
   };
 }

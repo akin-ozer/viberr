@@ -25,6 +25,7 @@ import {
 import { noChangeApplies } from "./no-change-completion.server";
 import { AppError } from "~/server/errors/app-error.server";
 import type { AcceptanceDisclosure } from "~/shared/acceptance-disclosure";
+import { stageMoveLead } from "~/shared/timeline-leads";
 import {
   loadProjectContext,
   type OfferWithdrawalCause,
@@ -359,9 +360,14 @@ export async function transitionStage(
     actor: ctx.operatorAuthorized ? { kind: "operator" } : humanActorRef(db, actor),
     title: null,
     text:
-      (ctx.operatorAuthorized
-        ? `**Transition:** operator moved ${input.taskKey} from ${stageName(project, fromStageId)} to ${stageName(project, input.toStageId)}.`
-        : `**Transition:** moved ${input.taskKey} from ${stageName(project, fromStageId)} to ${stageName(project, input.toStageId)}.`) +
+      // Ruling 693: the opening sentence has one home, because what a task
+      // took counts a person's moves back by it.
+      stageMoveLead(
+        input.taskKey,
+        stageName(project, fromStageId),
+        stageName(project, input.toStageId),
+        ctx.operatorAuthorized === true,
+      ) +
       // Ruling 381: on the event itself, not in a separate note, so the
       // operator reads the move and the reason as one fact — and quoted, the
       // way a packet decision quotes the resolver's words. Appending it as a

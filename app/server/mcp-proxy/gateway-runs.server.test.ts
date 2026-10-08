@@ -22,11 +22,15 @@ import {
   queueFakeRun,
 } from "../../../test-support/fake-runtime";
 import { settle, waitFor } from "../../../test-support/polling";
+import { withEnv } from "../../../test-support/env";
+import { writeFakeBrowser } from "../../../test-support/fake-browser";
 import { startHttpUpstream, type UpstreamHandle } from "../../../test-support/mcp-upstream";
 import { appendTimelineEvent, readTaskFile } from "~/server/files/task-writer.server";
 import { readProjectFile } from "~/server/files/project-writer.server";
 import { taskAttachmentsDir } from "~/server/files/file-store-root.server";
 import { keepDelivery } from "~/server/files/kept-deliveries.server";
+import { readTaskSources } from "~/server/files/task-sources.server";
+import { imageHeader } from "~/server/files/task-attachments.server";
 import { rebuildAll } from "~/server/projections/rebuilder.server";
 import { interruptRun, startRun } from "~/server/runtimes/run-service.server";
 import { getRun } from "~/server/runtimes/run-store.server";
@@ -47,6 +51,13 @@ import { LOOP_REPEATS, mcpGatewayStatus, startMcpGateway, stopMcpGateway } from 
  */
 
 const SECRET = "cf-api-token-sentinel-runs";
+/** Ruling 690: a board mount's other inputs, for a run that reads the board
+ *  and may not save a file on its task. */
+const READS_ONLY = {
+  keepsSources: false,
+  webEgress: true,
+  agent: { profileId: "workflow-researcher", roleHint: "Workflow Researcher" },
+};
 let ctx: TestDbContext;
 let store: TestStore;
 let upstream: UpstreamHandle;
@@ -324,7 +335,7 @@ describe("ruling 585: the gateway answers a Codex run's knowledge server itself"
     expect(resolveKnowledgeMcp({ backend: "claude", kb: ["answer-keys"], dataRoot: store.dataRoot, agent })).toBeNull();
     expect(resolveKnowledgeMcp({ backend: "codex", kb: [], dataRoot: store.dataRoot, agent })).toBeNull();
     const mount = resolveKnowledgeMcp({ backend: "codex", kb: ["answer-keys"], dataRoot: store.dataRoot, agent });
-    const boardMount = resolveBoardMcp({ backend: "codex", collaborates: true, dataRoot: store.dataRoot });
+    const boardMount = resolveBoardMcp({ backend: "codex", collaborates: true, ...READS_ONLY, dataRoot: store.dataRoot });
     queueFakeRun({ lines: [{ t: "1", ev: "text", tag: "assistant", text: "scoring" }], sessionId: "s", backend: "codex", keepRunning: true }, "codex");
     const { runId } = await startRun(store.db, {
       projectSlug: store.slug,
@@ -449,9 +460,9 @@ describe("ruling 589: the gateway answers a Codex run's board server itself", ()
     rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
     // A Claude run has these tools in its toolkit, and a run that holds no
     // collaboration grant reads no more of the board than its prompt.
-    expect(resolveBoardMcp({ backend: "claude", collaborates: true, dataRoot: store.dataRoot })).toBeNull();
-    expect(resolveBoardMcp({ backend: "codex", collaborates: false, dataRoot: store.dataRoot })).toBeNull();
-    const mount = resolveBoardMcp({ backend: "codex", collaborates: true, dataRoot: store.dataRoot });
+    expect(resolveBoardMcp({ backend: "claude", collaborates: true, ...READS_ONLY, dataRoot: store.dataRoot })).toBeNull();
+    expect(resolveBoardMcp({ backend: "codex", collaborates: false, ...READS_ONLY, dataRoot: store.dataRoot })).toBeNull();
+    const mount = resolveBoardMcp({ backend: "codex", collaborates: true, ...READS_ONLY, dataRoot: store.dataRoot });
     queueFakeRun({ lines: [{ t: "1", ev: "text", tag: "assistant", text: "comparing" }], sessionId: "s", backend: "codex", keepRunning: true }, "codex");
     const { runId } = await startRun(store.db, {
       projectSlug: store.slug,
@@ -477,6 +488,7 @@ describe("ruling 589: the gateway answers a Codex run's board server itself", ()
       "read_board",
       "read_timeline_entry",
       "read_task_attachment",
+      "read_task_source",
     ]);
     const call = async (name: string, args: Record<string, string>) => {
       const result = await client.callTool({ name, arguments: args });
@@ -528,6 +540,191 @@ describe("ruling 589: the gateway answers a Codex run's board server itself", ()
   });
 });
 
+describe("ruling 690: a Codex run keeps and reads a task's sources through the board server", () => {
+  it("a Codex run that may post files keeps a source through the board server as its own agent and run, and one that may not is offered no keep_source", async () => {
+    // The transport the server suites cannot reach: the mount carrying the
+    // agent, tools/list per grant, the call routed with the gateway's own run
+    // id. CANARY: leave `sources` off the mount in resolveBoardMcp and
+    // tools/list has no keep_source for the granted run.
+    const agent = { profileId: "cost-researcher", roleHint: "Cost Researcher" };
+    const startCodexRun = async (taskKey: string, keepsSources: boolean) => {
+      const mount = resolveBoardMcp({ backend: "codex", collaborates: true, keepsSources, webEgress: true, agent, dataRoot: store.dataRoot });
+      queueFakeRun({ lines: [{ t: "1", ev: "text", tag: "assistant", text: "pricing" }], sessionId: "s", backend: "codex", keepRunning: true }, "codex");
+      const { runId } = await startRun(store.db, {
+        projectSlug: store.slug,
+        taskKey,
+        role: "Cost Researcher",
+        kind: "primary",
+        backend: "codex",
+        model: defaultModelFor("codex"),
+        prompt: "go",
+        dataRoot: store.dataRoot,
+        mcpServers: { viberr_board: mount! },
+        agentProfileId: "cost-researcher",
+        credentialUserId: store.users.arda.id,
+      });
+      await settle();
+      // The run is handed the URL and its token, never the agent or the store.
+      const board = mountSchema.parse(lastRunSpec()?.mcpServers?.viberr_board);
+      const client = new Client({ name: "codex-cli", version: "1.0.0" });
+      await client.connect(new StreamableHTTPClientTransport(new URL(board.url), { requestInit: { headers: board.headers } }));
+      return { runId, client };
+    };
+    const textOf = (result: Awaited<ReturnType<Client["callTool"]>>) =>
+      z.array(z.object({ text: z.string() })).parse(result.content)[0]!.text;
+
+    const keeper = await startCodexRun("VIB-1", true);
+    expect((await keeper.client.listTools()).tools.map((tool) => tool.name)).toEqual([
+      "read_board",
+      "read_timeline_entry",
+      "read_task_attachment",
+      "read_task_source",
+      "keep_source",
+    ]);
+    // The run staged the page with its own shell; the server keeps it.
+    const dir = taskAttachmentsDir(store.slug, "VIB-1", store.dataRoot);
+    mkdirSync(dir, { recursive: true });
+    writeFileSync(path.join(dir, ".source-aws-pricing.html"), "<html>t3.medium $0.0416 per hour</html>");
+    const kept = await keeper.client.callTool({
+      name: "keep_source",
+      arguments: {
+        file: ".source-aws-pricing.html",
+        from: "https://aws.amazon.com/ec2/pricing/on-demand/",
+        title: "AWS EC2 on-demand pricing",
+      },
+    });
+    expect(textOf(kept)).toMatch(/^\[kept\] S1: aws-pricing\.html, 39 bytes, /);
+    expect(readTaskSources(store.slug, "VIB-1", store.dataRoot).sources).toMatchObject([
+      { id: "S1", runId: keeper.runId, by: { backend: "codex", ...agent } },
+    ]);
+    // And reads it back, by the list and by its id.
+    expect(textOf(await keeper.client.callTool({ name: "read_task_source", arguments: {} }))).toContain(
+      "S1 · aws-pricing.html · 39 bytes",
+    );
+    expect(textOf(await keeper.client.callTool({ name: "read_task_source", arguments: { id: "S1" } }))).toContain(
+      "t3.medium $0.0416 per hour",
+    );
+    // An argument the tool does not declare is refused, as on Claude.
+    const undeclared = await keeper.client.callTool({
+      name: "keep_source",
+      arguments: { file: ".source-aws-pricing.html", from: "x", title: "y", text: "the page said so" },
+    });
+    expect(undeclared.isError).toBe(true);
+    expect(textOf(undeclared)).toBe("keep_source takes `file`, `from` and `title` as text, and nothing else. Nothing was kept.");
+    await keeper.client.close();
+    await interrupt(keeper.runId);
+    await settle();
+
+    // A run whose profile may not save a file on the task reads the sources
+    // and is offered no way to keep one.
+    const reader = await startCodexRun("VIB-2", false);
+    expect((await reader.client.listTools()).tools.map((tool) => tool.name)).not.toContain("keep_source");
+    writeFileSync(path.join(dir, ".source-second.html"), "<html>db.t3.medium</html>");
+    const refused = await reader.client.callTool({
+      name: "keep_source",
+      arguments: { file: ".source-second.html", from: "https://aws.amazon.com/rds/pricing/", title: "RDS pricing" },
+    });
+    expect(refused.isError).toBe(true);
+    expect(textOf(refused)).toContain('"viberr_board" has no tool "keep_source"');
+    expect(textOf(await reader.client.callTool({ name: "read_task_source", arguments: { taskKey: "VIB-1" } }))).toContain(
+      "S1 · aws-pricing.html",
+    );
+    await reader.client.close();
+    await interrupt(reader.runId, "VIB-2");
+    await settle();
+  });
+});
+
+describe("ruling 691: the gateway's board server pictures a page for a Codex run", () => {
+  it("a Codex run's board server lists capture_page and answers it with the same pictures and the saved paths", async () => {
+    const fake = writeFakeBrowser(ctx.makeTempDir("viberr-fake-browser-"));
+    const dir = taskAttachmentsDir(store.slug, "VIB-1", store.dataRoot);
+    mkdirSync(dir, { recursive: true });
+    writeFileSync(path.join(dir, "post.html"), "<h1>Launch</h1><p>fake-height:2600</p>");
+    const mount = resolveBoardMcp({
+      backend: "codex",
+      collaborates: true,
+      // A writer's run holds both: it looks at its page and keeps its sources.
+      keepsSources: true,
+      webEgress: true,
+      agent: { profileId: "writer", roleHint: "Writer" },
+      dataRoot: store.dataRoot,
+    });
+    queueFakeRun({ lines: [{ t: "1", ev: "text", tag: "assistant", text: "writing" }], sessionId: "s", backend: "codex", keepRunning: true }, "codex");
+    const { runId } = await startRun(store.db, {
+      projectSlug: store.slug,
+      taskKey: "VIB-1",
+      role: "Writer",
+      kind: "primary",
+      backend: "codex",
+      model: defaultModelFor("codex"),
+      prompt: "go",
+      dataRoot: store.dataRoot,
+      mcpServers: { viberr_board: mount! },
+      agentProfileId: "writer",
+      credentialUserId: store.users.arda.id,
+    });
+    await settle();
+    const board = mountSchema.parse(lastRunSpec()?.mcpServers?.viberr_board);
+    const connect = async () => {
+      const client = new Client({ name: "codex-cli", version: "1.0.0" });
+      await client.connect(new StreamableHTTPClientTransport(new URL(board.url), { requestInit: { headers: board.headers } }));
+      return client;
+    };
+    // A server with no browser offers no tool it could not answer.
+    const without = await connect();
+    expect((await without.listTools()).tools.map((tool) => tool.name)).not.toContain("capture_page");
+    expect((await without.callTool({ name: "capture_page", arguments: { name: "post.html" } })).isError).toBe(true);
+    await without.close();
+
+    await withEnv({ VIBERR_BROWSER_EXECUTABLE: fake.executable, ...fake.env() }, async () => {
+      const client = await connect();
+      // CANARY: leave PAGE_CAPTURE_TOOL out of openBoardSession's list and the
+      // call answers that the server has no such tool; build the list from
+      // the page capture or the sources alone and the other tool is gone
+      // from a run that holds both.
+      expect((await client.listTools()).tools.map((tool) => tool.name)).toEqual([
+        "read_board",
+        "read_timeline_entry",
+        "read_task_attachment",
+        "read_task_source",
+        "capture_page",
+        "keep_source",
+      ]);
+      const result = await client.callTool({ name: "capture_page", arguments: { name: "post.html", view: "desktop" } });
+      const content = z
+        .array(
+          z.union([
+            z.object({ type: z.literal("text"), text: z.string() }),
+            z.object({ type: z.literal("image"), data: z.string(), mimeType: z.string() }),
+          ]),
+        )
+        .parse(result.content);
+      expect(result.isError).toBeFalsy();
+      const [text, picture] = content;
+      // The text names where the picture was saved: whether a Codex model is
+      // handed an image block is not established, and the run can open the
+      // file with its own viewer.
+      expect(text).toMatchObject({ type: "text" });
+      expect(text?.type === "text" ? text.text : "").toMatch(
+        /^\[done\] `post\.html` as a reader sees it\. Desktop, 1280 px wide: 0 to 2,000 px of 2,600 \(`nextFrom`: 2000\)\. Saved for this run at `\S+\/\.captures\/run_\S+\/cap_\S+\/out\/1-desktop\.png`: scratch/,
+      );
+      expect(content).toHaveLength(2);
+      expect(picture?.type === "image" ? imageHeader(Buffer.from(picture.data, "base64")) : null).toEqual({
+        mimeType: "image/png",
+        width: 1280,
+        height: 2000,
+      });
+      const refused = await client.callTool({ name: "capture_page", arguments: { name: "post.html", view: "tablet" } });
+      expect(refused.isError).toBe(true);
+      await client.close();
+    });
+
+    await interrupt(runId);
+    await settle();
+  });
+});
+
 describe("ruling 598: a run that keeps sending one call and getting one answer is stopped", () => {
   it("fails the run with the call and its answer as the cause, and lets a call whose answer changes run on", async () => {
     // Live on AWSC-49 the Estimate Judge's code-mode script sent one refused
@@ -539,7 +736,7 @@ describe("ruling 598: a run that keeps sending one call and getting one answer i
       frontmatter: baseTaskFrontmatter("VIB-1", { stage: "impl", ownerUserId: store.users.arda.id }),
     });
     rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
-    const mount = resolveBoardMcp({ backend: "codex", collaborates: true, dataRoot: store.dataRoot });
+    const mount = resolveBoardMcp({ backend: "codex", collaborates: true, ...READS_ONLY, dataRoot: store.dataRoot });
     queueFakeRun({ lines: [{ t: "1", ev: "text", tag: "assistant", text: "correcting" }], sessionId: "s", backend: "codex", keepRunning: true }, "codex");
     const { runId } = await startRun(store.db, {
       projectSlug: store.slug,

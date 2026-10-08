@@ -80,7 +80,14 @@ export const UNIFIED_CAP_CATALOG: readonly UnifiedCapabilityDef[] = [
   // codexRepoWriteAdvisory).
   // Ruling 176: withholding the headline grant also denies the org MCP tools an
   // admin marked as write tools (Claude by name, Codex as `disabled_tools`).
-  cap("execute-code-or-write-repo", "Execute code or write to the repo", ["agent"], "Repository & execution"),
+  // Ruling 692(d): the label says what withholding it takes away. It read
+  // "Execute code or write to the repo", and no backend ever took a run's shell
+  // with it: on Claude it removes the file tools and `git commit`, on Codex it
+  // is advisory (ruling 185). On a board made to deliver results every agent
+  // has it withheld (ruling 667), and live a writer that read the old label in
+  // a refusal stopped running commands, and its operator reported the commands
+  // it had run as done without the grant. The id is unchanged.
+  cap("execute-code-or-write-repo", "Write to the repository", ["agent"], "Repository & execution"),
   cap("create-task-branch", "Create the task-key branch", ["agent"], "Repository & execution"),
   cap("commit-push-branch", "Commit & push to the branch", ["agent"], "Repository & execution"),
   cap("open-review-pr", "Open the review pull request", ["agent"], "Repository & execution"),
@@ -444,7 +451,7 @@ export interface CoupledGrants<G> {
  * are actionable but whose `execute-code-or-write-repo` grant is ABSENT.
  *
  * B-AG1 (2026-07-28): this used to repair an explicit `off` as well, so an admin
- * who set "Execute code or write to the repo: Off" while leaving
+ * who set "Write to the repository: Off" while leaving
  * `commit-push-branch: Allowed` had the withholding flipped to `direct` on the
  * next save — silently, with no audit row, and in the opposite direction from
  * the ENFORCEMENT layer (`specialistGrantModes`, specialist-tool-policy), which honors the
@@ -482,7 +489,7 @@ export function repairDeliveryGrants<
         kind: "withheld",
         scoped: [...scoped],
         message:
-          `${labels} stays granted but "Execute code or write to the repo" is ` +
+          `${labels} stays granted but "Write to the repository" is ` +
           `${headline === "human" ? "human-only" : "off"}, so this profile cannot ` +
           `deliver until the headline capability is granted.`,
       },
@@ -503,7 +510,7 @@ export function repairDeliveryGrants<
       kind: "repaired",
       scoped: [...scoped],
       message:
-        `"Execute code or write to the repo" was granted to match ${labels}: ` +
+        `"Write to the repository" was granted to match ${labels}: ` +
         `the delivery steps above it cannot run without it.`,
     },
   };

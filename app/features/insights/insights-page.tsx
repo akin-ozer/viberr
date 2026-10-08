@@ -25,6 +25,7 @@ import {
 } from "~/shared/dates/format";
 import { observedAfter } from "~/shared/freshness";
 import { BACKEND_LABEL } from "~/shared/text/backend-label";
+import { formatCost, formatDuration } from "~/shared/text/figures";
 import { countLabel, pluralNoun } from "~/shared/text/plural";
 import { quotaWindowLabel } from "~/shared/text/quota-window";
 
@@ -46,12 +47,6 @@ import { quotaWindowLabel } from "~/shared/text/quota-window";
  * table under a switch; the prompt cache's diagnostics fold under its summary.
  */
 
-function fmtCost(usd: number): string {
-  if (usd === 0) return "$0.00";
-  if (usd < 0.01) return "<$0.01";
-  return `$${usd.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
-}
-
 /** "100.0K" is 100K: a scaled figure drops the zeros its rounding left. */
 function trimScaled(fixed: string): string {
   return fixed.replace(/\.?0+$/, "");
@@ -71,17 +66,6 @@ function fmtCount(n: number): string {
   return n.toLocaleString("en-US");
 }
 
-function fmtDuration(ms: number | null): string {
-  if (ms === null) return "n/a";
-  const s = Math.round(ms / 1000);
-  if (s < 60) return `${s}s`;
-  const m = Math.floor(s / 60);
-  const rem = s % 60;
-  if (m < 60) return rem ? `${m}m ${rem}s` : `${m}m`;
-  const h = Math.floor(m / 60);
-  return `${h}h ${m % 60}m`;
-}
-
 function fmtPercent(rate: number | null): string {
   return rate === null ? "n/a" : `${Math.round(rate * 100)}%`;
 }
@@ -90,7 +74,7 @@ function fmtPercent(rate: number | null): string {
  *  "not reported", never a zero the data cannot vouch for. */
 function fmtMeasure(measure: RunMeasure, value: number | null): string {
   if (value === null) return "not reported";
-  return measure === "cost" ? fmtCost(value) : fmtTokens(value);
+  return measure === "cost" ? formatCost(value) : fmtTokens(value);
 }
 
 export function InsightsPage({ summary }: { summary: InsightsSummary }) {
@@ -263,7 +247,7 @@ function RunTotals({ runs }: { runs: RunAnalytics }) {
       <Metric label="Runs" value={fmtCount(totals.runs)} sub={`${fmtCount(totals.turns)} turns`} />
       <Metric
         label="Cost"
-        value={unpriced ? "Not reported" : fmtCost(totals.cost)}
+        value={unpriced ? "Not reported" : formatCost(totals.cost)}
         absent={unpriced}
         sub={
           unpriced
@@ -315,7 +299,7 @@ function RunTotals({ runs }: { runs: RunAnalytics }) {
       />
       <Metric
         label="Avg run time"
-        value={runs.avgDurationMs === null ? "No finished runs" : fmtDuration(runs.avgDurationMs)}
+        value={runs.avgDurationMs === null ? "No finished runs" : formatDuration(runs.avgDurationMs)}
         absent={runs.avgDurationMs === null}
         sub={runs.avgDurationMs === null ? undefined : "finished runs"}
       />
@@ -385,7 +369,7 @@ function coordinationSentence(c: CoordinationShare): string {
   }
   const figures =
     c.measure === "cost"
-      ? `${fmtCost(c.coordination)} of ${fmtCost(c.total)}`
+      ? `${formatCost(c.coordination)} of ${formatCost(c.total)}`
       : `${fmtTokens(c.coordination)} of ${fmtTokens(c.total)} tokens`;
   return `operator and controller runs, ${figures}`;
 }
@@ -451,7 +435,7 @@ function OversightBand({ oversight: g }: { oversight: OversightSummary }) {
           label="Blocked-decision wait"
           value={
             wait.medianMs !== null
-              ? fmtDuration(wait.medianMs)
+              ? formatDuration(wait.medianMs)
               : wait.openNow
                 ? "None resolved"
                 : "No decisions yet"
@@ -459,7 +443,7 @@ function OversightBand({ oversight: g }: { oversight: OversightSummary }) {
           absent={wait.medianMs === null}
           sub={
             wait.resolved
-              ? `median of ${wait.resolved} resolved · avg ${fmtDuration(wait.avgMs)}` +
+              ? `median of ${wait.resolved} resolved · avg ${formatDuration(wait.avgMs)}` +
                 (wait.openNow ? ` · ${wait.openNow} open now` : "")
               : wait.openNow
                 ? `${wait.openNow} open now`
@@ -468,11 +452,11 @@ function OversightBand({ oversight: g }: { oversight: OversightSummary }) {
         />
         <Metric
           label="Time to review-ready"
-          value={g.timeToReview.medianMs === null ? "None yet" : fmtDuration(g.timeToReview.medianMs)}
+          value={g.timeToReview.medianMs === null ? "None yet" : formatDuration(g.timeToReview.medianMs)}
           absent={g.timeToReview.medianMs === null}
           sub={
             g.timeToReview.tasks
-              ? `median of ${g.timeToReview.tasks} tasks · avg ${fmtDuration(g.timeToReview.avgMs)}`
+              ? `median of ${g.timeToReview.tasks} tasks · avg ${formatDuration(g.timeToReview.avgMs)}`
               : "no task has reached review yet"
           }
         />
@@ -1213,7 +1197,7 @@ function BreakdownPanel({ runs }: { runs: RunAnalytics }) {
 /** A figure in a sentence: "$0.40", "1.2B tokens", "cost not reported". */
 function spokenMeasure(measure: RunMeasure, value: number | null): string {
   if (value === null) return measure === "cost" ? "cost not reported" : "tokens not reported";
-  return measure === "cost" ? fmtCost(value) : `${fmtTokens(value)} tokens`;
+  return measure === "cost" ? formatCost(value) : `${fmtTokens(value)} tokens`;
 }
 
 /**

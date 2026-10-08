@@ -160,10 +160,34 @@ RUN npm install -g pnpm@12.9.1 && npm cache clean --force
 # user. Debian's package is used instead of `npx playwright install` for the
 # same reason uv is copied above: a pinned binary in the image, not a first-run
 # download into a container-local cache.
+#
+# Ruling 691: Viberr pictures every delivered page with this browser, and a
+# picture is only worth keeping when it shows what a reader would get. Two
+# things were wrong with fonts-liberation alone (measured in this image, Debian
+# Chromium 154, 2026-10-07):
+#   - an emoji drew as an empty box: fonts-noto-color-emoji (11 MB installed);
+#   - a page set in `system-ui` was pictured in a monospace face: fontconfig
+#     answered Liberation Mono for it (and for `sans-serif` and `serif` asked
+#     directly, which Chromium maps by itself). /etc/fonts/local.conf names the
+#     Liberation face each generic family means.
+# Other scripts (CJK, Arabic, Indic) still have no font here and draw as boxes:
+# fonts-noto-cjk alone is about 90 MB installed, so it waits for a board that
+# needs it.
 # hadolint ignore=DL3008
 RUN apt-get update \
-    && apt-get install -y --no-install-recommends chromium fonts-liberation \
-    && rm -rf /var/lib/apt/lists/*
+    && apt-get install -y --no-install-recommends chromium fonts-liberation fonts-noto-color-emoji \
+    && rm -rf /var/lib/apt/lists/* \
+    && printf '%s\n' \
+       '<?xml version="1.0"?>' \
+       '<!DOCTYPE fontconfig SYSTEM "fonts.dtd">' \
+       '<fontconfig>' \
+       '  <alias><family>sans-serif</family><prefer><family>Liberation Sans</family></prefer></alias>' \
+       '  <alias><family>serif</family><prefer><family>Liberation Serif</family></prefer></alias>' \
+       '  <alias><family>monospace</family><prefer><family>Liberation Mono</family></prefer></alias>' \
+       '  <alias><family>system-ui</family><prefer><family>Liberation Sans</family></prefer></alias>' \
+       '</fontconfig>' \
+       > /etc/fonts/local.conf \
+    && fc-cache -f
 ENV VIBERR_BROWSER_EXECUTABLE=/usr/bin/chromium
 
 # Ruling 566: an agent that delivers or judges a PDF checks it the way a person

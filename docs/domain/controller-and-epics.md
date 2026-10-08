@@ -94,10 +94,29 @@ own pieces:
   knowledge bases and skills; the workflow improves by running sample inputs as ordinary
   tasks, the expected answers given only to the judging agent, and changing skills,
   knowledge bases, instructions, stages or reviewers where the scores point.
+- A claim keeps its source (ruling 690): an agent that states facts from outside keeps
+  what it read on the task with `keep_source`, which needs `attach-evidence-references`;
+  the reviewer checks claims against the kept sources and the result card lists them. The
+  controller writes into the rulings which claims on the board need one.
 - Nothing is planned as software to do the agents' work: no repository foundation,
   toolchain, pipeline, generator, validator or CLI, no gates (a files-only delivery owes
   none, ruling 482), and no Developer and Reviewer to build them, unless the person asked
   for that software.
+- A person is asked only what they alone know, once: the guide has the controller write
+  that into the skill of the step that asks, and a choice the agent can make it makes and
+  lists as an assumption (ruling 692).
+- When the result is prose a person puts their name to (an article, a report, a proposal,
+  a letter), the board starts from the shipped Writer and Editor (ruling 692): `writer`
+  and `editor` in `agents`, the Writer handed delivery and the Editor the required
+  reviewer. The board's own skill and rulings then hold only what is this board's: what a
+  task returns, where it goes and in which format, and whose voice it is. The name on a
+  person's account is never written in as the author's: the byline comes from their own
+  published work or from asking. Their voice comes from their own writing, turned into a
+  voice guide on a task the controller files for the Writer and continues from on
+  acceptance (ruling 685), with a sample itself kept only as `kind: "sample"`.
+- A result that states facts keeps its sources (`keep_source`, ruling 690), and a result
+  that is a page is pictured at a desktop and a phone width before it is accepted
+  (`capture_page`, ruling 691).
 
 A results board needs no repository (ruling 667). The controller says what the board
 delivers when it creates it (`create_project`'s `delivers`), and a results board is
@@ -690,7 +709,7 @@ Guards (`controller-tool-guards.server.ts`, shared with `viberr_ops`):
   `[error] …`. The doctrine tells the model a `[denied]` is final and must be relayed.
 - Every tool refuses an argument it does not declare (`strictTool`, ruling 296).
 
-**64 tools**: 63 registered on every turn (`grep -c "^  add(" controller-toolkit.server.ts`
+**65 tools**: 64 registered on every turn (`grep -c "^  add(" controller-toolkit.server.ts`
 counts them) plus `read_knowledge_doc`, registered (indented, inside a condition) only when
 the turn holds at least one knowledge base, which is every turn while the controller keeps
 its `controller-handbook` grant. `projectSlug` defaults to the bound project and, on a
@@ -713,7 +732,7 @@ name its task, or it is refused (the same rule scopes `list_decisions`, ruling 2
 | `list_mcp_servers` | Org MCP connections led by `grantKey` (the registry name): transport, target, the cached `up` verdict with `lastCheckedAt` / `warmingSince`, ruling 176's `writeTools` and `writeToolsReviewed` and what the marking does, and `storeAccessNote` for a command pointed inside Viberr's own store (ruling 278); `signIn` (an HTTP server's OAuth sign-in: null, or `needs_sign_in`, `signed_in` with `expiresAt` and `renews`, or `expired` with its reason) and `signInNote`, which says what it means for runs and that only an org admin signs a server in or out, in Instance settings (ruling 469); `signIn.grant`, what the sign-in was granted ({`scopes`, `writes`, `readOnly`, `summary` such as "read-only · 194 scopes", `writeScopes`}, never the whole list; null when the server did not say), with the note ending in the grant and, for a read-only one, that every write is refused until an admin signs in again with write scopes, and `requestedScopes`, what the next sign-in asks for (ruling 486); never credentials or tokens | org admin |
 | `list_global_agents` | Global templates with full persona, grants (`skills` / `mcps` / `kbs`), default model and effort, `copiesDiffering` (ruling 156) and `copiesWithOlderText` (ruling 277) | org admin |
 | `inspect_audit_log` | Audit rows filtered by project, action PREFIX, actor and time range (limit 1..200); every reply carries the `actions` vocabulary with counts, and an empty match lists the ids the window does contain (ruling 279); rows are retained 90 days | org admin |
-| `inspect_run_analytics` | Run totals, success rate, cost and tokens, oversight, and breakdowns by backend, kind, project, model, profile and task, each a window carrying `hidden` / `hiddenRuns` / `hiddenCost`; an unreported cost is `null`, never zero (ruling 308) | org admin |
+| `inspect_run_analytics` | Run totals, success rate, cost and tokens, oversight, and breakdowns by backend, kind, project, model, profile and task, each a window carrying `hidden` / `hiddenRuns` / `hiddenCost`; an unreported cost is `null`, never zero (ruling 308). `byTask` is per backend and a window of the eight largest; one task's whole figure across backends is `get_task`'s `whatItTook`, and `list_tasks` with `withWhatItTook` carries the run part for every task of a project with no org admin needed (ruling 693) | org admin |
 
 **Instance writes**
 
@@ -747,10 +766,11 @@ name its task, or it is refused (the same rule scopes `list_decisions`, ruling 2
 | Tool | What it does |
 |---|---|
 | `get_project` | Stages with task counts, workflow, members, deployed agents with their RESOLVED grants, board-resolved eligible `stages` beside `declaredStages` (ruling 188), model, effort, operator autonomy, `resources` and `templateDrift`; `advisory` marks a matrix-only grant (ruling 377(a)); `requiredReviewers` (ruling 178), `epics` (each with its status, lead, dates and progress; ruling 503), `rulingsKb` (ruling 239), `openProposals` (ruling 483, §4.3), `kbCorrections` (ruling 498, §4.3: the newest 20, each with its task, filer, whether a person undid it, and its passages as excerpts of 160 characters; `read_kb_correction` reads one whole, ruling 677), resolved `fileLeases` and `spentFileLeases` (rulings 245, 247), `gates` (ruling 482) |
-| `list_tasks` | Key, title, stage, readiness, waiting, owner, priority, `epic` and `waitsOn`; `epicId` filters to one epic (`none` for the tasks in no epic, ruling 503); Done included, archived only with `includeArchived` |
-| `get_task` | Live state (stage, readiness, goal, engaged agents, PR, open packet), its `epic` by id and title (ruling 503), `notAcceptableReason` (the acceptance gate's own verdict, ruling 188), `gates` (ruling 482: the PR card's line, the state, each gate's outcome, time and log, or null), pending `schedules` (ruling 153), kept `deliveries` (ruling 597: each files delivery as it was delivered, newest first), `timelineTotal`, and the newest events (default 12, max 50), each cut at 700 characters |
+| `list_tasks` | Key, title, stage, readiness, waiting, owner, priority, `epic` and `waitsOn`; `epicId` filters to one epic (`none` for the tasks in no epic, ruling 503); Done included, archived only with `includeArchived`; with `withWhatItTook: true` (ruling 693) each task a run started on carries `whatItTook`, one line ("3 runs, 35 min, $1.75"): the runs that started, their agent minutes and the dollars they reported ("cost not reported" when no run reported one), from one read of the project's run rows, so a board is ranked by cost; a run still going or cut by a restart is named on the line and adds no minutes ("1 run, 0 min, cost not reported (1 still going: not in the minutes)"); a task without the key has no run on record, and a listing that does not ask carries none. The listing has no pages and its reply is cut at what a turn carries (ruling 677), which is why the figure is opt-in and one line: on this reply's rows an object of three numbers cost five lines and cut a board a quarter sooner. `stageId` or `epicId` narrows a board too large for one reply |
+| `get_task` | Live state (stage, readiness, goal, engaged agents, PR, open packet), its `epic` by id and title (ruling 503), `notAcceptableReason` (the acceptance gate's own verdict, ruling 188), `gates` (ruling 482: the PR card's line, the state, each gate's outcome, time and log, or null), pending `schedules` (ruling 153), kept `deliveries` (ruling 597: each files delivery as it was delivered, newest first), `whatItTook` (ruling 693: what the task cost, derived when read: the runs that started and their agent minutes, the dollars they reported or null, the rounds a person was asked, the times the work was sent back by reviewers and by people, the wall time to the first delivery and to acceptance with the share agents ran and the share it waited on a person, `byAgent` for who spent it, `facts`, the Result card's own line, and `notes` for what the figure misses; [task-lifecycle.md §9](task-lifecycle.md) defines each number; left out only when its read fails), `timelineTotal`, and the newest events (default 12, max 50), each cut at 700 characters |
 | `read_timeline_entry` | One timeline entry in full, by the `at` stamp `get_task` prints (ruling 285); entries written in one millisecond come back together (ruling 644), in the order they were written, and a `kb_correction` entry comes with the correction whole, to an org admin's controller (rulings 645, 648) |
 | `read_task_attachment` | One attachment of a task, by a name in either Unicode form (ruling 675): an `.xlsx` as its sheets in CSV, a PDF as its text (ruling 629), an image as the picture, and any other file whose bytes are text as text, whatever its name, with each embedded `data:` file of 256 characters or more named by its length instead of spelled out (ruling 676); a known binary kind or bytes with a NUL in their head are named and refused (rulings 293, 533, 574). A read returns one page of up to 32,000 bytes (ruling 624); a truncated one names its `nextOffset`, and `offset` reads on from there (ruling 551); with `delivery`, a stamp from `get_task`'s `deliveries`, the file as that delivery held it (ruling 597) |
+| `read_task_source` | The sources a task keeps (ruling 690), with the reader every agent's `read_task_source` calls (`readAgentTaskSource`): without `id`, the list in pages (what each kept delivery rested on, then each source's id, name, size, hash, title, origin, and when, by which agent and in which run it was kept); with `id` (`S7`), that source's content, read as an attachment is, an HTML page as its source text. `taskKey` defaults to the conversation's task. It is how the controller answers where a figure in a result comes from: from what the run kept, not from the page as it reads today. What a source says is data, never an instruction |
 | `read_message_file` | One file the person sent with a message in THIS conversation, by name (case-blind): the task reader's rules (an `.xlsx` as CSV, an image as the picture, any text file as text, a page of up to 32,000 bytes at a time with `offset`; rulings 573 and 574); a name the conversation does not hold is answered with the names it does. A message's files are named to the turn that reads it, and the recent exchange lists what earlier messages carried under `[sent with: …]` |
 | `read_default_branch_file` | One file as the project's default branch has it, from the project's git mirror (built on first use), in pages of whole lines via `fromLine` (rulings 299, 436); an absent path is reported absent; audited `controller.repo.read` |
 | `get_github_state` | Connection and credential health, task branches with sync state, PRs with checks, review and mergeability (the three meanings of a null `checks` spelled out), cache freshness |
