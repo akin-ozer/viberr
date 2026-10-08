@@ -17,7 +17,6 @@ import {
   OAUTH_SIGN_IN_EXPIRED,
   connectHttpUpstream,
   listAllTools,
-  type McpFetch,
 } from "~/server/mcp-proxy/upstream.server";
 import { gatewayMcpSection, resolveSpecialistMcpServersDetailed } from "~/server/tasks/specialist-mcp.server";
 import { CLOUDFLARE_READ_ONLY_GRANT } from "../../../test-support/cloudflare-read-only-grant";
@@ -376,19 +375,6 @@ describe("health, runs and sign-out (ruling 469)", () => {
 });
 
 describe("a sign-in ended or landed while a request was on the wire (R-oauth-3)", () => {
-  /** A `fetch` that, the first time it carries `grant`, lets `meanwhile`
-   *  land first — what an admin's other tab does inside one round trip. */
-  function landingDuring(grant: string, meanwhile: () => Promise<void>): McpFetch {
-    let landed = false;
-    return async (url, init) => {
-      if (!landed && String(init?.body ?? "").includes(`grant_type=${grant}`)) {
-        landed = true;
-        await meanwhile();
-      }
-      return fetch(url, init);
-    };
-  }
-
   it("a renewal refused after a new sign-in landed leaves the new sign-in alone", async () => {
     // CANARY: expire whatever was read before the refresh, and the admin's
     // fresh sign-in is wiped to "sign-in expired" with the old registration.
@@ -398,7 +384,8 @@ describe("a sign-in ended or landed while a request was on the wire (R-oauth-3)"
     const signInAgain = async () => {
       await signIn();
     };
-    const source = mcpOAuthTokenSource(db, MCP_ID, server.url, { fetchImpl: landingDuring("refresh_token", signInAgain) });
+    server.options.holdTokenAnswer = { grant: "refresh_token", until: signInAgain };
+    const source = mcpOAuthTokenSource(db, MCP_ID, server.url);
     const token = await source.renewAfterRefusal(firstAccess ?? "");
     const [, secondAccess] = server.issuedSecrets().filter((secret) => secret.startsWith("at_"));
     expect(token).toBe(secondAccess);
@@ -441,10 +428,8 @@ describe("a sign-in ended or landed while a request was on the wire (R-oauth-3)"
         ADMIN.actor,
       );
     };
-    const result = await completeMcpOAuthSignIn(db, {
-      ...callbackInput(back),
-      fetchImpl: landingDuring("authorization_code", repoint),
-    });
+    server.options.holdTokenAnswer = { grant: "authorization_code", until: repoint };
+    const result = await completeMcpOAuthSignIn(db, callbackInput(back));
     expect(result).toMatchObject({ ok: false, message: expect.stringContaining("endpoint changed") });
     expect(rawRow().cred_ref).not.toBeNull();
     expect(rawRow()).toMatchObject({ oauth_ref: null, oauth_json: null });

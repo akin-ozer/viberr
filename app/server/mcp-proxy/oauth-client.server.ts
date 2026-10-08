@@ -124,10 +124,9 @@ export function isClientRefusal(cause: unknown): boolean {
 }
 
 /** `fetch` with a deadline, since the SDK's OAuth helpers set none. */
-function timed(fetchImpl?: McpFetch): McpFetch {
-  const base = fetchImpl ?? fetch;
+function timed(): McpFetch {
   return (url, init) =>
-    base(url, { ...init, signal: init?.signal ?? AbortSignal.timeout(OAUTH_REQUEST_TIMEOUT_MS) });
+    fetch(url, { ...init, signal: init?.signal ?? AbortSignal.timeout(OAUTH_REQUEST_TIMEOUT_MS) });
 }
 
 /**
@@ -332,7 +331,6 @@ export async function exchangeMcpOAuthCode(
   client: McpOAuthClient,
   code: string,
   codeVerifier: string,
-  fetchImpl?: McpFetch,
 ): Promise<OAuthTokens> {
   try {
     return await exchangeAuthorization(discovery.authorizationServer, {
@@ -342,7 +340,7 @@ export async function exchangeMcpOAuthCode(
       codeVerifier,
       redirectUri: client.redirect_uri,
       resource: discovery.resource ? new URL(discovery.resource) : undefined,
-      fetchFn: timed(fetchImpl),
+      fetchFn: timed(),
     });
   } catch (error) {
     throw new McpOAuthError(`the code exchange failed: ${oauthFailureReason(error)}`, {
@@ -358,7 +356,6 @@ export async function refreshMcpOAuthTokens(
   discovery: McpOAuthDiscovery,
   client: McpOAuthClient,
   refreshToken: string,
-  fetchImpl?: McpFetch,
 ): Promise<OAuthTokens> {
   try {
     return await refreshAuthorization(discovery.authorizationServer, {
@@ -366,7 +363,7 @@ export async function refreshMcpOAuthTokens(
       clientInformation: client,
       refreshToken,
       resource: discovery.resource ? new URL(discovery.resource) : undefined,
-      fetchFn: timed(fetchImpl),
+      fetchFn: timed(),
     });
   } catch (error) {
     throw new McpOAuthError(oauthFailureReason(error), {

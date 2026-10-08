@@ -33,7 +33,6 @@ import {
   OAUTH_SIGN_IN_EXPIRED,
   UpstreamConnectError,
   UpstreamEndpointChanged,
-  type McpFetch,
   type UpstreamTokenSource,
 } from "~/server/mcp-proxy/upstream.server";
 import {
@@ -564,7 +563,6 @@ export interface CompleteMcpOAuthInput {
   userId: string;
   sessionId: string;
   actor: AuditActor;
-  fetchImpl?: McpFetch;
 }
 
 export type CompleteMcpOAuthResult =
@@ -636,7 +634,7 @@ export async function completeMcpOAuthSignIn(
   if (before.target !== entry.target || before.transport !== "HTTP") return moved();
   let tokens: OAuthTokens;
   try {
-    tokens = await exchangeMcpOAuthCode(entry.discovery, entry.client, input.code, entry.codeVerifier, input.fetchImpl);
+    tokens = await exchangeMcpOAuthCode(entry.discovery, entry.client, input.code, entry.codeVerifier);
   } catch (error) {
     const reason = oauthFailureReason(error);
     if (isClientRefusal(error)) forgetRefusedClient(db, entry.mcpId, entry.client.client_id, scrub(reason));
@@ -790,7 +788,6 @@ export function mcpOAuthTokenSource(
   db: DatabaseSync,
   mcpId: string,
   target: string,
-  options: { fetchImpl?: McpFetch } = {},
 ): UpstreamTokenSource {
   const current = (): LiveSignIn => {
     const row = rowById(db, mcpId);
@@ -868,7 +865,7 @@ export function mcpOAuthTokenSource(
     }
     let fresh: OAuthTokens;
     try {
-      fresh = await refreshMcpOAuthTokens(discoveryOf(sealed), sealed.client, tokens.refresh_token, options.fetchImpl);
+      fresh = await refreshMcpOAuthTokens(discoveryOf(sealed), sealed.client, tokens.refresh_token);
     } catch (error) {
       const reason = oauthFailureReason(error);
       if (isDefinitiveRefusal(error)) return endOrUseNewer(reason, isClientRefusal(error));
