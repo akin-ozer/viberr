@@ -627,7 +627,7 @@ const KB_INDEX_NOTE =
  * so a run with no knowledge base never carries a rule about a resource it does
  * not have.
  */
-export const KB_PRECEDENCE_NOTE =
+const KB_PRECEDENCE_NOTE =
   "\n\n---\n# Which source wins (knowledge bases vs the repository)\n\n" +
   "The repository's OWN documented conventions outrank the knowledge bases " +
   "below. Where a repo file states a convention (its README, CONTRIBUTING, " +
