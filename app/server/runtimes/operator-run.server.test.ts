@@ -67,7 +67,6 @@ import {
   AGENT_REPORT_CAP_TOOLLESS,
   type OperatorTaskSnapshot,
 } from "~/server/tasks/operator-snapshot.server";
-import { CREATE_TASK_BASE_NOTE } from "~/server/tasks/operator-packets.server";
 import type { OperatorAuthority, OperatorAutonomy } from "~/server/tasks/operator-authority.server";
 import {
   approveReviewEntry,
@@ -1715,7 +1714,9 @@ describe("operatorPlanToolsFor — the schema mirrors the capability policy (P13
     // kind for "another owner's package", which is how AX-5 was nearly made
     // to wait on a task that could never reach its code.
     const schema = operatorPlanSchemaFor(authority({ "generate-packets": "direct" }));
-    expect(JSON.stringify(schema)).toContain(JSON.stringify(CREATE_TASK_BASE_NOTE).slice(1, -1));
+    expect(JSON.stringify(schema)).toContain(
+      "A created task starts from the base branch, so it cannot reach code that exists only on this task's unmerged branch.",
+    );
   });
 
   it("ruling 421: the plan schema carries run_agent's `completeness`, required like every other field", () => {
@@ -1868,14 +1869,14 @@ describe("pr-diverged turn instruction (both backends)", () => {
   }
   const { buildOperatorTurnPrompt, buildCodexOperatorPrompt, agentReportBlock } = operatorPrompts;
 
-  it("ruling 649: every turn, on both backends, closes with the people rule", async () => {
+  it("ruling 649: every turn, on both backends, closes with the people rule", () => {
     // Live on the AWS board the operator wrote "his words" on AWSC-43 and
     // "Her words" on AWSC-80 about the same owner, from a rule buried in its
     // definition. CANARY: drop it from `operatorTurnInstruction` and neither
     // backend reads it on its turn.
-    const { PEOPLE_RULE } = await import("./people-rule.server");
-    expect(buildOperatorTurnPrompt(snapshot(), "pr-diverged")).toContain(PEOPLE_RULE);
-    expect(buildCodexOperatorPrompt(snapshot(), "pr-diverged")).toContain(PEOPLE_RULE);
+    const rule = 'never "he", "she", "him", "her", "his" or "hers"';
+    expect(buildOperatorTurnPrompt(snapshot(), "pr-diverged")).toContain(rule);
+    expect(buildCodexOperatorPrompt(snapshot(), "pr-diverged")).toContain(rule);
   });
 
   it("closed PR on an active task → ONE recovery packet with rework/archive/archive+deleteBranch, acceptance forbidden", () => {
