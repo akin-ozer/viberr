@@ -318,7 +318,13 @@ describe("pushWorkspaceBranch (F-GH3)", () => {
       ]);
       const lsEnv = git.envs.find((e) => e.args.includes("ls-remote"))!.env;
       expect(lsEnv?.GIT_TERMINAL_PROMPT).toBe("0");
-      expect(lsEnv?.GIT_CONFIG_KEY_0).toBe("credential.helper");
+      // The credential helper reset, wherever it lands: the reset is appended
+      // after any `GIT_CONFIG_*` entries the server's own environment carries.
+      const config = Array.from({ length: Number(lsEnv?.GIT_CONFIG_COUNT ?? 0) }, (_, i) => [
+        lsEnv?.[`GIT_CONFIG_KEY_${i}`],
+        lsEnv?.[`GIT_CONFIG_VALUE_${i}`],
+      ]);
+      expect(config).toContainEqual(["credential.helper", ""]);
     });
 
     it("the remote read and the push share ONE credential channel", async () => {
