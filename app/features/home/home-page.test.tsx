@@ -113,6 +113,12 @@ function renderHome(data: HomePageData, extra: HomeOverrides = {}) {
   return render(<Stub initialEntries={["/"]} />);
 }
 
+/** One project card or list row, alone under a router (its link needs one). */
+function renderPiece(node: ReactNode) {
+  const Stub = createRoutesStub([{ path: "/", Component: () => <>{node}</> }]);
+  return render(<Stub initialEntries={["/"]} />);
+}
+
 describe("UI-02: project card recency", () => {
   it("says there is no activity instead of inventing a timestamp", () => {
     const { getByText, queryByText } = renderHome(baseData([card()]));
@@ -716,11 +722,6 @@ describe("U33-2: an unreachable repository has a home on the project card", () =
    * (`repoAccess`), and pin that an absent fact renders as silence rather than
    * as health.
    */
-  function renderPiece(node: ReactNode) {
-    const Stub = createRoutesStub([{ path: "/", Component: () => <>{node}</> }]);
-    return render(<Stub initialEntries={["/"]} />);
-  }
-
   const repoLine = (container: HTMLElement) =>
     container.querySelector(".pj-name .repo")!;
 
@@ -839,10 +840,6 @@ describe("acce-8: the project link is named by what it shows", () => {
   // "Open X board" as an aria-label replaced the content, so a screen reader
   // never heard the repo, the task counts, "N waiting on you" or the last
   // update. Canary: restore the aria-label on either form.
-  function renderPiece(node: ReactNode) {
-    const Stub = createRoutesStub([{ path: "/", Component: () => <>{node}</> }]);
-    return render(<Stub initialEntries={["/"]} />);
-  }
   const p = card({ total: 3, dist: { impl: 3 }, waiting: 2 });
 
   it.each([

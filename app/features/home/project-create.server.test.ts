@@ -330,7 +330,7 @@ describe("createProject — policy preset shapes REAL governance", () => {
     to: string,
   ) => wf.find((b) => b.from === from && b.to === to)?.boundary;
 
-  it("balanced = template defaults (pre-work auto, supervised operator)", async () => {
+  it("balanced = template defaults (pre-work and the move into Review auto, a supervised operator with deliver-review-pr: direct)", async () => {
     const store = setupTestStore(ctx);
     seedConnection(store.db, store.users.arda.id);
     answeringGithub();
@@ -343,7 +343,14 @@ describe("createProject — policy preset shapes REAL governance", () => {
     const f = fm(store, r.slug);
     expect(boundary(f.workflow, "triage", "ready")).toBe("auto");
     expect(boundary(f.workflow, "ready", "impl")).toBe("auto");
+    // Ruling 519: nobody confirms the move into Review on a new board; the
+    // operator makes it. CANARY: put the template's edge back to `approval`.
+    expect(boundary(f.workflow, "impl", "review")).toBe("auto");
     expect(opAutonomy(f.agents)).toBeUndefined(); // supervised (default)
+    const op = f.agents.find((a) => a.profileId === "operator")!;
+    expect(
+      op.capabilities.find((c) => c.capabilityId === "deliver-review-pr")?.mode,
+    ).toBe("direct");
   });
 
   /**
@@ -415,26 +422,6 @@ describe("createProject — policy preset shapes REAL governance", () => {
     expect(
       op.capabilities.find((c) => c.capabilityId === "deliver-review-pr")?.mode,
     ).toBe("recommend");
-  });
-
-  it("balanced keeps the shipped template's deliver-review-pr: direct and its automatic move into Review", async () => {
-    const store = setupTestStore(ctx);
-    seedConnection(store.db, store.users.arda.id);
-    answeringGithub();
-    const r = await createProject(
-      store.db,
-      { name: "Bal", key: "BAL", owner: "akin-ozer", repoName: "b", policy: "balanced" },
-      ACTOR,
-      { dataRoot: store.dataRoot },
-    );
-    const f = fm(store, r.slug);
-    // Ruling 519: nobody confirms the move into Review on a new board; the
-    // operator makes it. CANARY: put the template's edge back to `approval`.
-    expect(boundary(f.workflow, "impl", "review")).toBe("auto");
-    const op = f.agents.find((a) => a.profileId === "operator")!;
-    expect(
-      op.capabilities.find((c) => c.capabilityId === "deliver-review-pr")?.mode,
-    ).toBe("direct");
   });
 
   it("auto = the operator runs at full autonomy + explicit completion-for-acceptance:direct (Q1)", async () => {
