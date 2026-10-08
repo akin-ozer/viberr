@@ -220,19 +220,6 @@ function resetTaskOwner(ownerUserId: string, patch: Partial<TaskFrontmatter> = {
   rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
 }
 
-/** A SECOND task, so "authority on my task" can be told apart from "authority". */
-function writeOtherTask(key: string, patch: Partial<TaskFrontmatter> = {}) {
-  writeTask(store.dataRoot, store.slug, {
-    frontmatter: baseTaskFrontmatter(key, {
-      stage: "impl",
-      title: `Other task ${key}`,
-      ...patch,
-    }),
-    goal: "A task the actor does not own.",
-  });
-  rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
-}
-
 interface MatrixDriver {
   /** How this action is reached in the shipping server code. */
   label: string;
@@ -849,57 +836,11 @@ describe("RBAC enforcement is bound to ACTION_ROLES (single-source guarantee)", 
 
 /**
  * R6-2 / R14-2 / FR37 — a task's human OWNER holds the decisions ON THEIR OWN
- * TASK whatever their project role. BOTH halves matter, and only the first one
- * used to be tested here: the "…and a contributor who does NOT own it is still
- * denied" leg drove DENIZ, who is a NON-MEMBER — that assertion passes on the
- * membership gate alone and would still pass if `ownerException` handed
- * acceptance authority to every contributor in the project. The second task
- * below is the real control.
+ * TASK whatever their project role. The next block drives that authority, and
+ * its limit to the one task, through every consumer of `ownerException`; this
+ * one pins where the exception stops.
  */
 describe("R6-2: task-owner authority is scoped to THAT task", () => {
-  const acceptOn = (taskKey: string, user: { id: string; email: string }) =>
-    guardAllowed(() =>
-      completeTaskMerge(
-        store.db,
-        { projectSlug: store.slug, taskKey },
-        actorOf(user),
-        { dataRoot: store.dataRoot },
-      ),
-    );
-
-  it("a CONTRIBUTOR owner may accept their own task — and no other task", async () => {
-    resetTaskOwner(store.users.selin.id); // selin owns VIB-1
-    // VIB-2 is owned by SOMEONE ELSE, not merely unowned. An unowned control
-    // proves nothing: `ownerException` short-circuits on a null owner, so the
-    // identity comparison — the half that makes the authority task-scoped — is
-    // only load-bearing when there IS an owner to be confused with. (Caught by
-    // canarying this case: with `ownerUserId === actor.userId` deleted from
-    // ownerException, an unowned VIB-2 still refused selin and the test stayed
-    // green.)
-    writeOtherTask("VIB-2", { ownerUserId: store.users.arda.id });
-    expect(
-      await acceptOn("VIB-1", store.users.selin),
-      "a contributor OWNER may accept their own task (R6-2)",
-    ).toBe(true);
-    expect(
-      await acceptOn("VIB-2", store.users.selin),
-      "the SAME contributor must be denied on a task they do not own",
-    ).toBe(false);
-    // A maintainer needs no ownership at all — the tier still works.
-    expect(await acceptOn("VIB-2", store.users.murat)).toBe(true);
-  });
-
-  it("the owner exception needs a LIVE own-task role: a viewer owner is still denied", async () => {
-    // `ownerException` re-checks `roleCan(role, "own-task")`, so a seat left
-    // behind by a demotion (or hand-written into the file) does not carry
-    // acceptance authority. elif is a viewer.
-    resetTaskOwner(store.users.elif.id);
-    expect(await acceptOn("VIB-1", store.users.elif)).toBe(false);
-    // …and a seat held by someone who is no longer a member at all.
-    resetTaskOwner(store.users.deniz.id);
-    expect(await acceptOn("VIB-1", store.users.deniz)).toBe(false);
-  });
-
   it("the owner exception does NOT reach the admin-only escape hatch (force-accept)", async () => {
     // force-accept-completion deliberately bypasses the review gate (DG-2), so
     // it is admin-only and takes no owner exception — otherwise any contributor
