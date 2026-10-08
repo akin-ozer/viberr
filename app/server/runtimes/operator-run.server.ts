@@ -290,9 +290,12 @@ export interface RunOperatorResult {
   /**
    * The trigger was REFUSED at fire time rather than driven. The caller owns the
    * honesty follow-up.
-   *   `terminal-stage` (F19-20) — FR39's "a scheduled re-run never fires on a
-   *     terminal stage", enforced where the run would actually start rather than
-   *     only where it was scheduled (the schedule runner records the retirement).
+   *   `closed` (F19-20, widened by ruling 177) — FR39's "a scheduled re-run
+   *     never fires on a terminal stage", enforced where the run would actually
+   *     start rather than only where it was scheduled (the schedule runner
+   *     records the retirement). Ruling 177 refuses EVERY trigger on a closed
+   *     task, archived or at its terminal stage, with the sentence in
+   *     `refusalReason`.
    *   `open-packet` (R20-1 / F20-5) — a HUMAN pressed "Run operator" while a
    *     decision packet is open, which is a paid no-op (coordination is paused
    *     by the packet). Scoped to the `manual` trigger: machine triggers
@@ -766,8 +769,8 @@ function leaseRefFromKey(key: string) {
  * the front of the lease queue says so on the task — the refusal used to exist
  * only in the server log while the timeline still said "Scheduled action
  * starting". Mirrors {@link noteQueuedTriggerFireFailed} but SETTLES NOTHING:
- * an open packet owns `waiting: "human"`, and the terminal-stage refusal
- * already settled inside `runOperator`. When the trigger carries a schedule
+ * an open packet owns `waiting: "human"`, and the `closed` refusal already
+ * settled inside `runOperator`. When the trigger carries a schedule
  * occurrence (`scheduleId`) the occurrence is retired the same way the schedule
  * runner retires a fire-time refusal (`fired`, `claimedAt: null`) and the final
  * `task.schedule.fired` row records the outcome. A `blocked-by` refusal is

@@ -80,8 +80,8 @@ function terminalStageId(db: DatabaseSync, projectSlug: string): string | null {
 }
 
 // FR39 asked at DRIVE time is now enforced inside `runOperator` itself, which
-// returns `refused: "terminal-stage"` for a scheduled turn on a task that has
-// reached its terminal stage (the belt to this claim-time brace). B's standalone
+// returns `refused: "closed"` for any turn on a closed task, archived or at its
+// terminal stage (ruling 177; the belt to this claim-time brace). B's standalone
 // `scheduledRunIsMoot` drive probe was retired with that guard (RECONCILE §1.2).
 
 // ------------------------------------------------------------------ bounds

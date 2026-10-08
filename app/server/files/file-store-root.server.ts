@@ -154,8 +154,9 @@ export function epicFilePath(
 
 /**
  * Ruling 503: where the chained-goal files of ruling 99 lived. Nothing reads
- * or writes a goal any more; the boot conversion (`goal-epic-migration`)
- * turns each one into an epic and files the original under `converted/`.
+ * or writes a goal any more; the boot conversion (`convertGoalsToEpics`,
+ * goal-epic-conversion.server.ts) turns each one into an epic and files the
+ * original under `converted/`.
  */
 export function retiredGoalsDir(slug: string, dataRoot?: string): string {
   return path.join(projectDir(slug, dataRoot), "goals");

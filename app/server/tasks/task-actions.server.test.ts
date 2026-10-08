@@ -4240,7 +4240,7 @@ describe("ruling 137: a move off the acceptance boundary withdraws the offers", 
     // Ruling 387 (F39-14): the withdrawal is a CONSEQUENCE of the move, and
     // its timestamp is the later of the two, so it sits ABOVE the transition in
     // a newest-first timeline — and the file stays strictly newest-first, which
-    // viberr's own `timeline_not_strictly_newest_first` diagnostic checks.
+    // viberr's own `timeline.out_of_order` diagnostic checks.
     // CANARY: unshift the transition after the withdrawal and both fail.
     expect(parsed.timeline[0]?.title).toBe("Recommendation withdrawn");
     expect(parsed.timeline[1]?.type).toBe("transition");

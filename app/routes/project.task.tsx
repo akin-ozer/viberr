@@ -1537,8 +1537,8 @@ export async function action({ request, params }: Route.ActionArgs) {
         const started = await runOperator(db, operatorInput);
         // Record the steer as an @operator timeline comment ONLY once the run is
         // not refused — a directive that reaches an agent off the record would be
-        // invisible to supervision, but a refused run (open packet / terminal
-        // stage) would otherwise strand the comment with no run to address it.
+        // invisible to supervision, but a refused run (open packet / closed
+        // task) would otherwise strand the comment with no run to address it.
         // The UI disables the steer input in exactly those states, so this guards
         // the crafted-POST path. `humanComment` still rides the run's input, so a
         // started/queued run addresses the directive.
@@ -1554,12 +1554,15 @@ export async function action({ request, params }: Route.ActionArgs) {
           ok: true as const,
           intent,
           // A7 (pass 23), BUG-2's sibling on the manual "Run operator" control:
-          // runOperator REFUSES with `refused: "open-packet" | "terminal-stage"`
-          // (an open decision blocks it; a terminal-stage task is scheduled-only),
-          // and this toast branched on `queued` alone — so a refused start toasted
-          // "Operator running" for a run that never began. The UI disables the
-          // control in those states, so this is the crafted-POST / SSE-race path;
-          // it now tells the truth, exactly as commentToAgent does (PR #195).
+          // runOperator REFUSES a manual trigger with `refused: "open-packet"`
+          // (an open decision blocks it) or `"closed"` (ruling 177: an archived
+          // task or one at its terminal stage refuses every trigger, with the
+          // sentence in `refusalReason`; the third value, `"blocked-by"`, never
+          // meets a manual trigger), and this toast branched on `queued` alone —
+          // so a refused start toasted "Operator running" for a run that never
+          // began. The UI disables the control in those states, so this is the
+          // crafted-POST / SSE-race path; it now tells the truth, exactly as
+          // commentToAgent does (PR #195).
           // B10 (pass 16): a trigger that lands while a run already holds the
           // lease is QUEUED, not started — it drains when the current run ends.
           toast:
