@@ -209,6 +209,33 @@ function taskFile() {
   })!;
 }
 
+/** Run the completion effects for run `runId` on VIB-1: by default the
+ *  `reviewer` profile's Claude review run, which delivers nothing; `over`
+ *  changes what differs. */
+function complete(
+  runId: string,
+  over: Partial<Parameters<typeof applyAgentCompletionEffects>[2]> = {},
+  state = "finished",
+  deps?: Parameters<typeof applyAgentCompletionEffects>[1]["deps"],
+): Promise<void> {
+  return applyAgentCompletionEffects(
+    store.db,
+    deps ? { dataRoot: store.dataRoot, deps } : { dataRoot: store.dataRoot },
+    {
+      projectSlug: store.slug,
+      taskKey: "VIB-1",
+      backend: "claude",
+      profileId: "reviewer",
+      role: "Reviewer",
+      delivers: false,
+      workdir: null,
+      agentHandle: "reviewer",
+      ...over,
+    },
+    { id: runId, state },
+  );
+}
+
 beforeEach(async () => {
   ctx = createTestDbContext();
   store = setupTestStore(ctx);
@@ -362,25 +389,17 @@ describe("applyAgentCompletionEffects (the shared effects)", () => {
     writeReviewTask({ stage: "impl", waiting: "agent" });
     const runId = await finishedRunWith("Done with the slice. @operator");
 
-    await applyAgentCompletionEffects(
-      store.db,
-      { dataRoot: store.dataRoot },
-      {
-        projectSlug: store.slug,
-        taskKey: "VIB-1",
-        backend: "codex",
-        profileId: "developer",
-        role: "Implementation",
-        delivers: true,
-        workdir: null,
-        agentHandle: "developer",
-        // The chain that prompted this agent ran on the OLD backend. This is
-        // the field the react block reads — putting it on `ctx` instead made
-        // the first version of this canary pass with the bug restored.
-        operatorRun: { backend: "codex", autonomy: "supervised", reactDepth: 0 },
-      },
-      { id: runId, state: "finished" },
-    );
+    await complete(runId, {
+      backend: "codex",
+      profileId: "developer",
+      role: "Implementation",
+      delivers: true,
+      agentHandle: "developer",
+      // The chain that prompted this agent ran on the OLD backend. This is
+      // the field the react block reads — putting it on `ctx` instead made
+      // the first version of this canary pass with the bug restored.
+      operatorRun: { backend: "codex", autonomy: "supervised", reactDepth: 0 },
+    });
 
     // SAFETY: `backend` is a TEXT NOT NULL column on `agent_runs`
     // (0001_baseline.sql); only operator rows are selected and this test
@@ -408,25 +427,16 @@ describe("applyAgentCompletionEffects (the shared effects)", () => {
     // Shipped (terminal) while the run was live — the F36-5 shape.
     writeReviewTask({ stage: "done", waiting: "agent" });
     const runId = await finishedRunWith("Implemented the harness; branch hlc-9, HEAD 16c6e2e. @operator");
-    await applyAgentCompletionEffects(
-      store.db,
-      { dataRoot: store.dataRoot },
-      {
-        projectSlug: store.slug,
-        taskKey: "VIB-1",
-        backend: "claude",
-        profileId: "developer",
-        role: "Implementation",
-        delivers: true,
-        workdir: null,
-        agentHandle: "developer",
-        // The dispatch-completion contract's forced react hop — the very hop
-        // that woke the operator on the shipped task live.
-        dispatchedByName: "Arda",
-        dispatchedByUserId: store.users.arda.id,
-      },
-      { id: runId, state: "finished" },
-    );
+    await complete(runId, {
+      profileId: "developer",
+      role: "Implementation",
+      delivers: true,
+      agentHandle: "developer",
+      // The dispatch-completion contract's forced react hop — the very hop
+      // that woke the operator on the shipped task live.
+      dispatchedByName: "Arda",
+      dispatchedByUserId: store.users.arda.id,
+    });
     const operatorRows = store.db
       .prepare(`SELECT id FROM agent_runs WHERE kind = 'operator'`)
       .all();
@@ -469,21 +479,7 @@ describe("applyAgentCompletionEffects (the shared effects)", () => {
       ],
     });
     const runId = await finishedRunWith("Verdict: request changes — the tests are missing.");
-    await applyAgentCompletionEffects(
-      store.db,
-      { dataRoot: store.dataRoot },
-      {
-        projectSlug: store.slug,
-        taskKey: "VIB-1",
-        backend: "claude",
-        profileId: "reviewer",
-        role: "Reviewer",
-        delivers: false,
-        workdir: null,
-        agentHandle: "reviewer",
-      },
-      { id: runId, state: "finished" },
-    );
+    await complete(runId);
     const fm = taskFile().parsed.frontmatter;
     expect(fm.validation).toBe("failing");
     expect(fm.recommendations.map((r) => r.id)).toEqual(["rec_run"]);
@@ -518,21 +514,7 @@ describe("applyAgentCompletionEffects (the shared effects)", () => {
     // The durable fact the clone path stamps on the row.
     patchRun(store.db, runId, { noCheckout: 1 });
 
-    await applyAgentCompletionEffects(
-      store.db,
-      { dataRoot: store.dataRoot },
-      {
-        projectSlug: store.slug,
-        taskKey: "VIB-1",
-        backend: "codex",
-        profileId: "reviewer",
-        role: "Reviewer",
-        delivers: false,
-        workdir: null,
-        agentHandle: "reviewer",
-      },
-      { id: runId, state: "finished" },
-    );
+    await complete(runId, { backend: "codex" });
 
     const fm = taskFile().parsed.frontmatter;
     // CANARY: drop `&& !readNothing` from the verdict line and this is
@@ -579,22 +561,7 @@ describe("applyAgentCompletionEffects (the shared effects)", () => {
       },
     });
 
-    await applyAgentCompletionEffects(
-      store.db,
-      { dataRoot: store.dataRoot },
-      {
-        projectSlug: store.slug,
-        taskKey: "VIB-1",
-        backend: "claude",
-        profileId: "reviewer",
-        role: "Reviewer",
-        delivers: false,
-        workdir: null,
-        agentHandle: "reviewer",
-        outcomeKey: `oc-${runId}`,
-      },
-      { id: runId, state: "finished" },
-    );
+    await complete(runId, { outcomeKey: `oc-${runId}` });
 
     const fm = taskFile().parsed.frontmatter;
     // CANARY: drop `&& !outcome?.question` and the word "fails" in the prose
@@ -614,21 +581,7 @@ describe("applyAgentCompletionEffects (the shared effects)", () => {
     const filler = "Detailed review notes follow. ".repeat(50);
     const reply = `${filler}\nVerdict: request changes — the diff violates the spec.`;
     const runId = await finishedRunWith(reply);
-    await applyAgentCompletionEffects(
-      store.db,
-      { dataRoot: store.dataRoot },
-      {
-        projectSlug: store.slug,
-        taskKey: "VIB-1",
-        backend: "claude",
-        profileId: "reviewer",
-        role: "Reviewer",
-        delivers: false,
-        workdir: null,
-        agentHandle: "reviewer",
-      },
-      { id: runId, state: "finished" },
-    );
+    await complete(runId);
     const fm = taskFile().parsed.frontmatter;
     expect(fm.validation).toBe("failing");
     const quality = taskFile().parsed.timeline.find((e) => e.type === "quality");
@@ -650,21 +603,7 @@ describe("applyAgentCompletionEffects (the shared effects)", () => {
     mkdirSync(strayDir, { recursive: true });
     writeFileSync(path.join(strayDir, "knc-9-licence-verification.txt"), "MIT, verified");
     const runId = await finishedRunWith("Attached the licence verification note.");
-    await applyAgentCompletionEffects(
-      store.db,
-      { dataRoot: store.dataRoot },
-      {
-        projectSlug: store.slug,
-        taskKey: "VIB-1",
-        backend: "claude",
-        profileId: "reviewer",
-        role: "Reviewer",
-        delivers: false,
-        workdir,
-        agentHandle: "reviewer",
-      },
-      { id: runId, state: "finished" },
-    );
+    await complete(runId, { workdir });
     const warning = taskFile().parsed.timeline.find(
       (e) => e.type === "policy" && e.text.includes("store layout"),
     );
@@ -685,21 +624,7 @@ describe("applyAgentCompletionEffects (the shared effects)", () => {
   it("ruling 159: no warning line when the workspace holds no stray folder", async () => {
     writeReviewTask();
     const runId = await finishedRunWith("Nothing stray here.");
-    await applyAgentCompletionEffects(
-      store.db,
-      { dataRoot: store.dataRoot },
-      {
-        projectSlug: store.slug,
-        taskKey: "VIB-1",
-        backend: "claude",
-        profileId: "reviewer",
-        role: "Reviewer",
-        delivers: false,
-        workdir: store.dataRoot,
-        agentHandle: "reviewer",
-      },
-      { id: runId, state: "finished" },
-    );
+    await complete(runId, { workdir: store.dataRoot });
     expect(taskFile().parsed.timeline.some((e) => e.text.includes("store layout"))).toBe(false);
   });
 
@@ -719,21 +644,7 @@ describe("applyAgentCompletionEffects (the shared effects)", () => {
     );
     // Saved during the run window (after started_at, before completion lands).
     const dir = saveInRunWindow(runId, [cited, uncitedSnap, uncitedLog, screenshot]);
-    await applyAgentCompletionEffects(
-      store.db,
-      { dataRoot: store.dataRoot },
-      {
-        projectSlug: store.slug,
-        taskKey: "VIB-1",
-        backend: "claude",
-        profileId: "reviewer",
-        role: "Reviewer",
-        delivers: false,
-        workdir: null,
-        agentHandle: "reviewer",
-      },
-      { id: runId, state: "finished" },
-    );
+    await complete(runId);
     // The uncited working artifacts are gone from the canonical store…
     expect(existsSync(path.join(dir, uncitedSnap))).toBe(false);
     expect(existsSync(path.join(dir, uncitedLog))).toBe(false);
@@ -764,21 +675,12 @@ describe("applyAgentCompletionEffects (the shared effects)", () => {
     writeFileSync(findings, `Bulk import offers three templates. Evidence: ${citedInFile}.\n`);
     const finishedAt = new Date(getRun(store.db, runId)!.finished_at!);
     utimesSync(findings, finishedAt, finishedAt);
-    await applyAgentCompletionEffects(
-      store.db,
-      { dataRoot: store.dataRoot },
-      {
-        projectSlug: store.slug,
-        taskKey: "VIB-1",
-        backend: "claude",
-        profileId: "dev",
-        role: "Developer",
-        delivers: true,
-        workdir: null,
-        agentHandle: "dev",
-      },
-      { id: runId, state: "finished" },
-    );
+    await complete(runId, {
+      profileId: "dev",
+      role: "Developer",
+      delivers: true,
+      agentHandle: "dev",
+    });
     expect(existsSync(path.join(dir, citedInFile))).toBe(true);
     expect(existsSync(path.join(dir, uncited))).toBe(false);
     expect(existsSync(findings)).toBe(true);
@@ -805,21 +707,12 @@ describe("applyAgentCompletionEffects (the shared effects)", () => {
     const upload = path.join(taskAttachmentsDir(store.slug, "VIB-1", store.dataRoot), "inventory.csv");
     const finishedAt = new Date(getRun(store.db, runId)!.finished_at!);
     utimesSync(upload, finishedAt, finishedAt);
-    await applyAgentCompletionEffects(
-      store.db,
-      { dataRoot: store.dataRoot },
-      {
-        projectSlug: store.slug,
-        taskKey: "VIB-1",
-        backend: "claude",
-        profileId: "dev",
-        role: "Developer",
-        delivers: true,
-        workdir: null,
-        agentHandle: "dev",
-      },
-      { id: runId, state: "finished" },
-    );
+    await complete(runId, {
+      profileId: "dev",
+      role: "Developer",
+      delivers: true,
+      agentHandle: "dev",
+    });
     const parsed = taskFile().parsed;
     expect(parsed.frontmatter.deliveredAt).toBeNull();
     const claimants = parsed.timeline.filter((e) => (e.attachments ?? []).includes("inventory.csv"));
@@ -838,21 +731,12 @@ describe("applyAgentCompletionEffects (the shared effects)", () => {
     const composed = "Müşteri Envanteri.csv";
     await withAttachmentClaims(store.slug, "VIB-1", [composed], async () => {
       saveInRunWindow(runId, [composed.normalize("NFD")]);
-      await applyAgentCompletionEffects(
-        store.db,
-        { dataRoot: store.dataRoot },
-        {
-          projectSlug: store.slug,
-          taskKey: "VIB-1",
-          backend: "claude",
-          profileId: "dev",
-          role: "Developer",
-          delivers: true,
-          workdir: null,
-          agentHandle: "dev",
-        },
-        { id: runId, state: "finished" },
-      );
+      await complete(runId, {
+        profileId: "dev",
+        role: "Developer",
+        delivers: true,
+        agentHandle: "dev",
+      });
     });
     const parsed = taskFile().parsed;
     expect(parsed.frontmatter.deliveredAt).toBeNull();
@@ -871,21 +755,12 @@ describe("applyAgentCompletionEffects (the shared effects)", () => {
     const decomposed = composed.normalize("NFD");
     await withAttachmentClaims(store.slug, "VIB-1", [decomposed], async () => {
       saveInRunWindow(runId, [decomposed, composed]);
-      await applyAgentCompletionEffects(
-        store.db,
-        { dataRoot: store.dataRoot },
-        {
-          projectSlug: store.slug,
-          taskKey: "VIB-1",
-          backend: "claude",
-          profileId: "dev",
-          role: "Developer",
-          delivers: true,
-          workdir: null,
-          agentHandle: "dev",
-        },
-        { id: runId, state: "finished" },
-      );
+      await complete(runId, {
+        profileId: "dev",
+        role: "Developer",
+        delivers: true,
+        agentHandle: "dev",
+      });
     });
     const parsed = taskFile().parsed;
     expect(parsed.frontmatter.deliveredAt).not.toBeNull();
@@ -962,21 +837,12 @@ describe("applyAgentCompletionEffects (the shared effects)", () => {
       // window, as `saveInRunWindow` stamps a run's own files.
       const finishedAt = new Date(getRun(store.db, runId)!.finished_at!);
       utimesSync(vib1Sample(), finishedAt, finishedAt);
-      const completing = applyAgentCompletionEffects(
-        store.db,
-        { dataRoot: store.dataRoot },
-        {
-          projectSlug: store.slug,
-          taskKey: "VIB-1",
-          backend: "claude",
-          profileId: "dev",
-          role: "Developer",
-          delivers: true,
-          workdir: null,
-          agentHandle: "dev",
-        },
-        { id: runId, state: "finished" },
-      );
+      const completing = complete(runId, {
+        profileId: "dev",
+        role: "Developer",
+        delivers: true,
+        agentHandle: "dev",
+      });
       // Both wait on the lock: the writer's claim first, then the completion.
       await vi.waitFor(async () => {
         const { pending = [] } = await navigator.locks.query();
@@ -1023,21 +889,7 @@ describe("applyAgentCompletionEffects (the shared effects)", () => {
       "Verdict: approve. Every sample carries at least three traps; the files are saved on this task.",
     );
     saveInRunWindow(runId, ["sample-01-input.csv", "golden-files.md"]);
-    await applyAgentCompletionEffects(
-      store.db,
-      { dataRoot: store.dataRoot },
-      {
-        projectSlug: store.slug,
-        taskKey: "VIB-1",
-        backend: "claude",
-        profileId: "reviewer",
-        role: "Review & validation",
-        delivers: true,
-        workdir: null,
-        agentHandle: "reviewer",
-      },
-      { id: runId, state: "finished" },
-    );
+    await complete(runId, { role: "Review & validation", delivers: true });
     const parsed = taskFile().parsed;
     expect(parsed.frontmatter.deliveredAt).not.toBeNull();
     const reply = parsed.timeline.find((e) => e.type === "comment" && e.actor.kind === "agent");
@@ -1066,21 +918,7 @@ describe("applyAgentCompletionEffects (the shared effects)", () => {
       }),
     );
     saveInRunWindow(runId, ["estimate-link.md", "assumptions.md"]);
-    await applyAgentCompletionEffects(
-      store.db,
-      { dataRoot: store.dataRoot },
-      {
-        projectSlug: store.slug,
-        taskKey: "VIB-1",
-        backend: "codex",
-        profileId: "reviewer",
-        role: "Calculator Builder",
-        delivers: true,
-        workdir: null,
-        agentHandle: "reviewer",
-      },
-      { id: runId, state: "finished" },
-    );
+    await complete(runId, { backend: "codex", role: "Calculator Builder", delivers: true });
     const parsed = taskFile().parsed;
     expect(parsed.packet?.title).toBe("Headline calculator total or Price List total? (C3)");
     expect(parsed.frontmatter.deliveredAt).toBeNull();
@@ -1117,22 +955,7 @@ describe("applyAgentCompletionEffects (the shared effects)", () => {
     });
     rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
   }
-  const completeReviewRun = (runId: string) =>
-    applyAgentCompletionEffects(
-      store.db,
-      { dataRoot: store.dataRoot },
-      {
-        projectSlug: store.slug,
-        taskKey: "VIB-1",
-        backend: "claude",
-        profileId: "reviewer",
-        role: "Review & validation",
-        delivers: false,
-        workdir: null,
-        agentHandle: "reviewer",
-      },
-      { id: runId, state: "finished" },
-    );
+  const completeReviewRun = (runId: string) => complete(runId, { role: "Review & validation" });
 
   it("ruling 555: a review run whose profile was handed delivery while it worked keeps its verdict", async () => {
     // The channel was offered at dispatch, as a reviewer; the roster at
@@ -1200,21 +1023,7 @@ describe("applyAgentCompletionEffects (the shared effects)", () => {
     });
     rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
     const runId = await finishedRunWith("Verdict: approve. Every sample carries its traps.", `files:${savedAt}`);
-    await applyAgentCompletionEffects(
-      store.db,
-      { dataRoot: store.dataRoot },
-      {
-        projectSlug: store.slug,
-        taskKey: "VIB-1",
-        backend: "claude",
-        profileId: "reviewer",
-        role: "Review & validation",
-        delivers: false,
-        workdir: null,
-        agentHandle: "reviewer",
-      },
-      { id: runId, state: "finished" },
-    );
+    await complete(runId, { role: "Review & validation" });
     const parsed = taskFile().parsed;
     expect(parsed.frontmatter.verdicts).toEqual([]);
     const note = parsed.timeline.find((e) => e.type === "quality");
@@ -1260,22 +1069,7 @@ describe("applyAgentCompletionEffects (the shared effects)", () => {
     });
     rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
   }
-  const completeSupportingRun = (runId: string) =>
-    applyAgentCompletionEffects(
-      store.db,
-      { dataRoot: store.dataRoot },
-      {
-        projectSlug: store.slug,
-        taskKey: "VIB-1",
-        backend: "claude",
-        profileId: "reviewer",
-        role: "Review & validation",
-        delivers: false,
-        workdir: null,
-        agentHandle: "reviewer",
-      },
-      { id: runId, state: "finished" },
-    );
+  const completeSupportingRun = (runId: string) => complete(runId, { role: "Review & validation" });
 
   it("ruling 587: a supporting run that rewrites a delivered file moves the delivery, and the verdict on it goes stale", async () => {
     // Live on AWSC-28 the Architect rewrote the delivered assumptions.md at
@@ -1343,21 +1137,7 @@ describe("applyAgentCompletionEffects (the shared effects)", () => {
     }
     const runId = await finishedRunWith("Built the estimate; the link and exports are on this task.");
     saveInRunWindow(runId, ["assumptions.md"]);
-    await applyAgentCompletionEffects(
-      store.db,
-      { dataRoot: store.dataRoot },
-      {
-        projectSlug: store.slug,
-        taskKey: "VIB-1",
-        backend: "codex",
-        profileId: "reviewer",
-        role: "Calculator Builder",
-        delivers: true,
-        workdir: null,
-        agentHandle: "reviewer",
-      },
-      { id: runId, state: "finished" },
-    );
+    await complete(runId, { backend: "codex", role: "Calculator Builder", delivers: true });
     const stamp = taskFile().parsed.frontmatter.deliveredAt!;
     expect(listKeptDeliveries(store.slug, "VIB-1", store.dataRoot)).toEqual([
       { deliveredAt: stamp, files: ["assumptions.md", "mapping.md"] },
@@ -1409,21 +1189,7 @@ describe("applyAgentCompletionEffects (the shared effects)", () => {
     const runId = await finishedRunWith("Built the estimate; the unit prices are cited by source id.");
     expect(keepSourceInRun(runId, "ec2-pricing.html", "t3.medium $0.0416 per hour")).toContain("[kept] S1");
     saveInRunWindow(runId, ["assumptions.md"]);
-    await applyAgentCompletionEffects(
-      store.db,
-      { dataRoot: store.dataRoot },
-      {
-        projectSlug: store.slug,
-        taskKey: "VIB-1",
-        backend: "claude",
-        profileId: "reviewer",
-        role: "Calculator Builder",
-        delivers: true,
-        workdir: null,
-        agentHandle: "reviewer",
-      },
-      { id: runId, state: "finished" },
-    );
+    await complete(runId, { role: "Calculator Builder", delivers: true });
     const stamp = taskFile().parsed.frontmatter.deliveredAt!;
     expect(stamp).toBeTruthy();
     // The kept source was never one of the delivery's files.
@@ -1454,21 +1220,7 @@ describe("applyAgentCompletionEffects (the shared effects)", () => {
     saveInRunWindow(runId, ["estimate.md"]);
     // Saved by the researcher's shell while the deliverer was still running.
     const staged = stageSource("rds-pricing.html", "db.t3.medium $0.068 per hour");
-    await applyAgentCompletionEffects(
-      store.db,
-      { dataRoot: store.dataRoot },
-      {
-        projectSlug: store.slug,
-        taskKey: "VIB-1",
-        backend: "claude",
-        profileId: "reviewer",
-        role: "Calculator Builder",
-        delivers: true,
-        workdir: null,
-        agentHandle: "reviewer",
-      },
-      { id: runId, state: "finished" },
-    );
+    await complete(runId, { role: "Calculator Builder", delivers: true });
     const delivered = taskFile().parsed;
     const stamp = delivered.frontmatter.deliveredAt!;
     expect(stamp).toBeTruthy();
@@ -1507,23 +1259,8 @@ describe("applyAgentCompletionEffects (the shared effects)", () => {
     keepSourceInRun(runId, "rds-pricing.html", "db.t3.medium $0.068 per hour");
     // Another run's source on the same task is not this run's to name.
     keepSourceInRun("run_other", "s3-pricing.html", "$0.023 per GB", "dev");
-    const input = {
-      projectSlug: store.slug,
-      taskKey: "VIB-1",
-      backend: "claude" as const,
-      profileId: "reviewer",
-      role: "Review & validation",
-      delivers: false,
-      workdir: null,
-      agentHandle: "reviewer",
-    };
-    await applyAgentCompletionEffects(store.db, { dataRoot: store.dataRoot }, input, { id: runId, state: "finished" });
-    await applyAgentCompletionEffects(
-      store.db,
-      { dataRoot: store.dataRoot },
-      { ...input, replayed: true },
-      { id: runId, state: "finished" },
-    );
+    await complete(runId, { role: "Review & validation" });
+    await complete(runId, { role: "Review & validation", replayed: true });
     const notes = taskFile().parsed.timeline.filter((e) => e.title === "Sources kept");
     expect(notes.map((e) => [e.type, e.actor, e.text])).toEqual([
       [
@@ -1583,21 +1320,7 @@ describe("applyAgentCompletionEffects (the shared effects)", () => {
     rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
   }
   const completeRunAs = (runId: string, profileId: string, role: string) =>
-    applyAgentCompletionEffects(
-      store.db,
-      { dataRoot: store.dataRoot },
-      {
-        projectSlug: store.slug,
-        taskKey: "VIB-1",
-        backend: "claude",
-        profileId,
-        role,
-        delivers: false,
-        workdir: null,
-        agentHandle: profileId,
-      },
-      { id: runId, state: "finished" },
-    );
+    complete(runId, { profileId, role, agentHandle: profileId });
 
   it("ruling 699: a supporting agent with no verdict that saves again a file it saved before moves the delivery, and the verdict on it goes stale", async () => {
     // Read before it shipped: a cover sent back was replaced under its own
@@ -1734,21 +1457,12 @@ describe("applyAgentCompletionEffects (the shared effects)", () => {
     const landed = path.join(taskAttachmentsDir(store.slug, "VIB-1", store.dataRoot), "sample-01-input.csv");
     const finishedAt = new Date(getRun(store.db, runId)!.finished_at!);
     utimesSync(landed, finishedAt, finishedAt);
-    await applyAgentCompletionEffects(
-      store.db,
-      { dataRoot: store.dataRoot },
-      {
-        projectSlug: store.slug,
-        taskKey: "VIB-1",
-        backend: "claude",
-        profileId: "dev",
-        role: "Developer",
-        delivers: true,
-        workdir: null,
-        agentHandle: "dev",
-      },
-      { id: runId, state: "finished" },
-    );
+    await complete(runId, {
+      profileId: "dev",
+      role: "Developer",
+      delivers: true,
+      agentHandle: "dev",
+    });
     const parsed = taskFile().parsed;
     expect(parsed.frontmatter.deliveredAt).toBeNull();
     const claimants = parsed.timeline.filter((e) => (e.attachments ?? []).includes("sample-01-input.csv"));
@@ -1816,22 +1530,7 @@ describe("applyAgentCompletionEffects (the shared effects)", () => {
     const summary = "Checked every line item against the pricing pages.";
     const runId = await finishedRunWith(summary, dispatchedOn);
     stageOutcome(store.db, `oc-${runId}`, { summary, verdict });
-    await applyAgentCompletionEffects(
-      store.db,
-      { dataRoot: store.dataRoot },
-      {
-        projectSlug: store.slug,
-        taskKey: "VIB-1",
-        backend: "claude",
-        profileId: "reviewer",
-        role: "Review & validation",
-        delivers: false,
-        workdir: null,
-        agentHandle: "reviewer",
-        outcomeKey: `oc-${runId}`,
-      },
-      { id: runId, state: "finished" },
-    );
+    await complete(runId, { role: "Review & validation", outcomeKey: `oc-${runId}` });
     const parsed = taskFile().parsed;
     expect(parsed.frontmatter.verdicts).toEqual([]);
     expect(parsed.frontmatter.validation).toBe("changed");
@@ -1848,22 +1547,7 @@ describe("applyAgentCompletionEffects (the shared effects)", () => {
     const summary = "Approved at the pinned head.";
     const runId = await finishedRunWith(summary, "rev_1");
     stageOutcome(store.db, `oc-${runId}`, { summary, verdict: "approve" });
-    await applyAgentCompletionEffects(
-      store.db,
-      { dataRoot: store.dataRoot },
-      {
-        projectSlug: store.slug,
-        taskKey: "VIB-1",
-        backend: "claude",
-        profileId: "reviewer",
-        role: "Review & validation",
-        delivers: false,
-        workdir: null,
-        agentHandle: "reviewer",
-        outcomeKey: `oc-${runId}`,
-      },
-      { id: runId, state: "finished" },
-    );
+    await complete(runId, { role: "Review & validation", outcomeKey: `oc-${runId}` });
     expect(
       taskFile().parsed.frontmatter.verdicts.map((v) => [v.revisionId, v.result]),
     ).toEqual([["rev_1", "approve"]]);
@@ -1877,21 +1561,7 @@ describe("applyAgentCompletionEffects (the shared effects)", () => {
     const dump = "console-2026-08-31T16-00-00-000Z.log";
     const runId = await finishedRunWith("partial output before the crash");
     const dir = saveInRunWindow(runId, [dump]);
-    await applyAgentCompletionEffects(
-      store.db,
-      { dataRoot: store.dataRoot },
-      {
-        projectSlug: store.slug,
-        taskKey: "VIB-1",
-        backend: "claude",
-        profileId: "reviewer",
-        role: "Reviewer",
-        delivers: false,
-        workdir: null,
-        agentHandle: "reviewer",
-      },
-      { id: runId, state: "error" },
-    );
+    await complete(runId, {}, "error");
     expect(existsSync(path.join(dir, dump))).toBe(true);
   });
 
@@ -1917,21 +1587,7 @@ describe("applyAgentCompletionEffects (the shared effects)", () => {
       )
       .run(store.slug, now, now, now);
     const dir = saveInRunWindow(runId, [cited, uncited, screenshot]);
-    await applyAgentCompletionEffects(
-      store.db,
-      { dataRoot: store.dataRoot },
-      {
-        projectSlug: store.slug,
-        taskKey: "VIB-1",
-        backend: "claude",
-        profileId: "reviewer",
-        role: "Reviewer",
-        delivers: false,
-        workdir: null,
-        agentHandle: "reviewer",
-      },
-      { id: runId, state: "finished" },
-    );
+    await complete(runId);
     for (const name of [cited, uncited, screenshot]) expect(existsSync(path.join(dir, name))).toBe(true);
     const claimed = taskFile().parsed.timeline.flatMap((e) => e.attachments ?? []);
     expect(claimed).toContain(cited);
@@ -1970,21 +1626,7 @@ describe("applyAgentCompletionEffects (the shared effects)", () => {
       insertSiblingRun(kind, live ? null : getRun(store.db, runId)!.finished_at!);
       const names = ["round-6-comparison.md", "rescore-note.md", "page-2026-10-01T22-01-20-000Z.png"];
       const dir = saveInRunWindow(runId, names);
-      await applyAgentCompletionEffects(
-        store.db,
-        { dataRoot: store.dataRoot },
-        {
-          projectSlug: store.slug,
-          taskKey: "VIB-1",
-          backend: "codex",
-          profileId: "reviewer",
-          role: "Estimate Judge",
-          delivers: false,
-          workdir: null,
-          agentHandle: "reviewer",
-        },
-        { id: runId, state: "finished" },
-      );
+      await complete(runId, { backend: "codex", role: "Estimate Judge" });
       for (const name of names) expect(existsSync(path.join(dir, name))).toBe(true);
       const claimed = taskFile().parsed.timeline.flatMap((e) => e.attachments ?? []);
       expect(claimed.sort()).toEqual(claims === "its whole window" ? [...names].sort() : ["rescore-note.md"]);
@@ -2015,21 +1657,7 @@ describe("applyAgentCompletionEffects (the shared effects)", () => {
         attachments: [claimedByOther],
       },
     );
-    await applyAgentCompletionEffects(
-      store.db,
-      { dataRoot: store.dataRoot },
-      {
-        projectSlug: store.slug,
-        taskKey: "VIB-1",
-        backend: "claude",
-        profileId: "reviewer",
-        role: "Reviewer",
-        delivers: false,
-        workdir: null,
-        agentHandle: "reviewer",
-      },
-      { id: runId, state: "finished" },
-    );
+    await complete(runId);
     expect(existsSync(path.join(dir, inEvidence))).toBe(true);
     expect(existsSync(path.join(dir, claimedByOther))).toBe(true);
     expect(existsSync(path.join(dir, nobodys))).toBe(false);
@@ -2050,30 +1678,10 @@ describe("applyAgentCompletionEffects (the shared effects)", () => {
     });
     writeReviewTask();
     const reply = "@arda the diff is unchanged since my last pass.";
-    const effects = {
-      projectSlug: store.slug,
-      taskKey: "VIB-1",
-      backend: "claude" as const,
-      profileId: "reviewer",
-      role: "Reviewer",
-      delivers: false,
-      workdir: null,
-      agentHandle: "reviewer",
-    };
     const first = await finishedRunWith(reply);
-    await applyAgentCompletionEffects(
-      store.db,
-      { dataRoot: store.dataRoot },
-      effects,
-      { id: first, state: "finished" },
-    );
+    await complete(first);
     const second = await finishedRunWith(reply);
-    await applyAgentCompletionEffects(
-      store.db,
-      { dataRoot: store.dataRoot },
-      effects,
-      { id: second, state: "finished" },
-    );
+    await complete(second);
     // No operator is deployed, so the no-progress arm's record is the note
     // that its packet was refused (ruling 325). With the comparison forms out
     // of sync the repeat reads as NEW work and no note is written.
@@ -2089,22 +1697,7 @@ describe("applyAgentCompletionEffects (the shared effects)", () => {
     // and the operator — R20-9's guarantee-over-guidance shape.
     writeReviewTask();
     const runId = await finishedRunWith("Verdict: approve — the diff is fine.");
-    await applyAgentCompletionEffects(
-      store.db,
-      { dataRoot: store.dataRoot },
-      {
-        projectSlug: store.slug,
-        taskKey: "VIB-1",
-        backend: "claude",
-        profileId: "reviewer",
-        role: "Reviewer",
-        delivers: false,
-        workdir: null,
-        agentHandle: "reviewer",
-        dispatchedByName: "Arda Kaya",
-      },
-      { id: runId, state: "finished" },
-    );
+    await complete(runId, { dispatchedByName: "Arda Kaya" });
     const reply = taskFile().parsed.timeline.find((e) => e.type === "comment");
     expect(reply?.text).toContain("cc @Arda Kaya @operator");
   });
@@ -2125,23 +1718,10 @@ describe("applyAgentCompletionEffects (the shared effects)", () => {
     const runId = await finishedRunWith(
       "@Arda Other done — @operator over to you. Verdict: approve.",
     );
-    await applyAgentCompletionEffects(
-      store.db,
-      { dataRoot: store.dataRoot },
-      {
-        projectSlug: store.slug,
-        taskKey: "VIB-1",
-        backend: "claude",
-        profileId: "reviewer",
-        role: "Reviewer",
-        delivers: false,
-        workdir: null,
-        agentHandle: "reviewer",
-        dispatchedByName: store.users.arda.name,
-        dispatchedByUserId: store.users.arda.id,
-      },
-      { id: runId, state: "finished" },
-    );
+    await complete(runId, {
+      dispatchedByName: store.users.arda.name,
+      dispatchedByUserId: store.users.arda.id,
+    });
     const reply = taskFile().parsed.timeline.find((e) => e.type === "comment");
     // The dispatcher's own full-name tag is appended; @operator already stood.
     expect(reply?.text).toContain(`cc @${store.users.arda.name}`);
@@ -2153,22 +1733,7 @@ describe("applyAgentCompletionEffects (the shared effects)", () => {
     const runId = await finishedRunWith(
       "@Arda Kaya done — @operator over to you. Verdict: approve.",
     );
-    await applyAgentCompletionEffects(
-      store.db,
-      { dataRoot: store.dataRoot },
-      {
-        projectSlug: store.slug,
-        taskKey: "VIB-1",
-        backend: "claude",
-        profileId: "reviewer",
-        role: "Reviewer",
-        delivers: false,
-        workdir: null,
-        agentHandle: "reviewer",
-        dispatchedByName: "Arda Kaya",
-      },
-      { id: runId, state: "finished" },
-    );
+    await complete(runId, { dispatchedByName: "Arda Kaya" });
     const reply = taskFile().parsed.timeline.find((e) => e.type === "comment");
     expect(reply?.text).not.toContain("cc @");
   });
@@ -2180,32 +1745,11 @@ describe("applyAgentCompletionEffects (the shared effects)", () => {
     // is refused and the note saying so (ruling 325) is all it writes, and the
     // react then settles harmlessly.
     writeReviewTask();
-    const effects = {
-      projectSlug: store.slug,
-      taskKey: "VIB-1",
-      backend: "claude" as const,
-      profileId: "reviewer",
-      role: "Reviewer",
-      delivers: false,
-      workdir: null,
-      agentHandle: "reviewer",
-      dispatchedByName: "Arda Kaya",
-    };
     const reply = "The diff is unchanged since my last pass.";
     const first = await finishedRunWith(reply);
-    await applyAgentCompletionEffects(
-      store.db,
-      { dataRoot: store.dataRoot },
-      effects,
-      { id: first, state: "finished" },
-    );
+    await complete(first, { dispatchedByName: "Arda Kaya" });
     const second = await finishedRunWith(reply);
-    await applyAgentCompletionEffects(
-      store.db,
-      { dataRoot: store.dataRoot },
-      effects,
-      { id: second, state: "finished" },
-    );
+    await complete(second, { dispatchedByName: "Arda Kaya" });
     expect(
       taskFile().parsed.timeline.some((e) => e.text.includes("stopped making progress")),
     ).toBe(false);
@@ -2306,22 +1850,7 @@ describe("applyAgentCompletionEffects (the shared effects)", () => {
     // the server can state — which is the whole point.
     writeReviewTask({ validation: "changed" });
     const runId = await finishedRunWith("Still not right; the same three files.");
-    await applyAgentCompletionEffects(
-      store.db,
-      { dataRoot: store.dataRoot },
-      {
-        projectSlug: store.slug,
-        taskKey: "VIB-1",
-        backend: "claude",
-        profileId: "reviewer",
-        role: "Reviewer",
-        delivers: false,
-        workdir: null,
-        agentHandle: "reviewer",
-        operatorRun: { backend: "claude", autonomy: "full", reactDepth: 99 },
-      },
-      { id: runId, state: "finished" },
-    );
+    await complete(runId, { operatorRun: { backend: "claude", autonomy: "full", reactDepth: 99 } });
     await pollUntil(() =>
       taskFile().parsed.timeline.some((e) => e.text.includes("stopped making progress")),
     );
@@ -2377,23 +1906,14 @@ describe("applyAgentCompletionEffects (the shared effects)", () => {
         { dataRoot: store.dataRoot },
       ) === null;
 
-    await applyAgentCompletionEffects(
-      store.db,
-      { dataRoot: store.dataRoot },
-      {
-        projectSlug: store.slug,
-        taskKey: "VIB-1",
-        backend: "claude",
-        profileId: "dev",
-        role: "Implementation",
-        delivers: true,
-        workdir: null,
-        agentHandle: "dev",
-        // At the cap, which is what fired on SHOP-32.
-        operatorRun: { backend: "claude", autonomy: "full", reactDepth: 99 },
-      },
-      { id: runId, state: "finished" },
-    );
+    await complete(runId, {
+      profileId: "dev",
+      role: "Implementation",
+      delivers: true,
+      agentHandle: "dev",
+      // At the cap, which is what fired on SHOP-32.
+      operatorRun: { backend: "claude", autonomy: "full", reactDepth: 99 },
+    });
 
     // The premise of the test: this task really is acceptable, so the chain
     // reached a boundary rather than running out of road.
@@ -2450,24 +1970,11 @@ describe("applyAgentCompletionEffects (the shared effects)", () => {
     const before = operatorRuns();
     const log = vi.spyOn(logger, "info");
     log.mockClear();
-    await applyAgentCompletionEffects(
-      store.db,
-      { dataRoot: store.dataRoot },
-      {
-        projectSlug: store.slug,
-        taskKey: "VIB-1",
-        backend: "claude",
-        profileId: "reviewer",
-        role: "Reviewer",
-        delivers: false,
-        workdir: null,
-        agentHandle: "reviewer",
-        outcomeKey: `oc-${runId}`,
-        // At the cap, which is what fired on BNB-16.
-        operatorRun: { backend: "claude", autonomy: "full", reactDepth: 99 },
-      },
-      { id: runId, state: "finished" },
-    );
+    await complete(runId, {
+      outcomeKey: `oc-${runId}`,
+      // At the cap, which is what fired on BNB-16.
+      operatorRun: { backend: "claude", autonomy: "full", reactDepth: 99 },
+    });
 
     // Premises: the approve was recorded, and the task is still not acceptable.
     expect(
@@ -2522,23 +2029,14 @@ describe("applyAgentCompletionEffects (the shared effects)", () => {
     };
     /** The delivering developer's completion, at the depth cap. */
     async function completeDeveloperAtCap(runId: string): Promise<void> {
-      await applyAgentCompletionEffects(
-        store.db,
-        { dataRoot: store.dataRoot },
-        {
-          projectSlug: store.slug,
-          taskKey: "VIB-1",
-          backend: "claude",
-          profileId: "dev",
-          role: "Implementation",
-          delivers: true,
-          workdir: null,
-          agentHandle: "dev",
-          // OPERATOR_REACT_DEPTH_CAP: the chain has spent its four hops.
-          operatorRun: { backend: "claude", autonomy: "supervised", reactDepth: 4 },
-        },
-        { id: runId, state: "finished" },
-      );
+      await complete(runId, {
+        profileId: "dev",
+        role: "Implementation",
+        delivers: true,
+        agentHandle: "dev",
+        // OPERATOR_REACT_DEPTH_CAP: the chain has spent its four hops.
+        operatorRun: { backend: "claude", autonomy: "supervised", reactDepth: 4 },
+      });
     }
 
     it("a reply at the cap that committed a new head opens no stuck packet — the operator reacts from a fresh depth", async () => {
@@ -2624,22 +2122,12 @@ describe("applyAgentCompletionEffects (the shared effects)", () => {
      * stalled" over the rework it had just delivered.
      */
     async function completeFilesDelivererAtCap(runId: string): Promise<void> {
-      await applyAgentCompletionEffects(
-        store.db,
-        { dataRoot: store.dataRoot },
-        {
-          projectSlug: store.slug,
-          taskKey: "VIB-1",
-          backend: "codex",
-          profileId: "reviewer",
-          role: "Calculator Builder",
-          delivers: true,
-          workdir: null,
-          agentHandle: "reviewer",
-          operatorRun: { backend: "claude", autonomy: "supervised", reactDepth: 4 },
-        },
-        { id: runId, state: "finished" },
-      );
+      await complete(runId, {
+        backend: "codex",
+        role: "Calculator Builder",
+        delivers: true,
+        operatorRun: { backend: "claude", autonomy: "supervised", reactDepth: 4 },
+      });
     }
     const FILES_TASK: Parameters<typeof baseTaskFrontmatter>[1] = {
       stage: "impl",
@@ -2853,21 +2341,17 @@ describe("applyAgentCompletionEffects (the shared effects)", () => {
         );
         rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
         const reactsBefore = runOp.mock.calls.length;
-        await applyAgentCompletionEffects(
-          store.db,
-          { dataRoot: store.dataRoot, deps: { runOperator: runOp } },
+        await complete(
+          runId,
           {
-            projectSlug: store.slug,
-            taskKey: "VIB-1",
-            backend: "claude",
             profileId: "dev",
             role: "Implementation",
             delivers: true,
-            workdir: null,
             agentHandle: "dev",
             operatorRun: { backend: "claude", autonomy: "supervised", ...chain },
           },
-          { id: runId, state: "finished" },
+          "finished",
+          { runOperator: runOp },
         );
         if (hop < OPERATOR_REACT_HOP_CEILING) {
           // Progress keeps the depth at 1, far under its cap: only the ceiling
@@ -2922,22 +2406,14 @@ describe("applyAgentCompletionEffects (the shared effects)", () => {
       const summary = "Approved at the pinned head.";
       const approveRun = await finishedRunWith(summary);
       stageOutcome(store.db, `oc-${approveRun}`, { summary, verdict: "approve" });
-      await applyAgentCompletionEffects(
-        store.db,
-        { dataRoot: store.dataRoot, deps: { runOperator: runOp } },
+      await complete(
+        approveRun,
         {
-          projectSlug: store.slug,
-          taskKey: "VIB-1",
-          backend: "claude",
-          profileId: "reviewer",
-          role: "Reviewer",
-          delivers: false,
-          workdir: null,
-          agentHandle: "reviewer",
           outcomeKey: `oc-${approveRun}`,
           operatorRun: atCeiling,
         },
-        { id: approveRun, state: "finished" },
+        "finished",
+        { runOperator: runOp },
       );
       // CANARY: stop an approve restarting the hop count and the ceiling opens
       // "Work stalled" over an approve — BNB-16 again.
@@ -2987,21 +2463,17 @@ describe("applyAgentCompletionEffects (the shared effects)", () => {
         acceptanceRefusalFor({ projectSlug: store.slug, taskKey: "VIB-1" }, { dataRoot: store.dataRoot }),
       ).toBeNull();
       const notesRun = await finishedRunWith("Release notes tidied; nothing else to do.");
-      await applyAgentCompletionEffects(
-        store.db,
-        { dataRoot: store.dataRoot, deps: { runOperator: runOp } },
+      await complete(
+        notesRun,
         {
-          projectSlug: store.slug,
-          taskKey: "VIB-1",
-          backend: "claude",
           profileId: "dev",
           role: "Implementation",
           delivers: true,
-          workdir: null,
           agentHandle: "dev",
           operatorRun: atCeiling,
         },
-        { id: notesRun, state: "finished" },
+        "finished",
+        { runOperator: runOp },
       );
       // CANARY: leave the ceiling out of ruling 258's check and the packet
       // opens and blocks the acceptance it should wait for.
@@ -3033,21 +2505,7 @@ describe("applyAgentCompletionEffects (the shared effects)", () => {
     const runId = await finishedRunWith(
       "Verdict: approve\n\n@operator the change meets the spec.",
     );
-    await applyAgentCompletionEffects(
-      store.db,
-      { dataRoot: store.dataRoot },
-      {
-        projectSlug: store.slug,
-        taskKey: "VIB-1",
-        backend: "claude",
-        profileId: "reviewer",
-        role: "Reviewer",
-        delivers: false,
-        workdir: null,
-        agentHandle: "reviewer",
-      },
-      { id: runId, state: "finished" },
-    );
+    await complete(runId);
     // The verdict was recorded (snapshot is authoritative) → the only required
     // reviewer approved the current revision → validation derives healthy →
     // acceptance is unblocked.
@@ -3091,25 +2549,7 @@ describe("applyAgentCompletionEffects (the shared effects)", () => {
         state: "finished",
       });
     };
-    const reviewerInput = {
-      projectSlug: store.slug,
-      taskKey: "VIB-1",
-      backend: "claude" as const,
-      profileId: "reviewer",
-      role: "Reviewer",
-      delivers: false,
-      workdir: null,
-      agentHandle: "reviewer",
-    };
-    const review = async (reply: string) => {
-      const runId = await finishedRunWith(reply);
-      await applyAgentCompletionEffects(
-        store.db,
-        { dataRoot: store.dataRoot },
-        reviewerInput,
-        { id: runId, state: "finished" },
-      );
-    };
+    const review = async (reply: string) => complete(await finishedRunWith(reply));
 
     await review("Verdict: request_changes\n\n@operator the stack cannot start.");
     expect(taskFile().parsed.frontmatter.verdicts).toHaveLength(1);
@@ -3165,23 +2605,12 @@ describe("applyAgentCompletionEffects (the shared effects)", () => {
         },
       }),
     );
-    await applyAgentCompletionEffects(
-      store.db,
-      { dataRoot: store.dataRoot },
-      {
-        projectSlug: store.slug,
-        taskKey: "VIB-1",
-        // The envelope door is Codex-only: `parseAgentOutcomeJson` runs behind
-        // `input.backend === "codex"`.
-        backend: "codex",
-        profileId: "reviewer",
-        role: "Review & validation",
-        delivers: false,
-        workdir: null,
-        agentHandle: "reviewer",
-      },
-      { id: runId, state: "finished" },
-    );
+    await complete(runId, {
+      // The envelope door is Codex-only: `parseAgentOutcomeJson` runs behind
+      // `input.backend === "codex"`.
+      backend: "codex",
+      role: "Review & validation",
+    });
     expect(taskFile().parsed.packet?.kind).toBe("Agent question");
     // SAFETY: `actor_json` is TEXT on `notifications`, written by
     // `createNotification` from an `ActorRender`.
@@ -3220,13 +2649,8 @@ describe("applyAgentCompletionEffects (the shared effects)", () => {
    */
   describe("ruling 237 as amended by 410: the THIRD consecutive objection escalates to a person", () => {
     const reviewerInput = (profileId: string) => ({
-      projectSlug: store.slug,
-      taskKey: "VIB-1",
-      backend: "claude" as const,
       profileId,
       role: "Review & validation",
-      delivers: false,
-      workdir: null,
       agentHandle: profileId,
     });
     /**
@@ -3262,12 +2686,7 @@ describe("applyAgentCompletionEffects (the shared effects)", () => {
     ) => {
       rework();
       const runId = await finishedRunWith(reply);
-      await applyAgentCompletionEffects(
-        store.db,
-        { dataRoot: store.dataRoot },
-        { ...reviewerInput(profileId), ...extra },
-        { id: runId, state: "finished" },
-      );
+      await complete(runId, { ...reviewerInput(profileId), ...extra });
     };
     const blocks = (n: number) =>
       `Verdict: request_changes\n\n@operator objection number ${n}.`;
@@ -3312,15 +2731,7 @@ describe("applyAgentCompletionEffects (the shared effects)", () => {
       });
     };
     /** A verdict with NO rework dispatched before it (`review` always reworks). */
-    const reviewOnly = async (reply: string) => {
-      const runId = await finishedRunWith(reply);
-      await applyAgentCompletionEffects(
-        store.db,
-        { dataRoot: store.dataRoot },
-        reviewerInput("reviewer"),
-        { id: runId, state: "finished" },
-      );
-    };
+    const reviewOnly = async (reply: string) => complete(await finishedRunWith(reply), reviewerInput("reviewer"));
     const roundsOnTheRevision = () => taskFile().parsed.frontmatter.verdicts[0]?.rounds;
 
     it("ruling 416: a rework the PROVIDER refused fought no round, a crash still did, and a repeat keeps the rounds fought", async () => {
@@ -3428,12 +2839,7 @@ describe("applyAgentCompletionEffects (the shared effects)", () => {
           };
         },
       );
-      await applyAgentCompletionEffects(
-        store.db,
-        { dataRoot: store.dataRoot },
-        reviewerInput("reviewer"),
-        { id: runId, state: "finished" },
-      );
+      await complete(runId, reviewerInput("reviewer"));
     };
 
     it("ruling 421: the verdict of a run that put the question IS the answer, and the packet it raises recommends one rework", async () => {
@@ -3871,12 +3277,7 @@ describe("applyAgentCompletionEffects (the shared effects)", () => {
       const quiet = await finishedRunWith(answer, undefined, { verdictWithheld: true });
       // The deadlock question's run: dispatched with its verdict channel taken
       // away (ruling 313), which ruling 316 makes the completion path honour.
-      await applyAgentCompletionEffects(
-        store.db,
-        { dataRoot: store.dataRoot },
-        reviewerInput("reviewer"),
-        { id: quiet, state: "finished" },
-      );
+      await complete(quiet, reviewerInput("reviewer"));
 
       /**
        * CANARY: drop `verdictSilenced` from the fallback guard and the
@@ -3890,12 +3291,7 @@ describe("applyAgentCompletionEffects (the shared effects)", () => {
       // on a run whose channel was NOT withheld overwrites the genuine record.
       rework();
       const loud = await finishedRunWith(answer);
-      await applyAgentCompletionEffects(
-        store.db,
-        { dataRoot: store.dataRoot },
-        reviewerInput("reviewer"),
-        { id: loud, state: "finished" },
-      );
+      await complete(loud, reviewerInput("reviewer"));
       const overwritten = taskFile().parsed.frontmatter.verdicts.at(-1);
       expect(overwritten?.result).toBe("request_changes");
       expect(overwritten?.reason).not.toContain("objection number 1");
@@ -4234,14 +3630,6 @@ describe("applyAgentCompletionEffects (the shared effects)", () => {
     });
   });
 
-  /**
-   * R15-7 (owner ruling): a run whose profile cannot be resolved is fully
-   * conservative. The RUN layer withholds its toolkit, but completion re-derived
-   * the gates from `[]`, which the catalog defaults read as comment/ask/evidence
-   * GRANTED — so the same ghost profile's envelope could still open a question
-   * packet and assert evidence rows in a vanished profile's name, one layer
-   * later and out of sight.
-   */
   it("ruling 137: the envelope's question packet withdraws the standing acceptance offer on the record", async () => {
     // Canary: drop the withdrawal at the envelope-question site in
     // recordAgentCompletion and the accept card outlives the question.
@@ -4257,21 +3645,7 @@ describe("applyAgentCompletionEffects (the shared effects)", () => {
         question: { title: "Which API surface should this use?", body: "Two candidates." },
       }),
     );
-    await applyAgentCompletionEffects(
-      store.db,
-      { dataRoot: store.dataRoot },
-      {
-        projectSlug: store.slug,
-        taskKey: "VIB-1",
-        backend: "codex",
-        profileId: "dev",
-        role: "Reviewer",
-        delivers: false,
-        workdir: null,
-        agentHandle: "dev",
-      },
-      { id: runId, state: "finished" },
-    );
+    await complete(runId, { backend: "codex", profileId: "dev", agentHandle: "dev" });
     const parsed = taskFile().parsed;
     expect(parsed.packet?.title).toBe("Which API surface should this use?");
     expect(parsed.frontmatter.recommendations.map((r) => r.id)).toEqual(["r-run"]);
@@ -4298,21 +3672,7 @@ describe("applyAgentCompletionEffects (the shared effects)", () => {
         },
       }),
     );
-    await applyAgentCompletionEffects(
-      store.db,
-      { dataRoot: store.dataRoot },
-      {
-        projectSlug: store.slug,
-        taskKey: "VIB-1",
-        backend: "codex",
-        profileId: "dev",
-        role: "Reviewer",
-        delivers: false,
-        workdir: null,
-        agentHandle: "dev",
-      },
-      { id: runId, state: "finished" },
-    );
+    await complete(runId, { backend: "codex", profileId: "dev", agentHandle: "dev" });
     const asked = taskFile().parsed.timeline.find((e) => e.type === "blocked");
     expect(asked?.text).toBe(
       "**Question for a human:** Intake batch: accept the proposed defaults?\n\n" +
@@ -4321,6 +3681,14 @@ describe("applyAgentCompletionEffects (the shared effects)", () => {
     );
   });
 
+  /**
+   * R15-7 (owner ruling): a run whose profile cannot be resolved is fully
+   * conservative. The RUN layer withholds its toolkit, but completion re-derived
+   * the gates from `[]`, which the catalog defaults read as comment/ask/evidence
+   * GRANTED — so the same ghost profile's envelope could still open a question
+   * packet and assert evidence rows in a vanished profile's name, one layer
+   * later and out of sight.
+   */
   it("R15-7: an UNRESOLVABLE profile's finished run opens no question packet and asserts no evidence", async () => {
     const runId = await finishedRunWith(
       JSON.stringify({
@@ -4332,23 +3700,13 @@ describe("applyAgentCompletionEffects (the shared effects)", () => {
         evidence: [{ label: "unit suite", result: "12 passed", status: "pass" }],
       }),
     );
-    await applyAgentCompletionEffects(
-      store.db,
-      { dataRoot: store.dataRoot },
-      {
-        projectSlug: store.slug,
-        taskKey: "VIB-1",
-        // The Codex transport: the envelope rides the final reply text.
-        backend: "codex",
-        // Never deployed here — `resolveDeployedSpecialist` throws for it.
-        profileId: "ghost-profile",
-        role: "Reviewer",
-        delivers: false,
-        workdir: null,
-        agentHandle: "ghost-profile",
-      },
-      { id: runId, state: "finished" },
-    );
+    await complete(runId, {
+      // The Codex transport: the envelope rides the final reply text.
+      backend: "codex",
+      // Never deployed here — `resolveDeployedSpecialist` throws for it.
+      profileId: "ghost-profile",
+      agentHandle: "ghost-profile",
+    });
     const parsed = taskFile().parsed;
     expect(parsed.packet, "a ghost profile must not open a decision").toBeNull();
     expect(
@@ -4374,12 +3732,7 @@ describe("applyAgentCompletionEffects (the shared effects)", () => {
       // fresh review-state task each iteration (delivered revision + reviewer)
       writeReviewTask();
       const runId = await finishedRunWith(reply);
-      await applyAgentCompletionEffects(
-        store.db,
-        { dataRoot: store.dataRoot },
-        { projectSlug: store.slug, taskKey: "VIB-1", backend: "claude", profileId: "reviewer", role: "Reviewer", delivers: false, workdir: null, agentHandle: "reviewer" },
-        { id: runId, state: "finished" },
-      );
+      await complete(runId);
       const tl = taskFile().parsed.timeline;
       const reviewerComment = tl.find(
         (e) => e.type === "comment" && e.actor.kind === "agent" && e.actor.roleHint === "Reviewer",
@@ -4395,21 +3748,12 @@ describe("applyAgentCompletionEffects (the shared effects)", () => {
   it("posts the reply comment and flips waiting agent→human when no operator is deployed", async () => {
     await markWaitingAgent(store.db, { dataRoot: store.dataRoot }, store.slug, "VIB-1");
     const runId = await finishedRunWith("All done — summary of the work.");
-    await applyAgentCompletionEffects(
-      store.db,
-      { dataRoot: store.dataRoot },
-      {
-        projectSlug: store.slug,
-        taskKey: "VIB-1",
-        backend: "claude",
-        profileId: "developer",
-        role: "developer",
-        delivers: true,
-        workdir: null,
-        agentHandle: "dev",
-      },
-      { id: runId, state: "finished" },
-    );
+    await complete(runId, {
+      profileId: "developer",
+      role: "developer",
+      delivers: true,
+      agentHandle: "dev",
+    });
     const parsed = taskFile().parsed;
     expect(
       parsed.timeline.some(
@@ -4460,20 +3804,16 @@ describe("applyAgentCompletionEffects (the shared effects)", () => {
       },
     });
     await markWaitingAgent(store.db, { dataRoot: store.dataRoot }, store.slug, "VIB-1");
-    await applyAgentCompletionEffects(
-      store.db,
-      { dataRoot: store.dataRoot },
+    await complete(
+      runId,
       {
-        projectSlug: store.slug,
-        taskKey: "VIB-1",
         backend: "codex",
         profileId: "developer",
         role: "Developer",
         delivers: true,
-        workdir: null,
         agentHandle: "dev",
       },
-      { id: runId, state: "error" },
+      "error",
     );
     const parsed = taskFile().parsed;
     // The typed failure event naming the reason (distinct from the operator's
@@ -4578,20 +3918,16 @@ describe("applyAgentCompletionEffects (the shared effects)", () => {
       },
     });
     await markWaitingAgent(store.db, { dataRoot: store.dataRoot }, store.slug, "VIB-1");
-    await applyAgentCompletionEffects(
-      store.db,
-      { dataRoot: store.dataRoot },
+    await complete(
+      runId,
       {
-        projectSlug: store.slug,
-        taskKey: "VIB-1",
         backend: "codex",
         profileId: "developer",
         role: "Developer",
         delivers: true,
-        workdir: null,
         agentHandle: "dev",
       },
-      { id: runId, state: "error" },
+      "error",
     );
     expect(taskFile().parsed.packet, "the recovery packet still opens").toBeTruthy();
 
@@ -4663,20 +3999,15 @@ describe("applyAgentCompletionEffects (the shared effects)", () => {
       },
     });
     await markWaitingAgent(store.db, { dataRoot: store.dataRoot }, store.slug, "VIB-1");
-    await applyAgentCompletionEffects(
-      store.db,
-      { dataRoot: store.dataRoot },
+    await complete(
+      runId,
       {
-        projectSlug: store.slug,
-        taskKey: "VIB-1",
-        backend: "claude",
         profileId: "developer",
         role: "Developer",
         delivers: true,
-        workdir: null,
         agentHandle: "dev",
       },
-      { id: runId, state: "error" },
+      "error",
     );
     const event = taskFile().parsed.timeline.find(
       (e) => e.type === "blocked" && /did not complete/.test(e.text),
@@ -4727,20 +4058,15 @@ describe("applyAgentCompletionEffects (the shared effects)", () => {
       },
     });
     await markWaitingAgent(store.db, { dataRoot: store.dataRoot }, store.slug, "VIB-1");
-    await applyAgentCompletionEffects(
-      store.db,
-      { dataRoot: store.dataRoot },
+    await complete(
+      runId,
       {
-        projectSlug: store.slug,
-        taskKey: "VIB-1",
-        backend: "claude",
         profileId: "developer",
         role: "Developer",
         delivers: true,
-        workdir: null,
         agentHandle: "dev",
       },
-      { id: runId, state: "error" },
+      "error",
     );
     const parsed = taskFile().parsed;
     const event = parsed.timeline.find(
@@ -4813,20 +4139,15 @@ describe("applyAgentCompletionEffects (the shared effects)", () => {
       },
     });
     await markWaitingAgent(store.db, { dataRoot: store.dataRoot }, store.slug, "VIB-1");
-    await applyAgentCompletionEffects(
-      store.db,
-      { dataRoot: store.dataRoot },
+    await complete(
+      runId,
       {
-        projectSlug: store.slug,
-        taskKey: "VIB-1",
-        backend: "claude",
         profileId: "developer",
         role: "Developer",
         delivers: true,
-        workdir: null,
         agentHandle: "dev",
       },
-      { id: runId, state: "error" },
+      "error",
     );
     const event = taskFile().parsed.timeline.find(
       (e) => e.type === "blocked" && /did not complete/.test(e.text),
@@ -4869,20 +4190,16 @@ describe("applyAgentCompletionEffects (the shared effects)", () => {
       },
     });
     await markWaitingAgent(store.db, { dataRoot: store.dataRoot }, store.slug, "VIB-1");
-    await applyAgentCompletionEffects(
-      store.db,
-      { dataRoot: store.dataRoot },
+    await complete(
+      runId,
       {
-        projectSlug: store.slug,
-        taskKey: "VIB-1",
         backend: "codex",
         profileId: "developer",
         role: "Developer",
         delivers: true,
-        workdir: null,
         agentHandle: "dev",
       },
-      { id: runId, state: "error" },
+      "error",
     );
     const parsed = taskFile().parsed;
     const packet = parsed.packet!;
@@ -4932,20 +4249,16 @@ describe("applyAgentCompletionEffects (the shared effects)", () => {
       display: { t: "04:16:40", ev: "err", tag: "run·error·tool_loop", text: sentence, failure: emptyRunFailureFacts("tool_loop") },
     });
     await markWaitingAgent(store.db, { dataRoot: store.dataRoot }, store.slug, "VIB-1");
-    await applyAgentCompletionEffects(
-      store.db,
-      { dataRoot: store.dataRoot },
+    await complete(
+      runId,
       {
-        projectSlug: store.slug,
-        taskKey: "VIB-1",
         backend: "codex",
         profileId: "developer",
         role: "Developer",
         delivers: true,
-        workdir: null,
         agentHandle: "dev",
       },
-      { id: runId, state: "error" },
+      "error",
     );
     const parsed = taskFile().parsed;
     expect(parsed.packet!.options.find((o) => o.rec)?.t).toBe("Redirect with sharper guidance");
@@ -4990,20 +4303,16 @@ describe("applyAgentCompletionEffects (the shared effects)", () => {
       },
     });
     await markWaitingAgent(store.db, { dataRoot: store.dataRoot }, store.slug, "VIB-1");
-    await applyAgentCompletionEffects(
-      store.db,
-      { dataRoot: store.dataRoot },
+    await complete(
+      runId,
       {
-        projectSlug: store.slug,
-        taskKey: "VIB-1",
         backend: "codex",
         profileId: "developer",
         role: "Developer",
         delivers: true,
-        workdir: null,
         agentHandle: "dev",
       },
-      { id: runId, state: "error" },
+      "error",
     );
     // No packet opened…
     expect(taskFile().parsed.packet).toBeFalsy();
@@ -5254,20 +4563,15 @@ describe("superseded stuck-packet withdrawal (owner ruling 2026-07-18)", () => {
     engagement: { delivers: boolean; profileId?: string },
     state = "finished",
   ): Promise<void> {
-    await applyAgentCompletionEffects(
-      store.db,
-      { dataRoot: store.dataRoot },
+    await complete(
+      runId,
       {
-        projectSlug: store.slug,
-        taskKey: "VIB-1",
-        backend: "claude",
         profileId: engagement.profileId ?? "developer",
         role: "developer",
         delivers: engagement.delivers,
-        workdir: null,
         agentHandle: "dev",
       },
-      { id: runId, state },
+      state,
     );
   }
 
@@ -5463,21 +4767,18 @@ describe("a refusal in a window the owner already decided (ruling 602)", () => {
     });
     return id;
   }
-  async function complete(taskKey: string, runId: string): Promise<void> {
-    await applyAgentCompletionEffects(
-      store.db,
-      { dataRoot: store.dataRoot },
+  async function completeRefused(taskKey: string, runId: string): Promise<void> {
+    await complete(
+      runId,
       {
-        projectSlug: store.slug,
         taskKey,
         backend: "codex",
         profileId: "dev",
         role: "Developer",
         delivers: true,
-        workdir: null,
         agentHandle: "dev",
       },
-      { id: runId, state: "error" },
+      "error",
     );
   }
   function parsedOf(taskKey: string) {
@@ -5494,7 +4795,7 @@ describe("a refusal in a window the owner already decided (ruling 602)", () => {
     });
     rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
 
-    await complete("VIB-1", refusedRun("VIB-1"));
+    await completeRefused("VIB-1", refusedRun("VIB-1"));
     const first = parsedOf("VIB-1").packet!;
     const wait = first.options.findIndex((o) => o.kind === "wait_for_window");
     expect(wait, "the first refusal offers the wait").toBeGreaterThanOrEqual(0);
@@ -5505,7 +4806,7 @@ describe("a refusal in a window the owner already decided (ruling 602)", () => {
       { dataRoot: store.dataRoot },
     );
 
-    await complete("VIB-2", refusedRun("VIB-2"));
+    await completeRefused("VIB-2", refusedRun("VIB-2"));
     const second = parsedOf("VIB-2");
     expect(second.packet, "the later packet was answered from the standing decision").toBeNull();
     expect(second.frontmatter.schedules.map((s) => s.action)).toEqual(["run-operator"]);
