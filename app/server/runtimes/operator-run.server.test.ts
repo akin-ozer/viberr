@@ -5,11 +5,12 @@ import { chmodSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "n
 import path from "node:path";
 import { promisify } from "node:util";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { z } from "zod";
 import { logger } from "~/server/logging/logger.server";
 import { rebuildAll } from "~/server/projections/rebuilder.server";
 import { readProjectFile } from "~/server/files/project-writer.server";
 import { recordNoRepositoryRuling } from "~/server/org/repository-ruling.server";
-import { resolveOperatorAuthority } from "~/server/tasks/operator-authority.server";
+import { planRefusalOf, resolveOperatorAuthority } from "~/server/tasks/operator-authority.server";
 import { writeTaskAttachment } from "~/server/files/task-attachments.server";
 import {
   updateTaskFile, readTaskFile } from "~/server/files/task-writer.server";
@@ -62,7 +63,6 @@ import {
 } from "./operator-codex-plan.server";
 import * as operatorPrompts from "./operator-prompt.server";
 import * as operatorRunModule from "./operator-run.server";
-import * as operatorCodexPlan from "./operator-codex-plan.server";
 import {
   AGENT_REPORT_CAP_TOOLLESS,
   type OperatorTaskSnapshot,
@@ -2143,7 +2143,6 @@ describe("pr-diverged turn instruction (both backends)", () => {
   });
 
   it("ruling 443: a step whose outcome is the packet it opened is not a refusal", () => {
-    const { planRefusalOf } = operatorCodexPlan;
     const conflict = "`ax-5` CONFLICTS with `main`. Opened a blocking decision packet for a human to resolve.";
     // CANARY: drop the `openedPacket` check and AX-5's refresh is narrated
     // "This step did not apply" beside the packet it opened.
@@ -2931,9 +2930,9 @@ describe("stranded auto-stage resume", () => {
         expect(parsed.frontmatter.waiting).toBe("human");
       });
       // Ruling 399: the pause itself is right and stays, but its note says the
-      // operator was stopped. CANARY: drop the `planRefused` branch and this
-      // note calls a refused plan a deliberate hold, which is what AX-4's
-      // timeline says verbatim.
+      // operator was stopped. CANARY: drop `heldNudgeNote`'s
+      // `planWhollyRefused` branch and this note calls a refused plan a
+      // deliberate hold, which is what AX-4's timeline says verbatim.
       const note = readTaskFile({ projectSlug: store2.slug, taskKey: "VIB-1", dataRoot: store2.dataRoot })!
         .parsed.timeline.find((e) => e.text.includes("did not hold this stage"))?.text;
       expect(note, "no hold note says the operator was stopped").toBeDefined();
@@ -2945,6 +2944,83 @@ describe("stranded auto-stage resume", () => {
       expect(note).toContain("take the action yourself");
       await new Promise((resolve) => setTimeout(resolve, 80));
       expect(operatorRuns()).toHaveLength(2);
+    });
+
+    /**
+     * Ruling 399 on Claude (ruling 705). A Claude drive's governed tools answer
+     * each refusal to the model in-run, and no timeline note narrates it, so
+     * `planWhollyRefused` (ruling 228, a Codex plan's) is never set. A nudge
+     * whose every call was refused therefore read at settle as one that tried
+     * nothing, and got "the operator held it twice in a row … treated as a
+     * deliberate hold … run the operator manually": the two falsehoods and the
+     * remedy ruling 399 took out of the Codex note.
+     *
+     * The calls go through the drive's mounted `viberr` server with a real MCP
+     * client, the way the model makes them (ruling 406's Claude row).
+     */
+    it("ruling 399 on Claude: a nudge refused every time was stopped, and the note quotes the refusals", async () => {
+      reconfigureProject(store2, {
+        agents: [codexOperator(OPERATOR_POLICY, { backends: ["claude"], model: defaultModelFor("claude") })],
+      });
+      /** One governed call on the pending Claude drive; the reply it read. */
+      const callOnDrive = async (name: string, args: Record<string, string>): Promise<string> => {
+        const viberr = adapter2.pending!.spec.mcpServers?.viberr;
+        if (!inProcess(viberr)) throw new Error("a Claude drive must mount viberr in process");
+        const client = await connectedClient(viberr, "ruling-399");
+        const reply = await client.callTool({ name, arguments: args });
+        await client.close();
+        return z
+          .object({ content: z.array(z.object({ text: z.string() })) })
+          .parse(reply)
+          .content.map((c) => c.text)
+          .join("\n");
+      };
+      await runOperator(store2.db, {
+        projectSlug: store2.slug,
+        taskKey: "VIB-1",
+        backend: "claude",
+        autonomy: "supervised",
+        trigger: "create",
+        dataRoot: store2.dataRoot,
+      });
+      // A move to Done is an acceptance, and this operator holds no
+      // `completion-for-acceptance` grant: refused by its policy.
+      const refusal = await callOnDrive("transition_stage", { toStageId: "done" });
+      expect(refusal).toMatch(/^\[denied\] Accepting completion is not permitted/);
+      adapter2.finish(store2, "Accepting is not mine to do here.", "finished");
+      // Triage auto-advances, so the backstop nudges once. CANARY: record a
+      // Claude refusal as `planWhollyRefused` and this is ruling 228's
+      // plan-refused nudge, paid for refusals the drive had already read.
+      await eventually(() => {
+        expect(operatorRuns()).toHaveLength(2);
+        expect(adapter2.pending).not.toBeNull();
+      });
+      expect(adapter2.pending!.spec.prompt).toContain("your previous run ended with this auto-advance stage idle");
+      expect(adapter2.pending!.spec.prompt).not.toContain("EVERY action your previous run planned was refused");
+      // The nudge tries the same move and is refused the same way.
+      expect(await callOnDrive("transition_stage", { toStageId: "done" })).toBe(refusal);
+      adapter2.finish(store2, "Still not mine to do.", "finished");
+      await eventually(() => {
+        const parsed = readTaskFile({ projectSlug: store2.slug, taskKey: "VIB-1", dataRoot: store2.dataRoot })!.parsed;
+        // The pause stays, as ruling 399 keeps it, and settles to a person
+        // rather than to a third drive.
+        expect(parsed.frontmatter.heldAtStage).toBe(parsed.frontmatter.stage);
+        expect(parsed.frontmatter.waiting).toBe("human");
+      });
+      // CANARY: drop the Claude record (`noteRefusedCall` in the toolkit's
+      // `resultText`) and this note calls the refused nudge a deliberate hold
+      // and sends the reader to run the operator manually.
+      const note = readTaskFile({ projectSlug: store2.slug, taskKey: "VIB-1", dataRoot: store2.dataRoot })!
+        .parsed.timeline.find((e) => e.text.includes("Coordination is paused"))?.text;
+      expect(note, "no hold note").toBeDefined();
+      expect(note).not.toContain("deliberate hold");
+      expect(note).not.toContain("run the operator manually");
+      expect(note).toContain("the operator did not hold this stage; it was stopped");
+      // It quotes the refusal the call was answered with, which nothing else on
+      // the timeline does, and points at no refusal note.
+      expect(note).toContain(`- \`transition_stage\`: ${refusal.replace(/^\[denied\] /, "")}`);
+      expect(note).not.toContain("refusal notes are directly above");
+      expect(note).toContain("take the action yourself");
     });
 
     /**

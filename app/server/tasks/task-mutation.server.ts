@@ -161,6 +161,22 @@ export interface TaskMutationContext {
      */
     refusedPlanSteps?: { tool: string; message: string }[];
     /**
+     * Ruling 399 on Claude (ruling 705): each governed call of a CLAUDE drive
+     * that Viberr refused (`planRefusalOf`), in order, recorded by
+     * `noteRefusedCall` from the toolkit's reply. Its one reader is the
+     * settle's hold note: a nudged drive that carried out nothing and was
+     * refused here was STOPPED, and the note quotes these, because no timeline
+     * note narrates a Claude drive's refusals.
+     *
+     * A field of its own, not `refusedPlanSteps` with `planWhollyRefused`.
+     * Those keep their Codex meaning: ruling 228's premise is a plan whose
+     * refusals arrive after its turn has ended, where nobody reads them, which
+     * is what pays for the plan-refused nudge and its quote (ruling 400). A
+     * Claude drive read each refusal in-run and chose to end its turn, so its
+     * refusals arm no nudge, and kept apart they cannot reach one.
+     */
+    refusedCalls?: { tool: string; message: string }[];
+    /**
      * Ruling 357 (pass 38, F38-11): this drive's own delivery opened the review
      * PR or moved its head under full autonomy — the event that used to queue
      * a `delivered` operator turn behind this very drive's lease. The drive

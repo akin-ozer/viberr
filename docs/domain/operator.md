@@ -256,9 +256,17 @@ and stay quiet until a person re-litigates it (a transition, a packet resolution
 edit, a person's Run). An action carried out is any governed action that answered `done`,
 or one whose outcome is the packet it opened (ruling 443), on either backend: a Codex plan
 step through the executor's `record` and a Claude tool call through the toolkit's reply
-both stamp it with `noteCarriedOutAction` (ruling 705). When the nudged drive's plan was
-wholly refused again, the note says the operator was STOPPED, not holding, and names the
-three remedies (ruling 399).
+both stamp it with `noteCarriedOutAction` (ruling 705). When the nudged drive tried to act
+and Viberr refused all of it, the note says the operator was STOPPED, not holding, and
+names the three remedies (ruling 399). On Codex that is a plan wholly refused again, and
+the note points at the refusal notes the plan left directly above it. On Claude it is a
+drive whose governed calls were refused (`planRefusalOf`, the predicate the plan executor
+asks, kept on the drive by `noteRefusedCall` from the toolkit's reply): its tools answered
+each refusal to the model in the run and no timeline note narrates them, so the hold note
+quotes the refused calls itself, one "- `tool`: message" line each, and says nothing of
+the drive before the nudge (ruling 705). A Claude drive's refusals arm no nudge of their
+own: ruling 228's plan-refused nudge pays for refusals that arrive after a Codex turn has
+ended, where nobody reads them, and a Claude drive read its refusals and ended its turn.
 The nudge chain shares `OPERATOR_TRANSITION_CHAIN_CAP`; at the cap a note says the
 operator ended that many runs without advancing, opening a packet or engaging an agent.
 

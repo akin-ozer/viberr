@@ -151,6 +151,66 @@ export function noteCarriedOutAction(
   }
 }
 
+/** A plan step or tool call that did not run, and WHY it did not (see
+ *  OperatorActionResult): `authority` = the capability policy (or ownership)
+ *  refused it; `state` = the task's current state, or the step itself, ruled
+ *  it out. */
+export interface RefusedPlanStep {
+  tool: string;
+  message: string;
+  kind: "authority" | "state";
+}
+
+/**
+ * Ruling 443: what one action's result refuses, if anything. `denied` is a
+ * refusal by authority and `noop` one by state (the LV-03 split), except a
+ * step whose outcome is the decision packet it opened. Live on ax-clone AX-21,
+ * AX-28 and AX-5 a refresh that met a conflict was narrated "This step did not
+ * apply to the task's current state" beside the packet it had just opened.
+ * The step ran, and its outcome was the packet.
+ *
+ * Both backends ask it: a Codex plan's `record` and a Claude drive's tool
+ * replies (`noteRefusedCall`), so a refusal is one fact on each.
+ */
+export function planRefusalOf(
+  toolName: string,
+  result: OperatorActionResult,
+): RefusedPlanStep | null {
+  if (result.outcome !== "denied" && result.outcome !== "noop") return null;
+  if (result.openedPacket) return null;
+  return {
+    tool: toolName,
+    message: result.message,
+    kind: result.outcome === "denied" ? "authority" : "state",
+  };
+}
+
+/**
+ * Ruling 399 on Claude (ruling 705): record a Claude drive's refused governed
+ * call on the drive, for the settle's hold note. A Codex plan's refusals are
+ * narrated onto the timeline once the plan has run (`narrateRefusedActions`);
+ * a Claude drive's reach the model in-run, as its tool's reply, and nothing
+ * else kept them. So a nudge whose every call was refused read at settle as a
+ * drive that tried nothing, and its hold note called it deliberate.
+ */
+export function noteRefusedCall(
+  ctx: TaskMutationContext,
+  toolName: string,
+  result: OperatorActionResult,
+): void {
+  const refusal = planRefusalOf(toolName, result);
+  if (ctx.operatorRun && refusal) {
+    (ctx.operatorRun.refusedCalls ??= []).push({ tool: refusal.tool, message: refusal.message });
+  }
+}
+
+/** Refused actions as a person reads them, one "- `tool`: message" line each:
+ *  a Codex plan's refusal note and a stopped Claude drive's hold note (ruling
+ *  399) print the same list. */
+export function refusalList(refusals: readonly { tool: string; message: string }[]): string {
+  return refusals.map((r) => `- \`${r.tool}\`: ${r.message}`).join("\n");
+}
+
 function readAutonomy(
   definition: AgentDeploymentDefinition | undefined,
 ): OperatorAutonomy {
