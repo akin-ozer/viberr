@@ -139,6 +139,13 @@ function renderBoard(
   );
 }
 
+/** The fields a board POST carried, files left out: what its action reads. */
+async function postedFields(request: Request): Promise<Record<string, string>> {
+  const row: Record<string, string> = {};
+  for (const [k, v] of (await request.formData()).entries()) if (!(v instanceof File)) row[k] = v;
+  return row;
+}
+
 describe("UI-58: the Board/List seg carries its selected state", () => {
   it("marks the active layout with aria-pressed", () => {
     const { getByRole } = renderBoard([task()]);
@@ -710,10 +717,7 @@ describe("B1: accepting from the board asks first", () => {
       [task({ key: "VIB-1", stage: "done" })],
       {
         action: async ({ request }) => {
-          const fd = await request.formData();
-          const row: Record<string, string> = {};
-          for (const [k, v] of fd.entries()) if (!(v instanceof File)) row[k] = v;
-          posted.push(row);
+          posted.push(await postedFields(request));
           return { ok: true as const, toast: "moved" };
         },
       },
@@ -1158,6 +1162,18 @@ describe("F19-8: an archived card is inert and honest", () => {
   });
 });
 
+/** The acceptance confirm VIB-1's Move menu opens on its way from `from` into
+ *  Done, as one line of text. */
+function confirmText(patch: Partial<BoardTask>, from: "impl" | "triage" = "impl"): string {
+  const r = renderBoard([task({ key: "VIB-1", stage: from, ...patch })], {
+    action: () => ({ ok: true as const, toast: "moved" }),
+  });
+  const stage = STAGES.find((s) => s.id === from)!.name;
+  fireEvent.click(r.getByLabelText(`Change stage (currently ${stage})`));
+  fireEvent.click(r.getByRole("menuitemradio", { name: "Done" }));
+  return r.container.querySelector("dialog")!.textContent!.replace(/\s+/g, " ");
+}
+
 /**
  * F19-27 — the board acceptance confirm received `taskKey` + `stageName` and
  * disclosed neither the PR it merges, the head it merges, nor the verdict it
@@ -1166,25 +1182,16 @@ describe("F19-8: an archived card is inert and honest", () => {
  * accept dialog — board acceptance runs the identical contract.
  */
 describe("F19-27: the board accept confirm discloses what it merges", () => {
-  const openConfirm = (patch: Partial<BoardTask>) => {
-    const r = renderBoard([task({ key: "VIB-1", stage: "impl", ...patch })], {
-      action: () => ({ ok: true as const, toast: "moved" }),
-    });
-    fireEvent.click(r.getByLabelText("Change stage (currently In Progress)"));
-    fireEvent.click(r.getByRole("menuitemradio", { name: "Done" }));
-    return r.container.querySelector("dialog")!.textContent!.replace(/\s+/g, " ");
-  };
-
   it("names the pull request and its state through the one PR-state map", () => {
     expect(
-      openConfirm({
+      confirmText({
         pr: { number: 124, state: "review", title: "Attach a credential" },
       }),
     ).toContain("PR #124 · in review");
   });
 
   it("warns that commits added since the review merge unreviewed (ruling 42)", () => {
-    const text = openConfirm({
+    const text = confirmText({
       pr: {
         number: 124,
         state: "review",
@@ -1198,17 +1205,17 @@ describe("F19-27: the board accept confirm discloses what it merges", () => {
   });
 
   it("shows the verdict it is about to accept over", () => {
-    expect(openConfirm({ validation: "changed" })).toContain("awaiting verdict");
+    expect(confirmText({ validation: "changed" })).toContain("awaiting verdict");
   });
 
   it("states the standing refusal instead of spending the click on an error", () => {
     expect(
-      openConfirm({ blockReason: "No reviewer verdict on the delivered revision." }),
+      confirmText({ blockReason: "No reviewer verdict on the delivered revision." }),
     ).toContain("No reviewer verdict on the delivered revision.");
   });
 
   it("says so honestly when there is no pull request to merge", () => {
-    const text = openConfirm({ pr: null });
+    const text = confirmText({ pr: null });
     expect(text).toContain("No linked pull request");
     expect(text).not.toContain("PR #");
   });
@@ -1226,15 +1233,6 @@ describe("F19-27: the board accept confirm discloses what it merges", () => {
  * dialog with no blocked row, and the server refused the click afterwards.
  */
 describe("F19-27: the board confirm asks the server's own refusal questions", () => {
-  const openConfirm = (patch: Partial<BoardTask>) => {
-    const r = renderBoard([task({ key: "VIB-1", stage: "impl", ...patch })], {
-      action: () => ({ ok: true as const, toast: "moved" }),
-    });
-    fireEvent.click(r.getByLabelText("Change stage (currently In Progress)"));
-    fireEvent.click(r.getByRole("menuitemradio", { name: "Done" }));
-    return r.container.querySelector("dialog")!.textContent!.replace(/\s+/g, " ");
-  };
-
   const blockedPacket = {
     type: "blocked" as const,
     kind: "Blocked decision",
@@ -1249,7 +1247,7 @@ describe("F19-27: the board confirm asks the server's own refusal questions", ()
     // Same predicate the acceptance writers pass as `blockedPacket`, and the
     // same sentence the task page shows for it.
     expect(
-      openConfirm({
+      confirmText({
         readiness: "blocked",
         packet: blockedPacket,
         blockReason: null,
@@ -1259,7 +1257,7 @@ describe("F19-27: the board confirm asks the server's own refusal questions", ()
 
   it("leaves an INPUT packet alone — only a blocked one gates acceptance", () => {
     expect(
-      openConfirm({
+      confirmText({
         readiness: "input_required",
         packet: { type: "input", title: blockedPacket.title },
         blockReason: null,
@@ -1268,7 +1266,7 @@ describe("F19-27: the board confirm asks the server's own refusal questions", ()
   });
 
   it("names a conflicting PR through the server's own predicate", () => {
-    const text = openConfirm({
+    const text = confirmText({
       blockReason: null,
       pr: {
         number: 124,
@@ -1288,7 +1286,7 @@ describe("F19-27: the board confirm asks the server's own refusal questions", ()
 
   it("ruling 135: names an unpushed delivered revision ABOVE the conflict, through the server's own predicate", () => {
     // Canary: drop `unpushedRevisionBlockedReason` from `boardAcceptRefusal` (board-accept-confirm.tsx).
-    const text = openConfirm({
+    const text = confirmText({
       blockReason: null,
       workRevisionSha: "9".repeat(40),
       pr: {
@@ -1303,7 +1301,7 @@ describe("F19-27: the board confirm asks the server's own refusal questions", ()
 
   it("stays silent on a PR that merges cleanly", () => {
     expect(
-      openConfirm({
+      confirmText({
         blockReason: null,
         pr: {
           number: 124,
@@ -1316,7 +1314,7 @@ describe("F19-27: the board confirm asks the server's own refusal questions", ()
   });
 
   it("keeps the server's precedence — the revision gate speaks first", () => {
-    const text = openConfirm({
+    const text = confirmText({
       blockReason: "VIB-1's delivered revision has no approving verdict yet.",
       readiness: "blocked",
       packet: blockedPacket,
@@ -1338,23 +1336,7 @@ describe("F19-27: the board confirm asks the server's own refusal questions", ()
  * derived server-side through the same `resolveStageRoles` the writers gate on.
  */
 describe("F19-27: the confirm names the stage gate the server will refuse on", () => {
-  const fromTriage = (patch: Partial<BoardTask> = {}) => {
-    const r = renderBoard([task({ key: "VIB-1", stage: "triage", ...patch })], {
-      action: () => ({ ok: true as const, toast: "moved" }),
-    });
-    fireEvent.click(r.getByLabelText("Change stage (currently Triage)"));
-    fireEvent.click(r.getByRole("menuitemradio", { name: "Done" }));
-    return r.container.querySelector("dialog")!.textContent!.replace(/\s+/g, " ");
-  };
-
-  const fromBoundary = (patch: Partial<BoardTask> = {}) => {
-    const r = renderBoard([task({ key: "VIB-1", stage: "impl", ...patch })], {
-      action: () => ({ ok: true as const, toast: "moved" }),
-    });
-    fireEvent.click(r.getByLabelText("Change stage (currently In Progress)"));
-    fireEvent.click(r.getByRole("menuitemradio", { name: "Done" }));
-    return r.container.querySelector("dialog")!.textContent!.replace(/\s+/g, " ");
-  };
+  const fromTriage = (patch: Partial<BoardTask> = {}) => confirmText(patch, "triage");
 
   it("still names the stage the card is leaving in the head sentence", () => {
     const text = fromTriage({ atAcceptanceBoundary: false });
@@ -1375,7 +1357,7 @@ describe("F19-27: the confirm names the stage gate the server will refuse on", (
   });
 
   it("leaves a boundary accept unblocked — the graph really allows that edge", () => {
-    const text = fromBoundary();
+    const text = confirmText({});
     expect(text).not.toContain("the boundary the workflow puts before");
     expect(text).not.toContain("Blocked");
   });
@@ -1935,10 +1917,7 @@ describe("D3: the board renders the shared acceptance ceremony", () => {
       ],
       {
         action: async ({ request }) => {
-          const fd = await request.formData();
-          const row: Record<string, string> = {};
-          for (const [k, v] of fd.entries()) if (!(v instanceof File)) row[k] = v;
-          submitted.push(row);
+          submitted.push(await postedFields(request));
           return { ok: true as const, toast: "moved" };
         },
       },
@@ -1983,10 +1962,7 @@ describe("D3: the board renders the shared acceptance ceremony", () => {
       ],
       {
         action: async ({ request }) => {
-          const fd = await request.formData();
-          const row: Record<string, string> = {};
-          for (const [k, v] of fd.entries()) if (!(v instanceof File)) row[k] = v;
-          submitted.push(row);
+          submitted.push(await postedFields(request));
           return { ok: true as const, toast: "moved" };
         },
       },
@@ -2028,10 +2004,7 @@ describe("D3: the board renders the shared acceptance ceremony", () => {
       ],
       {
         action: async ({ request }) => {
-          const fd = await request.formData();
-          const row: Record<string, string> = {};
-          for (const [k, v] of fd.entries()) if (!(v instanceof File)) row[k] = v;
-          submitted.push(row);
+          submitted.push(await postedFields(request));
           return { ok: false as const, toast: refusal };
         },
       },
@@ -2759,9 +2732,7 @@ describe("acce-17: Move up / Move down reorder a card within its lane", () => {
     const posted: Record<string, string>[] = [];
     const view = renderBoard(lane(), {
       action: async ({ request }) => {
-        const fd = await request.formData();
-        const row: Record<string, string> = {};
-        for (const [k, v] of fd.entries()) if (!(v instanceof File)) row[k] = v;
+        const row = await postedFields(request);
         posted.push(row);
         return { ok: true as const, toast: `Reordered ${row.taskKey}` };
       },
