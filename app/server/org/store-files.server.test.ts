@@ -14,7 +14,6 @@ import {
 } from "~/server/files/file-store-root.server";
 import { createConnection } from "./connections.server";
 import {
-  getSkill,
   listKnowledgeBases,
   listSkills,
   resolveStoreTarget,
@@ -153,7 +152,7 @@ describe("uploads", () => {
     );
     expect(result.capturedSkillMd).toBe(true);
     // The skill body is re-read from disk on the next load.
-    expect(getSkill(db, skill.id, ctx)!.body).toBe("## captured body");
+    expect(listSkills(db, ctx).find((s) => s.id === skill.id)!.body).toBe("## captured body");
   });
 
   // Ruling 183 (pass 36, F36-2): the upload path is a SKILL.md writer too.
@@ -181,7 +180,7 @@ describe("uploads", () => {
       ),
     ).toThrowError(/JSON-escaped/);
     expect(existsSync(path.join(target.rootAbs, "notes.md"))).toBe(false);
-    expect(getSkill(db, skill.id, ctx)!.body).toBe("# kept");
+    expect(listSkills(db, ctx).find((s) => s.id === skill.id)!.body).toBe("# kept");
     // A nested SKILL.md is a supporting file, not the skill: not judged.
     const nested = writeStoreFiles(
       db,
@@ -864,12 +863,12 @@ describe("writeStoreDoc", () => {
         overwrite: true,
       }),
     ).toThrowError(/frontmatter/);
-    expect(getSkill(db, skill.id, ctx)!.body).toBe("# kept");
+    expect(listSkills(db, ctx).find((s) => s.id === skill.id)!.body).toBe("# kept");
     const ok = writeStoreDoc(db, target, [], "SKILL.md", "# Rewritten\n- fine", ACTOR, {
       overwrite: true,
     });
     expect(ok.replaced).toBe(true);
-    expect(getSkill(db, skill.id, ctx)!.body).toBe("# Rewritten\n- fine");
+    expect(listSkills(db, ctx).find((s) => s.id === skill.id)!.body).toBe("# Rewritten\n- fine");
   });
 
   // P14-RV-02: `assertInsideRoot` was LEXICAL — it proved the path STRING sat

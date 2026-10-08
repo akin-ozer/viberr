@@ -345,7 +345,7 @@ function kbRowForId(db: DatabaseSync, id: string | null | undefined): KbRow | nu
   return (db.prepare(`${KB_SQL} WHERE dir = ?`).get(dir) as KbRow | undefined) ?? null;
 }
 
-export function getKnowledgeBase(
+function getKnowledgeBase(
   db: DatabaseSync,
   id: string,
   ctx: OrgSeedContext = {},
@@ -1145,7 +1145,7 @@ export function listMcpServerNames(db: DatabaseSync): string[] {
   return rows.map((r) => r.name);
 }
 
-export function getMcpServer(
+function getMcpServer(
   db: DatabaseSync,
   id: string,
 ): McpView | null {
@@ -2505,7 +2505,7 @@ function skillRowForId(
   );
 }
 
-export function getSkill(
+function getSkill(
   db: DatabaseSync,
   id: string,
   ctx: OrgSeedContext = {},

@@ -29,7 +29,7 @@ import {
   signOutMcpOAuth,
   startMcpOAuthSignIn,
 } from "./mcp-oauth.server";
-import { getMcpServer, listMcpServers, saveMcpServer, testMcpServer } from "./resources.server";
+import { listMcpServers, saveMcpServer, testMcpServer } from "./resources.server";
 
 /**
  * Ruling 469: an HTTP MCP connection signs in with OAuth, end to end against
@@ -79,6 +79,9 @@ function callbackInput(back: URL, session = ADMIN) {
 
 /** Start, consent at the in-test authorization server, complete. */
 const signIn = () => signInWithOAuth(db, MCP_ID);
+
+/** The connection as the Agent resources list reads it. */
+const mcpRow = () => listMcpServers(db).find((mcp) => mcp.id === MCP_ID);
 
 function rawRow(): { cred_ref: string | null; oauth_ref: string | null; oauth_json: string | null } {
   // SAFETY: three nullable TEXT columns of `org_mcp_servers` (0001_baseline.sql).
@@ -160,7 +163,7 @@ describe("the callback: exchange and seal (ruling 469)", () => {
       expect(row.oauth_ref).not.toContain(secret);
       expect(row.oauth_json).not.toContain(secret);
     }
-    const view = getMcpServer(db, MCP_ID)?.oauth;
+    const view = mcpRow()?.oauth;
     expect(view).toMatchObject({ status: "signed_in", renews: true, issuer: new URL(server.origin).host, reason: null });
     expect(Date.parse(view?.expiresAt ?? "") - Date.now()).toBeGreaterThan(3_500_000);
     const [connected] = listAuditEvents(db, { action: "org.mcp.oauth_connected" });
@@ -237,8 +240,8 @@ describe("the token upstream: use, renew, expire (ruling 469)", () => {
     // Every MCP request carried the renewed token, none the one that ran out.
     const [, renewedAccess] = server.issuedSecrets().filter((secret) => secret.startsWith("at_"));
     expect(new Set(server.authorizations)).toEqual(new Set([`Bearer ${renewedAccess}`]));
-    expect(getMcpServer(db, MCP_ID)?.oauth?.status).toBe("signed_in");
-    expect(Date.parse(getMcpServer(db, MCP_ID)?.oauth?.expiresAt ?? "") - Date.now()).toBeGreaterThan(3_500_000);
+    expect(mcpRow()?.oauth?.status).toBe("signed_in");
+    expect(Date.parse(mcpRow()?.oauth?.expiresAt ?? "") - Date.now()).toBeGreaterThan(3_500_000);
   });
 
   it("renews once on a 401 and retries with the new token", async () => {
@@ -257,7 +260,7 @@ describe("the token upstream: use, renew, expire (ruling 469)", () => {
     await signIn();
     server.invalidateAccessTokens();
     await expect(callWhoami()).rejects.toThrow(OAUTH_SIGN_IN_EXPIRED);
-    const view = getMcpServer(db, MCP_ID)?.oauth;
+    const view = mcpRow()?.oauth;
     expect(view).toMatchObject({ status: "expired", renews: false });
     expect(view?.reason).toMatch(/invalid_grant/);
     const [failed] = listAuditEvents(db, { action: "org.mcp.oauth_failed" });
@@ -273,7 +276,7 @@ describe("the token upstream: use, renew, expire (ruling 469)", () => {
     await signIn();
     server.invalidateAccessTokens();
     await expect(callWhoami()).rejects.toThrow(/could not renew the OAuth sign-in: .*temporarily_unavailable/);
-    expect(getMcpServer(db, MCP_ID)?.oauth?.status).toBe("signed_in");
+    expect(mcpRow()?.oauth?.status).toBe("signed_in");
     server.options.refresh = "ok";
     expect(await callWhoami()).toContain("whoami");
   });
@@ -342,7 +345,7 @@ describe("health, runs and sign-out (ruling 469)", () => {
     expect(toast).toBe("cloudflare-api signed out. Its tokens were revoked at the server and deleted here.");
     expect(new Set(server.revoked)).toEqual(new Set([access, refresh]));
     expect(rawRow().oauth_ref).toBeNull();
-    expect(getMcpServer(db, MCP_ID)?.oauth?.status).toBe("needs_sign_in");
+    expect(mcpRow()?.oauth?.status).toBe("needs_sign_in");
     expect(listAuditEvents(db, { action: "org.mcp.oauth_signed_out" })[0]?.details).toEqual({
       name: "cloudflare-api",
       revocation: "revoked",
@@ -399,7 +402,7 @@ describe("a sign-in ended or landed while a request was on the wire (R-oauth-3)"
     const token = await source.renewAfterRefusal(firstAccess ?? "");
     const [, secondAccess] = server.issuedSecrets().filter((secret) => secret.startsWith("at_"));
     expect(token).toBe(secondAccess);
-    expect(getMcpServer(db, MCP_ID)?.oauth?.status).toBe("signed_in");
+    expect(mcpRow()?.oauth?.status).toBe("signed_in");
     expect(listAuditEvents(db, { action: "org.mcp.oauth_failed" })).toEqual([]);
   });
 
@@ -412,10 +415,10 @@ describe("a sign-in ended or landed while a request was on the wire (R-oauth-3)"
     const [, live] = server.issuedSecrets().filter((secret) => secret.startsWith("at_"));
     const source = mcpOAuthTokenSource(db, MCP_ID, server.url);
     await source.refusedAfterRenewal(stale ?? "");
-    expect(getMcpServer(db, MCP_ID)?.oauth?.status).toBe("signed_in");
+    expect(mcpRow()?.oauth?.status).toBe("signed_in");
     const ended = await source.refusedAfterRenewal(live ?? "");
     expect(ended.reason).toBe(OAUTH_SIGN_IN_EXPIRED);
-    expect(getMcpServer(db, MCP_ID)?.oauth?.status).toBe("expired");
+    expect(mcpRow()?.oauth?.status).toBe("expired");
   });
 
   it("a callback whose row was re-pointed during the code exchange writes nothing and keeps the credential that save pasted", async () => {
@@ -445,7 +448,7 @@ describe("a sign-in ended or landed while a request was on the wire (R-oauth-3)"
     expect(result).toMatchObject({ ok: false, message: expect.stringContaining("endpoint changed") });
     expect(rawRow().cred_ref).not.toBeNull();
     expect(rawRow()).toMatchObject({ oauth_ref: null, oauth_json: null });
-    expect(getMcpServer(db, MCP_ID)?.target).toBe(`${server.origin}/other`);
+    expect(mcpRow()?.target).toBe(`${server.origin}/other`);
   });
 });
 
@@ -460,7 +463,7 @@ describe("a registered client the authorization server no longer accepts (R-oaut
     server.invalidateAccessTokens();
     await expect(callWhoami()).rejects.toThrow(OAUTH_SIGN_IN_EXPIRED);
     expect(rawRow().oauth_ref).toBeNull();
-    expect(getMcpServer(db, MCP_ID)?.oauth).toMatchObject({ status: "expired", reason: expect.stringContaining("invalid_client") });
+    expect(mcpRow()?.oauth).toMatchObject({ status: "expired", reason: expect.stringContaining("invalid_client") });
 
     const again = await signIn();
     expect(again.ok).toBe(true);
@@ -478,7 +481,7 @@ describe("a registered client the authorization server no longer accepts (R-oaut
     const refused = await signIn();
     expect(refused).toMatchObject({ ok: false, message: expect.stringContaining("invalid_client") });
     expect(rawRow().oauth_ref).toBeNull();
-    expect(getMcpServer(db, MCP_ID)?.oauth?.status).toBe("expired");
+    expect(mcpRow()?.oauth?.status).toBe("expired");
 
     const again = await signIn();
     expect(again.ok).toBe(true);
@@ -509,11 +512,11 @@ describe("a pasted credential and what is left of a sign-in (R-oauth-2)", () => 
     // reads "needs sign-in" for good, beside the credential runs mount.
     await startServer();
     await saveMcpServer(db, { ...base(), cred: "" }, ADMIN.actor);
-    expect(getMcpServer(db, MCP_ID)?.oauth?.status).toBe("needs_sign_in");
+    expect(mcpRow()?.oauth?.status).toBe("needs_sign_in");
     await saveMcpServer(db, { ...base(), cred: "a-pasted-token-123" }, ADMIN.actor);
     expect(rawRow()).toMatchObject({ oauth_ref: null, oauth_json: null });
     expect(rawRow().cred_ref).not.toBeNull();
-    expect(getMcpServer(db, MCP_ID)).toMatchObject({ hasCred: true, oauth: null });
+    expect(mcpRow()).toMatchObject({ hasCred: true, oauth: null });
 
     // An expired sign-in's sealed half (its registration) goes too: the
     // connection holds one credential, and it is the pasted one.
@@ -521,10 +524,10 @@ describe("a pasted credential and what is left of a sign-in (R-oauth-2)", () => 
     server.options.refresh = "invalid_grant";
     server.invalidateAccessTokens();
     await expect(callWhoami()).rejects.toThrow(OAUTH_SIGN_IN_EXPIRED);
-    expect(getMcpServer(db, MCP_ID)?.oauth?.status).toBe("expired");
+    expect(mcpRow()?.oauth?.status).toBe("expired");
     await saveMcpServer(db, { ...base(), cred: "a-pasted-token-456" }, ADMIN.actor);
     expect(rawRow()).toMatchObject({ oauth_ref: null, oauth_json: null });
-    expect(getMcpServer(db, MCP_ID)?.oauth).toBeNull();
+    expect(mcpRow()?.oauth).toBeNull();
     expect(listAuditEvents(db, { action: "org.mcp.updated" })[0]?.details).toMatchObject({ oauthDropped: true });
   });
 
@@ -537,8 +540,7 @@ describe("a pasted credential and what is left of a sign-in (R-oauth-2)", () => 
       JSON.stringify({ status: "needs_sign_in", expiresAt: null, renews: false, issuer: null, resourceMetadataUrl: null, reason: null }),
       MCP_ID,
     );
-    expect(getMcpServer(db, MCP_ID)).toMatchObject({ hasCred: true, oauth: null });
-    expect(listMcpServers(db).find((mcp) => mcp.id === MCP_ID)?.oauth).toBeNull();
+    expect(mcpRow()).toMatchObject({ hasCred: true, oauth: null });
   });
 });
 
@@ -568,7 +570,7 @@ describe("what a sign-in was granted, and what it asks for (ruling 486)", () => 
     await startServer({ grantedScope: CLOUDFLARE_READ_ONLY_GRANT });
     await signIn();
     expect(oauthJson().scope).toBe(CLOUDFLARE_READ_ONLY_GRANT);
-    expect(getMcpServer(db, MCP_ID)?.oauth?.scope).toBe(CLOUDFLARE_READ_ONLY_GRANT);
+    expect(mcpRow()?.oauth?.scope).toBe(CLOUDFLARE_READ_ONLY_GRANT);
     const [connected] = listAuditEvents(db, { action: "org.mcp.oauth_connected" });
     expect(connected?.details?.scope).toBe(CLOUDFLARE_READ_ONLY_GRANT);
 
@@ -578,19 +580,19 @@ describe("what a sign-in was granted, and what it asks for (ruling 486)", () => 
     server.invalidateAccessTokens();
     expect(await callWhoami()).toContain("whoami");
     expect(server.tokenRequests.at(-1)).toEqual({ grant: "refresh_token", answered: "tokens" });
-    expect(getMcpServer(db, MCP_ID)?.oauth?.scope).toBe("user:read offline_access workers-scripts.write");
+    expect(mcpRow()?.oauth?.scope).toBe("user:read offline_access workers-scripts.write");
 
     // A refresh reply that names no scope keeps the grant the sign-in held.
     server.options.grantedScope = null;
     server.invalidateAccessTokens();
     expect(await callWhoami()).toContain("whoami");
-    expect(getMcpServer(db, MCP_ID)?.oauth?.scope).toBe("user:read offline_access workers-scripts.write");
+    expect(mcpRow()?.oauth?.scope).toBe("user:read offline_access workers-scripts.write");
 
     // CANARY: keep `scope` through a sign-out, and a signed-out row still
     // claims a grant.
     await signOutMcpOAuth(db, MCP_ID, ADMIN.actor);
     expect(oauthJson()).toMatchObject({ status: "needs_sign_in", scope: null });
-    expect(getMcpServer(db, MCP_ID)?.oauth?.scope).toBeNull();
+    expect(mcpRow()?.oauth?.scope).toBeNull();
   });
 
   it("a sign-in stored before ruling 486 learns its grant at boot from the sealed token scope, once", async () => {
@@ -600,7 +602,7 @@ describe("what a sign-in was granted, and what it asks for (ruling 486)", () => 
     await signIn();
     const before486 = publicWithoutScope.parse(JSON.parse(rawRow().oauth_json ?? "null"));
     db.prepare(`UPDATE org_mcp_servers SET oauth_json = ? WHERE id = ?`).run(JSON.stringify(before486), MCP_ID);
-    expect(getMcpServer(db, MCP_ID)?.oauth?.scope).toBeNull();
+    expect(mcpRow()?.oauth?.scope).toBeNull();
     // CANARY: skip the write, and the row keeps naming no grant.
     expect(backfillMcpGrantScopes(db)).toEqual(["cloudflare-api"]);
     expect(oauthJson()).toMatchObject({ status: "signed_in", scope: CLOUDFLARE_READ_ONLY_GRANT });
@@ -640,7 +642,7 @@ describe("what a sign-in was granted, and what it asks for (ruling 486)", () => 
     await signIn();
     expect(server.authorizeRequests.at(-1)?.get("scope")).toBe("mcp.read mcp.write");
     // A token reply that names no scope granted what was asked (RFC 6749 §5.1).
-    expect(getMcpServer(db, MCP_ID)?.oauth?.scope).toBe("mcp.read mcp.write");
+    expect(mcpRow()?.oauth?.scope).toBe("mcp.read mcp.write");
 
     const saved = await saveMcpServer(
       db,
@@ -653,13 +655,13 @@ describe("what a sign-in was granted, and what it asks for (ruling 486)", () => 
     });
     await signIn();
     expect(server.authorizeRequests.at(-1)?.get("scope")).toBe("workers-scripts.write zone.read");
-    expect(getMcpServer(db, MCP_ID)?.oauth?.scope).toBe("workers-scripts.write zone.read");
+    expect(mcpRow()?.oauth?.scope).toBe("workers-scripts.write zone.read");
 
     // Absent keeps it; blank clears it.
     await saveMcpServer(db, base, ADMIN.actor);
-    expect(getMcpServer(db, MCP_ID)?.requestedScope).toBe("workers-scripts.write zone.read");
+    expect(mcpRow()?.requestedScope).toBe("workers-scripts.write zone.read");
     await saveMcpServer(db, { ...base, requestedScopes: " " }, ADMIN.actor);
-    expect(getMcpServer(db, MCP_ID)?.requestedScope).toBeNull();
+    expect(mcpRow()?.requestedScope).toBeNull();
   });
 
   it("tells a run what each OAuth sign-in was granted, and the save and test toasts say it too", async () => {

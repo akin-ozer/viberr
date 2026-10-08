@@ -22,9 +22,6 @@ import {
   deleteMcpServer,
   deleteSkill,
   discoverStdioMcpTools,
-  getMcpServer,
-  getKnowledgeBase,
-  getSkill,
   isFirstRunInstallerCommand,
   listKnowledgeBases,
   listSkills,
@@ -316,7 +313,7 @@ describe("knowledge bases", () => {
     // External edit → visible on the next read (the def-note promise).
     mkdirSync(path.join(dir, "decisions"), { recursive: true });
     writeFileSync(path.join(dir, "decisions", "adr-001.md"), "# ADR");
-    const fresh = getKnowledgeBase(db, kb.id, ctx)!;
+    const fresh = listKnowledgeBases(db, ctx).find((k) => k.id === kb.id)!;
     expect(fresh.fileCount).toBe(1);
     expect(fresh.tree[0]).toMatchObject({ type: "dir", name: "decisions" });
 
@@ -360,10 +357,10 @@ describe("knowledge bases", () => {
     const { db, dataRoot, ctx } = setup();
     const { kb } = await saveKnowledgeBase(db, { name: "Wiped", refresh: "manual" }, ACTOR, ctx);
     // A healthy KB with no docs still exists on disk.
-    expect(getKnowledgeBase(db, kb.id, ctx)!.folderExists).toBe(true);
+    expect(listKnowledgeBases(db, ctx).find((k) => k.id === kb.id)!.folderExists).toBe(true);
     // Remove the folder out from under the row (a store reset / external delete).
     rmSync(kbDirPath("wiped", dataRoot), { recursive: true, force: true });
-    const orphan = getKnowledgeBase(db, kb.id, ctx)!;
+    const orphan = listKnowledgeBases(db, ctx).find((k) => k.id === kb.id)!;
     expect(orphan.folderExists).toBe(false);
     expect(orphan.injectableCount).toBe(0); // indistinguishable from empty WITHOUT the flag
   });
@@ -424,7 +421,7 @@ describe("skills", () => {
       ctx,
     );
     expect(updated.toast).toBe("Skill terraform-review updated. SKILL.md rewritten");
-    expect(getSkill(db, skill.id, ctx)!.body).toBe("## New body");
+    expect(listSkills(db, ctx).find((s) => s.id === skill.id)!.body).toBe("## New body");
   });
 
   it("U36-4: a disk:<name> id whose folder already has a row updates THAT row instead of clashing", async () => {
@@ -645,7 +642,7 @@ describe("skills", () => {
     symlinkSync(outside, path.join(dir, "SKILL.md"));
 
     // READ: the editor shows nothing rather than the target's content.
-    expect(getSkill(db, skill.id, ctx)!.body).toBe("");
+    expect(listSkills(db, ctx).find((s) => s.id === skill.id)!.body).toBe("");
 
     // WRITE: refused, and the link target is untouched.
     await expect(
@@ -942,7 +939,7 @@ describe("mcp servers", () => {
     // as 15 because the old probe advertised no client capabilities.
     const healthy = await testMcpServer(db, mcp.id, { fetchImpl: mcpHttpFetch(15) });
     expect(healthy.toast).toMatch(/^github-mcp healthy: 15 tools · \d+ms$/);
-    expect(getMcpServer(db, mcp.id)!.tools).toBe(15);
+    expect(listMcpServers(db).find((m) => m.id === mcp.id)!.tools).toBe(15);
 
     const dead = await testMcpServer(db, mcp.id, { fetchImpl: unreachableFetch() });
     expect(dead.mcp.up).toBe(false);
@@ -1238,8 +1235,7 @@ describe("disk is truth (finding #7)", () => {
     expect(disk.id).toBe("disk:developer-expertise");
     expect(disk.summary).toBe("Implement a task's stage work.");
     expect(disk.updatedAt).toBeNull();
-    // getSkill resolves the synthetic id (StoreBrowser / edit rely on this).
-    expect(getSkill(db, disk.id, ctx)!.body).toContain("# body");
+    expect(disk.body).toContain("# body");
   });
 
   it("derives the summary from a BLOCK-SCALAR description (imported skills) — not a literal '|'", () => {
@@ -1260,7 +1256,7 @@ describe("disk is truth (finding #7)", () => {
     mkdirSync(dir, { recursive: true });
     writeFileSync(path.join(dir, "SKILL.md"), "# original");
 
-    const before = getSkill(db, "disk:reviewer-expertise", ctx)!;
+    const before = listSkills(db, ctx).find((s) => s.name === "reviewer-expertise")!;
     const { skill, toast } = await saveSkill(
       db,
       { id: before.id, name: "reviewer-expertise", summary: "Review verdicts.", body: "# edited" },
@@ -1317,7 +1313,7 @@ describe("disk is truth (finding #7)", () => {
       ),
     ).rejects.toThrowError(/already exists/);
     // Original content untouched.
-    expect(getSkill(db, "disk:api-design", ctx)!.body).toContain("# keep me");
+    expect(listSkills(db, ctx).find((s) => s.name === "api-design")!.body).toContain("# keep me");
   });
 
   it("rejects a path-traversal disk id instead of escaping the store root", async () => {
@@ -1867,7 +1863,7 @@ describe("knowledge-base doc counts", () => {
     writeFileSync(path.join(dir, "contract.pdf"), "%PDF-1.7");
     writeFileSync(path.join(dir, "diagram.png"), "png");
 
-    const fresh = getKnowledgeBase(db, kb.id, ctx)!;
+    const fresh = listKnowledgeBases(db, ctx).find((k) => k.id === kb.id)!;
     expect(fresh.fileCount).toBe(4);
     expect(fresh.injectableCount).toBe(2);
 
