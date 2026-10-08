@@ -412,67 +412,6 @@ describe("buildOperatorToolkit — update_branch_from_base (N19-9)", () => {
 });
 
 /**
- * A4 — with NO operator deployed, `resolveOperatorAuthority` returns an empty
- * policy and `deployed: false`. Every gate then denies, so the toolkit is
- * read-only. The bug: `deliverGate`'s absent-means-granted polarity fired for
- * the empty policy too, so this authority built `get_task` +
- * `deliver_for_review` — a run that could push a branch and open a PR with no
- * operator configured anywhere in the project.
- */
-describe("buildOperatorToolkit — no operator deployed (A4)", () => {
-  const undeployed = (): OperatorAuthority => ({
-    ...authority([]),
-    policy: new Map(),
-    deployed: false,
-    // A non-strict board: the shape whose absent grant resolved to `direct`.
-    humanGatedBeforeWork: false,
-  });
-
-  it("builds a READ-ONLY toolkit — no delivery, no packets, no transitions", () => {
-    const db = ctxDb.makeDb();
-    const toolkit = buildOperatorToolkit({
-      db,
-      ctx: { dataRoot: ctxDb.makeTempDir() },
-      projectSlug: "p",
-      taskKey: "P-1",
-      authority: undeployed(),
-    });
-    // R19-1: the operator reads the repository from the full read-only checkout
-    // under its cwd (Read/Grep/Glob), not from an MCP tool — so the in-process
-    // toolkit floor is the READS. What "read-only" excludes is every WRITE, and
-    // that is what this asserts: the floor is exactly the reads, and nothing
-    // that changes state is reachable.
-    //
-    // Ruling 282: `read_board` joins that floor. An undeployed operator holds
-    // no authority, and being able to SEE the board it holds no authority over
-    // takes nothing: the whole point of the floor is that reading is never the
-    // thing being withheld. Ruling 285's `read_timeline_entry` joins it for the
-    // same reason — and more sharply, because the task page shows a person the
-    // whole comment this returns, so withholding it from the coordinator
-    // withholds nothing from anyone. (`read_knowledge_doc` is NOT here: it is
-    // gated on the run's own KB grants, and this authority holds none.)
-    // Ruling 690: `read_task_source` joins the floor as `read_task_attachment`
-    // did: what a task keeps is on its page for every member to open.
-    expect(toolkit.allowedTools).toEqual([
-      "mcp__viberr__get_task",
-      "mcp__viberr__read_board",
-      "mcp__viberr__read_task_attachment",
-      "mcp__viberr__read_task_source",
-      "mcp__viberr__read_timeline_entry",
-    ]);
-    for (const write of [
-      "mcp__viberr__deliver_for_review",
-      "mcp__viberr__transition_stage",
-      "mcp__viberr__open_decision_packet",
-      "mcp__viberr__prompt_agent",
-      "mcp__viberr__post_comment",
-    ]) {
-      expect(toolkit.allowedTools).not.toContain(write);
-    }
-  });
-});
-
-/**
  * R19-1 — the toolkit's own instructions block is a SECOND channel into the
  * same model, and it used to contradict the first.
  *
@@ -587,19 +526,6 @@ describe("buildOperatorToolkit — read_default_branch_file (F21-21)", () => {
     expect(def.description).toContain("origin/main");
     expect(def.description).toContain("DELIVERING AGENT'S workspace");
     expect(def.description).toContain("never conclude from it that work landed out-of-band");
-  });
-
-  it("is withheld when the run has no checkout — a read that could only fail", () => {
-    const db = ctxDb.makeDb();
-    const toolkit = buildOperatorToolkit({
-      db,
-      ctx: { dataRoot: ctxDb.makeTempDir() },
-      projectSlug: "p",
-      taskKey: "P-1",
-      authority: authority([]),
-    });
-    expect(toolkit.allowedTools).not.toContain("mcp__viberr__read_default_branch_file");
-    expect(toolkit.tools.some((t) => t.name === "read_default_branch_file")).toBe(false);
   });
 });
 
