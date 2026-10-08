@@ -376,8 +376,10 @@ describe("Codex structured operator completion", () => {
       JSON.stringify({ reasoning: "Wait for VIB-2.", actions: [step(["VIB-2"]), step(null)] }),
       "finished",
     );
-    await new Promise((resolve) => setTimeout(resolve, 120));
-    expect(task().frontmatter.blockedBy).toEqual(["VIB-2"]);
+    await eventually(() => {
+      expect(task().frontmatter.blockedBy).toEqual(["VIB-2"]);
+      expect(task().timeline.some((e) => e.text.includes("The operator's plan was not carried out in full"))).toBe(true);
+    });
     expect(task().packet).toBeNull();
     // The malformed sibling is narrated through the STATE arm.
     const narration = task().timeline.find((e) => e.text.includes("The operator's plan was not carried out in full"));
