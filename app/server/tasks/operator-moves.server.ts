@@ -13,6 +13,7 @@ import {
   unpushedRevisionOf,
 } from "~/schemas/task-file.schema";
 import { resolveStageRoles, stageName } from "~/shared/workflow/stage-roles";
+import { engageStagesFor } from "~/shared/workflow/engage-stages";
 import { verdictStageFor } from "~/shared/workflow/verdict-stage";
 import { AppError } from "~/server/errors/app-error.server";
 import { readProjectFile } from "~/server/files/project-writer.server";
@@ -525,7 +526,8 @@ export async function foldAcceptanceRecommendation(
 /** True when moving `taskKey` to `toStageId` is an operator rework move (R7-4):
  *  a BACKWARD step to an earlier stage on a task whose latest review is
  *  `failing`. The operator performs these directly to route a rejected task
- *  back to the developer without a human. */
+ *  back to the developer without a human. Rulings 163 and 702 each add one
+ *  narrower backward move, named where they are read below. */
 function isReworkMove(
   ctx: TaskMutationContext,
   projectSlug: string,
@@ -545,16 +547,20 @@ function isReworkMove(
   if (!backward) return false;
   const validation = task.parsed.frontmatter.validation;
   if (validation === "failing") return true;
+  const board = { stages, workflow: project.parsed.frontmatter.workflow };
+  const deployed = listDeployedSpecialists(projectSlug, ctx);
+  // Ruling 702: a task with no delivering agent may go back to a stage where
+  // one can be engaged. Same answer `reworkStages` offers and `transitionStage`
+  // re-vets (`engageStagesFor`).
+  if (engageStagesFor(board, task.parsed.frontmatter, deployed).some((e) => e.stageId === toStageId)) {
+    return true;
+  }
   // Ruling 163 (pass 35, F35-13): a revision that changed after a verdict is
   // rework by definition; the one backward move it licenses is INTO the review
   // stage, where the re-verdict can be given. Same predicate `transitionStage`
   // re-vets, and the same shape `reworkStages` offers.
   if (validation !== "changed") return false;
-  const target = verdictStageFor(
-    { stages, workflow: project.parsed.frontmatter.workflow },
-    task.parsed.frontmatter,
-    listDeployedSpecialists(projectSlug, ctx),
-  );
+  const target = verdictStageFor(board, task.parsed.frontmatter, deployed);
   return target !== null && toStageId === target;
 }
 

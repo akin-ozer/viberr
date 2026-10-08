@@ -48,6 +48,7 @@ import type { startAgentRun } from "./specialist-run.server";
 import type { openTaskPr } from "~/server/github/pr-open.server";
 import type { mergeTaskPr } from "~/server/github/github-reconciler.server";
 import type { updateWorkspaceBranchFromBase } from "~/server/github/update-branch.server";
+import { type EngageStage, engageStagesFor } from "~/shared/workflow/engage-stages";
 import { verdictStageFor } from "~/shared/workflow/verdict-stage";
 import { logger } from "~/server/logging/logger.server";
 import { userDisplayName } from "./user-display-name.server";
@@ -178,6 +179,23 @@ export async function verdictStageOf(
   const specialistCtx: TaskMutationContext = {};
   if (ctx.dataRoot) specialistCtx.dataRoot = ctx.dataRoot;
   return verdictStageFor(project, fm, listDeployedSpecialists(projectSlug, specialistCtx));
+}
+
+/**
+ * Ruling 702: the earlier stages a task with no delivering agent may go back
+ * to so that one can be engaged (`engageStagesFor`, read against the deployed
+ * profiles), each with the agents' names.
+ */
+export async function engageStagesOf(
+  ctx: TaskMutationContext,
+  projectSlug: string,
+  project: ProjectContext,
+  fm: { stage: string; engagements: Engagement[] },
+): Promise<EngageStage[]> {
+  const { listDeployedSpecialists } = await import("./specialist-roster.server");
+  const specialistCtx: TaskMutationContext = {};
+  if (ctx.dataRoot) specialistCtx.dataRoot = ctx.dataRoot;
+  return engageStagesFor(project, fm, listDeployedSpecialists(projectSlug, specialistCtx));
 }
 
 /** The terminal (Done-equivalent) stage id. */

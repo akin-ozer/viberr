@@ -223,7 +223,13 @@ profile's stages.
    of them is eligible where the task stands, else the nearest earlier stage where one
    is; the acceptance-boundary stage when no verdict-capable profile is deployed), so a
    revision that moved after a verdict goes back for its re-verdict instead of waiting
-   at Merge. The operator's move INTO the acceptance-boundary stage is refused with the
+   at Merge. A third backward move is the operator's on a task with no delivering agent
+   (ruling 702): into an earlier stage where an agent that cannot be engaged where the
+   task stands can be (`engageStagesFor`), because ruling 133 lets only an ENGAGED
+   deliverer run past the stages its profile declares. A refused backward move says why
+   and names a way out that exists: the engaged deliverer on a task that has one, those
+   stages and their agents on a task that has none (rulings 412 and 702).
+   The operator's move INTO the acceptance-boundary stage is refused with the
    acceptance gate's own sentence while the review PR conflicts with the base or lacks
    the delivered revision (`mergeReadinessRefusal`, ruling 162: Merge means mergeable).
 6. Inside the file lock the stage is re-read: already there → write nothing; moved

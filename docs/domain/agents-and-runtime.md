@@ -1463,7 +1463,10 @@ A supporting engagement stays stage-scoped, and an unengaged profile whose sessi
 survives is judged by the new-engagement rule, so the @mention resume door
 (`assertResumeEligible`) refuses with the dispatcher's own sentence and posts the
 comment as a partial success. That door first refuses a closed task (ruling 177) and a
-held one (ruling 186) with the same sentences as every other door.
+held one (ruling 186) with the same sentences as every other door. A task with NO
+delivering engagement that stands past the stages its agents declare has nobody either
+half reaches, so the operator may move it back to an earlier stage where one can be
+engaged (ruling 702; `reworkStages` in its snapshot names the stages and the agents).
 
 Before a delivering dispatch on a task with no recorded branch (ruling 122),
 `ensureTaskBranchBestEffort` prepares the task branch, for a deliverer that writes the

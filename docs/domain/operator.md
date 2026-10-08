@@ -84,7 +84,9 @@ from the workflow graph, never a stored preset).
   the terminal stage is reachable only through acceptance. `transitionStage` enforces the
   same rule for every operator-authorized caller, so a `task.transition` row with
   `by: operator` and `boundary: approval` cannot be written. Rework moves on a failing task
-  (R7-4) are performed directly.
+  (R7-4) are performed directly. So are the two narrower backward moves: into the
+  review stage after a revision changed (ruling 163), and into an earlier stage where a
+  delivering agent can be engaged, on a task that has none (ruling 702).
 
 ## 3. Triggers
 
@@ -376,8 +378,10 @@ disagree with.
   `validation` (derived: `healthy | failing | changed | none`), owner, `blockedBy` (each
   entry with its resolved state, ruling 131), `stageIds`, `doneStageId`, `reviewStageId`,
   `workStageId`, `nextStages` (with boundaries), `reworkStages` (the earlier stages the
-  operator may move the task to directly: while validation is `failing`, and the one move
-  back to the review stage a `changed` revision licenses, ruling 163), `repo`, `branch`,
+  operator may move the task to directly: every one while validation is `failing`; the one
+  move back to the review stage a `changed` revision licenses, ruling 163; and, on a task
+  with no delivering agent, the stages where an agent that cannot be engaged where the task
+  stands can be, each with `engage` naming those agents, ruling 702), `repo`, `branch`,
   `noChanges`, `liveRuns`, `schedules` (ruling 487: the pending entries on the task, each
   with its action, due time, profile, prompt, `by` and `yours`, true for one the operator
   scheduled itself).
@@ -584,7 +588,9 @@ Details that matter:
   autonomy or the grant (ruling 151); a `human` boundary is refused; a backward move
   on a `failing` task is a rework move performed directly, and so is the one backward
   move a `changed` revision licenses, into the stage where the task's reviewers can
-  run (`reworkStages` lists it; ruling 163); a move INTO the acceptance-boundary stage
+  run (`reworkStages` lists it; ruling 163), and so is the move of a task that has no
+  delivering agent into an earlier stage where one can be engaged (`reworkStages` lists
+  each with `engage`; ruling 702); a move INTO the acceptance-boundary stage
   is refused with the gate's own sentence while the PR conflicts (`pr.mergeable:
   "conflicting"`) or lacks the delivered revision (`pr.unpushedRevision`) ("... KNC-6
   stays at Review: Merge is where acceptance happens, and the gate would refuse it. Call

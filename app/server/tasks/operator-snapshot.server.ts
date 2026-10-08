@@ -39,6 +39,7 @@ import {
   unpushedRevisionOf,
 } from "~/schemas/task-file.schema";
 import { resolveStageRoles, stageName } from "~/shared/workflow/stage-roles";
+import { engageStagesFor } from "~/shared/workflow/engage-stages";
 import { verdictStageFor } from "~/shared/workflow/verdict-stage";
 import { AppError } from "~/server/errors/app-error.server";
 import { readProjectFile } from "~/server/files/project-writer.server";
@@ -162,8 +163,10 @@ export interface OperatorTaskSnapshot {
    *  available to me" and parked the task on a human, while the move was
    *  legal all along. These are the earlier stages the operator MAY move the
    *  task to directly, no human and no recommendation. Non-empty only while
-   *  the latest review is `failing` — the same gate `transitionStage` vets. */
-  reworkStages: { id: string; name: string }[];
+   *  the latest review is `failing` — the same gate `transitionStage` vets.
+   *  Ruling 702: and while the task has no delivering agent, the earlier
+   *  stages where one can be engaged, each with `engage` naming the agents. */
+  reworkStages: { id: string; name: string; engage?: string[] }[];
   /** All stage ids in workflow order (first → done). Lets a coordinator tell a
    *  pre-work stage from the implementation stage from the review stage. */
   stageIds: string[];
@@ -1050,16 +1053,22 @@ export function operatorSnapshot(
     fm.validation === "changed"
       ? verdictStageFor({ stages, workflow }, fm, listDeployedSpecialists(projectSlug, ctx))
       : null;
-  const reworkStages =
-    fm.validation === "failing" && currentStageIndex > 0
-      ? stages
-          .slice(0, currentStageIndex)
-          .map((s) => ({ id: s.id, name: s.name }))
-      : changedTarget !== null
-        ? stages
-            .filter((s) => s.id === changedTarget)
-            .map((s) => ({ id: s.id, name: s.name }))
-        : [];
+  // Ruling 702: a task with no delivering agent may also go back to a stage
+  // where one can be engaged, and the entry says who, so the move and the
+  // hand-off that follows it are one decision. `failing` already licenses
+  // every earlier stage, so the names ride on those entries too.
+  const engageAt = new Map(
+    engageStagesFor({ stages, workflow }, fm, listDeployedSpecialists(projectSlug, ctx)).map(
+      (e) => [e.stageId, e.agents],
+    ),
+  );
+  const reworkStages = stages
+    .slice(0, Math.max(currentStageIndex, 0))
+    .filter((s) => fm.validation === "failing" || s.id === changedTarget || engageAt.has(s.id))
+    .map((s) => {
+      const engage = engageAt.get(s.id);
+      return engage ? { id: s.id, name: s.name, engage } : { id: s.id, name: s.name };
+    });
 
   const ownerName = fm.ownerUserId
     ? (userNameSchema.safeParse(

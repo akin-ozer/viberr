@@ -5626,6 +5626,123 @@ describe("pass 35 S15: rulings 162 and 163 at the merge stage", () => {
     expect(taskFile(store).frontmatter.previousStageId).toBe("merge");
   });
 
+  /**
+   * Ruling 702, live on BLOG-8.
+   *
+   * The task's files were taken from another task, so it passed its writing
+   * stage with no run and no delivering agent. Two stages on the operator
+   * needed the writer: the hand-off was refused (the writer is declared for
+   * the earlier stages), the backward move was refused (no review failing),
+   * and the refusal told it to dispatch "the engaged deliverer". The task
+   * waited on a person for a stage move.
+   */
+  function withScopedDeveloper(store: TestStore): void {
+    const file = readProjectFile({ projectSlug: store.slug, dataRoot: store.dataRoot })!;
+    writeProject(store.dataRoot, {
+      ...file.parsed.frontmatter,
+      ...MERGE_STAGE_BOARD,
+      agents: [
+        REVIEW_STAGE_REVIEWER,
+        {
+          profileId: "developer",
+          capabilities: [{ capabilityId: "execute-code-or-write-repo", mode: "direct" }],
+          extras: [],
+          definition: { kind: "specialist", name: "Dev", role: "Implementation", backends: ["claude"], model: "sonnet", stages: ["impl"] },
+        },
+      ],
+    });
+  }
+
+  /** A task nobody delivers: a reviewer is engaged, no review has failed. */
+  function seedWithoutDeliverer(store: TestStore, stage: string, engagements = [REVIEWER_ENGAGEMENT]): void {
+    writeTask(store.dataRoot, store.slug, {
+      frontmatter: baseTaskFrontmatter("VIB-1", {
+        stage,
+        waiting: "agent",
+        readiness: "ready",
+        ownerUserId: store.users.arda.id,
+        engagements,
+        validation: "none",
+      }),
+    });
+    rebuildAll(store.db, { dataRoot: store.dataRoot });
+  }
+
+  async function refusal(store: TestStore, toStageId: string, as: "operator" | "person"): Promise<string> {
+    try {
+      await transitionStage(
+        store.db,
+        { projectSlug: store.slug, taskKey: "VIB-1", toStageId, rework: true },
+        as === "operator" ? OPERATOR_TASK_ACTOR : actorOf(store.users.arda),
+        { dataRoot: store.dataRoot, operatorAuthorized: as === "operator" },
+      );
+    } catch (thrown) {
+      return thrown instanceof Error ? thrown.message : String(thrown);
+    }
+    return "";
+  }
+
+  it("ruling 702: a task with no delivering agent goes back to where one can be engaged, by the operator's own move", async () => {
+    // Canary: drop the `engageStages` arm of transitionStage's `isReworkMove`.
+    const store = setupProjectedStore(ctx);
+    withScopedDeveloper(store);
+    seedWithoutDeliverer(store, "merge");
+    expect(await refusal(store, "impl", "operator")).toBe("");
+    expect(taskFile(store).frontmatter.stage).toBe("impl");
+    expect(taskFile(store).frontmatter.previousStageId).toBe("merge");
+    const rows = listAuditEvents(store.db, { action: "task.transition" });
+    expect(rows.some((r) => r.details?.by === "operator" && r.details?.to === "impl")).toBe(true);
+  });
+
+  it("ruling 702: any other backward move is refused, and the refusal names those stages and no deliverer", async () => {
+    // Canary: restore the unconditional "engaged deliverer" sentence.
+    const store = setupProjectedStore(ctx);
+    withScopedDeveloper(store);
+    seedWithoutDeliverer(store, "merge");
+    const refused = await refusal(store, "triage", "operator");
+    expect(refused).toContain("No allowed transition from Merge to Triage.");
+    expect(refused).toContain("this task has neither.");
+    expect(refused).toContain(
+      "It has no delivering agent either, and the backward moves open are into the stages where one can be engaged: In Progress (Dev), Review (Rev).",
+    );
+    expect(refused).not.toContain("engaged deliverer runs at every stage");
+    expect(taskFile(store).frontmatter.stage).toBe("merge");
+  });
+
+  it("ruling 702: with a delivering agent engaged nothing changes: the move is refused and the deliverer is the way out", async () => {
+    // Canary: license the move whenever a scoped agent exists, engaged or not.
+    const store = setupProjectedStore(ctx);
+    withScopedDeveloper(store);
+    seedWithoutDeliverer(store, "merge", [DEV_ENGAGEMENT, REVIEWER_ENGAGEMENT]);
+    const refused = await refusal(store, "impl", "operator");
+    expect(refused).toContain("No allowed transition from Merge to In Progress.");
+    expect(refused).toContain("The engaged deliverer runs at every stage (ruling 133)");
+    expect(refused).not.toContain("no delivering agent");
+    expect(taskFile(store).frontmatter.stage).toBe("merge");
+  });
+
+  it("ruling 702: the move is the operator's: the same call without its authority is refused", async () => {
+    // Canary: drop `ctx.operatorAuthorized === true` from `isReworkMove`.
+    const store = setupProjectedStore(ctx);
+    withScopedDeveloper(store);
+    seedWithoutDeliverer(store, "merge");
+    expect(await refusal(store, "impl", "person")).toContain(
+      "No allowed transition from Merge to In Progress.",
+    );
+    expect(taskFile(store).frontmatter.stage).toBe("merge");
+  });
+
+  it("ruling 702: where no earlier stage has an agent to engage, the refusal names no way out it does not have", async () => {
+    // The one agent on this board is declared for Review, where the task
+    // stands: nothing earlier offers anybody.
+    const store = setupProjectedStore(ctx);
+    withMergeBoard(store);
+    seedWithoutDeliverer(store, "review");
+    const refused = await refusal(store, "impl", "operator");
+    expect(refused).toContain("No allowed transition from Review to In Progress.");
+    expect(refused.endsWith("this task has neither.")).toBe(true);
+  });
+
   it("ruling 163 (b): resolving the conflict packet's redirect at Merge returns the task to Review in the same write", async () => {
     // Canary: drop the `option.rework` branch in resolvePacket's default arm.
     const store = setupProjectedStore(ctx);

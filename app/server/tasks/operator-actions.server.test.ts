@@ -18,6 +18,7 @@ import {
   deliveringEngagement,
   supportingEngagements,
   type Recommendation,
+  type TaskFrontmatter,
   type TaskPacket,
   type WorkRevision,
 } from "~/schemas/task-file.schema";
@@ -6100,6 +6101,89 @@ describe("get_task exposes the rework license the operator was never told about"
         dataRoot: store.dataRoot,
       })!.parsed.frontmatter.stage,
     ).toBe(target.id);
+  });
+});
+
+/**
+ * Ruling 702, live on BLOG-8: a task reached a later stage with no delivering
+ * agent, the agent that could take it was declared for earlier stages only,
+ * `reworkStages` was empty because no review was failing, and the operator
+ * parked the task on a person for a stage move. The snapshot now offers the
+ * stages where a delivering agent can be engaged and says who, and the
+ * operator's own move accepts exactly those.
+ */
+describe("ruling 702: get_task offers the way back to an agent the task can be delivered by", () => {
+  const snapshot = () =>
+    operatorSnapshot(store.db, { dataRoot: store.dataRoot }, store.slug, "VIB-1", authority("supervised"));
+
+  /** The developer is declared for the work stage only, as the writer was. */
+  const scopeDeveloper = () => {
+    deployRoster(DEFAULT_POLICY);
+    const file = readProjectFile({ projectSlug: store.slug, dataRoot: store.dataRoot })!;
+    writeProject(store.dataRoot, {
+      ...file.parsed.frontmatter,
+      agents: file.parsed.frontmatter.agents.map((a) =>
+        a.profileId === "developer" ? { ...a, definition: { ...a.definition, stages: ["impl"] } } : a,
+      ),
+    });
+    rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
+  };
+
+  const seed = (patch: Partial<TaskFrontmatter> = {}) => {
+    writeTask(store.dataRoot, store.slug, {
+      frontmatter: baseTaskFrontmatter("VIB-1", {
+        stage: "review",
+        ownerUserId: store.users.arda.id,
+        operator: { assignedAtStageId: "triage" },
+        title: "Nobody delivers this yet",
+        ...patch,
+      }),
+      goal: "Prove the way back to a delivering agent is visible.",
+    });
+    rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
+  };
+
+  const move = (toStageId: string) =>
+    operatorTransitionStage(
+      store.db,
+      { dataRoot: store.dataRoot },
+      { projectSlug: store.slug, taskKey: "VIB-1", toStageId },
+      authority("supervised"),
+    );
+
+  it("offers the stage and names the agent, and the operator makes the move with no person", async () => {
+    // Canary: drop the `engageAt` half of the snapshot's filter, or the
+    // `engageStagesFor` arm of the operator's `isReworkMove`.
+    scopeDeveloper();
+    seed();
+    expect(snapshot().reworkStages).toEqual([{ id: "impl", name: "In Progress", engage: ["Dev"] }]);
+    const r = await move("impl");
+    expect(r.outcome).toBe("done");
+    expect(task().frontmatter.stage).toBe("impl");
+    expect(task().frontmatter.recommendations).toEqual([]);
+    // Once there, nothing earlier is offered: the developer can be engaged.
+    expect(snapshot().reworkStages).toEqual([]);
+  });
+
+  it("offers nothing once a delivering agent is engaged: it runs where the task stands", () => {
+    scopeDeveloper();
+    seed({
+      engagements: [
+        { profileId: "developer", backend: "claude", role: "Implementation", delivers: true, verdictCapable: false },
+      ],
+    });
+    expect(snapshot().reworkStages).toEqual([]);
+  });
+
+  it("a failing review keeps every earlier stage, and the names ride on the ones that have them", () => {
+    // Canary: build the `failing` entries without reading `engageAt`.
+    scopeDeveloper();
+    seed({ validation: "failing" });
+    expect(snapshot().reworkStages).toEqual([
+      { id: "triage", name: "Triage" },
+      { id: "ready", name: "Ready" },
+      { id: "impl", name: "In Progress", engage: ["Dev"] },
+    ]);
   });
 });
 
