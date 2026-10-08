@@ -1279,7 +1279,7 @@ function operatorTurnDoctrine(
  * was still owed. Empty when the project declares no rule.
  */
 function requiredReviewersRule(snapshot: OperatorTaskSnapshot): string {
-  const rules = snapshot.requiredReviewers ?? [];
+  const rules = snapshot.requiredReviewers;
   if (rules.length === 0) return "";
   const named = rules.map((r) => `${r.agentName} at ${r.stageName}`).join(", ");
   return (
@@ -1558,7 +1558,7 @@ function engageStagesInstruction(snapshot: OperatorTaskSnapshot): string {
  * Engineer run. Confirm the hold?", a packet that decided nothing.
  */
 function pendingSchedulesInstruction(snapshot: OperatorTaskSnapshot): string {
-  const pending = snapshot.schedules ?? [];
+  const pending = snapshot.schedules;
   if (pending.length === 0) return "";
   const nameOf = (profileId: string | null): string =>
     snapshot.deployedSpecialists.find((s) => s.id === profileId)?.name ?? profileId ?? "an agent";
@@ -1636,7 +1636,7 @@ function refreshBoundaryInstruction(snapshot: OperatorTaskSnapshot): string {
  * the sentence; this puts it in front of the plan, whatever the trigger.
  */
 function baseCompareInstruction(snapshot: OperatorTaskSnapshot): string {
-  const sentence = snapshot.baseBehindBySentence ?? "";
+  const sentence = snapshot.baseBehindBySentence;
   if (!sentence) return "";
   return (
     `${sentence} A decision packet never states a behind count for a head other than the one ` +

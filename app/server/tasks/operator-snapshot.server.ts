@@ -126,28 +126,24 @@ export interface OperatorTaskSnapshot {
      *  changes on, counted back from its newest verdict and stopping at its
      *  first `approve`. `0` when its newest verdict is an approval or it has
      *  not weighed in. Two or more means the same objection survived a rework,
-     *  which is when re-prompting the deliverer stops being the move. Optional
-     *  so hand-built fixtures need not restate it; `operatorSnapshot` always
-     *  sets it. */
-    consecutiveRequestChanges?: number;
+     *  which is when re-prompting the deliverer stops being the move. */
+    consecutiveRequestChanges: number;
   }[];
   /** Ruling 178: the reviewers the PROJECT requires, per review stage,
    *  resolved to the names the acceptance gate prints. Each must hold an
    *  `approve` verdict on the delivered revision before acceptance, engaged
    *  or not — `reviewers` above lists only who the operator has engaged.
-   *  Optional so hand-built fixtures need not restate it; `operatorSnapshot`
-   *  always sets it. */
-  requiredReviewers?: RequiredReviewerView[];
+   *  Empty when the project requires none. */
+  requiredReviewers: RequiredReviewerView[];
   /**
    * Ruling 482 (F40-52): the project's gates on the revision under review, as
    * VIBERR ran them (never an agent's report of them): the line the PR card
    * prints, the state, and each gate that did not exit 0 with its log's
    * attachment name. A `failed` state blocks acceptance; dispatch the rework
    * with the failing gate and its log in the directive. Null when the project
-   * declares no gates or nothing is delivered. Optional so hand-built
-   * fixtures need not restate it; `operatorSnapshot` always sets it.
+   * declares no gates or nothing is delivered.
    */
-  gates?: {
+  gates: {
     line: string;
     state: GatesState;
     failed: { name: string; command: string; outcome: string; log: string | null }[];
@@ -374,11 +370,8 @@ export interface OperatorTaskSnapshot {
    *  the 90-day audit retention. The DURABLE trace of a refusal is the typed
    *  timeline event `dismissRecommendation` writes
    *  (RECOMMENDATION_DECLINED_TITLE); that one lives in task.md for good and is
-   *  what the operator re-reads through `recentTimeline`.
-   *
-   *  Optional only so hand-built test fixtures need not restate it (same reason
-   *  as `repo`/`noChanges`); `operatorSnapshot` always sets it. */
-  recommendations?: {
+   *  what the operator re-reads through `recentTimeline`. */
+  recommendations: {
     /** Still awaiting a human — do NOT re-propose these. */
     pending: {
       id: string;
@@ -427,9 +420,8 @@ export interface OperatorTaskSnapshot {
         unpushedRevisionSentence: string;
         /** Ruling 162 (pass 35, F35-12): GitHub's mergeability as the
          *  reconciler last read it (`conflicting` is the fact the acceptance
-         *  gate refuses on); null when never read or settled. Optional only so
-         *  hand-built fixtures need not restate it; the producer always sets it. */
-        mergeable?: PrMergeable | null;
+         *  gate refuses on); null when never read or settled. */
+        mergeable: PrMergeable | null;
       }
     | null;
   /** Ruling 162 (pass 35, F35-12): the acceptance gate's own refusal, computed
@@ -438,22 +430,19 @@ export interface OperatorTaskSnapshot {
    *  A PR the gate would refuse cannot be recommended for acceptance and the
    *  task cannot be moved into the acceptance stage; route the conflict with
    *  `update_branch_from_base` (ruling 475) or deliver the unpushed revision
-   *  instead. Optional only so hand-built
-   *  fixtures need not restate it; `operatorSnapshot` always sets it. */
-  notAcceptableReason?: string | null;
+   *  instead. */
+  notAcceptableReason: string | null;
   /** Ruling 521: the completion packet a person reads before accepting, and
-   *  what writing it takes (the change's size, the images you may pick).
-   *  Optional only so hand-built fixtures need not restate it;
-   *  `operatorSnapshot` always sets it. */
-  completionPacket?: CompletionPacketFact;
+   *  what writing it takes (the change's size, the images you may pick). */
+  completionPacket: CompletionPacketFact;
   /** Ruling 693: what the task has taken so far, derived from its run rows and
    *  its own timeline at this read: the runs that started and their agent
    *  minutes, the dollars they reported (`cost.usd: null` is unknown, never
    *  zero), the rounds a person was asked, the times the work was sent back,
    *  the wall time to the first delivery and to acceptance, and who spent it
    *  (`byAgent`). `notes` says what the figure misses. Information only: it
-   *  changes no gate. Optional so hand-built fixtures need not restate it;
-   *  `operatorSnapshot` sets it unless the read itself failed. */
+   *  changes no gate. Absent when that read failed: a read of what a task
+   *  cost never fails the read of the task. */
   whatItTook?: TaskTook;
   /** The task's delivery branch (null before any delivery). Lets recovery
    *  packets name the branch a `deleteBranch` archive option would remove. */
@@ -463,25 +452,21 @@ export interface OperatorTaskSnapshot {
    *  structurally blind to the collision at the exact moment it must author a
    *  `resolve_remote_collision` packet — the Collision card row and the
    *  refusal notes rendered it for humans only, so the model had to guess from
-   *  timeline prose. Null when no collision is recorded.
-   *
-   *  Optional only so hand-built test fixtures need not restate it; the real
-   *  producer (`operatorSnapshot`) always sets it. */
-  unownedPr?: number | null;
+   *  timeline prose. Null when no collision is recorded. */
+  unownedPr: number | null;
   /** Ruling 161 (pass 35, U35-8): origin's copy of the task branch carries
    *  commits this task did not author, as the reconciler last recorded it
    *  (`github.foreignHead`): the head sha when GitHub named one and the
    *  unowned PR when one stands. Name it in an `archive_task` option's text
    *  when offering `deleteBranch`: deleting the branch removes those commits
-   *  too. Null when the head is this task's or was never read. Optional only
-   *  so hand-built fixtures need not restate it; `operatorSnapshot` sets it. */
-  foreignHead?: ForeignBranchHead | null;
+   *  too. Null when the head is this task's or was never read. */
+  foreignHead: ForeignBranchHead | null;
   /** F37-11 (pass 37): how many commits the BASE is ahead of this task's
    *  branch, from the reconciler's last compare — the same reading the GitHub
    *  page's sync pill renders. `0` = level with the base, `null` = no pass has
    *  compared this task yet. Informational: a stale or absent reading must
    *  never stop an update, it only stops the step being planned blind. */
-  baseBehindBy?: number | null;
+  baseBehindBy: number | null;
   /** Ruling 494 (pass 40, F40-70): the compare `baseBehindBy` was counted in.
    *  `sha` is the branch head it read and `observedAt` when it ran. `current`
    *  is false when the count was not read on the head Viberr's newest push
@@ -491,18 +476,16 @@ export interface OperatorTaskSnapshot {
    *  count then describes another head than the pushed one. It is null when
    *  the compare named no head (a compare recorded before ruling 494), which
    *  never reads as current either, and true otherwise. Null while
-   *  `baseBehindBy` is null. Optional only so hand-built fixtures need not
-   *  restate it; `operatorSnapshot` always sets it. */
-  baseComparedHead?: {
+   *  `baseBehindBy` is null. */
+  baseComparedHead: {
     sha: string | null;
     observedAt: string;
     current: boolean | null;
     pushedSince: { sha: string | null; at: string } | null;
   } | null;
   /** Ruling 494: when `baseBehindBy` does not describe the branch's current
-   *  head, the sentence that says so and what not to write; "" when it does.
-   *  Optional for the same reason as above. */
-  baseBehindBySentence?: string;
+   *  head, the sentence that says so and what not to write; "" when it does. */
+  baseBehindBySentence: string;
   /** Ruling 424 (pass 39): the sentence `update_branch_from_base` refuses
    *  with from where the task stands, or null when a refresh would run. At
    *  the acceptance stage the ceremony refreshes the branch once and merges,
@@ -510,28 +493,21 @@ export interface OperatorTaskSnapshot {
    *  operator read the doctrine and the count and planned the refresh anyway,
    *  fifteen times across seven ax-clone tasks, each one a "plan was not
    *  carried out in full" note on the task's timeline. Read from the same
-   *  function the tool refuses with, so the two cannot disagree. Optional only
-   *  so hand-built fixtures need not restate it; `operatorSnapshot` sets it. */
-  notRefreshableReason?: string | null;
+   *  function the tool refuses with, so the two cannot disagree. */
+  notRefreshableReason: string | null;
   /** R19-1: the project's repository ("owner/name"), or null when none is
    *  attached. The coordinator used to be blind to it — it could not even NAME
    *  the repository it operates on, which is part of how it came to call its own
    *  task folder "the repo" (F19-4). It now works inside a read-only checkout of
-   *  that repository (owner ruling 2026-08-06), so naming it is table stakes.
-   *
-   *  Optional only so hand-built test fixtures need not restate it (same
-   *  reason as `noChanges`); `operatorSnapshot` always sets it. */
-  repo?: string | null;
+   *  that repository (owner ruling 2026-08-06), so naming it is table stakes. */
+  repo: string | null;
   /** R19-8: this task is a no-change completion — nothing was delivered and
    *  there is nothing to merge. Accept it with `accept_completion`; do NOT call
    *  `deliver_for_review` and do NOT open a decision packet asking a human how
    *  to close it out. The operator used to be structurally blind to the shape,
    *  which is how VC-5 became a "how do we close this out?" packet whose
-   *  recommended option was "Manually mark Done" (F19-21).
-   *
-   *  Optional only so hand-built test fixtures need not restate it; the real
-   *  producer (`operatorSnapshot`) always sets it. */
-  noChanges?: boolean;
+   *  recommended option was "Manually mark Done" (F19-21). */
+  noChanges: boolean;
   /** Queued/running agent runs on THIS task — the ONLY truth for "a run is
    *  in flight". Live-caught: the operator inferred an in-flight deliverer
    *  from `waiting: "agent"` (a board display flag) plus its own directive
@@ -549,10 +525,9 @@ export interface OperatorTaskSnapshot {
    * (`run-agent`, with the profile and directive). `by` is who scheduled it,
    * and `yours` marks one the operator scheduled itself, the only kind
    * `cancel_task_schedule` takes from it. A hold one of these explains needs
-   * no decision packet. Optional so hand-built fixtures need not restate it;
-   * `operatorSnapshot` always sets it.
+   * no decision packet.
    */
-  schedules?: {
+  schedules: {
     id: string;
     action: TaskSchedule["action"];
     dueAt: string;
@@ -592,10 +567,9 @@ export interface OperatorTaskSnapshot {
    * here but under no `deployedSpecialists[].resources` means "exists, not
    * granted on this project" — the remedy is granting it from the project's
    * Agents surface, never re-creating it. Names only, bounded by the org
-   * catalog's own size; optional so hand-built fixtures need not restate it
-   * (`operatorSnapshot` always sets it).
+   * catalog's own size.
    */
-  orgResources?: { kbs: string[]; skills: string[]; mcps: string[] };
+  orgResources: { kbs: string[]; skills: string[]; mcps: string[] };
 }
 
 /** [1] Hard bound on `snapshot.recommendations`: the whole snapshot is

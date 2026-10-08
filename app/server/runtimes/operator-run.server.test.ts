@@ -1836,7 +1836,7 @@ describe("pr-diverged turn instruction (both backends)", () => {
       waiting: "human",
       nextStages: [{ id: "done", name: "Done", boundary: "human" }],
       stageIds: ["triage", "ready", "impl", "review", "done"],
-      pr: { number: 318, state: "closed", title: "PR", revisionDrift: null, revisionDriftSentence: "", headSha: null, unpushedRevision: null, unpushedRevisionSentence: "" },
+      pr: { number: 318, state: "closed", title: "PR", revisionDrift: null, revisionDriftSentence: "", headSha: null, unpushedRevision: null, unpushedRevisionSentence: "", mergeable: null },
       branch: "vib-9",
       ...over,
     });
@@ -1865,7 +1865,7 @@ describe("pr-diverged turn instruction (both backends)", () => {
 
   it("merged out-of-band → acceptance is the next state, no packet demanded", () => {
     const prompt = buildOperatorTurnPrompt(
-      snapshot({ pr: { number: 318, state: "merged", title: "PR", revisionDrift: null, revisionDriftSentence: "", headSha: null, unpushedRevision: null, unpushedRevisionSentence: "" } }),
+      snapshot({ pr: { number: 318, state: "merged", title: "PR", revisionDrift: null, revisionDriftSentence: "", headSha: null, unpushedRevision: null, unpushedRevisionSentence: "", mergeable: null } }),
       "pr-diverged",
     );
     expect(prompt).toContain("merged OUT-OF-BAND");
@@ -1875,7 +1875,7 @@ describe("pr-diverged turn instruction (both backends)", () => {
 
   it("PR live again → withdraw the moot packet and continue", () => {
     const prompt = buildOperatorTurnPrompt(
-      snapshot({ pr: { number: 318, state: "review", title: "PR", revisionDrift: null, revisionDriftSentence: "", headSha: null, unpushedRevision: null, unpushedRevisionSentence: "" } }),
+      snapshot({ pr: { number: 318, state: "review", title: "PR", revisionDrift: null, revisionDriftSentence: "", headSha: null, unpushedRevision: null, unpushedRevisionSentence: "", mergeable: null } }),
       "pr-diverged",
     );
     expect(prompt).toContain("live again");
@@ -2327,7 +2327,7 @@ describe("pr-diverged turn instruction (both backends)", () => {
     expect(ordinary).toContain(line);
     expect(ordinary).toContain("`run_agent` (`delivers: false`)");
     const delivered = buildOperatorTurnPrompt(
-      snapshot({ requiredReviewers: rules, pr: { number: 318, state: "review", title: "PR", revisionDrift: null, revisionDriftSentence: "", headSha: null, unpushedRevision: null, unpushedRevisionSentence: "" } }),
+      snapshot({ requiredReviewers: rules, pr: { number: 318, state: "review", title: "PR", revisionDrift: null, revisionDriftSentence: "", headSha: null, unpushedRevision: null, unpushedRevisionSentence: "", mergeable: null } }),
       "delivered",
     );
     expect(delivered).toContain(line);
@@ -2357,6 +2357,7 @@ describe("pr-diverged turn instruction (both backends)", () => {
           headSha: null,
           unpushedRevision: null,
           unpushedRevisionSentence: "",
+          mergeable: null,
         },
       });
 
@@ -2369,7 +2370,7 @@ describe("pr-diverged turn instruction (both backends)", () => {
             number: 318, state: "closed", title: "PR",
             revisionDrift: record,
             revisionDriftSentence: describeRevisionDrift(record).sentence,
-            headSha: null, unpushedRevision: null, unpushedRevisionSentence: "",
+            headSha: null, unpushedRevision: null, unpushedRevisionSentence: "", mergeable: null,
           },
         }),
         "pr-diverged",
@@ -2413,6 +2414,7 @@ describe("pr-diverged turn instruction (both backends)", () => {
               headSha: null,
               unpushedRevision: null,
               unpushedRevisionSentence: "",
+              mergeable: null,
             },
           }),
           "pr-diverged",
