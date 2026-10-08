@@ -3,7 +3,7 @@ import { ERROR_CODES } from "~/server/errors/error-codes";
 import { logger } from "~/server/logging/logger.server";
 
 /** Wall-clock ceiling for a single mutating server action. */
-export const ACTION_WATCHDOG_MS = 30_000;
+const ACTION_WATCHDOG_MS = 30_000;
 
 /**
  * F20-1: wrap a mutating server action in a wall-clock guard. A data-root write
@@ -28,23 +28,22 @@ export const ACTION_WATCHDOG_MS = 30_000;
 export async function withActionWatchdog<T>(
   label: string,
   fn: () => Promise<T>,
-  timeoutMs: number = ACTION_WATCHDOG_MS,
 ): Promise<T> {
   let timer: ReturnType<typeof setTimeout> | undefined;
   const guard = new Promise<never>((_, reject) => {
     timer = setTimeout(() => {
-      logger.error("action watchdog fired", { label, timeoutMs });
+      logger.error("action watchdog fired", { label, timeoutMs: ACTION_WATCHDOG_MS });
       reject(
         new AppError({
           code: ERROR_CODES.INTERNAL,
           status: 503,
-          message: `action "${label}" exceeded ${timeoutMs}ms`,
+          message: `action "${label}" exceeded ${ACTION_WATCHDOG_MS}ms`,
           userMessage: `This action did not complete in ${Math.round(
-            timeoutMs / 1000,
+            ACTION_WATCHDOG_MS / 1000,
           )}s; the data root may be unreachable. Nothing reliable was changed; try again once storage is healthy.`,
         }),
       );
-    }, timeoutMs);
+    }, ACTION_WATCHDOG_MS);
     // Never let the guard timer keep the process alive on its own.
     timer.unref?.();
   });
