@@ -47,7 +47,6 @@ import {
   ambiguousBackendHandle,
   ambiguousBackendHandleNote,
   fullReplyTextForRun,
-  normalizeWorkspacePaths,
   resumeWorkdir,
   resolveMentionedAgent,
   unreachedAgents,
@@ -60,6 +59,7 @@ import { deliverDeferredMention } from "./agent-completion.server";
 import type { runOperator } from "~/server/runtimes/operator-run.server";
 import type { LogLine } from "~/features/runtime/runtime-types";
 import { emptyRunFailureFacts } from "~/shared/run-failure";
+import { normalizeWorkspacePaths } from "~/shared/workspace-paths";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 
