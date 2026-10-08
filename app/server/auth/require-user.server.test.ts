@@ -139,6 +139,19 @@ describe("authenticate (better-auth session)", () => {
     const { cookie } = await app.cookieFor(user.id);
     const auth = await authenticate(app.request("/x", { cookie }));
     expect(auth?.pwresetRequired).toBe(true);
+    // The live session still goes to /login (the set-new-password step) from
+    // every guarded page; only the reset itself opts in.
+    // CANARY: drop requireAuth's pwresetRequired check and the board loads.
+    const gated: unknown = await requireAuth(
+      app.request("/projects/acme/board", { cookie }),
+    ).catch((e) => e);
+    expect(gated instanceof Response ? gated.headers.get("Location") : null).toBe(
+      `/login?returnTo=${encodeURIComponent("/projects/acme/board")}`,
+    );
+    const allowed = await requireAuth(app.request("/login", { cookie }), {
+      allowPendingPasswordReset: true,
+    });
+    expect(allowed.user.id).toBe(user.id);
   });
 });
 
