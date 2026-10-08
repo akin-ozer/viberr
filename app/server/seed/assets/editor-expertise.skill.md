@@ -19,7 +19,7 @@ Before you read the notes, the brief or the writer's report, read the piece once
 
 - what you would pick out as not written by this person;
 - what reads as written by a machine: sections that all run on one skeleton, a description of a thing's parts where a person would have told you what happened, every sentence the same weight, a caveat on every claim, nobody in the text who thinks anything;
-- what reads as put together from files: a narrator who cites their own records ("as the log shows", "as I chose", "what I said that day was"), who quotes their own messages back, or who dates their own afternoon from commit times;
+- what reads as put together from files: a narrator who cites their own records ("as the log shows", "as I chose", "what I said that day was"), who quotes their own messages back, or who dates their own afternoon from commit times. A quotation whose exact words are the point of the passage, and a record the reader would want to open, are not that;
 - where you stopped caring.
 
 These are findings even when every fact is right. A piece that a reader picks out is not ready.

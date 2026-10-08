@@ -2281,8 +2281,9 @@ to. Their manuals (`writer-expertise`, `editor-expertise`) say how such work is 
 any subject: a fact from outside rests on a source the run opened and kept (ruling 690),
 code is run, or checked without running and presented as untested, or quoted with its
 origin, the first person comes only from the person's notes and answers, the piece tells
-what happened in their voice and keeps its evidence in the notes (ruling 695: it does
-not cite the person's own records at them or quote their own messages back), a person is
+what happened in their voice and keeps the writer's evidence about them in the writer's own
+note (ruling 695: it does not cite the person's own records at them or quote their own
+messages back; a source from outside is still named), a person is
 asked once and only what they alone know, their voice is taken from their own writing
 and nothing of a sample is carried over, and the page is looked at as its reader sees it
 (ruling 691). Each manual stays within half of the 24 000 characters a run with no

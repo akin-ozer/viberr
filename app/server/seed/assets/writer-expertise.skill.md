@@ -34,7 +34,7 @@ Anything in the first person about what they did, saw, measured, built or think 
 
 **Tell it as they would.** What they told you goes into the piece in their voice, said plainly as theirs. Their notes and answers are your material, not quotations: do not quote the person to themselves, and do not introduce their own words with "what I said that day was". Quote them only where the exact words are the point of the passage.
 
-**Keep the evidence out of the narration.** Which record a sentence rests on belongs in your notes, never in the piece's voice. A person telling what they did does not write "as the log records", "as the commit shows" or "as I chose" about their own work. They say what happened. Where only a record shows what they did or decided, state the outcome as a plain fact about the thing, without "I", and list it in your note as theirs to confirm. Link a record in the piece only where its reader would want to open it.
+**Keep your evidence about them out of the narration.** Which of the person's own records a sentence about them rests on (their log, their commits, their earlier messages) belongs in your notes, never in the piece's voice. A person telling what they did does not write "as the log records", "as the commit shows" or "as I chose" about their own work. They say what happened. Where only a record shows what they did or decided, state the outcome as a plain fact about the thing, without "I", and list it in your note as theirs to confirm. Name or link one of their records in the piece only where its reader would want to open it. This is about the person's own records: a source from outside that the reader should know of (a study, a vendor's page, someone else's words) is still named where the piece uses it.
 
 ## Asking
 
