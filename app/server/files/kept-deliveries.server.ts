@@ -15,11 +15,22 @@
  * `attachments/`, so the attachments panel, the browser's output folder and
  * the working-file prune never see it, and it moves with the task directory.
  */
-import { constants, copyFileSync, mkdirSync, readdirSync, statSync } from "node:fs";
+import {
+  closeSync,
+  constants,
+  copyFileSync,
+  mkdirSync,
+  openSync,
+  readdirSync,
+  readSync,
+  statSync,
+} from "node:fs";
 import path from "node:path";
+import { pageCapturesAmong } from "~/shared/page-capture";
 import {
   resolveStoreSegment,
   resolveStoredSegment,
+  storedNameAmong,
   taskAttachmentsDir,
   taskDir,
 } from "./file-store-root.server";
@@ -108,6 +119,111 @@ export function listKeptDeliveries(slug: string, key: string, dataRoot?: string)
     if (files.length > 0) kept.push({ deliveredAt, files });
   }
   return kept.sort((a, b) => b.deliveredAt.localeCompare(a.deliveredAt));
+}
+
+/** What differs between a kept delivery and the task's files now, by name. */
+export interface KeptDeliveryChanges {
+  changed: string[];
+  added: string[];
+  removed: string[];
+  same: string[];
+}
+
+/** Two files are read side by side in pieces of this size, so a large
+ *  delivery is never held in memory twice. */
+const COMPARE_CHUNK_BYTES = 64 * 1024;
+
+/** True when two files hold the same bytes. A file that cannot be read, or
+ *  is not a regular file, is not the same as anything: it is told as changed,
+ *  which sends a reader to look. */
+function sameBytes(a: string, b: string): boolean {
+  let fa: number | null = null;
+  let fb: number | null = null;
+  try {
+    const sa = statSync(a);
+    const sb = statSync(b);
+    if (!sa.isFile() || !sb.isFile() || sa.size !== sb.size) return false;
+    fa = openSync(a, "r");
+    fb = openSync(b, "r");
+    const ba = Buffer.allocUnsafe(COMPARE_CHUNK_BYTES);
+    const bb = Buffer.allocUnsafe(COMPARE_CHUNK_BYTES);
+    for (;;) {
+      const na = readSync(fa, ba, 0, COMPARE_CHUNK_BYTES, null);
+      const nb = readSync(fb, bb, 0, COMPARE_CHUNK_BYTES, null);
+      if (na !== nb) return false;
+      if (na === 0) return true;
+      if (!ba.subarray(0, na).equals(bb.subarray(0, nb))) return false;
+    }
+  } catch {
+    return false;
+  } finally {
+    for (const fd of [fa, fb]) {
+      if (fd === null) continue;
+      try {
+        closeSync(fd);
+      } catch {
+        // Nothing to do for a descriptor that will not close; the answer stands.
+      }
+    }
+  }
+}
+
+/**
+ * Ruling 703: the task's files as they stand now set against the kept
+ * delivery `judged`, byte for byte, or null when that delivery was not kept.
+ *
+ * `now` is the names in the task's attachments folder that the caller counts
+ * as the task's files. It is the folder that is read, not the kept copy of
+ * the newest delivery: a reviewer opens the folder, and a file can change
+ * there without the delivery moving (a supporting agent's first save of a
+ * name, a person's upload or removal). `leftOut` is the caller's rule for a
+ * name of the kept delivery that is not one of the task's files either.
+ *
+ * The pictures Viberr makes of a delivered page (ruling 691) are left out of
+ * the kept side here as the caller leaves them out of `now`: they are remade
+ * at every delivery, and the note is about the files, not about Viberr's own
+ * pictures of them.
+ *
+ * A name is paired with its kept file by ruling 675's rule (`storedNameAmong`):
+ * one file stored under two Unicode forms of its name is one file, named as
+ * the folder has it now, and two files a folder holds apart stay two.
+ */
+export function changesSinceKeptDelivery(
+  slug: string,
+  key: string,
+  judged: string,
+  now: readonly string[],
+  leftOut: (name: string) => boolean,
+  dataRoot?: string,
+): KeptDeliveryChanges | null {
+  const dir = keptDeliveryDir(slug, key, judged, dataRoot);
+  if (!dir) return null;
+  let listed: string[];
+  try {
+    listed = readdirSync(dir);
+  } catch {
+    return null;
+  }
+  const own = pageCapturesAmong(listed);
+  const kept = listed.filter((name) => !own.has(name) && !leftOut(name));
+  const attachments = taskAttachmentsDir(slug, key, dataRoot);
+  const changes: KeptDeliveryChanges = { changed: [], added: [], removed: [], same: [] };
+  const paired = new Set<string>();
+  // Code-unit order, so the lists read the same on every machine.
+  for (const name of [...now].sort()) {
+    // Ruling 675's rule: the kept file of exactly this name, else the single
+    // one that composes to it. Twins a folder holds apart stay apart.
+    const was = storedNameAmong(kept, name);
+    if (was === null || paired.has(was)) {
+      changes.added.push(name);
+      continue;
+    }
+    paired.add(was);
+    if (sameBytes(path.join(dir, was), path.join(attachments, name))) changes.same.push(name);
+    else changes.changed.push(name);
+  }
+  changes.removed = kept.filter((name) => !paired.has(name)).sort();
+  return changes;
 }
 
 /** Where a kept delivery holds `name`, or null for a stamp or a name that

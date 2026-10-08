@@ -462,12 +462,20 @@ describe("ruling 699: the library ships a Diagrammer and a Cover Designer", () =
     // the drawing is not its to do. CANARY: drop either clause.
     expect(guide).toContain("to run the two one after the other, the diagrams first");
     expect(guide).toContain("so its writer draws none");
+    // Live: the first board's controller gave both the writer's `max`, and a
+    // six-box diagram took seventeen minutes, eight of them before a first
+    // draft. At `high`, on the next post, it took two. CANARY: drop the
+    // sentence and the next board's controller chooses by analogy again.
+    expect(guide).toContain("Deploy both at `high` effort, whatever the writer runs at");
+    expect(guide).toContain("a picture took 17 and 20 minutes at `max` and a little over two at `high`");
+    expect(guide).toContain("sent one label back at `high`, which its maker fixed in under a minute");
     // A store whose copy nobody edited takes the new text at its next boot.
     // CANARY: remove any of the three outgoing hashes.
     const outgoing: [string, string][] = [
       ["skills/writer-expertise/SKILL.md", "8c133fa610e494f0497b114cf71f64f08d91c9d08e6974634f1f4129fb64e870"],
       ["skills/editor-expertise/SKILL.md", "62e62eed5108c4228e92c228d082d9815cb79c450d64b8d79f07beab7e30538a"],
       ["skills/controller-guide/SKILL.md", "e51e4710c9719b8bae32484e443a0c8be92e5fe6298e03dd53bc78eb26abb208"],
+      ["skills/controller-guide/SKILL.md", "56c5a3ff8a12958bdd1b0307b5eb3f9ad9b9d31fb273dba734dc7b915a6acf53"],
     ];
     for (const [rel, hash] of outgoing) expect(shippedCopyIsUnedited(rel, hash, {}), rel).toBe(true);
     // The two new manuals as they first shipped, hours before their pace

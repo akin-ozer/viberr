@@ -22,6 +22,7 @@ import type { AgentDeployment, CapabilityGrant, ProjectRole } from "~/schemas/pr
 import { withheldAgentGrants } from "~/features/agents/capability-catalog";
 import { type AuditActor, OPERATOR_AUDIT_ACTOR } from "~/server/audit/audit-recorder.server";
 import { AppError } from "~/server/errors/app-error.server";
+import type { KeptDeliveryChanges } from "~/server/files/kept-deliveries.server";
 import { readProjectFile } from "~/server/files/project-writer.server";
 import { SOURCE_STAGING_PREFIX } from "~/server/files/task-sources.server";
 import { readTaskFile } from "~/server/files/task-writer.server";
@@ -412,6 +413,68 @@ export const KB_CONTRACT_CORRECTION_SENTENCE =
  */
 export const REREVIEW_RESTATES_NOTE =
   "- You have recorded a verdict on this task before, and the one you record now replaces it for every later reader: the board read and the task's outcome carry only a reviewer's newest verdict. Restate in it everything from your earlier verdict that still stands (a score and each of its deductions, the findings, each knowledge-base correction you made on this task with its id), not only what changed.";
+
+/** How many unchanged names the note below prints before it counts the rest.
+ *  The other three lists are never cut: a file named in no list would be one
+ *  the note says nothing about. */
+const REREVIEW_UNCHANGED_MAX_NAMES = 40;
+/** How long a name it prints may be, in characters. */
+const REREVIEW_NAME_MAX_CHARS = 120;
+
+/** A file's name as one bounded line with no backtick: a name is whatever its
+ *  maker typed, and this one is printed into a run's instructions. Cut by
+ *  character, never inside one. */
+function printedFileName(name: string): string {
+  const line = [...name.replace(/[\s`]+/g, " ").trim()];
+  if (line.length === 0) return "(a name of spaces or backticks only)";
+  return line.length > REREVIEW_NAME_MAX_CHARS
+    ? `${line.slice(0, REREVIEW_NAME_MAX_CHARS - 1).join("")}…`
+    : line.join("");
+}
+
+/**
+ * Ruling 703: what a reviewer judging a files delivery AGAIN is told about the
+ * delivery it judged before.
+ *
+ * Viberr keeps every files delivery as it was delivered (ruling 597), so it
+ * knows, byte for byte, how the task's files differ from the ones a reviewer
+ * judged. Nothing said so to the reviewer sent to judge the rework. Live on
+ * BLOG-8 a reviewer sent one label of a diagram back; its maker fixed the
+ * label in 47 seconds, and the second review took 18 minutes and $6.69
+ * against 20 minutes and $7.12 for the first: it hashed all seven files
+ * against its own notes of the first round to learn that three had not
+ * changed, then rendered the unchanged cover again and pictured the whole
+ * page five times.
+ *
+ * The lists are facts. The sentences after them say what the facts are
+ * worth, and no more: a check that PASSED on a file alone still holds, a
+ * finding the reviewer sent back is checked again wherever its fix was made,
+ * and what its earlier report does not show, or this run's directive asks
+ * for, is still owed. `reader` is whether this run holds the tool that opens
+ * a kept delivery (ruling 594).
+ */
+export function rereviewChangesNote(judged: string, changes: KeptDeliveryChanges, reader: boolean): string {
+  const named = (label: string, names: string[], max = names.length): string[] => {
+    if (names.length === 0) return [];
+    const shown = names.slice(0, max).map((name) => `\`${printedFileName(name)}\``);
+    const more = names.length - shown.length;
+    return [`${label}: ${shown.join(", ")}${more > 0 ? `, and ${more} more` : ""}.`];
+  };
+  const lists = [
+    ...named("Changed", changes.changed),
+    ...named("New", changes.added),
+    ...named("Gone", changes.removed),
+    ...named("Unchanged", changes.same, REREVIEW_UNCHANGED_MAX_NAMES),
+  ].join(" ");
+  return (
+    `- Viberr kept the delivery you judged last (${judged}) and has set the task's files as they stand now against it, byte for byte (the review files your own entries on this task name, the browser's working files and Viberr's pictures of a page are left out; "new" is a file that kept delivery does not hold). ${lists} ` +
+    "An unchanged file is the file you judged: a check it passed then, resting on that file alone, still holds, so restate its result and do not make the check again. " +
+    "Check again everything you sent back, wherever its fix was made. " +
+    "Check the changed and the new files, what a change makes untrue in a file that did not change (a change to the goal, a ruling, a kept source or a person's decision included), anything your earlier report does not show you checked, and whatever this run's directive asks you to look at. " +
+    "With that, this is your whole sweep of the delivery." +
+    (reader ? ` \`read_task_attachment\` with \`delivery: "${judged}"\` returns a file as you judged it.` : "")
+  );
+}
 
 /**
  * Ruling 488 (F40-67): the relay, named where a specialist reads its channels.

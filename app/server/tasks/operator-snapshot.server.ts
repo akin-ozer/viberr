@@ -39,6 +39,7 @@ import {
   unpushedRevisionOf,
 } from "~/schemas/task-file.schema";
 import { resolveStageRoles, stageName } from "~/shared/workflow/stage-roles";
+import { engageStagesFor } from "~/shared/workflow/engage-stages";
 import { verdictStageFor } from "~/shared/workflow/verdict-stage";
 import { AppError } from "~/server/errors/app-error.server";
 import { readProjectFile } from "~/server/files/project-writer.server";
@@ -76,7 +77,7 @@ import {
   type GatesState,
   projectGatesView,
 } from "~/shared/project-gates";
-import type { OperatorAuthority, OperatorAutonomy } from "./operator-authority.server";
+import { gate, type OperatorAuthority, type OperatorAutonomy } from "./operator-authority.server";
 import { packetIsOperators } from "./operator-packets.server";
 
 export interface OperatorTaskSnapshot {
@@ -161,9 +162,13 @@ export interface OperatorTaskSnapshot {
    *  the operator reported "there is no Review → In Progress transition
    *  available to me" and parked the task on a human, while the move was
    *  legal all along. These are the earlier stages the operator MAY move the
-   *  task to directly, no human and no recommendation. Non-empty only while
-   *  the latest review is `failing` — the same gate `transitionStage` vets. */
-  reworkStages: { id: string; name: string }[];
+   *  task to directly, no human and no recommendation: every earlier stage
+   *  while the latest review is `failing` (R7-4), the review stage after a
+   *  revision changed (ruling 163), and (ruling 702) on a task that has no
+   *  delivering agent and has delivered nothing, the earlier stages where one
+   *  can be engaged, each with `engage` naming the agents. The same answers
+   *  `transitionStage` vets. */
+  reworkStages: { id: string; name: string; engage?: { id: string; name: string }[] }[];
   /** All stage ids in workflow order (first → done). Lets a coordinator tell a
    *  pre-work stage from the implementation stage from the review stage. */
   stageIds: string[];
@@ -1046,20 +1051,33 @@ export function operatorSnapshot(
   // changed` may go back to the review stage (and only there) for its
   // re-verdict; `failing` keeps the whole backward license.
   const currentStageIndex = stages.findIndex((s) => s.id === fm.stage);
+  const deployed = listDeployedSpecialists(projectSlug, ctx);
   const changedTarget =
-    fm.validation === "changed"
-      ? verdictStageFor({ stages, workflow }, fm, listDeployedSpecialists(projectSlug, ctx))
-      : null;
-  const reworkStages =
-    fm.validation === "failing" && currentStageIndex > 0
-      ? stages
-          .slice(0, currentStageIndex)
-          .map((s) => ({ id: s.id, name: s.name }))
-      : changedTarget !== null
-        ? stages
-            .filter((s) => s.id === changedTarget)
-            .map((s) => ({ id: s.id, name: s.name }))
-        : [];
+    fm.validation === "changed" ? verdictStageFor({ stages, workflow }, fm, deployed) : null;
+  // Ruling 702: a task that has no delivering agent and has delivered nothing
+  // may also go back to a stage where one can be engaged, and the entry says
+  // whom the move is for. It never meets the two licenses above: both need
+  // something delivered.
+  // An operator whose policy withholds stage transitions is offered none: it
+  // holds no tool to make the move, and asking a person is then right.
+  const engageAt = new Map(
+    (gate(authority, "stage-transitions") === "deny"
+      ? []
+      : engageStagesFor(
+          { stages, workflow },
+          fm,
+          deployed,
+          project.parsed.frontmatter.requiredReviewers,
+        )
+    ).map((e) => [e.stageId, e.agents]),
+  );
+  // A stage this board does not have is before nothing.
+  const reworkStages = (currentStageIndex < 0 ? [] : stages.slice(0, currentStageIndex))
+    .filter((s) => fm.validation === "failing" || s.id === changedTarget || engageAt.has(s.id))
+    .map((s) => {
+      const engage = engageAt.get(s.id);
+      return engage ? { id: s.id, name: s.name, engage } : { id: s.id, name: s.name };
+    });
 
   const ownerName = fm.ownerUserId
     ? (userNameSchema.safeParse(
@@ -1129,7 +1147,7 @@ export function operatorSnapshot(
     doneStageId,
     reviewStageId: roles.reviewId,
     workStageId: roles.workId,
-    deployedSpecialists: listDeployedSpecialists(projectSlug, ctx).map((s) => ({
+    deployedSpecialists: deployed.map((s) => ({
       ...s,
       // Ruling 133: may this profile RUN here (declared, or the engaged
       // deliverer), not only "may it be newly engaged here".

@@ -3783,6 +3783,47 @@ describe("turn doctrine: triage quality gate and scheduled re-runs", () => {
     }
   });
 
+  it("ruling 702: the way back to a delivering agent is said on EVERY trigger, to BOTH builders, and only when the snapshot offers one", () => {
+    // The tool description is Claude's alone: a Codex operator plans from the
+    // prompt and the snapshot. And the turn that needs this is usually an
+    // agent's report, which returns before the stage rules: on BLOG-8 it was
+    // the two drawing agents' reports.
+    // Canary: drop the paragraph, or put it back among the stage rules, where
+    // the agent-reply and packet-resolved turns never reach it.
+    const atCover = snap({
+      stage: "cover",
+      stageName: "Cover",
+      goal: "Give the post its pictures.",
+      reworkStages: [
+        { id: "writing", name: "Writing", engage: [{ id: "writer", name: "Writer" }] },
+        { id: "diagrams", name: "Diagrams", engage: [{ id: "diagrammer", name: "Diagrammer" }] },
+      ],
+    });
+    const PARAGRAPH =
+      "This task has delivered nothing and has no delivering agent you can run. If work remains that belongs to an agent you cannot engage where the task stands (the hand-off is refused for the stage), " +
+      "the move back is yours to make: Writing (`writing`) for Writer (`writer`); Diagrams (`diagrams`) for Diagrammer (`diagrammer`). " +
+      "Call `transition_stage` to that stage, then `run_agent` that profile id with `delivers: true`. " +
+      "These entries (`reworkStages[].engage`) are an offer, never a reason to move: use one only when such work remains, and never ask a person for that move. ";
+    for (const trigger of ["manual", "agent-reply", "packet-resolved", "scheduled"] as const) {
+      expect(operatorPrompts.buildOperatorTurnPrompt(atCover, trigger), `claude ${trigger}`).toContain(PARAGRAPH);
+      expect(operatorPrompts.buildCodexOperatorPrompt(atCover, trigger), `codex ${trigger}`).toContain(PARAGRAPH);
+    }
+    // A failing review's entries carry no `engage`: the paragraph is about
+    // nothing there. Canary: print it whenever `reworkStages` is not empty.
+    const failing = snap({
+      stage: "review",
+      stageName: "Review",
+      goal: "Ship it.",
+      reworkStages: [{ id: "impl", name: "In Progress" }],
+    });
+    for (const prompt of [
+      operatorPrompts.buildOperatorTurnPrompt(failing, "agent-reply"),
+      operatorPrompts.buildCodexOperatorPrompt(failing, "agent-reply"),
+    ]) {
+      expect(prompt).not.toContain("has no delivering agent you can run");
+    }
+  });
+
   it("ruling 130(c): the packet-resolved instruction bolds the decided title and claims no policy or credential fix", () => {
     // Live (JC-6): the old parenthetical "(a policy/credential fix means
     // re-check the work that was blocked)" plus a record saying "policy /

@@ -13,6 +13,7 @@ import {
   unpushedRevisionOf,
 } from "~/schemas/task-file.schema";
 import { resolveStageRoles, stageName } from "~/shared/workflow/stage-roles";
+import { type EngageStage, engageStagesFor } from "~/shared/workflow/engage-stages";
 import { verdictStageFor } from "~/shared/workflow/verdict-stage";
 import { AppError } from "~/server/errors/app-error.server";
 import { readProjectFile } from "~/server/files/project-writer.server";
@@ -272,7 +273,8 @@ export async function operatorTransitionStage(
   // The operator does this directly (no human, no recommendation) so a failed
   // review re-drives itself; transitionStage vets that it is genuinely backward
   // + failing before honoring the off-graph move.
-  const isRework = isReworkMove(ctx, input.projectSlug, input.taskKey, input.toStageId);
+  const rework = reworkMoveOf(ctx, input.projectSlug, input.taskKey, input.toStageId);
+  const isRework = rework !== null;
   const boundary = operatorBoundaryFor(ctx, input.projectSlug, input.taskKey, input.toStageId);
   const terminalId = terminalStageIdFor(ctx, input.projectSlug);
   // F19-26: a transition whose TARGET is the terminal stage is an ACCEPTANCE,
@@ -413,13 +415,27 @@ export async function operatorTransitionStage(
     { projectSlug: input.projectSlug, taskKey: input.taskKey },
     authority,
   );
+  // Ruling 702: a move made to reach a delivering agent ends at the hand-off,
+  // not at the next boundary. The forward sentence told an operator that had
+  // just walked the task back to continue forward "when nothing here needs an
+  // agent", and a run without `delivers: true` engages an agent that holds no
+  // repo-write grant as a supporting one, which leaves the task where it was:
+  // with nobody delivering it.
   const next = folded
     ? folded.message
-    : nextBoundarySentence(ctx, input.projectSlug, input.toStageId, name, authority);
+    : rework?.engage
+      ? `${input.taskKey} has no delivering agent: hand its delivery to ${engageNames(rework.engage)} here (run_agent with \`delivers: true\`).`
+      : nextBoundarySentence(ctx, input.projectSlug, input.toStageId, name, authority);
   return {
     outcome: "done",
     message: `Moved ${input.taskKey} to ${name}.${next ? ` ${next}` : ""}`,
   };
+}
+
+/** Ruling 702: the agents of an engage stage as a sentence names them, each
+ *  with the profile id `run_agent` takes. */
+function engageNames(stage: EngageStage): string {
+  return stage.agents.map((a) => `${a.name} (\`${a.id}\`)`).join(" or ");
 }
 
 /** The task's current stage id (the `from` of the move being judged). */
@@ -522,40 +538,51 @@ export async function foldAcceptanceRecommendation(
   };
 }
 
-/** True when moving `taskKey` to `toStageId` is an operator rework move (R7-4):
- *  a BACKWARD step to an earlier stage on a task whose latest review is
- *  `failing`. The operator performs these directly to route a rejected task
- *  back to the developer without a human. */
-function isReworkMove(
+/** Why moving `taskKey` to `toStageId` is an operator rework move, or null
+ *  when it is not one. R7-4: a BACKWARD step to an earlier stage on a task
+ *  whose latest review is `failing`, which the operator performs directly to
+ *  route a rejected task back to the developer without a human. Rulings 163
+ *  and 702 each add one narrower backward move, named where they are read
+ *  below; `engage` is ruling 702's stage, with the agents that can be given
+ *  the delivery there, when that is the only thing that licenses the move. */
+function reworkMoveOf(
   ctx: TaskMutationContext,
   projectSlug: string,
   taskKey: string,
   toStageId: string,
-): boolean {
+): { engage: EngageStage | null } | null {
   const task = readTaskFile(taskRef(ctx, projectSlug, taskKey));
   const project = readProjectFile({
     projectSlug,
     dataRoot: ctx.dataRoot,
   });
-  if (!task || !project) return false;
+  if (!task || !project) return null;
   const stages = project.parsed.frontmatter.stages;
   const fromIndex = stages.findIndex((s) => s.id === task.parsed.frontmatter.stage);
   const toIndex = stages.findIndex((s) => s.id === toStageId);
   const backward = toIndex >= 0 && fromIndex >= 0 && toIndex < fromIndex;
-  if (!backward) return false;
+  if (!backward) return null;
   const validation = task.parsed.frontmatter.validation;
-  if (validation === "failing") return true;
+  if (validation === "failing") return { engage: null };
+  const board = { stages, workflow: project.parsed.frontmatter.workflow };
+  const deployed = listDeployedSpecialists(projectSlug, ctx);
+  // Ruling 702: a task that has no delivering agent and has delivered nothing
+  // may go back to a stage where one can be engaged. Same answer
+  // `reworkStages` offers and `transitionStage` re-vets (`engageStagesFor`).
+  const engage = engageStagesFor(
+    board,
+    task.parsed.frontmatter,
+    deployed,
+    project.parsed.frontmatter.requiredReviewers,
+  ).find((e) => e.stageId === toStageId);
+  if (engage) return { engage };
   // Ruling 163 (pass 35, F35-13): a revision that changed after a verdict is
   // rework by definition; the one backward move it licenses is INTO the review
   // stage, where the re-verdict can be given. Same predicate `transitionStage`
   // re-vets, and the same shape `reworkStages` offers.
-  if (validation !== "changed") return false;
-  const target = verdictStageFor(
-    { stages, workflow: project.parsed.frontmatter.workflow },
-    task.parsed.frontmatter,
-    listDeployedSpecialists(projectSlug, ctx),
-  );
-  return target !== null && toStageId === target;
+  if (validation !== "changed") return null;
+  const target = verdictStageFor(board, task.parsed.frontmatter, deployed);
+  return target !== null && toStageId === target ? { engage: null } : null;
 }
 
 /**

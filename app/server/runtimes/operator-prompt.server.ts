@@ -1506,9 +1506,42 @@ const operatorTurnInstruction = (
   // Ruling 487: what is already scheduled, for the same reason again: a hold
   // a pending run explains is decided before any trigger's doctrine runs.
   const scheduled = pendingSchedulesInstruction(args[0]);
+  // Ruling 702: the way back to a delivering agent, on every trigger, because
+  // the turn that needs it is usually a report's, which returns before the
+  // stage rules: on BLOG-8 it was the two drawing agents' reports.
+  const engageable = engageStagesInstruction(args[0]);
   // Ruling 649: on every trigger, in a paragraph of its own.
-  return `${standing}${refused}${decided}${colliding}${unrefreshable}${staleCount}${notYours}${scheduled}${operatorTurnDoctrine(...args)}\n\n${CAPABILITY_GAP_REMEDY_INSTRUCTION}\n\n${PEOPLE_RULE}`;
+  return `${standing}${refused}${decided}${colliding}${unrefreshable}${staleCount}${notYours}${scheduled}${engageable}${operatorTurnDoctrine(...args)}\n\n${CAPABILITY_GAP_REMEDY_INSTRUCTION}\n\n${PEOPLE_RULE}`;
 };
+
+/**
+ * Ruling 702: what `reworkStages[].engage` is, said to both backends whenever
+ * the snapshot carries one.
+ *
+ * A task that has delivered nothing and has no delivering agent the operator
+ * can run is offered the earlier stages where one can be engaged. Live on
+ * BLOG-8 the task's files came from another task, so it passed its writing
+ * stage with no run; two stages on the operator needed the writer, could not
+ * engage it there, read an empty `reworkStages` and asked a person to move
+ * the task. The entries stand on every such task whether or not it needs an
+ * agent, so the text says they are an offer.
+ */
+function engageStagesInstruction(snapshot: OperatorTaskSnapshot): string {
+  const offered = snapshot.reworkStages.flatMap((s) =>
+    s.engage && s.engage.length > 0
+      ? [`${s.name} (\`${s.id}\`) for ${s.engage.map((a) => `${a.name} (\`${a.id}\`)`).join(" or ")}`]
+      : [],
+  );
+  if (offered.length === 0) return "";
+  return (
+    "This task has delivered nothing and has no delivering agent you can run. If work remains that " +
+    "belongs to an agent you cannot engage where the task stands (the hand-off is refused for the " +
+    `stage), the move back is yours to make: ${offered.join("; ")}. Call \`transition_stage\` to that ` +
+    "stage, then `run_agent` that profile id with `delivers: true`. These entries " +
+    "(`reworkStages[].engage`) are an offer, never a reason to move: use one only when such work " +
+    "remains, and never ask a person for that move. "
+  );
+}
 
 /**
  * Ruling 487 (F40-65): the runs already scheduled on the task, named on every

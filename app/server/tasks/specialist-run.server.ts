@@ -14,6 +14,7 @@ import {
   deliveringEngagement,
   type FileActorRef,
   type ParsedTaskFile,
+  judgedFilesDelivery,
   reviewSubjectId,
   supportingEngagements,
 } from "~/schemas/task-file.schema";
@@ -212,6 +213,7 @@ import {
   RELAY_NOTE_CLAUDE,
   RELAY_NOTE_CODEX,
   REREVIEW_RESTATES_NOTE,
+  rereviewChangesNote,
   resolveDeployedSpecialist,
   type ResolvedSpecialist,
   runDispatchLine,
@@ -1361,6 +1363,37 @@ async function dispatchAgentRun(
     existing.parsed.frontmatter.verdicts.some((v) => v.profileId === engagement.profileId)
   ) {
     collabNotes.push(REREVIEW_RESTATES_NOTE);
+    // Ruling 703: and, when what it judged was a files delivery Viberr kept,
+    // how the task's files stand against it now. Said only when there is
+    // something to say: a later delivery under review, or a file that differs.
+    // A reviewer asked again about the very delivery it judged, with nothing
+    // reworked (ruling 410's question), is being asked what it has NOT said
+    // yet, and a note about what it may leave unchecked has no place there.
+    // The note is advice: nothing in building it may stop the review.
+    try {
+      const judged = judgedFilesDelivery(existing.parsed.frontmatter, engagement.profileId);
+      // Imported dynamically, like every reach from this module into the
+      // task-action modules (ruling 207(e)).
+      const { changesSinceJudged } = await import("./task-replies.server");
+      const changes =
+        judged === null
+          ? null
+          : changesSinceJudged(ctx, input.projectSlug, input.taskKey, judged, engagement.profileId, existing.parsed);
+      const differs =
+        changes !== null && changes.changed.length + changes.added.length + changes.removed.length > 0;
+      const later =
+        changes !== null && changes.same.length > 0 && judged !== existing.parsed.frontmatter.deliveredAt;
+      if (judged !== null && changes !== null && (differs || later)) {
+        collabNotes.push(rereviewChangesNote(judged, changes, boardReader));
+      }
+    } catch (error) {
+      logger.warn("the note on what changed since a reviewer's verdict could not be built", {
+        projectSlug: input.projectSlug,
+        taskKey: input.taskKey,
+        profileId: engagement.profileId,
+        err: toError(error),
+      });
+    }
   }
   // Ruling 483 (F40-53): a knowledge-base line this run proves wrong has a
   // channel now, and the run is told which. Claude files it with the tool the

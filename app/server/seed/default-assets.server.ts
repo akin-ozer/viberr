@@ -270,6 +270,9 @@ export const PRIOR_SHIPPED_HASHES: PriorShippedHashes = {
     "86f1e309de8bdb5393156fc6f12bc93a035597c43ae74c02b6b6f2c94c1b488b",
   ],
   [path.join("skills", "controller-guide", "SKILL.md")]: [
+    // Ruling 699's third note of 2026-10-08: before the guide said to deploy
+    // the two drawing agents at high effort, with what each effort took.
+    "56c5a3ff8a12958bdd1b0307b5eb3f9ad9b9d31fb273dba734dc7b915a6acf53",
     // Ruling 699 (2026-10-08): before "A board that delivers results" said a
     // result that carries pictures starts from the shipped Diagrammer and
     // Cover Designer, each at the stage where its step happens.
