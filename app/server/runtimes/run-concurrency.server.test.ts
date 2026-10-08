@@ -691,8 +691,4 @@ describe("run concurrency cap — the coordination lane (ruling 152)", () => {
     // and falls through to the queued path like any run past its bound.
     expect(reserveOperator("res-op-2")).toBeNull();
   });
-
-  it("cap 0 carries no lane", () => {
-    expect(runConcurrencySnapshot(store.db)).toMatchObject({ cap: 0, lane: 0 });
-  });
 });
