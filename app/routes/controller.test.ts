@@ -1,6 +1,7 @@
 import { RouterContextProvider } from "react-router";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { z } from "zod";
+import { untilRunSettled } from "../../test-support/fake-runtime";
 import { setupAppTest, type AppTestContext } from "../../test-support/test-app";
 
 /**
@@ -99,16 +100,6 @@ async function workingTurn(surface: Surface) {
   return { conversationId: conversation.id, runId: result.runId };
 }
 
-async function settled(runId: string): Promise<void> {
-  const { getRun } = await import("~/server/runtimes/run-store.server");
-  for (let i = 0; i < 200; i += 1) {
-    const state = getRun(app.db, runId)?.state;
-    if (state && state !== "running" && state !== "queued") break;
-    await new Promise((resolve) => setTimeout(resolve, 5));
-  }
-  for (let i = 0; i < 20; i += 1) await new Promise((resolve) => setTimeout(resolve, 0));
-}
-
 /**
  * U35-4 (pass 35): a refused turn (no Claude connected for the asker, ruling
  * 127) used to answer `{ ok: true }` on both pages, so the HTTP door said yes
@@ -136,7 +127,7 @@ describe.each<Surface>(["instance", "project"])("POST intent=interrupt on the %s
       await post(surface, selin, { intent: "interrupt", conversationId, runId }),
     );
     expect(reply.toast).toBe("Turn interrupted. The transcript records that it was stopped.");
-    await settled(runId);
+    await untilRunSettled(app.db, runId);
     expect(getRun(app.db, runId)?.state).toBe("interrupted");
     // A second press finds the turn already over, and says that instead.
     const again = okResult.parse(
@@ -155,7 +146,7 @@ describe.each<Surface>(["instance", "project"])("POST intent=interrupt on the %s
     expect(getRun(app.db, runId)?.state).toBe("running");
     // Clean up: the owner stops it so nothing writes after the DB closes.
     await post(surface, selin, { intent: "interrupt", conversationId, runId });
-    await settled(runId);
+    await untilRunSettled(app.db, runId);
   });
 });
 
@@ -196,7 +187,7 @@ describe.each<Surface>(["instance", "project"])("ruling 527: steering and the qu
 
     // Clean up: stop the turn; the message still waiting runs its own and settles.
     await post(surface, selin, { intent: "interrupt", conversationId, runId });
-    await settled(runId);
+    await untilRunSettled(app.db, runId);
     for (let i = 0; i < 400 && conversationTurnState(app.db, conversationId).answering; i += 1) {
       await new Promise((resolve) => setTimeout(resolve, 5));
     }

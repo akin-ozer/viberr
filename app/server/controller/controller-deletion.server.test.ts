@@ -5,6 +5,7 @@ import type { LogLine } from "~/features/runtime/runtime-types";
 import type { RunCallbacks, RuntimeAdapter } from "~/server/runtimes/adapter.server";
 import type { SendMode } from "./controller-run.server";
 import { listAuditEvents } from "../../../test-support/audit-log";
+import { untilRunSettled } from "../../../test-support/fake-runtime";
 import { setupAppTest, type AppTestContext } from "../../../test-support/test-app";
 
 /**
@@ -99,18 +100,6 @@ function count(sql: string, ...args: string[]): number {
 
 function logLines(runId: string): number {
   return count(`SELECT COUNT(*) AS n FROM run_log_lines WHERE run_id = ?`, runId);
-}
-
-/** Wait until the run is terminal and its completion settle has run. */
-async function settled(runId: string): Promise<void> {
-  const { getRun } = await import("~/server/runtimes/run-store.server");
-  const { drainRunCompletions } = await import("../../../test-support/fake-runtime");
-  for (let i = 0; i < 400; i += 1) {
-    const state = getRun(app.db, runId)?.state;
-    if (state && state !== "running" && state !== "queued") break;
-    await new Promise((resolve) => setTimeout(resolve, 5));
-  }
-  await drainRunCompletions();
 }
 
 /** Selin's turn in `conversationId`, played by the fake runtime. */
@@ -253,13 +242,13 @@ describe("what a deletion takes away (ruling 525)", () => {
     queueFakeRun(answered("sess-delete-what", "Three invoices failed on a timeout."));
     const first = await turn(conversation.id, "And why?");
     if (first.state !== "started") throw new Error(`turn ${first.state}`);
-    await settled(first.runId);
+    await untilRunSettled(app.db, first.runId);
     // Another thread of hers, whose record must not be touched.
     const kept = await conversationOf(selin, INSTANCE, "What shipped this week?");
     queueFakeRun(answered("sess-delete-kept", "Two releases shipped."));
     const other = await turn(kept.id, "Anything else?");
     if (other.state !== "started") throw new Error(`turn ${other.state}`);
-    await settled(other.runId);
+    await untilRunSettled(app.db, other.runId);
 
     const transcript = await writeTranscript("sess-delete-what");
     const before = getRun(app.db, first.runId)!;
@@ -340,7 +329,7 @@ describe("a turn still working when its conversation is deleted (ruling 525)", (
     const result = await deleteAs(elif, conversation.id, SLUG);
     expect(result.stopped).toBe(1);
     expect(channel.take()).toBeNull();
-    await settled(working.runId);
+    await untilRunSettled(app.db, working.runId);
 
     const run = getRun(app.db, working.runId)!;
     expect(run.state).toBe("interrupted");
@@ -416,7 +405,7 @@ describe("a turn still working when its conversation is deleted (ruling 525)", (
       emit("Stopping here.");
       expect(logLines(working.runId)).toBe(1);
       callbacks.onExit({ outcome: "interrupted", effectiveBackend: "claude", sessionId: "sess-delete-slow" });
-      await settled(working.runId);
+      await untilRunSettled(app.db, working.runId);
       expect(logLines(working.runId)).toBe(0);
       expect(existsSync(rawLogPath("claude", working.runId, app.dataRoot))).toBe(false);
     } finally {

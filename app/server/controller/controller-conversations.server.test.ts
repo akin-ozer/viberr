@@ -1,9 +1,9 @@
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
-import { pollUntil, settle } from "../../../test-support/polling";
+import { pollUntil } from "../../../test-support/polling";
 import type { LogLine } from "~/features/runtime/runtime-types";
 import type { RuntimeAdapter } from "~/server/runtimes/adapter.server";
 import type { ControllerTurnInput } from "./controller-run.server";
-import type { FakeRun } from "../../../test-support/fake-runtime";
+import { untilRunSettled, type FakeRun } from "../../../test-support/fake-runtime";
 import {
   setupAppTest,
   type AppTestContext,
@@ -281,11 +281,7 @@ describe("conversation access", () => {
         messages.some((m) => m.text.includes("Profile → Agent accounts")),
       ).toBe(false);
       // Let the fake run finish so nothing writes after the suite closes the DB.
-      for (let i = 0; i < 200; i += 1) {
-        const state = getRun(app.db, runId)?.state;
-        if (state && state !== "running" && state !== "queued") break;
-        await new Promise((resolve) => setTimeout(resolve, 5));
-      }
+      await untilRunSettled(app.db, runId);
     } finally {
       await connectFakeBackend(app.db, ownerId, "claude");
     }
@@ -445,17 +441,6 @@ describe("stopping a turn", () => {
     return { conversationId: conversation.id, runId: result.runId };
   }
 
-  async function settled(runId: string): Promise<void> {
-    const { getRun } = await import("~/server/runtimes/run-store.server");
-    for (let i = 0; i < 200; i += 1) {
-      const state = getRun(app.db, runId)?.state;
-      if (state && state !== "running" && state !== "queued") break;
-      await new Promise((resolve) => setTimeout(resolve, 5));
-    }
-    // The settle runs from the completion callback on a later tick.
-    for (let i = 0; i < 20; i += 1) await new Promise((resolve) => setTimeout(resolve, 0));
-  }
-
   it("the owner stops it: the run is interrupted, the transcript says so, the lease is released", async () => {
     // Canary: make interruptRun's controller branch throw for everyone and
     // this rejects; drop the branch entirely and the empty member map refuses
@@ -477,7 +462,7 @@ describe("stopping a turn", () => {
       { userId: ownerId, label: "selin@viberr.dev" },
     );
     expect(result.outcome).toBe("interrupted");
-    await settled(runId);
+    await untilRunSettled(app.db, runId);
 
     const run = getRun(app.db, runId)!;
     expect(run.state).toBe("interrupted");
@@ -533,7 +518,7 @@ describe("stopping a turn", () => {
       { conversationId, runId, dataRoot: app.dataRoot },
       { userId: ownerId, label: "selin@viberr.dev" },
     );
-    await settled(runId);
+    await untilRunSettled(app.db, runId);
     // A finished turn reports nothing to show, not a stale step. (The lease is
     // released with the turn, so the run id goes with it.)
     expect(conversationTurnState(app.db, conversationId)).toEqual({
@@ -563,7 +548,7 @@ describe("stopping a turn", () => {
       { userId: orgAdminId, label: "arda@viberr.dev" },
     );
     expect(result.outcome).toBe("interrupted");
-    await settled(runId);
+    await untilRunSettled(app.db, runId);
   });
 
   it("a run id from another thread is not found on this conversation", async () => {
@@ -588,7 +573,7 @@ describe("stopping a turn", () => {
       { conversationId, runId, dataRoot: app.dataRoot },
       { userId: ownerId, label: "selin@viberr.dev" },
     );
-    await settled(runId);
+    await untilRunSettled(app.db, runId);
   });
 });
 
@@ -606,7 +591,6 @@ describe("a working turn streams to its owner", () => {
     const { createConversation } = await import("./controller-conversations.server");
     const { runControllerTurn } = await import("./controller-run.server");
     const { queueFakeRun } = await import("../../../test-support/fake-runtime");
-    const { getRun } = await import("~/server/runtimes/run-store.server");
     const { sseEventSchema } = await import("~/schemas/sse-event.schema");
 
     const conversation = createConversation(app.db, {
@@ -640,11 +624,7 @@ describe("a working turn streams to its owner", () => {
       dataRoot: app.dataRoot,
     });
     if (result.state !== "started") throw new Error(`turn ${result.state}`);
-    await pollUntil(() => {
-      const state = getRun(app.db, result.runId)?.state;
-      return !!state && state !== "running" && state !== "queued";
-    }, 1_000);
-    await settle();
+    await untilRunSettled(app.db, result.runId);
 
     const lines = owner().filter((e) => e.type === "controller.log-appended");
     expect(lines.map((e) => e.data)).toEqual([

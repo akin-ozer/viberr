@@ -1,4 +1,5 @@
 import { AsyncLocalStorage, createHook } from "node:async_hooks";
+import type { DatabaseSync } from "node:sqlite";
 import type { LogLine } from "~/features/runtime/runtime-types";
 import type {
   CompactCallbacks,
@@ -13,6 +14,7 @@ import {
   configureRunServiceForTests,
   type RunCompletionCallback,
 } from "~/server/runtimes/run-service.server";
+import { getRun } from "~/server/runtimes/run-store.server";
 import type { AdapterSet, RealBackend } from "~/server/runtimes/runtime-registry.server";
 
 export interface FakeRun {
@@ -176,6 +178,19 @@ export async function drainRunCompletions(timeoutMs = 5_000): Promise<void> {
   }
   unsettled.clear();
   promiseTracker.disable();
+}
+
+/** Wait until `runId`'s row has left running and queued, then for the
+ *  completion work its settle set off. Past `timeoutMs` it stops waiting,
+ *  as `drainRunCompletions` does. */
+export async function untilRunSettled(db: DatabaseSync, runId: string, timeoutMs = 2_000): Promise<void> {
+  const deadline = Date.now() + timeoutMs;
+  for (;;) {
+    const state = getRun(db, runId)?.state;
+    if ((state && state !== "running" && state !== "queued") || Date.now() > deadline) break;
+    await new Promise((resolve) => setTimeout(resolve, 5));
+  }
+  await drainRunCompletions();
 }
 
 export function installFakeRuntime(): void {
