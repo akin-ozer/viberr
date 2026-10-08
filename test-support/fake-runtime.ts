@@ -49,8 +49,6 @@ const queued: QueuedRuns = { claude: [], codex: [] };
  */
 const startedSpecs: RunSpec[] = [];
 
-/** Ruling 376: what the fake answers a completion compaction with, per
- *  backend, consumed oldest-first; nothing queued means "not compacted". */
 /** A queued answer, plus what the "provider" does when asked (a test appends
  *  the compaction to a rollout there, as the real app-server would). */
 interface QueuedCompaction {
@@ -63,6 +61,8 @@ interface QueuedCompactions {
   claude: QueuedCompaction[];
   codex: QueuedCompaction[];
 }
+/** Ruling 376: what the fake answers a completion compaction with, per
+ *  backend, consumed oldest-first; nothing queued means "not compacted". */
 const queuedCompactions: QueuedCompactions = { claude: [], codex: [] };
 const compactedSpecs: { spec: RunSpec; sessionId: string; signal?: AbortSignal }[] = [];
 
