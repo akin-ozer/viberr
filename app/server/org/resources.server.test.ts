@@ -2071,13 +2071,14 @@ describe("ruling 188: a CREATE takes the editor's own write-tool suggestion", ()
       ACTOR,
       { fetchImpl: mcpHttpFetch(FS_TOOLS.length, { toolNames: FS_TOOLS }) },
     );
-    // A deliberate "mark none" is an answer, not an absence: re-suggesting
-    // would nag a person who already decided.
+    // A deliberate "mark none" is an answer, not an absence: nothing is
+    // marked, and re-suggesting would nag a person who already decided.
+    expect(reviewed.mcp.writeTools).toEqual([]);
     expect(reviewed.mcp.writeToolsReviewed).toBe(true);
     expect(reviewed.writeToolsSuggestion).toEqual([]);
   });
 
-  it("an EXPLICIT list overrules the guess, and [] really means none", async () => {
+  it("an EXPLICIT list overrules the guess", async () => {
     const { db } = setup();
     const explicit = await saveMcpServer(
       db,
@@ -2092,21 +2093,6 @@ describe("ruling 188: a CREATE takes the editor's own write-tool suggestion", ()
       { fetchImpl: mcpHttpFetch(FS_TOOLS.length, { toolNames: FS_TOOLS }) },
     );
     expect(explicit.mcp.writeTools).toEqual(["write_file"]);
-
-    const none = await saveMcpServer(
-      db,
-      {
-        name: "unmarked-on-purpose",
-        transport: "HTTP",
-        target: "https://x.dev/mcp",
-        cred: "",
-        writeTools: [],
-      },
-      ACTOR,
-      { fetchImpl: mcpHttpFetch(FS_TOOLS.length, { toolNames: FS_TOOLS }) },
-    );
-    expect(none.mcp.writeTools).toEqual([]);
-    expect(none.mcp.writeToolsReviewed).toBe(true);
   });
 
   it("an UPDATE that omits the field leaves a person's marking alone", async () => {
