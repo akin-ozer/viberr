@@ -114,7 +114,7 @@ const DEFAULT_SPECIALIST_IDS: ReadonlySet<string> = new Set(["developer", "revie
  * `seed.server.test.ts` holds its count, so neither ships a specialist the
  * other does not.
  */
-export function shippedSpecialistProfiles(): SeedAgentProfile[] {
+function shippedSpecialistProfiles(): SeedAgentProfile[] {
   return [
     ...SEED_AGENT_PROFILES.filter((p) => DEFAULT_SPECIALIST_IDS.has(p.frontmatter.id)),
     ...LIBRARY_AGENT_PROFILES,
@@ -229,7 +229,7 @@ interface PriorShippedHashes {
   readonly [assetRel: string]: readonly string[];
 }
 
-export const PRIOR_SHIPPED_HASHES: PriorShippedHashes = {
+const PRIOR_SHIPPED_HASHES: PriorShippedHashes = {
   [path.join("agents", "definitions", "controller.md")]: [
     // Ruling 672 (owner, 2026-10-06): before the doctrine said a board that
     // builds software can start with no repository, and named the guide's
@@ -900,7 +900,7 @@ export function seedDefaultAgentAssets(dataRoot?: string): string[] {
   return refreshed;
 }
 
-export const SHIPPED_ASSETS_REFRESHED_ACTION = "org.shipped_assets.refreshed";
+const SHIPPED_ASSETS_REFRESHED_ACTION = "org.shipped_assets.refreshed";
 
 /**
  * Ruling 681(f): the record of an upgrade's refresh.
