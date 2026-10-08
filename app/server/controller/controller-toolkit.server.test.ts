@@ -90,6 +90,34 @@ beforeAll(async () => {
 });
 afterAll(() => app.cleanup());
 
+/**
+ * Build the toolkit AS one user, bound the way a conversation binds it: to
+ * `viberr-core` unless told otherwise, and to a task, a conversation or the
+ * message a turn answers when a case names one.
+ */
+async function toolkitAs(
+  userId: string,
+  bind: {
+    projectSlug?: string | null;
+    taskKey?: string | null;
+    conversationId?: string | null;
+    answering?: string | null;
+    fetchImpl?: typeof fetch;
+  } = {},
+) {
+  const { buildControllerToolkit } = await import("./controller-toolkit.server");
+  const { findUserById } = await import("~/server/auth/user-store.server");
+  const user = findUserById(app.db, userId)!;
+  const { fetchImpl, projectSlug = SLUG, ...anchors } = bind;
+  return buildControllerToolkit({
+    db: app.db,
+    ctx: fetchImpl ? { dataRoot: app.dataRoot, fetchImpl } : { dataRoot: app.dataRoot },
+    user: { id: user.id, email: user.email, name: user.name },
+    projectSlug,
+    ...anchors,
+  });
+}
+
 /** Build the toolkit AS one user and call one tool; returns the text reply. */
 async function call(
   userId: string,
@@ -97,16 +125,13 @@ async function call(
   args: Record<string, JsonValue> = {},
   projectSlug: string | null = SLUG,
 ): Promise<string> {
-  const { buildControllerToolkit } = await import("./controller-toolkit.server");
-  const { findUserById } = await import("~/server/auth/user-store.server");
-  const user = findUserById(app.db, userId)!;
-  const toolkit = buildControllerToolkit({
-    db: app.db,
-    ctx: { dataRoot: app.dataRoot },
-    user: { id: user.id, email: user.email, name: user.name },
-    projectSlug,
-  });
-  return callToolText(toolkit.tools, toolName, args);
+  return callToolText((await toolkitAs(userId, { projectSlug })).tools, toolName, args);
+}
+
+/** project.md's bytes, for the cases that prove a refused write left it alone. */
+async function projectMd(): Promise<string> {
+  const { resolveProjectFilePath } = await import("~/server/files/project-writer.server");
+  return readFileSync(resolveProjectFilePath({ projectSlug: SLUG, dataRoot: app.dataRoot }), "utf8");
 }
 
 /**
@@ -146,13 +171,7 @@ async function connectOwner(owner: string, token: string): Promise<void> {
 
 describe("the tool surface itself encodes the invariants", () => {
   it("has NO tool for the always-human decisions and NO delete anywhere", async () => {
-    const { buildControllerToolkit } = await import("./controller-toolkit.server");
-    const toolkit = buildControllerToolkit({
-      db: app.db,
-      ctx: { dataRoot: app.dataRoot },
-      user: { id: ids.orgAdmin, email: "arda@viberr.dev", name: "Arda" },
-      projectSlug: SLUG,
-    });
+    const toolkit = await toolkitAs(ids.orgAdmin);
     const names = toolkit.tools.map((t) => t.name);
     for (const banned of [
       "merge",
@@ -181,13 +200,7 @@ describe("the tool surface itself encodes the invariants", () => {
   it("stays deferred behind ToolSearch: loading 40+ tools up front costs more than the hop (Option D PR 4(a))", async () => {
     // Measured 2026-09-11 on the pinned SDK: alwaysLoad saved the controller a
     // turn but tripled turn 1's prompt and quadrupled a cold turn's cost.
-    const { buildControllerToolkit } = await import("./controller-toolkit.server");
-    const toolkit = buildControllerToolkit({
-      db: app.db,
-      ctx: { dataRoot: app.dataRoot },
-      user: { id: ids.orgAdmin, email: "arda@viberr.dev", name: "Arda" },
-      projectSlug: SLUG,
-    });
+    const toolkit = await toolkitAs(ids.orgAdmin);
     const loading = toolLoading(toolkit.mcpServers.viberr_controller);
     expect(loading.loaded).toEqual([]);
     expect(loading.deferred).toHaveLength(toolkit.tools.length);
@@ -243,13 +256,7 @@ describe("ruling 492: every controller door that writes a goal carries the done-
     );
     expect(DONE_SIGNAL_RULE).not.toContain("in the same write");
     expect(DONE_SIGNAL_RULE).not.toContain("at this task's acceptance");
-    const { buildControllerToolkit } = await import("./controller-toolkit.server");
-    const toolkit = buildControllerToolkit({
-      db: app.db,
-      ctx: { dataRoot: app.dataRoot },
-      user: { id: ids.orgAdmin, email: "arda@viberr.dev", name: "Arda" },
-      projectSlug: SLUG,
-    });
+    const toolkit = await toolkitAs(ids.orgAdmin);
     // The copy a model is handed: the JSON Schema read through a real MCP
     // client (ruling 296).
     const published = await publishedSchemas(toolkit.mcpServers.viberr_controller);
@@ -619,20 +626,11 @@ describe("list_decisions briefs the person and decides nothing (ruling 251)", ()
   it("ruling 256: an anchored task never filters another project's decisions", async () => {
     await openPacketOn(PACKET_TASK);
     try {
-      const { buildControllerToolkit } = await import("./controller-toolkit.server");
-      const { findUserById } = await import("~/server/auth/user-store.server");
-      const user = findUserById(app.db, ids.orgAdmin)!;
       const read = async (
         bound: { projectSlug: string | null; taskKey: string | null },
         args: Record<string, JsonValue>,
       ) => {
-        const toolkit = buildControllerToolkit({
-          db: app.db,
-          ctx: { dataRoot: app.dataRoot },
-          user: { id: user.id, email: user.email, name: user.name },
-          projectSlug: bound.projectSlug,
-          taskKey: bound.taskKey,
-        });
+        const toolkit = await toolkitAs(ids.orgAdmin, bound);
         const tool = toolkit.tools.find((t) => t.name === "list_decisions")!;
         // SAFETY: every toolkit handler returns the `textResult` shape.
         const result = (await tool.handler(args, {})) as { content: { text: string }[] };
@@ -1563,8 +1561,6 @@ describe("instance scope: org-role gate on every management tool", () => {
   it("create_project accepts createRepository and forwards it: the repository is created through the connection's token", async () => {
     // CANARY: stop copying `args.createRepository` onto the input and no POST
     // is made; drop the field from the schema and the published check fails.
-    const { buildControllerToolkit } = await import("./controller-toolkit.server");
-    const { findUserById } = await import("~/server/auth/user-store.server");
     const { fakeGithubFetch } = await import("../../../test-support/fake-github");
     await connectOwner("site-owner", "ghp_ctlcreaterepo00000000000000000000");
     let created = false;
@@ -1578,13 +1574,7 @@ describe("instance scope: org-role gate on every management tool", () => {
         return { status: 201, body: { full_name: "site-owner/website" } };
       },
     });
-    const user = findUserById(app.db, ids.projectAdmin)!;
-    const toolkit = buildControllerToolkit({
-      db: app.db,
-      ctx: { dataRoot: app.dataRoot, fetchImpl: gh.fetchImpl },
-      user: { id: user.id, email: user.email, name: user.name },
-      projectSlug: null,
-    });
+    const toolkit = await toolkitAs(ids.projectAdmin, { projectSlug: null, fetchImpl: gh.fetchImpl });
 
     const schema = z
       .object({ properties: z.object({ createRepository: z.object({ description: z.string() }) }) })
@@ -1612,7 +1602,7 @@ describe("instance scope: org-role gate on every management tool", () => {
     // Audited under the person, with the controller disclosed as the instrument.
     const row = listAuditEvents(app.db, { action: "project.repository.created" })[0]!;
     expect(row.actorUserId).toBe(ids.projectAdmin);
-    expect(row.actorLabel).toBe(`${user.email} · via controller`);
+    expect(row.actorLabel).toBe("elif@viberr.dev · via controller");
     expect(row.details).toEqual({ repo: "site-owner/website", private: true });
   });
 });
@@ -1697,13 +1687,7 @@ describe("ruling 463: list_github_connections", () => {
 
   it("create_project's description sends the controller to list_github_connections first", async () => {
     // CANARY: drop the sentence from the description.
-    const { buildControllerToolkit } = await import("./controller-toolkit.server");
-    const toolkit = buildControllerToolkit({
-      db: app.db,
-      ctx: { dataRoot: app.dataRoot },
-      user: { id: ids.nonMember, email: "deniz@viberr.dev", name: "Deniz" },
-      projectSlug: null,
-    });
+    const toolkit = await toolkitAs(ids.nonMember, { projectSlug: null });
     const create = toolkit.tools.find((t) => t.name === "create_project")!;
     expect(create.description).toContain("call list_github_connections FIRST");
   });
@@ -1744,8 +1728,6 @@ describe("ruling 463: list_github_connections", () => {
     // read is accepted for a board whose Developer pushes; let the tool
     // change a repository a project has and it bypasses the settings door's
     // footprint confirmation.
-    const { buildControllerToolkit } = await import("./controller-toolkit.server");
-    const { findUserById } = await import("~/server/auth/user-store.server");
     const { fakeGithubFetch } = await import("../../../test-support/fake-github");
     const { readProjectFile } = await import("~/server/files/project-writer.server");
     await connectOwner("later-owner", "ghp_ctlconnectlater0000000000000000000");
@@ -1755,13 +1737,7 @@ describe("ruling 463: list_github_connections", () => {
         body: { full_name: "later-owner/checkout", default_branch: "trunk", permissions: { push } },
       }),
     });
-    const user = findUserById(app.db, ids.projectAdmin)!;
-    const toolkit = buildControllerToolkit({
-      db: app.db,
-      ctx: { dataRoot: app.dataRoot, fetchImpl: gh.fetchImpl },
-      user: { id: user.id, email: user.email, name: user.name },
-      projectSlug: null,
-    });
+    const toolkit = await toolkitAs(ids.projectAdmin, { projectSlug: null, fetchImpl: gh.fetchImpl });
     const created = await callToolText(toolkit.tools, "create_project", {
       name: "Checkout Later",
       key: "CKL",
@@ -1863,8 +1839,6 @@ describe("ruling 464: the controller chooses a project's roster and can take an 
   it("create_project publishes `agents` and forwards it: the designed roster is written, no Developer or Reviewer, and the reply lists it", async () => {
     // CANARY: stop copying `args.agents` onto the input and the base roster
     // is written; drop the field from the schema and the published check fails.
-    const { buildControllerToolkit } = await import("./controller-toolkit.server");
-    const { findUserById } = await import("~/server/auth/user-store.server");
     const { fakeGithubFetch } = await import("../../../test-support/fake-github");
     const { readProjectFile } = await import("~/server/files/project-writer.server");
     writeTemplate("roster-builder", "Roster Builder");
@@ -1872,13 +1846,7 @@ describe("ruling 464: the controller chooses a project's roster and can take an 
     const gh = fakeGithubFetch({
       "GET /repos/roster-owner/shop": { body: { default_branch: "main", permissions: { push: true } } },
     });
-    const user = findUserById(app.db, ids.projectAdmin)!;
-    const toolkit = buildControllerToolkit({
-      db: app.db,
-      ctx: { dataRoot: app.dataRoot, fetchImpl: gh.fetchImpl },
-      user: { id: user.id, email: user.email, name: user.name },
-      projectSlug: null,
-    });
+    const toolkit = await toolkitAs(ids.projectAdmin, { projectSlug: null, fetchImpl: gh.fetchImpl });
     const schema = z
       .object({ properties: z.object({ agents: z.object({ description: z.string() }) }) })
       .parse((await publishedSchemas(toolkit.mcpServers.viberr_controller)).get("create_project"));
@@ -2766,17 +2734,7 @@ async function callAnchored(
   args: Record<string, JsonValue> = {},
   taskKey: string | null = "VIB-142",
 ): Promise<string> {
-  const { buildControllerToolkit } = await import("./controller-toolkit.server");
-  const { findUserById } = await import("~/server/auth/user-store.server");
-  const user = findUserById(app.db, userId)!;
-  const toolkit = buildControllerToolkit({
-    db: app.db,
-    ctx: { dataRoot: app.dataRoot },
-    user: { id: user.id, email: user.email, name: user.name },
-    projectSlug: SLUG,
-    taskKey,
-  });
-  return callToolText(toolkit.tools, toolName, args);
+  return callToolText((await toolkitAs(userId, { taskKey })).tools, toolName, args);
 }
 
 describe("task anchoring (ruling 121)", () => {
@@ -3114,13 +3072,7 @@ describe("save_global_agent: grants are store keys, and an omitted list is left 
    * refusal that lists only workarounds hides the fix.
    */
   it("ruling 280: deploy_agent names the removal path instead of denying one exists", async () => {
-    const { buildControllerToolkit } = await import("./controller-toolkit.server");
-    const toolkit = buildControllerToolkit({
-      db: app.db,
-      ctx: { dataRoot: app.dataRoot },
-      user: { id: ids.projectAdmin, email: "elif@viberr.dev", name: "Elif" },
-      projectSlug: SLUG,
-    });
+    const toolkit = await toolkitAs(ids.projectAdmin);
     // SAFETY: `deploy_agent` is unconditionally registered on this toolkit —
     // the gate is on the CALL, not on whether the tool exists.
     const def = toolkit.tools.find((t) => t.name === "deploy_agent")!;
@@ -3424,10 +3376,6 @@ describe("save_global_agent: grants are store keys, and an omitted list is left 
  * for the deployment's own kind, checks the stages itself, and writes nothing.
  */
 describe("update_agent_deployment refuses catalogued values by name (ruling 139)", () => {
-  async function projectMd(): Promise<string> {
-    const { resolveProjectFilePath } = await import("~/server/files/project-writer.server");
-    return readFileSync(resolveProjectFilePath({ projectSlug: SLUG, dataRoot: app.dataRoot }), "utf8");
-  }
   async function refused(args: Record<string, JsonValue>): Promise<string> {
     const before = await projectMd();
     // The newest row, never a count: `listAuditEvents` reads at most 100 rows,
@@ -3673,15 +3621,7 @@ describe("effort and model at deploy are settable and refused by name (ruling 13
   // not the backend default. The description is this door's only contract for
   // the model calling it, so it has to say the shipped rule.
   it("deploy_agent takes the template's own effort when none is given, and says so", async () => {
-    const { buildControllerToolkit } = await import("./controller-toolkit.server");
-    const { findUserById } = await import("~/server/auth/user-store.server");
-    const admin = findUserById(app.db, ids.projectAdmin)!;
-    const toolkit = buildControllerToolkit({
-      db: app.db,
-      ctx: { dataRoot: app.dataRoot },
-      user: { id: admin.id, email: admin.email, name: admin.name },
-      projectSlug: SLUG,
-    });
+    const toolkit = await toolkitAs(ids.projectAdmin);
     const def = toolkit.tools.find((t) => t.name === "deploy_agent")!;
     expect(def.description).not.toContain("the backend's default effort");
     expect(def.description).toContain("keep the template's own model and effort");
@@ -3893,12 +3833,6 @@ describe("update_agent_deployment sets a deployment's persona (ruling 467)", () 
  * two writes and two audit rows per person.
  */
 describe("invite_member seats the role it is given (C4)", () => {
-  async function projectMd(): Promise<string> {
-    const { resolveProjectFilePath } = await import("~/server/files/project-writer.server");
-    const { readFileSync } = await import("node:fs");
-    return readFileSync(resolveProjectFilePath({ projectSlug: SLUG, dataRoot: app.dataRoot }), "utf8");
-  }
-
   it("seats the role in ONE write with one audit row and no role change", async () => {
     // Canary: hardcode `viewer` in the writer again.
     const before = listAuditEvents(app.db, { action: "project.member.role_changed" }).length;
@@ -3926,15 +3860,7 @@ describe("invite_member seats the role it is given (C4)", () => {
       email: "unstated-seat@viberr.test",
     });
     expect(reply).toContain("joins as Viewer");
-    const { buildControllerToolkit } = await import("./controller-toolkit.server");
-    const { findUserById } = await import("~/server/auth/user-store.server");
-    const user = findUserById(app.db, ids.projectAdmin)!;
-    const toolkit = buildControllerToolkit({
-      db: app.db,
-      ctx: { dataRoot: app.dataRoot },
-      user: { id: user.id, email: user.email, name: user.name },
-      projectSlug: SLUG,
-    });
+    const toolkit = await toolkitAs(ids.projectAdmin);
     const def = toolkit.tools.find((t) => t.name === "invite_member")!;
     expect(def.description).not.toContain("join as contributor");
     expect(def.description).toContain("members join as viewer unless you give one");
@@ -3996,16 +3922,13 @@ describe("update_agent_deployment refuses a setting the deployment cannot hold",
   it("autonomy on a SPECIALIST is refused, and nothing is written", async () => {
     // Canary: drop the kind check — the call answers [done] for a value
     // `updateAgentProfile` writes only for the operator.
-    const { resolveProjectFilePath } = await import("~/server/files/project-writer.server");
-    const { readFileSync } = await import("node:fs");
-    const path = resolveProjectFilePath({ projectSlug: SLUG, dataRoot: app.dataRoot });
-    const before = readFileSync(path, "utf8");
+    const before = await projectMd();
     const reply = await call(ids.projectAdmin, "update_agent_deployment", {
       profileId: "developer",
       autonomy: "full",
     });
     expect(reply).toContain("[error] autonomy is an operator setting");
-    expect(readFileSync(path, "utf8")).toBe(before);
+    expect(await projectMd()).toBe(before);
   });
 });
 
@@ -4801,13 +4724,7 @@ describe("the effort descriptions are generated from the catalog (U36-5)", () =>
   it("every tier each backend offers appears in save_global_agent, deploy_agent and update_agent_deployment", async () => {
     // Canary: type the Codex list by hand again.
     const { effortsFor } = await import("~/server/runtimes/model-catalog.server");
-    const { buildControllerToolkit } = await import("./controller-toolkit.server");
-    const toolkit = buildControllerToolkit({
-      db: app.db,
-      ctx: { dataRoot: app.dataRoot },
-      user: { id: ids.orgAdmin, email: "arda@viberr.dev", name: "Arda" },
-      projectSlug: SLUG,
-    });
+    const toolkit = await toolkitAs(ids.orgAdmin);
     // Ruling 296 made a tool's schema a whole strict Zod object, so the field
     // texts are read where the model reads them: off the PUBLISHED JSON
     // schema, which is the only copy that matters.
@@ -4918,16 +4835,14 @@ describe("update_agent_deployment grants resources to every kind, the operator i
 
   it("an unknown key is refused by name and nothing is written", async () => {
     // Canary: skip resolveResourceGrants and merge the raw list.
-    const { resolveProjectFilePath } = await import("~/server/files/project-writer.server");
-    const file = resolveProjectFilePath({ projectSlug: SLUG, dataRoot: app.dataRoot });
-    const was = readFileSync(file, "utf8");
+    const was = await projectMd();
     const reply = await call(ids.projectAdmin, "update_agent_deployment", {
       profileId: operatorId,
       kbs: ["no-such-handbook"],
     });
     expect(reply.startsWith("[error] ")).toBe(true);
     expect(reply).toContain('Nothing in the store answers to knowledge base "no-such-handbook"');
-    expect(readFileSync(file, "utf8")).toBe(was);
+    expect(await projectMd()).toBe(was);
   });
 });
 
@@ -4975,9 +4890,7 @@ describe("set_required_reviewers (ruling 178)", () => {
   });
 
   it("refuses an unknown stage or profile by name with nothing written", async () => {
-    const { resolveProjectFilePath } = await import("~/server/files/project-writer.server");
-    const path = resolveProjectFilePath({ projectSlug: SLUG, dataRoot: app.dataRoot });
-    const before = readFileSync(path, "utf8");
+    const before = await projectMd();
     const audits = listAuditEvents(app.db, { action: "project.required_reviewers.updated" }).length;
     const stage = await call(ids.projectAdmin, "set_required_reviewers", {
       rules: [{ stageId: "qa", profileId: "reviewer" }],
@@ -4988,7 +4901,7 @@ describe("set_required_reviewers (ruling 178)", () => {
     });
     expect(profile).toContain('[error] No agent "ghost" is deployed on viberr-core. Nothing was written.');
     expect(profile).toContain("Verdict-capable agents here: Reviewer (reviewer)");
-    expect(readFileSync(path, "utf8")).toBe(before);
+    expect(await projectMd()).toBe(before);
     expect(listAuditEvents(app.db, { action: "project.required_reviewers.updated" })).toHaveLength(audits);
   });
 
@@ -5016,14 +4929,8 @@ describe("set_required_reviewers (ruling 178)", () => {
     // hand-off, so the operator's first act was a decision packet. The
     // controller read `requiredReviewers` with nothing saying what it means
     // for a plan. CANARY: drop either sentence and this goes red.
-    const { buildControllerToolkit } = await import("./controller-toolkit.server");
-    const toolkit = buildControllerToolkit({
-      db: app.db,
-      ctx: { dataRoot: app.dataRoot },
-      user: { id: ids.projectAdmin, email: "elif@viberr.dev", name: "Elif" },
-      projectSlug: SLUG,
-    });
-    const describe = (name: string) => toolkit.tools.find((t) => t.name === name)?.description ?? "";
+    const toolkit = await toolkitAs(ids.projectAdmin);
+    const describe =(name: string) => toolkit.tools.find((t) => t.name === name)?.description ?? "";
     expect(describe("set_required_reviewers")).toContain(
       "Ruling 556: the agent a rule names never delivers on this project",
     );
@@ -5289,13 +5196,7 @@ describe("ruling 469: the controller reads an MCP connection's OAuth sign-in", (
   });
 
   it("save_mcp_server's description names the sign-in as the admin's", async () => {
-    const { buildControllerToolkit } = await import("./controller-toolkit.server");
-    const toolkit = buildControllerToolkit({
-      db: app.db,
-      ctx: { dataRoot: app.dataRoot },
-      user: { id: ids.orgAdmin, email: "arda@viberr.dev", name: "Arda" },
-      projectSlug: SLUG,
-    });
+    const toolkit = await toolkitAs(ids.orgAdmin);
     const save = toolkit.tools.find((t) => t.name === "save_mcp_server");
     expect(save?.description).toContain("signed in by an org admin from its editor in Instance settings");
     expect(save?.description).toContain("which you cannot do");
@@ -5365,15 +5266,7 @@ describe("ruling 197: a template's persona is readable, and a summary-only edit 
   // the silence beside three spelled-out merge rules is what made a careful
   // caller refuse the edit entirely.
   it("says the merge rule in the tool's own description, beside the grants' rule", async () => {
-    const { buildControllerToolkit } = await import("./controller-toolkit.server");
-    const { findUserById } = await import("~/server/auth/user-store.server");
-    const admin = findUserById(app.db, ids.orgAdmin)!;
-    const toolkit = buildControllerToolkit({
-      db: app.db,
-      ctx: { dataRoot: app.dataRoot },
-      user: { id: admin.id, email: admin.email, name: admin.name },
-      projectSlug: SLUG,
-    });
+    const toolkit = await toolkitAs(ids.orgAdmin);
     const save = toolkit.tools.find((t) => t.name === "save_global_agent")!;
     expect(save.description).toContain(
       "an omitted or empty PERSONA leaves the stored persona unchanged",
@@ -5432,19 +5325,13 @@ describe("ruling 296: every published controller schema refuses unknown keys", (
   }
 
   it("finds no stripping object in any tool the controller mounts", async () => {
-    const { buildControllerToolkit } = await import("./controller-toolkit.server");
     const { buildControllerOpsMcp } = await import("./controller-ops-mcp.server");
     const { findUserById } = await import("~/server/auth/user-store.server");
     const me = findUserById(app.db, ids.orgAdmin)!;
     const user = { id: me.id, email: me.email, name: me.name };
 
     const servers = [
-      buildControllerToolkit({
-        db: app.db,
-        ctx: { dataRoot: app.dataRoot },
-        user,
-        projectSlug: SLUG,
-      }).mcpServers.viberr_controller,
+      (await toolkitAs(ids.orgAdmin)).mcpServers.viberr_controller,
       ...Object.values(
         buildControllerOpsMcp({ db: app.db, ctx: { dataRoot: app.dataRoot }, user }).mcpServers,
       ),
@@ -5481,18 +5368,7 @@ describe("ruling 685: continue_when_done", () => {
     /** The user message the calling turn answers: one a person wrote, unless a test says otherwise. */
     answering: string | null = "cmsg_a_person_wrote",
   ): Promise<string> {
-    const { buildControllerToolkit } = await import("./controller-toolkit.server");
-    const { findUserById } = await import("~/server/auth/user-store.server");
-    const user = findUserById(app.db, userId)!;
-    const toolkit = buildControllerToolkit({
-      db: app.db,
-      ctx: { dataRoot: app.dataRoot },
-      user: { id: user.id, email: user.email, name: user.name },
-      projectSlug: SLUG,
-      conversationId,
-      answering,
-    });
-    return callToolText(toolkit.tools, "continue_when_done", args);
+    return callToolText((await toolkitAs(userId, { conversationId, answering })).tools, "continue_when_done", args);
   }
   const STEP = "Copy proposal-template.html from this task into the rulings knowledge base as a template, then write the rule";
 
@@ -5697,17 +5573,7 @@ describe("ruling 685: continue_when_done", () => {
  */
 describe("ruling 573: read_message_file", () => {
   async function callIn(conversationId: string | null, args: Record<string, JsonValue>): Promise<string> {
-    const { buildControllerToolkit } = await import("./controller-toolkit.server");
-    const { findUserById } = await import("~/server/auth/user-store.server");
-    const user = findUserById(app.db, ids.orgAdmin)!;
-    const toolkit = buildControllerToolkit({
-      db: app.db,
-      ctx: { dataRoot: app.dataRoot },
-      user: { id: user.id, email: user.email, name: user.name },
-      projectSlug: SLUG,
-      conversationId,
-    });
-    return callToolText(toolkit.tools, "read_message_file", args);
+    return callToolText((await toolkitAs(ids.orgAdmin, { conversationId })).tools, "read_message_file", args);
   }
 
   it("reads a file sent in this conversation by its name, and names the ones it holds otherwise", async () => {
