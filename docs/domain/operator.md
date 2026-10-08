@@ -258,8 +258,12 @@ or one whose outcome is the packet it opened (ruling 443), on either backend: a 
 step through the executor's `record` and a Claude tool call through the toolkit's reply
 both stamp it with `noteCarriedOutAction` (ruling 705). When the nudged drive tried to act
 and Viberr refused all of it, the note says the operator was STOPPED, not holding, and
-names the three remedies (ruling 399). On Codex that is a plan wholly refused again, and
-the note points at the refusal notes the plan left directly above it. On Claude it is a
+names the three remedies (ruling 399). On Codex that is the nudge's plan refused in full,
+and the note points at the refusal notes left directly above it. It says the run before
+was refused too only when the nudge was ruling 228's plan-refused one, which the drive
+records at its start (`ctx.operatorRun.planRefusedNudge`); after a nudge for an idle
+`auto` stage, the drive's own move or a refresh it says nothing of that run, which may
+have carried out its whole plan. On Claude it is a
 drive whose governed calls were refused (`planRefusalOf`, the predicate the plan executor
 asks, kept on the drive by `noteRefusedCall` from the toolkit's reply): its tools answered
 each refusal to the model in the run and no timeline note narrates them, so the hold note

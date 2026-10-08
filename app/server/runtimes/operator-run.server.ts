@@ -1183,7 +1183,7 @@ export async function maybeResumeStrandedOperator(
       },
     );
     reprojectTask(db, { dataRoot: ref.dataRoot }, ref.projectSlug, ref.taskKey);
-    logger.info("stranded-operator resume withheld: the nudged drive held the stage again", {
+    logger.info("stranded-operator resume withheld: the nudged drive made no progress either", {
       taskKey: ref.taskKey,
       stage: file.parsed.frontmatter.stage,
     });
@@ -1272,21 +1272,25 @@ function heldNudgeNote(ownRun: OwnOperatorRun | null | undefined, autoStage: boo
     "do the thing a refusal names, change what made the step impossible, or take the action yourself.";
   if (ownRun?.planWhollyRefused === true) {
     // Ruling 399 (F39-26): the operator did not choose anything here. Every
-    // action it planned was REFUSED, twice — which Viberr knows in this exact
-    // scope (`planWhollyRefused`, which decided the task was stranded at all)
-    // and which the refusal notes say in their own words, directly above this
+    // action it planned was REFUSED — which Viberr knows in this exact scope
+    // (`planWhollyRefused`, which decided the task was stranded at all) and
+    // which the refusal notes say in their own words, directly above this
     // one. Calling that a deliberate hold is a sentence contradicting a fact
     // the same function is holding, and the remedy it offered — run the
-    // operator again — is the one move that reproduces it: the operator was
-    // already re-invoked once and told what was wrong, and planned the
-    // refused step again anyway.
+    // operator again — is the one move that reproduces it: the run Viberr
+    // refused WAS the automatic re-run. The drive before it was refused too
+    // only when this was ruling 228's plan-refused nudge; a nudge for an idle
+    // `auto` stage, the drive's own move or a refresh can follow a drive that
+    // carried out its whole plan, and then the note says nothing of it.
+    const when = ownRun.planRefusedNudge
+      ? "on its first run and again on the one automatic retry"
+      : "on the one automatic retry";
     return (
       stopped +
-      "Every action it planned was refused, on its first run and again on " +
-      "the one automatic retry, so nothing it decided was carried out. The " +
-      "refusal notes are directly above and each names what was wrong with " +
-      "the step. Coordination is paused because a fresh operator run plans " +
-      "against the same state and is refused the same way: " +
+      `Every action it planned was refused, ${when}, so nothing it decided ` +
+      "was carried out. The refusal notes are directly above and each names " +
+      "what was wrong with the step. Coordination is paused because a fresh " +
+      "operator run plans against the same state and is refused the same way: " +
       remedies
     );
   }
@@ -1294,7 +1298,7 @@ function heldNudgeNote(ownRun: OwnOperatorRun | null | undefined, autoStage: boo
     // Ruling 399 on Claude (ruling 705): the same verdict, said truly where no
     // refusal note exists. A Claude drive's tools answered each refusal to the
     // model as it called them, so the note quotes them itself, and it says
-    // nothing of the drive before the nudge, which no record here describes.
+    // nothing of the drive before the nudge, whose refusals it cannot quote.
     return (
       stopped +
       "On the one automatic re-run nothing it decided was carried out: Viberr " +
@@ -1942,6 +1946,9 @@ export async function runOperator(
     // transitionStage's re-trigger (see OPERATOR_TRANSITION_CHAIN_CAP).
     transitionDepth: input.transitionDepth ?? 0,
   };
+  // Ruling 399: why this drive was nudged, for its own hold note, which says
+  // the drive before it was refused too only when it was.
+  if (input.planRefusedNudge) ctx.operatorRun.planRefusedNudge = true;
   // Ruling 152(a): the settle reads this drive's own moves off the same object.
   leaseToken.ownRun = ctx.operatorRun;
 

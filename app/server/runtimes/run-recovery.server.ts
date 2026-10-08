@@ -798,8 +798,10 @@ function abandonedWaitNote(
  *
  * The remedy is the one `finalizeOrphanedRuns` already uses for its own case:
  * say so on the timeline and re-invoke the operator, which re-reads the task
- * and decides. A project with no operator deployed settles the flag instead, so
- * the board stops claiming work that is not happening.
+ * and decides. A re-invocation that starts no run, or throws, settles the flag
+ * instead, so the board stops claiming work that is not happening. A project
+ * with no operator deployed is not one of those: `runOperator` refuses no
+ * undeployed operator, so its drive runs.
  */
 export async function settleAbandonedWaits(
   db: DatabaseSync,
@@ -916,10 +918,11 @@ export async function settleAbandonedWaits(
       };
       if (ctx.dataRoot) drive.dataRoot = ctx.dataRoot;
       const result = await runOperator(db, drive);
-      // The operator may REFUSE rather than throw (none deployed, a closed
-      // task, an open packet, the task waiting on other work). Either way no
-      // run started, so the board must stop claiming an agent — the whole
-      // reason this sweep exists.
+      // The operator may REFUSE rather than throw: a closed task, or a packet
+      // opened since the read above (`blockedBy` holds no `manual` trigger,
+      // and this sweep skips such a task). An undeployed operator is not
+      // refused; its drive runs. A refusal starts no run, so the board must
+      // stop claiming an agent — the whole reason this sweep exists.
       if (!result.runId) {
         await clearWaitingToHuman(db, ctx, row.slug, row.key);
       }
@@ -929,8 +932,8 @@ export async function settleAbandonedWaits(
         taskKey: row.key,
         err: toError(error),
       });
-      // The operator could not run (none deployed, a refusal): the board must
-      // still stop claiming an agent is on it.
+      // The note or the drive threw (a refusal returns, it does not throw):
+      // the board must still stop claiming an agent is on it.
       await clearWaitingToHuman(db, ctx, row.slug, row.key).catch(() => {});
     }
   }

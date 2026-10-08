@@ -114,6 +114,16 @@ export interface TaskMutationContext {
      */
     planWhollyRefused?: boolean;
     /**
+     * Ruling 399: this drive IS ruling 228's plan-refused nudge, so the drive
+     * before it planned only steps Viberr refused. Stamped at drive start from
+     * `RunOperatorInput.planRefusedNudge`, because the settle judges this
+     * drive with nothing else about the one before it: its hold note says the
+     * first run was refused too only when this says so. A nudge for any other
+     * reason (an idle `auto` stage, the drive's own move, a refresh) follows a
+     * drive that may have carried out its whole plan.
+     */
+    planRefusedNudge?: boolean;
+    /**
      * Ruling 406 (F39-33): this drive CARRIED OUT at least one action (an
      * `outcome: "done"`, or a packet it opened, ruling 443), whatever effect it
      * had: a Codex plan step or a Claude tool call alike, both stamped by

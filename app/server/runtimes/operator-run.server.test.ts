@@ -2862,18 +2862,46 @@ describe("stranded auto-stage resume", () => {
      * operator again plans the same refused step, which is exactly what the one
      * automatic retry had already proved.
      *
-     * `planWhollyRefused` is read eleven lines above this note to decide the
-     * task is stranded at all — the fact was in the same function the whole
+     * `planWhollyRefused` was read eleven lines above that note to decide the
+     * task was stranded at all — the fact was in the same function the whole
      * time. This pass's signature shape, in the pause that is supposed to tell
      * a human what happened.
+     *
+     * Its first fix said "on its first run and again on the one automatic
+     * retry" after every nudge, and the settle knew nothing of the drive
+     * before it: a nudge for an idle `auto` stage follows a drive that may
+     * have carried out its whole plan. The second row is that shape.
      */
-    it("ruling 228: a plan refused IN FULL is nudged once, even at a human boundary", async () => {
-      // A stage whose outbound boundary is `human`, not `auto` — the shape the
-      // backstop could not see.
+    it.each([
+      {
+        case: "a plan refused IN FULL is nudged once, even at a human boundary",
+        // A stage whose outbound boundary is `human`, not `auto` — the shape the
+        // backstop could not see.
+        stage: "review",
+        // Drive 1 plans exactly one action and it does not run.
+        firstPlan: "refused",
+        // And it is told WHY it is back — not the idle-stage sentence, which
+        // would be false twice over here (the stage is not auto-advance, and the
+        // run did not end idle by choice).
+        nudgeSays: ["EVERY action your previous run planned was refused", "Do NOT plan the same refused action again"],
+        nudgeNever: "auto-advance stage idle",
+        refusedWhen: "on its first run and again on the one automatic retry",
+      },
+      {
+        case: "a nudge at an auto stage refused IN FULL does not say the run before it was",
+        // Ruling 399, said true: drive 1's one step was carried out, so the
+        // nudge is the idle-stage one, and nothing of the first run was refused.
+        stage: "triage",
+        firstPlan: "comment",
+        nudgeSays: ["auto-advance stage idle"],
+        nudgeNever: "EVERY action your previous run planned was refused",
+        refusedWhen: "on the one automatic retry",
+      },
+    ] as const)("ruling 228: $case", async ({ stage, firstPlan, nudgeSays, nudgeNever, refusedWhen }) => {
       writeTask(store2.dataRoot, store2.slug, {
         frontmatter: baseTaskFrontmatter("VIB-1", {
           title: "list files in the project",
-          stage: "review",
+          stage,
           readiness: "ready",
           waiting: "human",
           ownerUserId: store2.users.arda.id,
@@ -2890,12 +2918,11 @@ describe("stranded auto-stage resume", () => {
         trigger: "manual",
         dataRoot: store2.dataRoot,
       });
-      // Drive 1 plans exactly one action and it does not run.
       // Every field present-but-nullable, the shape OpenAI strict output
       // produces (B-6) — a missing key would fail the plan schema instead,
       // which is the escalation path, not this one.
-      // A REAL action the policy refuses: review → done is the locked human
-      // boundary, so the operator may not make this move. An empty or
+      // A REAL action the policy refuses: a move to Done is an acceptance, and
+      // this operator holds no `completion-for-acceptance` grant. An empty or
       // unparseable plan is a different case viberr already catches
       // ("produced no actionable plan") — the gap is a plan that named real
       // work and was not allowed to do it.
@@ -2903,22 +2930,33 @@ describe("stranded auto-stage resume", () => {
         reasoning: "Move it along.",
         actions: [transitionAction({ toStageId: "done" })],
       });
-      adapter2.finish(store2, refusedPlan, "finished");
+      const commentPlan = JSON.stringify({
+        reasoning: "",
+        actions: [
+          {
+            tool: "post_comment",
+            profileId: null,
+            delivers: null,
+            toStageId: null,
+            packetType: null,
+            text: "Read the goal; nothing to advance yet.",
+            reason: null,
+            packetOptions: null,
+          },
+        ],
+      });
+      adapter2.finish(store2, firstPlan === "refused" ? refusedPlan : commentPlan, "finished");
 
       await eventually(() => {
         expect(operatorRuns()).toHaveLength(2);
         expect(adapter2.pending).not.toBeNull();
       });
-      // And it is told WHY it is back — not the idle-stage sentence, which
-      // would be false twice over here (the stage is not auto-advance, and the
-      // run did not end idle by choice).
       const prompt = adapter2.pending!.spec.prompt;
-      expect(prompt).toContain("EVERY action your previous run planned was refused");
-      expect(prompt).toContain("Do NOT plan the same refused action again");
-      expect(prompt).not.toContain("auto-advance stage idle");
+      for (const said of nudgeSays) expect(prompt).toContain(said);
+      expect(prompt).not.toContain(nudgeNever);
 
-      // Drive 2 is refused in full as well: one nudge, then the hold, exactly
-      // as F31-11 requires — a refused plan must not loop either.
+      // Drive 2 is refused in full: one nudge, then the hold, exactly as
+      // F31-11 requires — a refused plan must not loop either.
       adapter2.finish(store2, refusedPlan, "finished");
       await eventually(() => {
         const parsed = readTaskFile({
@@ -2936,7 +2974,11 @@ describe("stranded auto-stage resume", () => {
       const note = readTaskFile({ projectSlug: store2.slug, taskKey: "VIB-1", dataRoot: store2.dataRoot })!
         .parsed.timeline.find((e) => e.text.includes("did not hold this stage"))?.text;
       expect(note, "no hold note says the operator was stopped").toBeDefined();
-      expect(note).toContain("Every action it planned was refused");
+      // The run before the nudge was refused too only after ruling 228's
+      // nudge. CANARY: drop the drive-start `planRefusedNudge` stamp and the
+      // first row loses its first run; say it whatever the nudge and the second
+      // blames a first run whose one step was carried out.
+      expect(note).toContain(`Every action it planned was refused, ${refusedWhen}, so nothing it decided was carried out`);
       expect(note).not.toContain("deliberate hold");
       // …and the remedy no longer sends the reader at the one move that
       // reproduces it.

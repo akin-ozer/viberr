@@ -609,9 +609,13 @@ export function deliverGate(authority: OperatorAuthority): Gate {
   // resolved to `direct` on any non-strict board. An undeployed operator
   // therefore built a toolkit of exactly `get_task` + `deliver_for_review` —
   // it could push a branch and open a PR with no operator configured anywhere.
-  // Denied HERE rather than at the call sites, because four of the five
-  // `runOperator` entry points (the Run-operator button, a schedule, boot
-  // recovery, an `@operator` comment) never check `authority.deployed`; the
+  // Denied HERE rather than at the call sites, because `runOperator` refuses
+  // no undeployed operator and four of its doors never check
+  // `authority.deployed`: the Run-operator control, a schedule, boot
+  // recovery's abandoned-wait sweep and the controller's `run_agent_on_task`.
+  // (`autoInvokeOperator` and the agent-reply react check it, and an
+  // `@operator` comment reaches the operator only through
+  // `resolveMentionedAgent`, which resolves it only when one is deployed.) The
   // Claude toolkit, the Codex plan schema and `operatorDeliverForReview` all
   // resolve delivery through this one function.
   if (!authority.deployed) return "deny";
