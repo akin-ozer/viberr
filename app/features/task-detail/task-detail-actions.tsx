@@ -375,7 +375,6 @@ export function useRunConsole({
   csrf,
   task,
   runtime,
-  runsVisible,
   myRole,
   canRunAgents,
   runPrincipal,
@@ -384,7 +383,6 @@ export function useRunConsole({
   csrf: string;
   task: TaskDetail;
   runtime: RunView[];
-  runsVisible: boolean;
   myRole: string | null;
   canRunAgents: boolean;
   runPrincipal: TaskRunPrincipalView | null;
@@ -407,9 +405,6 @@ export function useRunConsole({
     threads: runtime,
     // F22: bounds a stale "running" strip if a finalize event is missed.
     hasActiveRun: runtime.some((r) => r.state === "running"),
-    // UI-30: a non-member's tail requests 403 — don't ask for what can only
-    // be refused (it used to 403 silently on every appended line).
-    enabled: runsVisible,
   });
 
   const {

@@ -91,8 +91,7 @@ interface TaskDetailPageProps {
   /** Ruling 503: the project's epics, for the hero's Epic field and the
    *  Details panel's Epic menu. Empty in a project with none. */
   epics?: EpicOption[];
-  /** R19-19: browser-produced files (loader; `[]` for non-members — the same
-   *  visibility bar as the run console). */
+  /** R19-19: browser-produced files (loader). */
   attachments?: TaskAttachmentEntry[];
   /** Attachment name → who saved it and when (from the events that claim
    *  names). Names no event claims are absent — the panel omits the line. */
@@ -105,7 +104,7 @@ interface TaskDetailPageProps {
    *  Null hides the panel and the evidence links (e.g. bare test renders). */
   attachmentsBase?: string | null;
   /** Ruling 690: the sources the task keeps (loader; absent for a task that
-   *  keeps none and for a non-member), newest first. */
+   *  keeps none), newest first. */
   sources?: TaskSourceRow[];
   /** How many it keeps in all: the list stops at the newest hundred. */
   sourcesTotal?: number;
@@ -145,10 +144,6 @@ interface TaskDetailPageProps {
   /** The engagements' live (queued/running) runs (per-agent gating, and the
    *  engaged-agent card's "queued"/"running…" word). */
   liveAgentRuns: LiveAgentRun[];
-  /** UI-30: false → the viewer is not a project member, so `lines`/`raw`/`sid`
-   *  were withheld by the loader and the console renders an honest gate notice
-   *  instead of an empty panel. */
-  runsVisible?: boolean;
   timelineHasMore: boolean;
   timelineRemaining: number;
   timelineNextLimit: number;
@@ -276,7 +271,6 @@ export function TaskDetailPage({
   operatorAcceptsDirectly = false,
   runPrincipal,
   liveAgentRuns,
-  runsVisible = true,
   timelineHasMore,
   timelineRemaining,
   timelineNextLimit,
@@ -336,7 +330,6 @@ export function TaskDetailPage({
     csrf,
     task,
     runtime,
-    runsVisible,
     myRole,
     canRunAgents: can.canRunAgents,
     runPrincipal,
@@ -464,7 +457,6 @@ export function TaskDetailPage({
       <TaskMainColumn
         task={task}
         runtime={runtime}
-        runsVisible={runsVisible}
         runConsole={runConsole}
         can={can}
         recs={recs}

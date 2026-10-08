@@ -748,22 +748,20 @@ const RESULT_SOURCES_SHOWN = 12;
 
 /**
  * The completion packet as the task page shows it, from the task file the
- * loader has already read. `canSee` answers whether the viewer may see a
- * named attachment and it is still there (null for a viewer who may see no
- * attachments); `nameOf` names a reviewer; `ruleReviewers` are the profiles
+ * loader has already read. `canSee` answers whether a named attachment is
+ * still there; `nameOf` names a reviewer; `ruleReviewers` are the profiles
  * the project's rules require on every delivered task (ruling 178). None of
  * them reads a store file, so the task page's revalidation budget is
  * untouched (ruling 457). Ruling 690: `sources` is the work's kept sources as
- * the loader read them (`sourcesRestedOn`), or null for a viewer who may not
- * see the task's files.
+ * the loader read them (`sourcesRestedOn`).
  */
 export function completionView(
   fm: TaskFrontmatter,
   opts: {
-    canSee: ((name: string) => boolean) | null;
+    canSee: (name: string) => boolean;
     nameOf: (profileId: string) => string;
     ruleReviewers: readonly string[];
-    sources?: readonly TaskSource[] | null;
+    sources?: readonly TaskSource[];
   },
 ): CompletionView | null {
   const subject = reviewSubjectId(fm);
@@ -774,12 +772,12 @@ export function completionView(
   const onFile = fm.completionPacket;
   if (onFile) {
     const canSee = opts.canSee;
-    const screenshots = canSee ? onFile.screenshots.filter((s) => canSee(s.name)) : [];
+    const screenshots = onFile.screenshots.filter((s) => canSee(s.name));
     // Ruling 691: bound to the delivery under review, like the packet itself.
     // A picture of an earlier delivery never shows beside a newer file.
     const pictured = onFile.subject === subject ? currentPageCaptures(fm) : null;
     const pageOf = (name: string): CompletionFilePage | null => {
-      if (!pictured || !canSee || pageKindOf(name) === null) return null;
+      if (!pictured || pageKindOf(name) === null) return null;
       // A page the record does not name was not this render's to picture (a
       // person's own upload, say), and the card has nothing true to add.
       const page = pictured.pages.find((p) => p.file === name);
@@ -791,11 +789,9 @@ export function completionView(
         note: page.error,
       };
     };
-    const files = canSee
-      ? onFile.files
-          .filter((f) => canSee(f.name))
-          .map((f): CompletionFile => ({ name: f.name, caption: f.caption, page: pageOf(f.name) }))
-      : [];
+    const files = onFile.files
+      .filter((f) => canSee(f.name))
+      .map((f): CompletionFile => ({ name: f.name, caption: f.caption, page: pageOf(f.name) }));
     packet = {
       summary: onFile.summary,
       changes: onFile.changes,

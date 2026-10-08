@@ -123,13 +123,11 @@ const TASK: RunLogSource = { kind: "task", projectSlug: "viberr-core", taskKey: 
 let store: RunLogStore;
 
 function Probe({
-  enabled = true,
   threads,
   source = TASK,
   poll,
   shown,
 }: {
-  enabled?: boolean;
   threads?: ConsoleThreadInput[];
   source?: RunLogSource;
   poll?: { runId: string | null; everyMs: number };
@@ -139,7 +137,6 @@ function Probe({
   const input: Parameters<typeof useRunLogStream>[0] = {
     source,
     threads: threads ?? [thread()],
-    enabled,
   };
   if (poll) input.poll = poll;
   store = useRunLogStream(input);
@@ -321,15 +318,6 @@ describe("UI-35: run-log tail deduplication", () => {
 });
 
 describe("UI-30 / UI-03: the tail says when it stopped", () => {
-  it("asks for nothing when the viewer cannot read logs", async () => {
-    render(<Page enabled={false} />, { wrapper: DataRouter });
-    await act(async () => {
-      emitFrame(FakeEventSource.last(), "run.log-appended", frame(0));
-      await flush();
-    });
-    expect(fetchMock).not.toHaveBeenCalled();
-  });
-
   it("reports a 403 instead of swallowing it", async () => {
     fetchMock.mockResolvedValue({ ok: false, status: 403 });
     render(<Page />, { wrapper: DataRouter });

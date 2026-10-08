@@ -295,9 +295,9 @@ describe("ruling 521: what the task page is told", () => {
     ]);
   });
 
-  it("shows only the screenshots the viewer may see, and says when the packet describes earlier work", async () => {
-    // CANARY: pass the packet's screenshots through without `canSee` and a
-    // viewer who may not see the attachments is handed their names.
+  it("shows only the screenshots still in the store, and says when the packet describes earlier work", async () => {
+    // CANARY: pass the packet's screenshots through without `canSee` and the
+    // card draws a screenshot the store no longer holds.
     seed();
     attach("after.png");
     attach("before.png");
@@ -312,16 +312,12 @@ describe("ruling 521: what the task page is told", () => {
       hiddenScreenshots: 1,
       staleFor: null,
     });
-    expect(completionView(fm, { canSee: null, nameOf, ruleReviewers: [] })!.packet).toMatchObject({
-      screenshots: [],
-      hiddenScreenshots: 2,
-    });
     // A new revision replaces the work the packet describes.
     const redelivered = {
       ...fm,
       workRevision: { ...fm.workRevision!, id: "rev_2", headSha: "c".repeat(40) },
     };
-    expect(completionView(redelivered, { canSee: null, nameOf, ruleReviewers: [] })!.packet?.staleFor).toBe("aaaaaaa");
+    expect(completionView(redelivered, { canSee: () => true, nameOf, ruleReviewers: [] })!.packet?.staleFor).toBe("aaaaaaa");
   });
 });
 
@@ -469,9 +465,9 @@ describe("ruling 668: the packet names the result of a task delivered as files",
     ).toMatchObject({ resultFilesRequired: false, resultFileCandidates: [] });
   });
 
-  it("hands the page the notes, the result files the viewer may see, and the paths a revision changed", async () => {
-    // CANARY: pass the packet's files through without `canSee` and a viewer
-    // who may not see the attachments is handed their names.
+  it("hands the page the notes, the result files still in the store, and the paths a revision changed", async () => {
+    // CANARY: pass the packet's files through without `canSee` and the card
+    // lists a result file the store no longer holds.
     const nameOf = (id: string) => id;
     seedFiles();
     await write({
@@ -488,10 +484,6 @@ describe("ruling 668: the packet names the result of a task delivered as files",
       hiddenFiles: 1,
     });
     expect(member.paths).toBeNull();
-    expect(completionView(fm, { canSee: null, nameOf, ruleReviewers: [] })!.packet).toMatchObject({
-      files: [],
-      hiddenFiles: 2,
-    });
     // Another task reads the same result as one text (ruling 569).
     expect(completionPacketText(fm.completionPacket!)).toBe(
       "The attach flow works.\n\nAssumptions:\n730 hours a month.\n\n" +
@@ -508,7 +500,7 @@ describe("ruling 668: the packet names the result of a task delivered as files",
         paths: { headSha: SHA, changed, truncated: false },
       },
     });
-    const code = completionView(parsed().frontmatter, { canSee: null, nameOf, ruleReviewers: [] })!;
+    const code = completionView(parsed().frontmatter, { canSee: () => true, nameOf, ruleReviewers: [] })!;
     expect(code.paths).toEqual({ shown: changed.slice(0, 40), more: 2, truncated: false });
   });
 });
@@ -637,7 +629,7 @@ describe("ruling 690: what the work under review rests on", () => {
     expect(rested()).toEqual(["S2"]);
   });
 
-  it("the page's card carries the count and the first twelve, says zero for a files result, and nothing for a revision that rests on none or a viewer who may not see", () => {
+  it("the page's card carries the count and the first twelve, says zero for a files result, and nothing for a revision that rests on none", () => {
     // CANARY: carry `sources` on every view and the task page's payload grows
     // on every task that keeps none (ruling 457's console budget measures it);
     // drop it at zero for a files result and the card cannot say the result
@@ -646,10 +638,9 @@ describe("ruling 690: what the work under review rests on", () => {
     const nameOf = (id: string) => id;
     seed({ workRevision: null, branch: null, github: null, deliveredAt: "2026-10-07T13:00:00.000Z" });
     const filesFm = parsed().frontmatter;
-    const view = (fm: TaskFrontmatter, sources: ReturnType<typeof sourcesRestedOn> | null) =>
-      completionView(fm, { canSee: null, nameOf, ruleReviewers: [], sources })!;
+    const view = (fm: TaskFrontmatter, sources: ReturnType<typeof sourcesRestedOn>) =>
+      completionView(fm, { canSee: () => true, nameOf, ruleReviewers: [], sources })!;
     expect(view(filesFm, []).sources).toEqual({ count: 0, shown: [] });
-    expect("sources" in view(filesFm, null)).toBe(false);
 
     for (let n = 1; n <= 14; n += 1) keepAt("2026-10-07T12:00:00.000Z", `page-${n}.html`);
     const kept = readTaskSources(store.slug, "VIB-1", store.dataRoot).sources;

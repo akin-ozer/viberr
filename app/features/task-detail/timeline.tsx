@@ -266,8 +266,7 @@ export function Timeline({
    *  original copy, which is honest exactly when nothing is running. */
   runLive?: boolean;
   /** R19-19: the task's real attachment filenames — evidence labels citing one
-   *  become links to the serving route. Absent ⇒ plain text (bare renders,
-   *  non-members whose list the loader withheld). */
+   *  become links to the serving route. Absent ⇒ plain text (bare renders). */
   attachmentNames?: string[];
   attachmentsBase?: string;
   /** Ruling 573: the viewer may attach files to a comment (`attach-file`, a

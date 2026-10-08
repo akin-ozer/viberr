@@ -114,9 +114,6 @@ export function useRunLogStream(input: {
    * a turn. A null `runId` polls nothing, and the F22 net applies.
    */
   poll?: { runId: string | null; everyMs: number };
-  /** UI-30: false for a NON-MEMBER, whose `/resources/run-log` requests 403.
-   *  Asking for what can only be refused is worse than not asking. */
-  enabled?: boolean;
 }): RunLogStore {
   const { source } = input;
   // One key per stream: a different task (or conversation) is a new store.
@@ -124,7 +121,6 @@ export function useRunLogStream(input: {
     source.kind === "task"
       ? `task:${source.projectSlug}/${source.taskKey}`
       : `controller:${source.conversationId}`;
-  const enabled = input.enabled !== false;
 
   // TASK-3: the store is seeded ONCE per stream, from the payload it is
   // created with, so the server render draws the same lines the first client
@@ -132,16 +128,15 @@ export function useRunLogStream(input: {
   // a different store.
   const [held, setHeld] = useState(() => ({
     key: streamKey,
-    store: createLiveRunLogStore(source, input.threads, enabled),
+    store: createLiveRunLogStore(source, input.threads),
   }));
   let store: LiveRunLogStore = held.store;
   if (held.key !== streamKey) {
-    const next = { key: streamKey, store: createLiveRunLogStore(source, input.threads, enabled) };
+    const next = { key: streamKey, store: createLiveRunLogStore(source, input.threads) };
     setHeld(next);
     store = next.store;
   }
   useEffect(() => () => store.dispose(), [store]);
-  useEffect(() => store.setEnabled(enabled), [store, enabled]);
 
   // A revalidation brought the projection again: the store keeps what each
   // thread holds and takes only what changed (a new representative run, a
@@ -157,13 +152,12 @@ export function useRunLogStream(input: {
   // The tab's one live stream hands the console its frames. `source` is the
   // value `streamKey` spells, so the key is the dependency.
   useEffect(() => {
-    if (!enabled) return;
     const name = source.kind === "task" ? "run.log-appended" : "controller.log-appended";
     return onLiveFrame(name, (event) => {
       const frame = frameFor(source, event.data);
       if (frame) store.onFrame(frame.runId, frame.seq);
     });
-  }, [store, streamKey, enabled]);
+  }, [store, streamKey]);
 
   const revalidator = useRevalidator();
   const revalidateRef = useRef(revalidator.revalidate);
@@ -201,7 +195,7 @@ export function useRunLogStream(input: {
   const pollRunId = input.poll?.runId ?? null;
   const pollEvery = input.poll?.everyMs ?? 0;
   useEffect(() => {
-    if (!pollRunId || pollEvery <= 0 || !enabled || !("window" in globalThis)) return;
+    if (!pollRunId || pollEvery <= 0 || !("window" in globalThis)) return;
     let settled = false;
     const id = window.setInterval(() => {
       if (settled) return;
@@ -212,7 +206,7 @@ export function useRunLogStream(input: {
       });
     }, pollEvery);
     return () => window.clearInterval(id);
-  }, [store, pollRunId, pollEvery, enabled]);
+  }, [store, pollRunId, pollEvery]);
 
   return store;
 }

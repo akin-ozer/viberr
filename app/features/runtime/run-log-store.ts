@@ -286,8 +286,6 @@ export interface LiveRunLogStore extends RunLogStore {
   /** Reads the tail of `runId` now (the controller's status poll) and
    *  answers the run's state, or null when the read failed. */
   poll(runId: string): Promise<string | null>;
-  /** UI-30: false for a viewer whose run-log requests would 403. */
-  setEnabled(enabled: boolean): void;
   /** Aborts every request in flight (unmount). React can go on using a
    *  disposed store, so a window load it cuts short is asked again the next
    *  time its thread is shown (ruling 524(e)). */
@@ -297,14 +295,12 @@ export interface LiveRunLogStore extends RunLogStore {
 export function createLiveRunLogStore(
   source: RunLogSource,
   threads: readonly ConsoleThreadInput[],
-  initiallyEnabled = true,
 ): LiveRunLogStore {
   const listeners = new Set<() => void>();
   let threadMap = new Map<string, ThreadState>();
   const factsByRun = new Map<string, RunLiveFacts>();
   let streamError: string | null = null;
   let rawView = false;
-  let enabled = initiallyEnabled;
   let abort = new AbortController();
 
   const notify = () => {
@@ -460,7 +456,7 @@ export function createLiveRunLogStore(
    * long as a frame announced a line past what it brought.
    */
   const tail = async (t: ThreadState): Promise<void> => {
-    if (t.tailing || t.replacing || t.view.status !== "ready" || !enabled) return;
+    if (t.tailing || t.replacing || t.view.status !== "ready") return;
     t.tailing = true;
     try {
       while (current(t) && t.announced > t.cursor) {
@@ -504,7 +500,6 @@ export function createLiveRunLogStore(
    * the frames that landed while it was.
    */
   const readFacts = async (t: ThreadState): Promise<void> => {
-    if (!enabled) return;
     if (t.readingFacts) {
       t.factsAgain = true;
       return;
@@ -529,7 +524,7 @@ export function createLiveRunLogStore(
    * A thread `replacing` its lines keeps drawing them until the window lands.
    */
   const loadWindow = async (t: ThreadState): Promise<void> => {
-    if (t.windowing || !enabled) return;
+    if (t.windowing) return;
     // A failed load is asked again the next time the thread is shown.
     if (!t.replacing && t.view.status !== "unloaded" && t.view.status !== "failed") return;
     t.windowing = true;
@@ -604,7 +599,7 @@ export function createLiveRunLogStore(
       return;
     }
     t.fillAgain = false;
-    if (t.view.status !== "ready" || !enabled) return;
+    if (t.view.status !== "ready") return;
     const missing = new Map<number, number[]>();
     for (const line of t.view.lines) {
       if (line.raw !== null) continue;
@@ -663,7 +658,7 @@ export function createLiveRunLogStore(
    */
   const loadOlder = async (t: ThreadState): Promise<void> => {
     const cursor = t.page;
-    if (!cursor || cursor.runIdx < 0 || t.paging || !enabled) return;
+    if (!cursor || cursor.runIdx < 0 || t.paging) return;
     t.paging = true;
     const fail = (message: string) => {
       if (current(t)) update(t, { older: { ...t.view.older, loading: false, error: message } });
@@ -834,7 +829,6 @@ export function createLiveRunLogStore(
       }
     },
     async poll(runId) {
-      if (!enabled) return null;
       const t = threadOfRun(runId);
       try {
         // A thread whose lines are not in hand reads the facts only.
@@ -847,9 +841,6 @@ export function createLiveRunLogStore(
       } catch {
         return null;
       }
-    },
-    setEnabled(next) {
-      enabled = next;
     },
     dispose() {
       abort.abort();

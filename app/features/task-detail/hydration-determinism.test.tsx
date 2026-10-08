@@ -281,7 +281,6 @@ const BASE_PROPS: Omit<PageProps, "task" | "runtime"> = {
   operatorAutonomy: "supervised",
   runPrincipal: connectedPrincipal(),
   liveAgentRuns: [],
-  runsVisible: true,
   timelineHasMore: true,
   timelineRemaining: 12,
   timelineNextLimit: 50,

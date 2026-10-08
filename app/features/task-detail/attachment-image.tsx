@@ -11,8 +11,8 @@ import { Icon } from "~/ui/icon";
  *
  * This is NOT a membership guard. Every surface that renders these tiles
  * (task-detail-page) and the serving route both authorize through
- * `assertProjectAction("any-member")`, and the loader ships `[]` to a
- * non-member — so a viewer who sees a tile already passes the tile's request.
+ * `assertProjectAction("any-member")`, so a viewer who sees a tile already
+ * passes the tile's request.
  * The failure this covers (missing/oversized/unsupported file) hits members
  * too, which is exactly why it belongs on the image itself.
  *

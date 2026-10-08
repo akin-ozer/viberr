@@ -23,8 +23,8 @@ import { useAttachmentLightbox } from "./attachment-lightbox";
  * (ruling 363). The card offers no Remove: a kept source is not removed.
  *
  * Silent on a task that keeps none, as the attachments panel is on a task
- * that never had a file. Member-gated upstream: the loader ships no sources
- * to a non-member, and the serving route checks membership on every read.
+ * that never had a file. Member-gated upstream: the task page is
+ * members-only (R15-4), and the serving route checks membership on every read.
  * Drawn with the attachment list's and the result card's classes only.
  */
 export function SourcesPanel({

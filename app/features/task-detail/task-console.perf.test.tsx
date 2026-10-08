@@ -186,7 +186,6 @@ function pageProps(rows: 40 | 400): PageProps {
     operatorAutonomy: "supervised",
     runPrincipal: null,
     liveAgentRuns: [{ profileId: "developer", lifecycle: "running" }],
-    runsVisible: true,
     timelineHasMore: false,
     timelineRemaining: 0,
     timelineNextLimit: 30,

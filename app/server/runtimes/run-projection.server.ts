@@ -339,10 +339,8 @@ function pickRepresentative(rows: AgentRunRow[]): AgentRunRow {
  *   - `none`: a `.data` request (a revalidation, a client navigation). No
  *     group carries lines; each keeps its window facts, and the console fills
  *     the thread it shows with one `/resources/run-log?window=1` request.
- *   - `withheld`: UI-30, a viewer who may not read logs. No window is even
- *     bounded; the summary strip and the failure class stay.
  */
-export type ConsoleShipping = "all" | "shown" | "none" | "withheld";
+export type ConsoleShipping = "all" | "shown" | "none";
 
 /** How {@link projectRunsForTask} reads a task's runs. */
 export interface RunsForTaskOptions {
@@ -384,19 +382,11 @@ export function projectRunsForTask(
   if (groups.length === 0) return [];
   const representatives = groups.map(pickRepresentative);
   // Ruling 457 (TASK-1): one COUNT/MAX for the task, not one per run.
-  const stats =
-    shipping === "withheld" ? new Map<string, RunLineStats>() : runLineStatsForTask(db, projectSlug, taskKey);
+  const stats = runLineStatsForTask(db, projectSlug, taskKey);
   const shown = shipping === "shown" ? shownGroupIndex(representatives) : -1;
   return groups.map((bucket, i) => {
     const representative = representatives[i]!;
-    const read: WindowRead =
-      shipping === "withheld"
-        ? "withheld"
-        : shipping === "all"
-          ? "full"
-          : i === shown
-            ? "display"
-            : "sizes";
+    const read: WindowRead = shipping === "all" ? "full" : i === shown ? "display" : "sizes";
     return projectRow(
       db,
       representative,
@@ -481,9 +471,9 @@ interface GroupConsoleSlice {
 /**
  * How much of each line a window reads (ruling 457): `full` bodies and
  * envelopes, `display` bodies only, `sizes` neither (only the facts that
- * bound the window and find the continuity marker), `withheld` nothing.
+ * bound the window and find the continuity marker).
  */
-type WindowRead = "full" | "display" | "sizes" | "withheld";
+type WindowRead = "full" | "display" | "sizes";
 
 /** One line inside a window, as much of it as the read asked for. */
 interface WindowLine {
@@ -512,7 +502,7 @@ function readTail(db: DatabaseSync, runId: string, budget: TailBudget, read: Win
       raw: null,
     }));
   }
-  if (read === "sizes" || read === "withheld") {
+  if (read === "sizes") {
     return listRunLineSizes(db, runId, budget).map((l) => ({
       seq: l.seq,
       bytes: l.bytes,
@@ -583,15 +573,6 @@ function windowForGroup(
   stats: Map<string, RunLineStats>,
   read: WindowRead,
 ): GroupConsoleSlice {
-  if (read === "withheld") {
-    return {
-      display: [],
-      raw: [],
-      keys: [],
-      meta: { totalLines: 0, hasMore: false, runIds: [], oldest: null, headSeq: -1 },
-      sessionMissing: null,
-    };
-  }
   const countOf = (row: AgentRunRow) => stats.get(row.id)?.count ?? 0;
   const totalLines = bucket.reduce((sum, row) => sum + countOf(row), 0);
 
