@@ -3,7 +3,7 @@ import {
   setupAppTest,
   type AppTestContext,
 } from "../../../test-support/test-app";
-import { isRuntimeSessionOpen } from "./feed-helpers";
+import { compactAuditEntries } from "./feed-helpers";
 
 /**
  * Route-level tests for /projects/:slug/activity against the seeded demo
@@ -103,9 +103,10 @@ describe("/projects/:slug/activity", () => {
 
   it("R19-7: the audit column's fold recognises the session row the projection ships", async () => {
     // The view model carries no action name, so the page folds these rows by
-    // their rendered sentence (`isRuntimeSessionOpen`). The sentence itself is
+    // their rendered sentence (`compactAuditEntries`). The sentence itself is
     // pinned at the projection (activity-feed-phase10.server.test.ts); this
-    // binds the recogniser to the row the loader actually ships.
+    // binds the fold to the row the loader actually ships: two of them make a
+    // run, and a run compacts into one row.
     // CANARY: reword the `runtime.run.started` case in activity-feed.server.ts
     // alone and this goes red instead of the column silently un-compacting.
     const { recordAudit, OPERATOR_AUDIT_ACTOR } = await import(
@@ -127,7 +128,9 @@ describe("/projects/:slug/activity", () => {
       (e) => !shown.has(e.id),
     );
     expect(added).toHaveLength(1);
-    expect(isRuntimeSessionOpen(added[0]!)).toBe(true);
+    expect(compactAuditEntries([added[0]!, { ...added[0]!, id: "twin" }])).toMatchObject([
+      { compacted: true },
+    ]);
   });
 
   // CANARY: hand `docHref` to every viewer and a person who cannot open

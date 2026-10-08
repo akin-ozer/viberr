@@ -149,7 +149,7 @@ export function actIcon(type: string): IconName {
 const RUNTIME_SESSION_OPENED =
   /\bopened the .+ runtime session\. Recorded per audit policy on$/;
 
-export function isRuntimeSessionOpen(entry: AuditLogEntryView): boolean {
+function isRuntimeSessionOpen(entry: AuditLogEntryView): boolean {
   return entry.kind === "audit" && RUNTIME_SESSION_OPENED.test(entry.text);
 }
 
