@@ -3,7 +3,12 @@ import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { z } from "zod";
 import { createTestDbContext } from "../../../test-support/test-db";
-import { callToolText, publishedSchemas, toolLoading } from "../../../test-support/mcp-tool-meta";
+import {
+  callToolText,
+  publishedInstructions,
+  publishedSchemas,
+  toolLoading,
+} from "../../../test-support/mcp-tool-meta";
 import {
   baseTaskFrontmatter,
   setupTestStore,
@@ -36,18 +41,6 @@ const ctxDb = createTestDbContext();
 afterEach(() => ctxDb.cleanup());
 
 const ACTOR = { userId: "u_t", label: "t@test" };
-
-/** The instructions string as the MOUNTED server carries it: `createSdkMcpServer`
- *  hands back the live `McpServer` under `instance`, and `instance.server` is its
- *  `Server` handle, which keeps the instructions in `_instructions`. A run reads
- *  the server's instructions, not the module's constant. The field is `private`
- *  on the MCP SDK's `Server`, so it is read by parsing the shape we expect; if
- *  the SDK renames it, the read falls through to `""` and every positive
- *  assertion on it fails instead of passing on `undefined`. */
-const wiredInstructions = z
-  .object({ instance: z.object({ server: z.object({ _instructions: z.string() }) }) })
-  .transform((mounted) => mounted.instance.server._instructions)
-  .catch("");
 
 function authority(mcps: string[]): OperatorAuthority {
   return {
@@ -411,18 +404,6 @@ describe("buildOperatorToolkit — update_branch_from_base (N19-9)", () => {
   });
 });
 
-/**
- * R19-1 — the toolkit's own instructions block is a SECOND channel into the
- * same model, and it used to contradict the first.
- *
- * The operator now runs with a read-only checkout of the project repository
- * under its cwd and a system prompt requiring every packet that reasons about
- * repository contents to be grounded in it. The instructions still said "never
- * write code or touch the repository" — written when the operator had no
- * working tree at all. A model told to read the repo by one channel and never
- * to touch it by another can resolve that either way, and the way that loses is
- * exactly F19-4: describing the empty task folder as "the repo".
- */
 describe("buildOperatorToolkit — the knowledge tools name the document alike (ruling 588)", () => {
   it("correct_knowledge_doc takes the document as `path`, the field read_knowledge_doc takes", async () => {
     // Live on AWSC-29 the Estimate Judge read mapping.md with `path` and sent
@@ -447,9 +428,22 @@ describe("buildOperatorToolkit — the knowledge tools name the document alike (
   });
 });
 
+/**
+ * R19-1 — the toolkit's own instructions block is a SECOND channel into the
+ * same model, and it used to contradict the first.
+ *
+ * The operator now runs with a read-only checkout of the project repository
+ * under its cwd and a system prompt requiring every packet that reasons about
+ * repository contents to be grounded in it. The instructions still said "never
+ * write code or touch the repository" — written when the operator had no
+ * working tree at all. A model told to read the repo by one channel and never
+ * to touch it by another can resolve that either way, and the way that loses is
+ * exactly F19-4: describing the empty task folder as "the repo".
+ */
 describe("the viberr server's instructions — reading is expected, writing is not (R19-1)", () => {
+  /** The instructions as a run receives them: through `initialize` (ruling 297). */
   const wired = () =>
-    wiredInstructions.parse(
+    publishedInstructions(
       buildOperatorToolkit({
         db: ctxDb.makeDb(),
         ctx: { dataRoot: ctxDb.makeTempDir() },
@@ -459,10 +453,10 @@ describe("the viberr server's instructions — reading is expected, writing is n
       }).mcpServers.viberr,
     );
 
-  it("states the write prohibition precisely and stops forbidding reads", () => {
+  it("states the write prohibition precisely and stops forbidding reads", async () => {
     // Canary: restore the "never write code or touch the repository" sentence
     // and every half fails.
-    const text = wired();
+    const text = await wired();
     expect(text).toContain("never write code");
     expect(text).toMatch(/cannot edit, create or commit files/);
     expect(text).toContain("READING the task's repository checkout");
@@ -472,7 +466,7 @@ describe("the viberr server's instructions — reading is expected, writing is n
     expect(text).toMatch(/claim you make about the repository must come from reading it/);
   });
 
-  it("does NOT claim the operator cannot push — delivery is its decision (R15-2)", () => {
+  it("does NOT claim the operator cannot push — delivery is its decision (R15-2)", async () => {
     // The over-correction that would break the product: `deliver_for_review`
     // pushes the deliverer's committed branch, and both the operator definition
     // and the tool description tell the model delivery is its call. A blanket
@@ -480,7 +474,7 @@ describe("the viberr server's instructions — reading is expected, writing is n
     // them, and the careful resolution is an operator that stops delivering.
     // Canary: put "or push the repository" back into the constant and this
     // fails.
-    const text = wired();
+    const text = await wired();
     expect(text).not.toMatch(/or push the repository/);
     expect(text).toMatch(/delivery is a decision you make and the server executes/);
   });
