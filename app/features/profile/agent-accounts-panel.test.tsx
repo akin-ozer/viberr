@@ -1206,6 +1206,17 @@ describe("rulings 507 and 616: several accounts on one backend", () => {
     fireEvent.click(view.getByRole("menuitem", { name: action }));
   }
 
+  /** Press an account's own button with Work in use: Work's under its health
+   *  line, another's in the management, opened from the picker. */
+  function pressOn(view: RenderResult, id: string, text: string): void {
+    if (id !== WORK.id) chooseAction(view, "Work", "Manage other accounts");
+    const scope =
+      id === WORK.id
+        ? view.container.querySelector<HTMLElement>(".cred-card .cred-manage")!
+        : rowOf(view.container, id);
+    fireEvent.click(buttonIn(scope, text));
+  }
+
   // The switch is the picker's whole job: the row chosen is the account the
   // next run bills, and the store refuses nothing a person can choose here.
   // CANARY: submit the active account's id instead of the chosen row's and
@@ -1463,14 +1474,7 @@ describe("rulings 507 and 616: several accounts on one backend", () => {
   ])("an open Disconnect confirm says what confirming does when %s", async (_label, id, loaded, name, sentence) => {
     const server: ClaudeOnServer = { accounts: [WORK, PERSONAL, KEY], login: null };
     const { view, reload } = await renderLoaded(server);
-    // The account in use is disconnected under its health line; another one
-    // from the management.
-    if (id !== WORK.id) chooseAction(view, "Work", "Manage other accounts");
-    const scope =
-      id === WORK.id
-        ? view.container.querySelector<HTMLElement>(".cred-card .cred-manage")!
-        : rowOf(view.container, id);
-    fireEvent.click(buttonIn(scope, "Disconnect"));
+    pressOn(view, id, "Disconnect");
 
     server.accounts = loaded;
     await reload();
@@ -1614,14 +1618,7 @@ describe("rulings 507 and 616: several accounts on one backend", () => {
     const server: ClaudeOnServer = { accounts: [WORK, PERSONAL, KEY], login: null };
     const { view, reload } = await renderLoaded(server);
     const field = () => view.container.querySelector(`#agentacc-${id}-name`);
-    // The account in use is renamed under its health line; another one in
-    // the management.
-    if (id !== WORK.id) chooseAction(view, "Work", "Manage other accounts");
-    const scope =
-      id === WORK.id
-        ? view.container.querySelector<HTMLElement>(".cred-card .cred-manage")!
-        : rowOf(view.container, id);
-    fireEvent.click(buttonIn(scope, "Rename"));
+    pressOn(view, id, "Rename");
     // A load that changes nothing leaves the form where the person is typing.
     await reload();
     expect(field()).toBeTruthy();
