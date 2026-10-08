@@ -8,6 +8,7 @@ import {
   activeWorkRevision,
   currentVerdicts,
   deriveValidation,
+  judgedFilesDelivery,
   nextWorkRevision,
   revisionLeftWorkspace,
   parseTaskFrontmatter,
@@ -417,6 +418,63 @@ const valid = {
   createdAt: "2026-07-03T06:00:00.000Z",
   updatedAt: "2026-07-04T06:58:00.000Z",
 };
+
+describe("ruling 703: the files delivery a reviewer judged last", () => {
+  const FIRST = "2026-10-08T15:03:04.630Z";
+  const SECOND = "2026-10-08T15:32:35.992Z";
+  const verdict = (profileId: string, revisionId: string, at: string): ReviewVerdict => ({
+    profileId,
+    revisionId,
+    result: "request_changes",
+    reason: "One label says more than the piece.",
+    at,
+    rounds: 1,
+  });
+  const files = (deliveredAt: string, verdicts: ReviewVerdict[]) => ({ workRevision: null, deliveredAt, verdicts });
+
+  it("names the earlier delivery once the task's subject is a later one", () => {
+    // Canary: answer the current delivery's own stamp.
+    const fm = files(SECOND, [verdict("editor", `files:${FIRST}`, "2026-10-08T15:25:38.000Z")]);
+    expect(judgedFilesDelivery(fm, "editor")).toBe(FIRST);
+  });
+
+  it("reads the reviewer's NEWEST verdict, whatever order the file lists them in, and nobody else's", () => {
+    // Canary: take the first verdict found for the profile, or any profile's.
+    const THIRD = "2026-10-08T16:10:00.000Z";
+    const listed = [
+      verdict("editor", `files:${SECOND}`, "2026-10-08T15:51:37.000Z"),
+      verdict("editor", `files:${FIRST}`, "2026-10-08T15:25:38.000Z"),
+      verdict("reader", `files:${FIRST}`, "2026-10-08T15:55:00.000Z"),
+    ];
+    for (const verdicts of [listed, [...listed].reverse()]) {
+      const fm = files(THIRD, verdicts);
+      expect(judgedFilesDelivery(fm, "editor")).toBe(SECOND);
+      expect(judgedFilesDelivery(fm, "reader")).toBe(FIRST);
+      expect(judgedFilesDelivery(fm, "nobody")).toBeNull();
+    }
+  });
+
+  it("answers null for the same delivery again, a verdict on a commit, and a task whose subject is a commit", () => {
+    // Canary: drop any of the three guards.
+    const again = files(FIRST, [verdict("editor", `files:${FIRST}`, "2026-10-08T15:25:38.000Z")]);
+    expect(judgedFilesDelivery(again, "editor")).toBeNull();
+    const onCommit = files(SECOND, [verdict("editor", "rev_1", "2026-10-08T15:25:38.000Z")]);
+    expect(judgedFilesDelivery(onCommit, "editor")).toBeNull();
+    const commitNow = {
+      workRevision: {
+        id: "rev_2",
+        headSha: "b".repeat(40),
+        treeSha: "t".repeat(40),
+        branch: "vib-1",
+        createdAt: "2026-10-08T15:40:00.000Z",
+        sourceProfileId: "developer",
+      },
+      deliveredAt: SECOND,
+      verdicts: [verdict("editor", `files:${FIRST}`, "2026-10-08T15:25:38.000Z")],
+    };
+    expect(judgedFilesDelivery(commitNow, "editor")).toBeNull();
+  });
+});
 
 describe("parseTaskFrontmatter (tolerant)", () => {
   /** `valid` without the modern `engagements` key — what a task.md written

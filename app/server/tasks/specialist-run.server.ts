@@ -14,6 +14,7 @@ import {
   deliveringEngagement,
   type FileActorRef,
   type ParsedTaskFile,
+  judgedFilesDelivery,
   reviewSubjectId,
   supportingEngagements,
 } from "~/schemas/task-file.schema";
@@ -36,6 +37,7 @@ import {
   updateTaskFile,
 } from "~/server/files/task-writer.server";
 import { taskAttachmentsDir } from "~/server/files/file-store-root.server";
+import { keptDeliveryChanges } from "~/server/files/kept-deliveries.server";
 import {
   mountGrantedSkills,
   removeSkillPlugin,
@@ -212,6 +214,7 @@ import {
   RELAY_NOTE_CLAUDE,
   RELAY_NOTE_CODEX,
   REREVIEW_RESTATES_NOTE,
+  rereviewChangesNote,
   resolveDeployedSpecialist,
   type ResolvedSpecialist,
   runDispatchLine,
@@ -1361,6 +1364,20 @@ async function dispatchAgentRun(
     existing.parsed.frontmatter.verdicts.some((v) => v.profileId === engagement.profileId)
   ) {
     collabNotes.push(REREVIEW_RESTATES_NOTE);
+    // Ruling 703: and, when what it judged was a files delivery Viberr kept,
+    // which of those files a later delivery changed.
+    const judged = judgedFilesDelivery(existing.parsed.frontmatter, engagement.profileId);
+    const changes =
+      judged === null
+        ? null
+        : keptDeliveryChanges(
+            input.projectSlug,
+            input.taskKey,
+            judged,
+            existing.parsed.frontmatter.deliveredAt ?? "",
+            ctx.dataRoot,
+          );
+    if (judged !== null && changes !== null) collabNotes.push(rereviewChangesNote(judged, changes));
   }
   // Ruling 483 (F40-53): a knowledge-base line this run proves wrong has a
   // channel now, and the run is told which. Claude files it with the tool the

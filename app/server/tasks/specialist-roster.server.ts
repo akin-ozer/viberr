@@ -22,6 +22,7 @@ import type { AgentDeployment, CapabilityGrant, ProjectRole } from "~/schemas/pr
 import { withheldAgentGrants } from "~/features/agents/capability-catalog";
 import { type AuditActor, OPERATOR_AUDIT_ACTOR } from "~/server/audit/audit-recorder.server";
 import { AppError } from "~/server/errors/app-error.server";
+import type { KeptDeliveryChanges } from "~/server/files/kept-deliveries.server";
 import { readProjectFile } from "~/server/files/project-writer.server";
 import { SOURCE_STAGING_PREFIX } from "~/server/files/task-sources.server";
 import { readTaskFile } from "~/server/files/task-writer.server";
@@ -412,6 +413,39 @@ export const KB_CONTRACT_CORRECTION_SENTENCE =
  */
 export const REREVIEW_RESTATES_NOTE =
   "- You have recorded a verdict on this task before, and the one you record now replaces it for every later reader: the board read and the task's outcome carry only a reviewer's newest verdict. Restate in it everything from your earlier verdict that still stands (a score and each of its deductions, the findings, each knowledge-base correction you made on this task with its id), not only what changed.";
+
+/**
+ * Ruling 703: what a reviewer judging a files delivery AGAIN is told about the
+ * delivery it judged before.
+ *
+ * Viberr keeps every files delivery as it was delivered (ruling 597), so it
+ * knows, byte for byte, what a rework changed. Nothing said so to the reviewer
+ * sent to judge the rework. Live on BLOG-8 a reviewer sent one label of a
+ * diagram back; its maker fixed the label in 47 seconds, and the second
+ * review took 18 minutes and $6.30 against 20 minutes and $7.12 for the
+ * first: it hashed all seven files against its own notes of the first round
+ * to learn that three had not changed, then rendered the unchanged cover
+ * again and pictured the whole page five times.
+ *
+ * The lists are facts. The sentence after them says what they are worth: a
+ * check made on a file that has not changed still holds.
+ */
+export function rereviewChangesNote(judged: string, changes: KeptDeliveryChanges): string {
+  const named = (label: string, names: string[]): string[] =>
+    names.length > 0 ? [`${label}: ${names.map((name) => `\`${name}\``).join(", ")}.`] : [];
+  const lists = [
+    ...named("Changed", changes.changed),
+    ...named("New", changes.added),
+    ...named("Gone", changes.removed),
+    ...named("Unchanged", changes.same),
+  ].join(" ");
+  return (
+    `- Viberr kept the delivery you judged last (${judged}) and has set the files delivered now against it, byte for byte. ${lists} ` +
+    "An unchanged file is the file you judged: a check you made on it then still holds, so restate its result and do not make the check again. " +
+    "Check what changed, what a change makes untrue in a file that did not change, and anything you did not get to last time. " +
+    `\`read_task_attachment\` with \`delivery: "${judged}"\` returns a file as you judged it.`
+  );
+}
 
 /**
  * Ruling 488 (F40-67): the relay, named where a specialist reads its channels.

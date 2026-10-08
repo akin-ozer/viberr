@@ -1516,7 +1516,14 @@ the verdict it records now replaces its earlier one for every later reader, beca
 board read and the task's outcome carry only a reviewer's newest verdict, so it restates
 what still stands (a score and each deduction, the findings, each knowledge-base
 correction it made on the task with its id), not only what changed. A first review gets
-no such note.
+no such note. When that earlier verdict was on a files delivery Viberr kept (ruling 597)
+and the task has delivered again since, a second note follows it (`rereviewChangesNote`,
+ruling 703): the delivery the reviewer judged, the files changed, new, gone and unchanged
+since it (`keptDeliveryChanges`, byte for byte, without the page pictures Viberr makes
+itself), that a check made on an unchanged file still holds and is restated without being
+made again, and that `read_task_attachment` with `delivery` returns a file as it was
+judged. The same delivery judged again, a commit on either side, or a delivery that was
+not kept adds nothing.
 
 The outcome is the first envelope a run reports. The already-staged check reads the
 in-process map and the persisted row, so an envelope staged before a restart still stands

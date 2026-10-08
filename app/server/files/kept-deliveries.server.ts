@@ -15,8 +15,9 @@
  * `attachments/`, so the attachments panel, the browser's output folder and
  * the working-file prune never see it, and it moves with the task directory.
  */
-import { constants, copyFileSync, mkdirSync, readdirSync, statSync } from "node:fs";
+import { constants, copyFileSync, mkdirSync, readdirSync, readFileSync, statSync } from "node:fs";
 import path from "node:path";
+import { pageCapturesAmong } from "~/shared/page-capture";
 import {
   resolveStoreSegment,
   resolveStoredSegment,
@@ -108,6 +109,66 @@ export function listKeptDeliveries(slug: string, key: string, dataRoot?: string)
     if (files.length > 0) kept.push({ deliveredAt, files });
   }
   return kept.sort((a, b) => b.deliveredAt.localeCompare(a.deliveredAt));
+}
+
+/** What differs between two kept deliveries of one task, by file name. */
+export interface KeptDeliveryChanges {
+  changed: string[];
+  added: string[];
+  removed: string[];
+  same: string[];
+}
+
+/**
+ * Ruling 703: the files of the kept delivery `to` set against those of the
+ * kept delivery `from`, byte for byte, or null when either was not kept.
+ *
+ * The pictures Viberr makes of a delivered page (ruling 691) are left out:
+ * they are remade at every delivery and say nothing the page they picture
+ * does not.
+ */
+export function keptDeliveryChanges(
+  slug: string,
+  key: string,
+  from: string,
+  to: string,
+  dataRoot?: string,
+): KeptDeliveryChanges | null {
+  const filesOf = (stamp: string): { dir: string; names: Set<string> } | null => {
+    const dir = keptDeliveryDir(slug, key, stamp, dataRoot);
+    if (!dir) return null;
+    let listed: string[];
+    try {
+      listed = readdirSync(dir);
+    } catch {
+      return null;
+    }
+    const own = pageCapturesAmong(listed);
+    return { dir, names: new Set(listed.filter((name) => !own.has(name))) };
+  };
+  const before = filesOf(from);
+  const after = filesOf(to);
+  if (!before || !after) return null;
+  const sameBytes = (name: string): boolean => {
+    const a = path.join(before.dir, name);
+    const b = path.join(after.dir, name);
+    try {
+      if (statSync(a).size !== statSync(b).size) return false;
+      return readFileSync(a).equals(readFileSync(b));
+    } catch {
+      return false;
+    }
+  };
+  const changes: KeptDeliveryChanges = { changed: [], added: [], removed: [], same: [] };
+  for (const name of [...after.names].sort()) {
+    if (!before.names.has(name)) changes.added.push(name);
+    else if (sameBytes(name)) changes.same.push(name);
+    else changes.changed.push(name);
+  }
+  for (const name of [...before.names].sort()) {
+    if (!after.names.has(name)) changes.removed.push(name);
+  }
+  return changes;
 }
 
 /** Where a kept delivery holds `name`, or null for a stamp or a name that

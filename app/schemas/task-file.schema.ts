@@ -1693,6 +1693,26 @@ export function reviewSubjectId(fm: {
 }
 
 /**
+ * Ruling 703: the `deliveredAt` of the files delivery that `profileId`'s
+ * newest verdict judged, when the task's review subject is now a DIFFERENT
+ * files delivery. Null otherwise: no verdict from it, a verdict on a commit,
+ * a subject that is a commit, or the same delivery again.
+ */
+export function judgedFilesDelivery(
+  fm: { workRevision: WorkRevision | null; deliveredAt?: string | null; verdicts: ReviewVerdict[] },
+  profileId: string,
+): string | null {
+  const files = "files:";
+  const subject = reviewSubjectId(fm);
+  if (!subject?.startsWith(files)) return null;
+  const newest = fm.verdicts
+    .filter((v) => v.profileId === profileId)
+    .reduce<ReviewVerdict | null>((last, v) => (last === null || v.at >= last.at ? v : last), null);
+  if (!newest?.revisionId.startsWith(files) || newest.revisionId === subject) return null;
+  return newest.revisionId.slice(files.length);
+}
+
+/**
  * Ruling 556: the agent that made what a review binds to — the one whose
  * delivery minted the active revision, or whose saved files stamped
  * `deliveredAt` (the agent event stamped at that instant, ruling 388). Null

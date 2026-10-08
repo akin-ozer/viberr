@@ -2139,6 +2139,87 @@ describe("P14-RT-01 — a FRESH run of an UNDEPLOYED profile is confined like a 
     }
   });
 
+  it("ruling 703: a reviewer judging a files delivery again is told which files changed since the one it judged, on either backend", async () => {
+    // Live on BLOG-8 a reviewer sent one label of a diagram back, its maker
+    // fixed it in 47 seconds, and the second review took 18 minutes: it hashed
+    // every file against its own notes to learn which had changed, then
+    // checked the unchanged ones again. Viberr had both deliveries on disk.
+    // CANARY: drop the note, or hand it to a review of the same delivery.
+    const { updateTaskFile } = await import("~/server/files/task-writer.server");
+    const { keepDelivery } = await import("~/server/files/kept-deliveries.server");
+    const { writeTaskAttachment } = await import("~/server/files/task-attachments.server");
+    const FIRST = "2026-10-08T15:03:04.630Z";
+    const SECOND = "2026-10-08T15:32:35.992Z";
+    const NOT_KEPT = "2026-10-08T16:00:00.000Z";
+    const ref = { projectSlug: store.slug, taskKey: "VIB-1", dataRoot: store.dataRoot };
+    const save = (name: string, value: string) =>
+      writeTaskAttachment(store.slug, "VIB-1", name, new TextEncoder().encode(value), store.dataRoot);
+    save("post.md", "does the file's text hold a placeholder?");
+    save("cover.png", "the cover");
+    keepDelivery(store.slug, "VIB-1", FIRST, ["post.md", "cover.png"], store.dataRoot);
+    save("post.md", "does the template's text hold a placeholder?");
+    keepDelivery(store.slug, "VIB-1", SECOND, ["post.md", "cover.png"], store.dataRoot);
+    const review = async (deliveredAt: string) => {
+      await updateTaskFile(ref, (parsed) => {
+        parsed.frontmatter.workRevision = null;
+        parsed.frontmatter.deliveredAt = deliveredAt;
+        parsed.frontmatter.verdicts = [
+          {
+            profileId: "critic",
+            revisionId: `files:${FIRST}`,
+            result: "request_changes",
+            reason: "One label says more than the piece.",
+            at: "2026-10-08T15:25:38.000Z",
+            rounds: 1,
+          },
+        ];
+      });
+      await startAgentRun(
+        store.db,
+        { projectSlug: store.slug, taskKey: "VIB-1", profileId: "critic" },
+        actorOf(store.users.arda),
+        { dataRoot: store.dataRoot },
+      );
+      return specs.at(-1)!.prompt;
+    };
+    for (const backend of ["claude", "codex"] as const) {
+      const file = readProjectFile({ projectSlug: store.slug, dataRoot: store.dataRoot })!;
+      writeProject(store.dataRoot, {
+        ...file.parsed.frontmatter,
+        repo: null,
+        agents: ["dev", "critic"].map((profileId) => ({
+          profileId,
+          capabilities: [{ capabilityId: "report-validation-verdict", mode: "direct" as const }],
+          extras: [],
+          definition: {
+            kind: "specialist" as const,
+            name: profileId,
+            role: "reviewer",
+            backends: [backend],
+            model: backend === "codex" ? "gpt-5-codex" : "claude-sonnet-4-5",
+          },
+        })),
+      });
+      rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
+      const again = await review(SECOND);
+      expect(again, backend).toContain(REREVIEW_RESTATES_NOTE);
+      expect(again, backend).toContain(
+        `- Viberr kept the delivery you judged last (${FIRST}) and has set the files delivered now against it, byte for byte. ` +
+          "Changed: `post.md`. Unchanged: `cover.png`. " +
+          "An unchanged file is the file you judged: a check you made on it then still holds, so restate its result and do not make the check again. " +
+          "Check what changed, what a change makes untrue in a file that did not change, and anything you did not get to last time. " +
+          `\`read_task_attachment\` with \`delivery: "${FIRST}"\` returns a file as you judged it.`,
+      );
+      // The same delivery again has nothing to set against itself, and a
+      // delivery Viberr did not keep says nothing: the run starts all the same.
+      for (const stamp of [FIRST, NOT_KEPT]) {
+        const prompt = await review(stamp);
+        expect(prompt, `${backend} ${stamp}`).toContain(REREVIEW_RESTATES_NOTE);
+        expect(prompt, `${backend} ${stamp}`).not.toContain("Viberr kept the delivery you judged last");
+      }
+    }
+  });
+
   it("D4: a mounted collaboration toolkit reaches the run auto-approved", async () => {
     const file = readProjectFile({ projectSlug: store.slug, dataRoot: store.dataRoot })!;
     writeProject(store.dataRoot, {
