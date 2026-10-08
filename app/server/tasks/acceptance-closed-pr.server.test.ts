@@ -510,7 +510,8 @@ describe("F19-25 — the admin override is WITHDRAWN on the server too, not only
       ),
     ).rejects.toMatchObject({
       status: 409,
-      message: expect.stringMatching(/closed on GitHub without merging/i),
+      // The refusal names the closure and says why the override does not apply.
+      message: expect.stringMatching(/closed on GitHub without merging[\s\S]*Force-accept cannot override that/i),
     });
     // The task did not move and the closed PR was NOT overwritten.
     expect(task().frontmatter.stage).toBe("review");
@@ -518,20 +519,6 @@ describe("F19-25 — the admin override is WITHDRAWN on the server too, not only
     // No audit row either: a `task.acceptance.forced` record for an override
     // that was refused would read as a completed bypass in the log.
     expect(listAuditEvents(store.db, { action: "task.acceptance.forced" })).toHaveLength(0);
-  });
-
-  it("the refusal says WHY the override does not apply here", async () => {
-    seedClosedPrTask();
-    await expect(
-      forceAcceptCompletion(
-        store.db,
-        { projectSlug: store.slug, taskKey: "VIB-1" },
-        arda(),
-        { dataRoot: store.dataRoot },
-      ),
-    ).rejects.toMatchObject({
-      message: expect.stringContaining("Force-accept cannot override that"),
-    });
   });
 
   it("ruling 123: force-accept refuses an ARCHIVED task and says to restore it first", async () => {
