@@ -34,19 +34,6 @@ import {
  * They open the projection read-only instead — see db/backup.server.ts.
  */
 
-/** stdout/exit seam so a test can observe the refusal without dying. */
-export interface CliRefusalIo {
-  write(message: string): void;
-  exit(code: number): never;
-}
-
-const PROCESS_REFUSAL_IO: CliRefusalIo = {
-  write: (message) => {
-    process.stderr.write(message);
-  },
-  exit: (code) => process.exit(code),
-};
-
 export interface CliLockOptions {
   /** Defaults to the configured data root. */
   dataRoot?: string;
@@ -56,7 +43,6 @@ export interface CliLockOptions {
    * does; there is no in-app equivalent of the product seed).
    */
   alternative?: string;
-  io?: CliRefusalIo;
 }
 
 /**
@@ -108,14 +94,13 @@ export async function runWithDataRootWriterLock<T>(
   body: () => T | Promise<T>,
   options: CliLockOptions = {},
 ): Promise<T> {
-  const io = options.io ?? PROCESS_REFUSAL_IO;
   let lock: DataRootLock;
   try {
     lock = acquireCliWriterLock(options);
   } catch (error) {
     if (!(error instanceof DataRootLockedError)) throw error;
-    io.write(cliLockRefusalMessage(command, error, options.alternative));
-    return io.exit(1);
+    process.stderr.write(cliLockRefusalMessage(command, error, options.alternative));
+    return process.exit(1);
   }
   try {
     return await body();
