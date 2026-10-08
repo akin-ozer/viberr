@@ -33,9 +33,9 @@ import { reprojectTask, taskRef, type TaskMutationContext } from "./task-mutatio
  * corrections, with Undo.
  */
 
-export const RULINGS_CORRECTED_TITLE = "Rulings corrected";
-export const KB_CORRECTED_TITLE = "Knowledge base corrected";
-export const KB_CORRECTION_UNDONE_TITLE = "Knowledge-base correction undone";
+const RULINGS_CORRECTED_TITLE = "Rulings corrected";
+const KB_CORRECTED_TITLE = "Knowledge base corrected";
+const KB_CORRECTION_UNDONE_TITLE = "Knowledge-base correction undone";
 
 /** What an agent corrects. */
 export interface KbCorrectionRequest {

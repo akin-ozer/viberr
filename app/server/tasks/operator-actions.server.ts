@@ -45,7 +45,7 @@ import { writeOperatorComment } from "./operator-packets.server";
 // ------------------------------------------------- KB-vs-repository conflict
 
 /** R19-2 — the timeline title a context conflict always carries. */
-export const CONTEXT_CONFLICT_TITLE =
+const CONTEXT_CONFLICT_TITLE =
   "Knowledge base disagrees with the repository";
 
 export interface ContextConflict {

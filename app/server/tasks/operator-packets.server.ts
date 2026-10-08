@@ -439,7 +439,7 @@ export const CREATE_TASK_BASE_NOTE =
   "this task wait on a task that needs this task's code.";
 
 /** Ruling 138: the longest `goalDraft` an option may carry into task.md. */
-export const GOAL_DRAFT_MAX_CHARS = 4000;
+const GOAL_DRAFT_MAX_CHARS = 4000;
 
 /** One option the operator offers on a decision/blocking packet. */
 export interface OperatorPacketOptionInput {

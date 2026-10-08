@@ -77,7 +77,6 @@ import {
   operatorOpenPacket,
   operatorResolvePacket,
   type OperatorPacketOptionInput,
-  GOAL_DRAFT_MAX_CHARS,
 } from "./operator-packets.server";
 import {
   deliverGate,
@@ -88,12 +87,7 @@ import {
   resolveOperatorAuthority,
   type OperatorAutonomy,
 } from "./operator-authority.server";
-import {
-  KB_CORRECTED_TITLE,
-  KB_CORRECTION_UNDONE_TITLE,
-  RULINGS_CORRECTED_TITLE,
-  undoKbCorrectionOnTask,
-} from "./kb-correction-actions.server";
+import { undoKbCorrectionOnTask } from "./kb-correction-actions.server";
 import { readTimelineEntry } from "./board-read.server";
 import { KB_CORRECTION_MERGED_ACTION } from "~/server/org/kb-corrections.server";
 
@@ -4697,8 +4691,7 @@ describe("operatorCorrectKnowledgeDoc (rulings 378, 483 and 498)", () => {
     // CANARY: file it as a `proposal` again and the owner is asked to approve
     // what already happened.
     expect(top.type).toBe("kb_correction");
-    expect(top.title).toBe(RULINGS_CORRECTED_TITLE);
-    expect(RULINGS_CORRECTED_TITLE).toBe("Rulings corrected");
+    expect(top.title).toBe("Rulings corrected");
     expect(top.text).toMatch(/^Corrected `ax-rulings\/environment-and-gates.md` as `kc-[0-9a-f]{10}`:/);
     expect(top.text).toContain("- **Was:** ~~- Every test must pass under `go test -race ./...`.~~");
     expect(top.text).toContain("- **Now:** - Every test must pass under `go test ./...`");
@@ -4718,7 +4711,7 @@ describe("operatorCorrectKnowledgeDoc (rulings 378, 483 and 498)", () => {
     // the spam the owner asked to end.
     expect(
       listNotifications(store.db, store.users.arda.id).some(
-        (n) => n.title === RULINGS_CORRECTED_TITLE || n.title === KB_CORRECTED_TITLE,
+        (n) => n.title === "Rulings corrected" || n.title === "Knowledge base corrected",
       ),
     ).toBe(false);
   });
@@ -4752,7 +4745,7 @@ describe("operatorCorrectKnowledgeDoc (rulings 378, 483 and 498)", () => {
     expect(body).not.toContain("4.138.0");
     const top = task().timeline[0]!;
     expect(top.type).toBe("kb_correction");
-    expect(top.title).toBe(KB_CORRECTED_TITLE);
+    expect(top.title).toBe("Knowledge base corrected");
     expect(top.text).toContain(`${dossier}/06-platform-facts.md`);
   });
 
@@ -4778,7 +4771,7 @@ describe("operatorCorrectKnowledgeDoc (rulings 378, 483 and 498)", () => {
     expect(r.message).toContain("without quoting it");
     expect(readFileSync(path.join(store.dataRoot, "kb", keys, "sample-01.md"), "utf8")).toContain("5,614.00");
     const top = task().timeline[0]!;
-    expect(top.title).toBe(KB_CORRECTED_TITLE);
+    expect(top.title).toBe("Knowledge base corrected");
     const id = /kc-[0-9a-f]{10}/.exec(top.text)![0];
     expect(top.text).toBe(
       `Corrected \`${keys}/sample-01.md\` as \`${id}\`. The passage is not quoted here: ` +
@@ -4817,7 +4810,7 @@ describe("operatorCorrectKnowledgeDoc (rulings 378, 483 and 498)", () => {
     );
     expect(undone.outcome).toBe("done");
     const undoEntry = task().timeline[0]!;
-    expect(undoEntry.title).toBe(KB_CORRECTION_UNDONE_TITLE);
+    expect(undoEntry.title).toBe("Knowledge-base correction undone");
     expect(undoEntry.text).not.toContain("6,136.19");
     expect(undoEntry.text).not.toContain("5,614.00");
     expect(undoEntry.text).toContain("is not given to Rev");
@@ -6322,7 +6315,7 @@ describe("ruling 138: edit_goal options carry an explicit goalDraft", () => {
         taskKey: "VIB-1",
         packetType: "input",
         title: "Scope needed",
-        options: [{ kind: "edit_goal", title: "Ship it", recommended: true, goalDraft: "x".repeat(GOAL_DRAFT_MAX_CHARS + 500) }],
+        options: [{ kind: "edit_goal", title: "Ship it", recommended: true, goalDraft: "x".repeat(4_500) }],
       },
       authority("full"),
     );
@@ -6356,7 +6349,7 @@ describe("ruling 138: edit_goal options carry an explicit goalDraft", () => {
             recommended: true,
             newTask: {
               title: "The new task",
-              goal: "y".repeat(GOAL_DRAFT_MAX_CHARS + 1),
+              goal: "y".repeat(4_001),
             },
           },
         ],
@@ -6373,7 +6366,7 @@ describe("ruling 138: edit_goal options carry an explicit goalDraft", () => {
     // refuses a legitimate goal or lets one character through the guard.
     packetsRoster();
     seedTask("impl");
-    const exact = "z".repeat(GOAL_DRAFT_MAX_CHARS);
+    const exact = "z".repeat(4_000);
     const r = await operatorOpenPacket(
       store.db,
       { dataRoot: store.dataRoot },

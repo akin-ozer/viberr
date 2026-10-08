@@ -9,8 +9,8 @@ import {
   withLocalGithub,
 } from "../../../test-support/git-origin";
 import { createTestDbContext, type TestDbContext } from "../../../test-support/test-db";
+import { READ_PAGE_BYTES } from "~/server/runtimes/read-page-budget.server";
 import {
-  DEFAULT_BRANCH_READ_PAGE_BYTES,
   defaultBranchPageNote,
   pageOfText,
   readDefaultBranchFile,
@@ -35,8 +35,8 @@ describe("ruling 436: a default-branch read comes in pages the CLI will carry", 
     expect(pageOfText("the guide\n")).toEqual({
       ok: true, text: "the guide\n", fromLine: 1, toLine: 1, totalLines: 1, more: false, lineCut: false,
     });
-    const long = pageOfText(`${"x".repeat(DEFAULT_BRANCH_READ_PAGE_BYTES + 5)}\nnext\n`);
-    expect(long.ok && long.lineCut && long.more && long.text.length).toBe(DEFAULT_BRANCH_READ_PAGE_BYTES);
+    const long = pageOfText(`${"x".repeat(READ_PAGE_BYTES + 5)}\nnext\n`);
+    expect(long.ok && long.lineCut && long.more && long.text.length).toBe(READ_PAGE_BYTES);
     expect(pageOfText("a\nb\n", 3)).toEqual({ ok: false, totalLines: 2 });
     expect(pageOfText("", 1)).toMatchObject({ ok: true, totalLines: 0, more: false });
   });
@@ -293,7 +293,7 @@ describe("readProjectDefaultBranchFile (ruling 299)", () => {
       const read = await withLocalGithub(origins, () => readProjectDefaultBranchFile(db, request));
       if (read.kind !== "found") throw new Error(`read ${read.kind}`);
       // CANARY: take every line from fromLine on, uncapped.
-      expect(read.text.length).toBeLessThanOrEqual(DEFAULT_BRANCH_READ_PAGE_BYTES);
+      expect(read.text.length).toBeLessThanOrEqual(READ_PAGE_BYTES);
       expect(read.totalLines).toBe(10_000);
       seen.push(read.text.replace(/\n$/, ""));
       if (!read.more) break;
