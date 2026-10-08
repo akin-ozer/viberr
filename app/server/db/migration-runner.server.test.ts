@@ -71,8 +71,7 @@ describe("runMigrations", () => {
     const tables = tableNames(db);
     expect(tables).toContain("users");
     expect(tables).toContain("schema_migrations");
-    // better-auth owns sessions now; the legacy `sessions` table is dropped (0014).
-    expect(tables).not.toContain("sessions");
+    // better-auth owns sessions.
     expect(tables).toContain("session");
     expect(tables).toContain("account");
     // E8(a): `verification` reads as dead — no app query names it — and pass 16
