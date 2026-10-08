@@ -432,19 +432,14 @@ describe("instance_health: aggregates, open to any signed-in person", () => {
   });
 
   it("names the pinned browser executable's path to org admins only (C05-A)", async () => {
-    const { resetEnvCacheForTests } = await import("~/server/config/env.server");
-    process.env.VIBERR_BROWSER_EXECUTABLE = "/nonexistent/chromium-not-installed";
-    resetEnvCacheForTests();
-    try {
+    const { withEnv } = await import("../../../test-support/env");
+    await withEnv({ VIBERR_BROWSER_EXECUTABLE: "/nonexistent/chromium-not-installed" }, async () => {
       const member = parsed(HEALTH_REPLY, await call(ids.nonMember, "instance_health"));
       expect(JSON.stringify(member)).not.toContain("/nonexistent");
       expect(member.browserDetail).toBeUndefined();
       const admin = parsed(HEALTH_REPLY, await call(ids.orgAdmin, "instance_health"));
       expect(admin.browserDetail).toContain("/nonexistent/chromium-not-installed");
-    } finally {
-      delete process.env.VIBERR_BROWSER_EXECUTABLE;
-      resetEnvCacheForTests();
-    }
+    });
   });
 
   it("ruling 146: carries a refused credential and a spent quota window, and neither is an INSTANCE fault", async () => {
