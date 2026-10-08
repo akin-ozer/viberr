@@ -78,10 +78,12 @@ function unwrap(result: SettingsActionData): SettingsReply {
   return "data" in result ? result.data : result;
 }
 
-async function postAction(
+/** One action as `userId`, its reply as the route returned it: a refusal
+ *  still in its `data()` envelope, with the status the route chose. */
+async function postActionRaw(
   userId: string,
   fields: Record<string, string>,
-): Promise<SettingsReply> {
+): Promise<SettingsActionData> {
   const { action } = await import("~/routes/org.settings");
   const { cookie, sessionId } = await app.cookieFor(userId);
   const csrf = await app.csrfFor(sessionId);
@@ -94,8 +96,14 @@ async function postAction(
   });
   // SAFETY: as in runLoader — the action reads `request` only, so this stub
   // carries everything the call executes.
-  const result = await action({ request, params: {}, context: {} } as never);
-  return unwrap(result);
+  return action({ request, params: {}, context: {} } as never);
+}
+
+async function postAction(
+  userId: string,
+  fields: Record<string, string>,
+): Promise<SettingsReply> {
+  return unwrap(await postActionRaw(userId, fields));
 }
 
 describe("RBAC", () => {
@@ -1049,10 +1057,13 @@ describe("E5: route-only authority gates", () => {
   it("agent-delete of a DEPLOYED profile is refused with a 409 (in_use → the route maps it)", async () => {
     // The demo seed deploys every template in viberr-core, so deleting one
     // must refuse — the route's in_use → 409 mapping.
-    const result = await postAction(ids.arda, {
+    // CANARY: refuse `in_use` with the default status and this reads 400.
+    const raw = await postActionRaw(ids.arda, {
       intent: "agent-delete",
       profileId: "developer",
     });
+    expect("data" in raw ? raw.init?.status : 200).toBe(409);
+    const result = unwrap(raw);
     expect(result.ok).toBe(false);
     // The refusal names the profile and the deployments blocking it — a bare
     // "in use" would leave the admin nothing to act on.
