@@ -153,7 +153,7 @@ function notQuotedSentence(kb: string, leftOut: readonly string[]): string {
  *  `read_timeline_entry` reads them whole ({@link readCorrectionOfEntry}).
  *  Ruling 568: with agents the knowledge base is not given to, only where and
  *  the id. */
-export function correctionEventText(c: KbCorrection, leftOut: readonly string[] = []): string {
+function correctionEventText(c: KbCorrection, leftOut: readonly string[] = []): string {
   const where = `\`${c.kb}/${c.doc}\``;
   if (leftOut.length > 0) {
     return `${c.replaced === null ? "Added to" : "Corrected"} ${where} as \`${c.id}\`. ${notQuotedSentence(c.kb, leftOut)}`;
