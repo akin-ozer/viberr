@@ -2597,8 +2597,14 @@ describe("resolvePacket kind matrix", () => {
       { dataRoot: store.dataRoot },
     );
     // arda (admin) + murat (maintainer) are notified; selin (the owner) is not.
-    expect(res.notified).toBeGreaterThanOrEqual(1);
-    expect(listNotifications(store.db, store.users.murat.id).length).toBeGreaterThanOrEqual(1);
+    expect(res.notified).toBe(2);
+    for (const user of [store.users.arda, store.users.murat]) {
+      expect(
+        listNotifications(store.db, user.id).filter(
+          (n) => n.title === `Decision needs a maintainer: ${STRANDED_PACKET.title}`,
+        ),
+      ).toHaveLength(1);
+    }
     expect(listNotifications(store.db, store.users.selin.id).length).toBe(0);
     // The ask lands on the timeline (with the owner's note) and is audited.
     const texts = getTaskDetail(store.db, store.slug, "VIB-1")!.timeline.map((e) => e.text);
