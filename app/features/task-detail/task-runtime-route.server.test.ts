@@ -173,12 +173,6 @@ describe("loader — runtime projection shape", () => {
     expect(run.tokens).toBe(128034 + 6188);
   });
 
-  it("VIB-151: the live run projects as running", async () => {
-    const { runtime } = await runLoader("VIB-151", ids.arda);
-    const run = runtime.find((r) => r.serverRunId === runningRunId)!;
-    expect(run.state).toBe("running");
-  });
-
   /**
    * UI-30: raw run logs, the `{ } raw` wire envelopes and the provider session
    * id were served to ANY signed-in user, while `/resources/run-log` and

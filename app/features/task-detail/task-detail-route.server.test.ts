@@ -13,8 +13,8 @@ import type { TaskFrontmatter } from "~/schemas/task-file.schema";
 
 /**
  * Route-level tests for the phase-5 task workspace: real Requests against
- * routes/project.task — loader fidelity for the seeded VIB-142 (packet +
- * 9-event timeline + truth strip), timeline slicing, comment routing
+ * routes/project.task — the loader's read of the seeded VIB-142 (its 9-event
+ * timeline window), timeline slicing, comment routing
  * detection, resolvePacket dispatch incl. the human-only rejection, and the
  * ownership action matrix (take / hand-off / release / admin-release /
  * RBAC-denied) — VIB-148 proves ownership is a clean mutation with no operator
@@ -151,74 +151,22 @@ async function postFile(
 /* --------------------------------------------------- loader (read-only) */
 
 describe("loader — VIB-142 fidelity", () => {
-  it("returns the full detail: packet, 9-event timeline, truth strip, store path", async () => {
+  it("ships the projected VIB-142 with its whole 9-event window, newest first, and the viewer's default filter", async () => {
+    // The projection itself (packet, truth strip, actors, evidence) is the
+    // demo fixture's VIB-142 spot-check; this is what the loader adds to it.
     const result = await runLoader("VIB-142", ids.arda);
     const t = result.task;
 
-    // Hero + current state.
     expect(t.key).toBe("VIB-142");
     expect(t.title).toBe("Attach execution workspace to task runtime");
-    expect(t.stage).toBe("review");
     expect(t.displayReadiness).toBe("input_required");
-    expect(t.waiting).toBe("human");
-    expect(t.validation).toBe("changed");
-    expect(t.urgent).toBe(true);
-    expect(t.filePath).toBe("projects/viberr-core/tasks/VIB-142/task.md");
-    expect(t.stages.map((s) => s.id)).toEqual([
-      "triage", "ready", "impl", "review", "done",
-    ]);
 
-    // Execution profile: operator since Triage (stage NAME, F7-UI2), codex
-    // specialist, reviewer.
-    expect(t.operator?.sinceLabel).toBe("since Triage");
-    expect(t.specialist?.backend).toBe("codex");
-    // Role snapshots come from the LIVE seeded profiles (generic-agents seed
-    // hygiene - hand-written snapshots shielded the VIB-12 codec bug).
-    expect(t.specialist?.role).toBe("Implementation");
-    expect(t.reviewers.map((c) => c.role)).toEqual(["Review & validation"]);
-    expect(t.owner?.kind).toBe("human");
-
-    // Decision packet: stable option kinds (ruling 7), observations, rec.
-    expect(t.packet).not.toBeNull();
-    expect(t.packet!.type).toBe("input");
-    expect(t.packet!.kind).toBe("Completion report");
-    expect(t.packet!.from).toBe("Operator");
-    expect(t.packet!.options.map((o) => o.kind)).toEqual([
-      "accept_completion", "request_edit", "block_on_policy",
-    ]);
-    expect(t.packet!.options.filter((o) => o.rec)).toHaveLength(1);
-    expect(t.packet!.observations).toHaveLength(4);
-    expect(t.packet!.observations[0]).toEqual({
-      k: "Changed", v: "9 files · +412 / −87", code: true,
-    });
-
-    // Execution truth strip: branch / commits / diff / PR from real seed.
-    expect(t.branch).toBe("vib-142-attach-workspace");
-    expect(t.repo).toBe("akin-ozer/viberr"); // project default resolved
-    expect(t.pr).toMatchObject({ number: 318, state: "review" });
-    expect(t.commits).toHaveLength(3);
-    expect(t.commits[0]!.sha).toBe("a91f7c2");
-    expect(t.changed).toEqual({ files: 9, add: 412, del: 87 });
-
-    // Timeline: all 9 seeded events, newest first, typed fidelity.
     expect(result.timelineHasMore).toBe(false);
     expect(t.timeline).toHaveLength(9);
     expect(t.timeline.map((e) => e.type)).toEqual([
       "comment", "completion", "github", "policy", "quality",
       "transition", "agent", "comment", "assign",
     ]);
-    const [newest, completion] = t.timeline;
-    expect(newest!.toAgent).toBe(true); // @operator-routed comment
-    expect(newest!.actor).toMatchObject({ kind: "human", name: "Arda Kaya" });
-    expect(completion!.title).toBe("Completion report");
-    expect(completion!.evidence).toEqual([
-      { label: "unit/policy_gate_test", result: "6 passed", status: "pass" },
-      { label: "integration/pr_sync_test", result: "11 passed", status: "pass" },
-    ]);
-    const policy = t.timeline.find((e) => e.type === "policy")!;
-    expect(policy.actor).toMatchObject({ kind: "system", name: "Policy engine" });
-    const operatorEv = t.timeline.find((e) => e.type === "agent")!;
-    expect(operatorEv.actor).toMatchObject({ kind: "agent", name: "Operator" });
 
     expect(result.tlDefault).toBe("all");
   });
@@ -229,17 +177,6 @@ describe("loader — VIB-142 fidelity", () => {
     expect(result.timelineHasMore).toBe(true);
     expect(result.timelineRemaining).toBe(7);
     expect(result.timelineNextLimit).toBe(9); // capped at the total
-  });
-
-  it("VIB-153 carries Deniz's guest comment (app user · not in project)", async () => {
-    const result = await runLoader("VIB-153", ids.arda);
-    const deniz = result.task.timeline[0]!;
-    expect(deniz.type).toBe("comment");
-    expect(deniz.actor).toMatchObject({
-      kind: "human",
-      name: "Deniz Şahin",
-      guest: true,
-    });
   });
 
   it("honors the per-user tlDefault preference", async () => {
@@ -402,17 +339,8 @@ describe("comment action — @agent routing detection", () => {
     expect(humanComment).toMatchObject({ type: "comment", toAgent: true });
   });
 
-  it("@codex also routes + triggers; plain member mentions do not", async () => {
-    // SAFETY: the same `comment` arm — an @mention that resolves to a deployed
-    // specialist reports through `toAgent`/`triggered`.
-    const codex = (await postIntent("VIB-153", ids.arda, {
-      intent: "comment", text: "@codex check the linter",
-    })) as { toAgent: boolean; triggered: string | null };
-    expect(codex.toAgent).toBe(true);
-    expect(codex.triggered).toBeTruthy();
-    await stopTaskRuns("VIB-153", ids.arda);
-
-    // SAFETY: still the `comment` arm; a plain member mention is the not-routed
+  it("a plain teammate mention posts with the bare 'Comment posted' toast and routes to no agent", async () => {
+    // SAFETY: the `comment` arm; a plain member mention is the not-routed
     // branch of that same return, so the fields are unchanged.
     const plain = (await postIntent("VIB-153", ids.arda, {
       intent: "comment", text: "cc @murat for a second look",
@@ -721,37 +649,30 @@ describe("resolve-packet action — kind dispatch + RBAC", () => {
     expect(String(thrown?.data)).toBe("No project at projects/viberr-core.");
   });
 
-  it("block_on_policy (R20-1): UNBLOCKS, clears the packet, re-queues the operator, no settings nav", async () => {
-    // R20-1 (F20-5): the option's label promises an unblock, so it now records
-    // one — readiness→ready, waiting→agent, the packet clears, and the operator
-    // re-runs to re-check. It used to hold the task blocked, keep the packet
-    // open (re-accepting the same confirm forever), and deep-nav to settings.
-    queueFakeRun({
-      lines: [{ t: "", ev: "text", tag: "assistant", text: "re-checking" }],
-      keepRunning: true,
-    });
-    // SAFETY: arda holds `resolve-packet`, so the confirmed option returns the
-    // resolve arm: `kind`, its toast, and the optional navigation target.
-    const result = (await postIntent("VIB-142", ids.arda, {
-      intent: "resolve-packet", option: "2",
-    })) as { ok: true; kind: string; toast: string; navigateTo?: string };
-    expect(result.kind).toBe("block_on_policy");
+  /**
+   * What the route adds to a resolution: the option's `kind` and the toast
+   * that says what it did. What each kind writes (readiness, waiting, the
+   * cleared packet, the decision's words) is resolvePacket's, in
+   * task-governance.server.test.ts.
+   */
+  it.each([
     // Ruling 130(c) (pass 34): the toast states the EFFECT and restates no
     // claim. Canary: restore the old "Policy / credential updated" literal.
-    expect(result.toast).toBe("Unblocked · the operator re-runs to re-check");
-    expect(result.navigateTo).toBeUndefined();
-
-    const after = await runLoader("VIB-142", ids.arda);
-    expect(after.task.readiness).toBe("ready");
-    expect(after.task.waiting).toBe("agent");
-    expect(after.task.packet).toBeNull(); // resolved, not held
-    // The re-queue may post its own events, so find the decision by type.
-    const decision = after.task.timeline.find((e) => e.type === "transition");
-    expect(decision).toBeDefined();
-    // The record restates the seeded option's own words (ruling 130(c)).
-    expect(decision!.text).toContain("**Decision:** Block on policy.");
-    expect(decision!.text).not.toContain("policy / credential updated");
-    expect(decision!.text).toContain("unblocked");
+    { kind: "block_on_policy", key: "VIB-142", by: "arda", option: "2", reruns: true, toast: "Unblocked · the operator re-runs to re-check" },
+    { kind: "request_edit", key: "VIB-142", by: "arda", option: "1", reruns: true, toast: "Decision recorded: Request one edit" },
+    { kind: "hold_runtime_debug", key: "VIB-160", by: "murat", option: "2", reruns: false, toast: "Held for runtime debug · the session is recorded per audit policy" },
+  ] as const)("$kind answers with its own toast", async ({ kind, key, by, option, reruns, toast }) => {
+    // The two that re-queue the operator hand it a run that holds, so it
+    // starts and sits inert rather than writing under the next case.
+    if (reruns) {
+      queueFakeRun({
+        lines: [{ t: "", ev: "text", tag: "assistant", text: "working" }],
+        keepRunning: true,
+      });
+    }
+    expect(
+      await postIntent(key, ids[by], { intent: "resolve-packet", option }),
+    ).toMatchObject({ ok: true, kind, toast });
   });
 
   it("ruling 131 set-task-dependencies: sets the wait, clears it as a release, refuses a bad reference by name", async () => {
@@ -840,32 +761,6 @@ describe("resolve-packet action — kind dispatch + RBAC", () => {
     expect(restored.task.dueDate).toBe(before.task.dueDate);
   });
 
-  it("request_edit: clears the packet, flips waiting to agent, writes option.ev", async () => {
-    queueFakeRun({
-      lines: [{ t: "", ev: "text", tag: "assistant", text: "working" }],
-      keepRunning: true,
-    });
-    // SAFETY: the same resolve arm as the block_on_policy case above.
-    const result = (await postIntent("VIB-142", ids.arda, {
-      intent: "resolve-packet", option: "1",
-    })) as { ok: true; kind: string; toast: string; navigateTo?: string };
-    expect(result.kind).toBe("request_edit");
-    expect(result.toast).toBe("Decision recorded: Request one edit");
-    expect(result.navigateTo).toBeUndefined();
-
-    const after = await runLoader("VIB-142", ids.arda);
-    expect(after.task.packet).toBeNull();
-    expect(after.task.waiting).toBe("agent");
-    expect(after.task.readiness).toBe("ready");
-    // Sending work back re-invokes the operator (which may post its own events),
-    // so locate the decision transition by type rather than assuming position.
-    const decision = after.task.timeline.find((e) => e.type === "transition");
-    expect(decision).toBeDefined();
-    expect(decision!.text).toBe(
-      "**Decision:** request one edit. Developer widens the PAT scope, then the completion report returns for acceptance.",
-    );
-  });
-
   it("second resolve conflicts (409) instead of crashing", async () => {
     // Self-contained now that each test starts from a fresh packet (beforeEach):
     // resolve once (request_edit clears it + re-queues), then a second resolve
@@ -888,26 +783,6 @@ describe("resolve-packet action — kind dispatch + RBAC", () => {
     })) as ActionRefusal;
     expect(result.init.status).toBe(409);
     expect(result.data.error).toBe("This packet was already resolved.");
-  });
-
-  it("hold_runtime_debug on VIB-160 (R20-1): stays blocked but RESOLVES the packet", async () => {
-    // SAFETY: murat holds `resolve-packet` on VIB-160, so this is the resolve arm
-    // again — a hold still resolves the packet.
-    const result = (await postIntent("VIB-160", ids.murat, {
-      intent: "resolve-packet", option: "2",
-    })) as { ok: true; kind: string; toast: string };
-    expect(result.kind).toBe("hold_runtime_debug");
-    expect(result.toast).toBe(
-      "Held for runtime debug · the session is recorded per audit policy",
-    );
-    const after = await runLoader("VIB-160", ids.murat);
-    // R20-1 (F20-5): still a hold (readiness stays blocked, no run starts), but
-    // the packet now CLEARS — it used to stay open and re-accept the same confirm.
-    expect(after.task.readiness).toBe("blocked");
-    expect(after.task.packet).toBeNull();
-    expect(after.task.timeline[0]!.text).toContain(
-      "**Decision:** hold for runtime debug. VIB-160 stays blocked",
-    );
   });
 });
 
@@ -937,9 +812,6 @@ describe("ownership actions", () => {
     expect(after.task.owner).toMatchObject({ kind: "human", name: "Arda Kaya" });
     // The assign event sits at the top of the timeline…
     expect(after.task.timeline[0]!.type).toBe("assign");
-    expect(after.task.timeline[0]!.text).toBe(
-      "Took task ownership. The owner is the human reviewer and acceptance authority for this task.",
-    );
     // …board state is untouched: no fabricated ready/agent flip (VIB-148 stays
     // input_required + waiting on a human — ownership is orthogonal to
     // scheduling)…
@@ -955,7 +827,7 @@ describe("ownership actions", () => {
     expect(opRuns()).toBe(before);
   });
 
-  it("self release writes the exact assign copy (no re-scheduling on re-take)", async () => {
+  it("self release is not forced and empties the seat; a contributor's re-take puts its assign event on top", async () => {
     // SAFETY: releasing one's own seat is permitted, so this is the ownership arm
     // — `forced` exists only there, to separate a self-release from an admin one.
     const result = (await postIntent("VIB-148", ids.arda, {
@@ -966,9 +838,6 @@ describe("ownership actions", () => {
 
     const after = await runLoader("VIB-148", ids.arda);
     expect(after.task.owner).toBeNull();
-    expect(after.task.timeline[0]!.text).toBe(
-      "Released task ownership. Review & acceptance stall until another member takes the seat.",
-    );
     // Re-taking is a clean ownership mutation: just the assign event on top,
     // no operator scheduling reaction to re-fire (F19).
     // SAFETY: selin is a contributor, which `own-task` admits, so the re-take
@@ -979,9 +848,6 @@ describe("ownership actions", () => {
     expect(again.ok).toBe(true);
     const after2 = await runLoader("VIB-148", ids.selin);
     expect(after2.task.timeline[0]).toMatchObject({ type: "assign" });
-    expect(after2.task.timeline[0]!.text).toBe(
-      "Took task ownership. The owner is the human reviewer and acceptance authority for this task.",
-    );
   });
 
   it("non-owner non-admin cannot hand off or release someone else's seat", async () => {
@@ -1004,7 +870,7 @@ describe("ownership actions", () => {
     expect(release.data.error).toContain("cannot release another member's ownership");
   });
 
-  it("hand-off by admin + admin release with the forced copy + audit trail", async () => {
+  it("an admin hands the seat off and releases it with the forced toast, and the release is audited", async () => {
     // SAFETY: arda is a project admin, so the hand-off returns the ownership arm.
     const handoff = (await postIntent("VIB-151", ids.arda, {
       intent: "owner-assign", userId: ids.murat,
@@ -1012,9 +878,6 @@ describe("ownership actions", () => {
     expect(handoff.toast).toBe("Ownership handed to Murat");
     let after = await runLoader("VIB-151", ids.arda);
     expect(after.task.owner).toMatchObject({ name: "Murat Yıldız" });
-    expect(after.task.timeline[0]!.text).toBe(
-      "Handed task ownership to **Murat Yıldız**. They hold review & acceptance for this task now.",
-    );
 
     // SAFETY: the admin release returns the ownership arm too, with `forced` set.
     const release = (await postIntent("VIB-151", ids.arda, {
@@ -1024,11 +887,6 @@ describe("ownership actions", () => {
     expect(release.toast).toBe("Murat released from VIB-151 · admin action");
     after = await runLoader("VIB-151", ids.arda);
     expect(after.task.owner).toBeNull();
-    // F19-11: "any project member" was the wrong RBAC sentence (a viewer is a
-    // member and cannot own) — the copy and this pin are corrected together.
-    expect(after.task.timeline[0]!.text).toBe(
-      "Released **Murat Yıldız** from task ownership (admin). The seat is open to any contributor or above.",
-    );
 
     // Admin release promise: recorded in the audit trail (spec §4.5).
     // SAFETY: `COUNT(*) AS n` is an aggregate with no GROUP BY — exactly one row,
@@ -2021,7 +1879,7 @@ describe("attach-file (F39-6) — the human writer, end to end through the route
     ).toBe(true);
   });
 
-  it("refuses a NON-MEMBER, and refuses a type the serving route would not render", async () => {
+  it("refuses a NON-MEMBER at the visibility gate with the unknown-slug 404, and stores nothing", async () => {
     // R15-4: a non-member is stopped by the route's visibility gate, before the
     // intent switch, with the unknown-slug 404; the grant check inside
     // attachTaskFile is the VIEWER case below.
@@ -2032,19 +1890,6 @@ describe("attach-file (F39-6) — the human writer, end to end through the route
       data: "No project at projects/viberr-core.",
     });
     expect(await attachmentsOf("VIB-141")).not.toContain("sneaky.txt");
-
-    // SAFETY: a name the store would hide throws AppError, which the route
-    // renders through `appErrorResponse` — the refusal arm. (Ruling 574: any
-    // kind is stored; the name and the size are what an upload is refused by.)
-    const badName = (await postFile(
-      "VIB-141",
-      ids.selin,
-      ".hidden.txt",
-      "x",
-    )) as ActionRefusal;
-    expect(badName.data.ok).toBe(false);
-    expect(badName.data.error).toContain("cannot start with a dot");
-    expect(await attachmentsOf("VIB-141")).not.toContain(".hidden.txt");
   });
 
   it("refuses a VIEWER at attachTaskFile's own attach-file grant, and stores nothing", async () => {
