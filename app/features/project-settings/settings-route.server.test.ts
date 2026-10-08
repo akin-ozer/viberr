@@ -1,5 +1,5 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { RouterContextProvider } from "react-router";
 import { z } from "zod";
@@ -509,6 +509,46 @@ describe("danger zone", () => {
     expect(listAuditEvents(app.db, { action: "project.deleted" })[0]).toMatchObject(
       { subjectId: "billing-service" },
     );
+  });
+
+  /**
+   * Ruling 697: a project slug is one folder under `projects/`. The slug
+   * arrives from the URL decoded (a `%2F` is a `/`), so it can hold a path,
+   * and `delete-project` builds the folder it `rmSync`s from `projectDir(slug)`.
+   * A person holding `attach-file` (contributor and up) can put a `project.md`
+   * into a task's own `attachments/`, and that folder, named as a slug, then
+   * answers the membership guard as a project with whatever members the planted
+   * file lists — here one naming arda admin, so the ONLY thing between the
+   * request and the `rmSync` is the slug's containment.
+   */
+  it("ruling 697: a project.md planted in a task's attachments is not a project the delete door will erase", async () => {
+    const attachments = path.join(
+      app.dataRoot,
+      "projects/viberr-core/tasks/VIB-142/attachments",
+    );
+    mkdirSync(attachments, { recursive: true });
+    // A real, parseable project.md — viberr-core's own, renamed — so the guard
+    // reads arda as an admin of this "project": the 404 is the containment, not
+    // a missing or unreadable file (which would 404 for another reason).
+    const planted = projectMd().replace(/^name: .*$/m, "name: Forged");
+    writeFileSync(path.join(attachments, "project.md"), planted);
+
+    const slug = "viberr-core/tasks/VIB-142/attachments";
+    let status: number | undefined;
+    try {
+      await postAction(ids.arda, { intent: "delete-project", confirmName: "Forged" }, slug);
+    } catch (thrown) {
+      // SAFETY: the containment refusal is react-router's `data(message,
+      // { status })`, thrown by `requireVisibleProject`, which carries the
+      // status under `init` (as the task-attachment and other route suites read
+      // a thrown refusal); any other throw leaves `status` undefined and fails.
+      status = (thrown as { init?: { status?: number } }).init?.status;
+    }
+    // CANARY: drop the containment in `projectDir` and this is a 302 redirect —
+    // the planted project.md passes the guard and `rmSync` takes the folder.
+    expect(status).toBe(404);
+    expect(existsSync(path.join(attachments, "project.md"))).toBe(true);
+    expect(existsSync(path.join(app.dataRoot, "projects/viberr-core/project.md"))).toBe(true);
   });
 
 });
