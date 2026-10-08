@@ -122,7 +122,7 @@ function McpSignInActions({
  * tokens at the server when it offers revocation and drops them here.
  */
 export function McpSignIn({ mcp }: { mcp: McpView }) {
-  const oauth = mcp.oauth ?? null;
+  const oauth = mcp.oauth;
   const [err, setErr] = useState<string | null>(null);
   // The authorization URL, and the sign-in state it was fetched against: once
   // that state moves (the callback landed, or the admin signed out), the link

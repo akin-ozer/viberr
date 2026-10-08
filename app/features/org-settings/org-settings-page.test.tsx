@@ -560,9 +560,11 @@ const KBS: KbView[] = [
 ];
 const MCPS: McpView[] = [
   { id: "m1", name: "github-mcp", transport: "HTTP", target: "https://mcp.internal:7801/sse",
-    hasCred: true, tools: 14, up: true, lastCheckedAt: new Date().toISOString(), lastError: null, warmingSince: null, writeTools: [], writeToolsReviewed: false, discoveredTools: null, storePaths: [] },
+    hasCred: true, tools: 14, up: true, lastCheckedAt: new Date().toISOString(), lastError: null, warmingSince: null, writeTools: [], writeToolsReviewed: false, discoveredTools: null, storePaths: [],
+    credUnreadable: false, firstSuccessAt: null, heuristicWarmups: 0, oauth: null, requestedScope: null },
   { id: "m2", name: "browserbase", transport: "HTTP", target: "https://mcp.internal:7809/sse",
-    hasCred: false, tools: 0, up: false, lastCheckedAt: new Date().toISOString(), lastError: null, warmingSince: null, writeTools: [], writeToolsReviewed: false, discoveredTools: null, storePaths: [] },
+    hasCred: false, tools: 0, up: false, lastCheckedAt: new Date().toISOString(), lastError: null, warmingSince: null, writeTools: [], writeToolsReviewed: false, discoveredTools: null, storePaths: [],
+    credUnreadable: false, firstSuccessAt: null, heuristicWarmups: 0, oauth: null, requestedScope: null },
 ];
 const SKILLS: SkillView[] = [
   { id: "s1", name: "terraform-review", summary: "Module review checklist.",
@@ -681,6 +683,7 @@ describe("ResourcesPanel", () => {
           "exited before responding — ImportError: cannot import name 'McpError' from 'mcp.shared.exceptions'",
         warmingSince: null,
         writeTools: [], writeToolsReviewed: false, discoveredTools: null, storePaths: [],
+        credUnreadable: false, firstSuccessAt: null, heuristicWarmups: 0, oauth: null, requestedScope: null,
       },
     ];
     const { container } = renderPanel(
@@ -707,6 +710,7 @@ describe("ResourcesPanel", () => {
         lastError: "still installing after 20s — …",
         warmingSince: new Date().toISOString(),
         writeTools: [], writeToolsReviewed: false, discoveredTools: null, storePaths: [],
+        credUnreadable: false, firstSuccessAt: null, heuristicWarmups: 0, oauth: null, requestedScope: null,
       },
     ];
     const { container } = renderPanel(
@@ -741,6 +745,7 @@ describe("ResourcesPanel", () => {
         credUnreadable: true,
         lastError: null, warmingSince: null,
         writeTools: [], writeToolsReviewed: false, discoveredTools: null, storePaths: [],
+        firstSuccessAt: null, heuristicWarmups: 0, oauth: null, requestedScope: null,
         tools: null,
         up: null,
         lastCheckedAt: new Date().toISOString(),
@@ -808,7 +813,8 @@ describe("ResourcesPanel", () => {
     const threeHoursAgo = new Date(Date.now() - 3 * 60 * 60 * 1000).toISOString();
     const staleMcps: McpView[] = [
       { id: "m3", name: "notes-fixture", transport: "stdio", target: "node /tmp/notes.mjs",
-        hasCred: true, tools: 1, up: true, lastCheckedAt: threeHoursAgo, lastError: null, warmingSince: null, writeTools: [], writeToolsReviewed: false, discoveredTools: null, storePaths: [] },
+        hasCred: true, tools: 1, up: true, lastCheckedAt: threeHoursAgo, lastError: null, warmingSince: null, writeTools: [], writeToolsReviewed: false, discoveredTools: null, storePaths: [],
+        credUnreadable: false, firstSuccessAt: null, heuristicWarmups: 0, oauth: null, requestedScope: null },
     ];
     const { container } = renderPanel(
       <ResourcesPanel kbs={[]} mcps={staleMcps} skills={[]} gagents={[]} stages={STAGES} projectStages={[]} />,
