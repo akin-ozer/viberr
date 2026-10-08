@@ -3,7 +3,7 @@ import { GlyphSwap } from "~/ui/copy-glyph";
 import { Icon } from "~/ui/icon";
 
 /**
- * Profile → GitHub identity's personal OAuth card (ruling 695(e), the split of
+ * Profile → GitHub identity's personal OAuth card (ruling 696(e), the split of
  * `profile-page.tsx` along the task page's recipe): the scopes, and either the
  * connection with its Disconnect or the Connect. Hook-free: `ProfileGithub`
  * owns the connect, the confirm and the fetcher, and hands each in.

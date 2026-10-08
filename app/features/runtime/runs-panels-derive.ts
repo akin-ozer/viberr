@@ -20,7 +20,7 @@ import { editDiff, type EditDiff } from "./edit-diff";
 
 /**
  * What the run panels read off a run and its console before they draw
- * (ruling 695(e), the large-component split of `runs-panels.tsx` on the task
+ * (ruling 696(e), the large-component split of `runs-panels.tsx` on the task
  * page's recipe): the Agent logs footer's sentence and the retry it offers,
  * what the console box says about its own history, a console line's shapes
  * and a wait row's figures. Pure functions of the run and the store's thread,

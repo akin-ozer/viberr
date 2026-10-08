@@ -23,7 +23,7 @@ import { DiagnosticsPanel, ExecutionSection } from "./task-main-sections";
 import { Timeline, type TimelineFilterId } from "./timeline";
 
 /**
- * U35-2: `.detail-main`, the task page's main column (ruling 695(d), the pilot
+ * U35-2: `.detail-main`, the task page's main column (ruling 696(d), the pilot
  * split of `task-detail-page.tsx`): the live run, diagnostics, continuity,
  * recommendations, the run controls, the console, the changes, the
  * attachments and the timeline. It calls no hook: the page owns every fetcher

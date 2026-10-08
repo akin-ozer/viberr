@@ -16,7 +16,7 @@ import { accountKindWord } from "./agent-accounts-derive";
 import type { ProfileBackendAccount } from "./profile-query.server";
 
 /**
- * Profile → Agent accounts: the account picker (ruling 695(e), the split of
+ * Profile → Agent accounts: the account picker (ruling 696(e), the split of
  * `agent-accounts-panel.tsx` along the task page's recipe), moved whole with
  * the hooks it always owned.
  */

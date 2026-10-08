@@ -53,7 +53,7 @@ import {
  * management. Rename and Disconnect are per account; disconnecting the one in
  * use hands runs to the account used before it.
  *
- * Ruling 695(e): the card is composition. Its sign-in poll is a hook in
+ * Ruling 696(e): the card is composition. Its sign-in poll is a hook in
  * `agent-accounts-actions.ts`, what it reads off its props and the fetcher is
  * pure functions in `agent-accounts-derive.ts`, and its regions are hook-free
  * components in `agent-accounts-regions.tsx` and `agent-account-in-use.tsx`;

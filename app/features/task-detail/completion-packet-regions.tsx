@@ -19,7 +19,7 @@ import { ChangesPanel } from "./changes-slot";
 import type { CompletionDiff, CompletionResult } from "./completion-packet";
 
 /**
- * The completion packet's sections (ruling 695(e), the split of
+ * The completion packet's sections (ruling 696(e), the split of
  * `completion-packet.tsx` along the task-page recipe): its head, Operator's
  * summary, a result page's pictures, the sources the result rests on, the
  * notes on what is not shown, the reviewers' verdicts, what the task took and

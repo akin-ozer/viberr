@@ -28,7 +28,7 @@ import type { EpicMemberView, EpicStageView } from "./epics-query.server";
  * ones are one click away and never deleted. A Done epic whose tasks are all
  * done offers Archive tasks, to someone who may archive them (ruling 651).
  *
- * Ruling 695(e): the empty state and the list are `EpicsEmptyHero` and
+ * Ruling 696(e): the empty state and the list are `EpicsEmptyHero` and
  * `EpicsList` below, which take the page's slot and call no hook.
  */
 
@@ -46,7 +46,7 @@ function isShow(value: string | null): value is Show {
 let openings = 0;
 
 /**
- * Ruling 695(c): New epic's create, held by the page that acts on its answer
+ * Ruling 696(c): New epic's create, held by the page that acts on its answer
  * rather than by the dialog, so the new epic's id never goes up through an
  * effect. A made epic is toasted and opened, then the dialog plays its close;
  * a refusal stays in the dialog's foot. Each opening has a fetcher of its own,

@@ -493,7 +493,7 @@ export function resolveBoardMcp(input: {
 }
 
 /**
- * Ruling 695(b): how many stdio pre-flight handshakes a run start keeps in
+ * Ruling 696(b): how many stdio pre-flight handshakes a run start keeps in
  * flight. Each may take its full 20 s, so a run mounting four waited 80 s
  * before it began; two halves that. Three would save more only on a run
  * mounting three or more, at the price of a third concurrent first-run
@@ -514,7 +514,7 @@ const STDIO_PREFLIGHT_CONCURRENCY = 2;
  * module 'ajv'`, contributing zero tools while every surface said healthy).
  *
  * This re-runs the real discovery handshake for each mounted stdio server, two
- * at a time (ruling 695(b), below). On a failure it (1) DROPS the server from
+ * at a time (ruling 696(b), below). On a failure it (1) DROPS the server from
  * the config so the run is not told it has tools it will never get, (2) joins
  * the existing `unresolved` disclosure by name with `mounted: false` (a hard
  * mount failure, distinct from the stale `mounted: true` "probe was old" note),
@@ -554,7 +554,7 @@ export async function verifyStdioMcpMountsForRun(
   const servers = { ...resolution.servers };
   const unresolved = [...resolution.unresolved];
 
-  // Ruling 695(b): the handshakes run STDIO_PREFLIGHT_CONCURRENCY at a time,
+  // Ruling 696(b): the handshakes run STDIO_PREFLIGHT_CONCURRENCY at a time,
   // taken in mount order, and each verdict is applied in mount order as soon
   // as every earlier mount's verdict is in. The mounted set, the health rows,
   // the warn lines and `unresolved` therefore come out as the one-at-a-time

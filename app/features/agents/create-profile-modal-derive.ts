@@ -20,7 +20,7 @@ import type { CapSelection } from "./create-profile-modal";
 
 /**
  * What the agent profile editor reads off the profile it opens and the fields
- * it holds (ruling 695(e), the large-component split of
+ * it holds (ruling 696(e), the large-component split of
  * `create-profile-modal.tsx`, on the task page's recipe): the capability policy
  * for the profile's kind, the seed of its capability grants, where the form
  * stands against what a save requires, and the sentences the model picker and

@@ -26,7 +26,7 @@ import type { EpicPageView } from "./epics-query.server";
  * person's call; when every task is done the history says so and the lead is
  * told, and closing it stays theirs.
  *
- * Ruling 695(e): the page holds its state, its requests (`epic-page-actions.tsx`)
+ * Ruling 696(e): the page holds its state, its requests (`epic-page-actions.tsx`)
  * and its dialogs; its regions are drawn in `epic-page-regions.tsx`.
  */
 

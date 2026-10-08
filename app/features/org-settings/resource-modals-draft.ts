@@ -3,7 +3,7 @@ import type { McpView } from "~/server/org/resources.server";
 import { looksLikeWriteTool, MCP_TOOL_NAME_RE } from "~/shared/mcp-tools";
 
 /**
- * The MCP-server editor's write-tool draft (ruling 695(e), the split of
+ * The MCP-server editor's write-tool draft (ruling 696(e), the split of
  * `resource-modals.tsx`): the marks and the names typed in. McpModal calls it
  * where its state always registered, after the connection's own fields. No
  * component lives here, so the module is not a Fast Refresh boundary.

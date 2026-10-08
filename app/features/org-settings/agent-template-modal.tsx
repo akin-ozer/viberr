@@ -15,7 +15,7 @@ import { useModalAction } from "./resource-helpers";
  * The global agent-TEMPLATE editor for the Agent-resources tab. Split out of
  * `resources-panel.tsx` (pass 16, pure structural refactor — no behaviour or
  * copy change); it is the largest and least-shared of the four editors, so it
- * gets its own file. Ruling 695(e) split it again along the task-page recipe:
+ * gets its own file. Ruling 696(e) split it again along the task-page recipe:
  * its draft lives in `agent-template-draft.ts` (hooks), what it reads off its
  * props in `agent-template-derive.ts`, and the fields that carry logic (the
  * backend pick, the eligible stages, the loadable context with its missing

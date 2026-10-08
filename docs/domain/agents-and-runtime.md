@@ -1962,7 +1962,7 @@ runtime's answer for a missing grant.
   the credential on both backends, before the run and are dropped (and marked
   unreachable) on failure. The handshakes start in mount order and run two at a time,
   each with its own 20 s limit, and two mounts of one command never at once
-  (ruling 695(b)); each verdict is applied in mount order as soon as every earlier
+  (ruling 696(b)); each verdict is applied in mount order as soon as every earlier
   server's is in, so for the same verdicts the mounts, the registry rows, the log lines
   and the prompt read as a one-at-a-time check left them. Two things differ. A later
   server's handshake can end while an earlier one is still running, and its failure is

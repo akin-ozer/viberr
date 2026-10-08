@@ -10,7 +10,7 @@ import {
 } from "~/features/github/github-pills";
 
 /**
- * What the GitHub trace reads off the task before it draws (ruling 695(e), the
+ * What the GitHub trace reads off the task before it draws (ruling 696(e), the
  * task-page recipe applied to `task-side-panels.tsx`): whether a live pull
  * request stands, the revision a push would carry and what the server would
  * refuse a delivery with, the admin override's reason, the card's links and

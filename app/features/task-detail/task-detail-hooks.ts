@@ -14,7 +14,7 @@ import type { TaskRunPrincipalView } from "./run-principal-view";
  * (pass 16 — the file was 1811 lines and the most conflict-prone in the tree);
  * a pure structural refactor, no behaviour or copy change. The page's own
  * posts, each with its fetcher and confirm, are in `task-detail-actions.tsx`
- * (ruling 695(d)); `useRunConsole` there calls the two hooks below.
+ * (ruling 696(d)); `useRunConsole` there calls the two hooks below.
  */
 
 export type ActionResult =

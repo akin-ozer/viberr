@@ -79,7 +79,7 @@ export interface PinnedChip {
   title: string;
 }
 
-/** Which "none" line a grant group closes on, if any (ruling 695(e): read off
+/** Which "none" line a grant group closes on, if any (ruling 696(e): read off
  *  the group as a pure function). A group with a pinned or a missing chip
  *  shows something already; otherwise a locked group with nothing granted
  *  says "none granted", and an open group with nothing to offer "none

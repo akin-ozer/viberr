@@ -9,7 +9,7 @@ import type { ContextGrants, StageEligibility } from "./agent-template-draft";
 
 /**
  * The global agent-template editor's fields that carry its logic (ruling
- * 695(e), the split of `agent-template-modal.tsx`): the backend pick, the
+ * 696(e), the split of `agent-template-modal.tsx`): the backend pick, the
  * default eligible stages with the Custom stages list, and the loadable
  * context with its missing chips. Each takes the slot its markup held in the
  * editor and calls no hook of its own (StageRow keeps the one id it always

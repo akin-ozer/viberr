@@ -102,7 +102,7 @@ function prSignal({
 const PUSH_LABEL = (rev: string, prNumber: number): string =>
   `Push ${rev} to PR #${prNumber}`;
 /** The refusal the server would give a plain push of a diverged branch (the
- *  name ruling 160 cites). Module-local: since the ruling 695(e) split its one
+ *  name ruling 160 cites). Module-local: since the ruling 696(e) split its one
  *  use sits in `deliverButton`, and the build ships it as a variable whether or
  *  not it is exported (project.task 360,333 B gzip both ways, measured). */
 const DIVERGED_PUSH_REFUSAL =
@@ -302,7 +302,7 @@ export function GithubTrace({
 }
 
 /*
- * Ruling 695(e): the parts of the PR card, each the markup of one slot of
+ * Ruling 696(e): the parts of the PR card, each the markup of one slot of
  * `GithubTrace`, which keeps the card's frame and what it decides. Plain
  * functions rather than components, as `prSignal` is: none calls a hook, and a
  * component each would add a render per part to every revalidation (ruling
@@ -1001,7 +1001,7 @@ export function CurrentStatePanel({
 }
 
 /*
- * Ruling 695(e): the parts of Current state, each the markup of one slot of
+ * Ruling 696(e): the parts of Current state, each the markup of one slot of
  * `CurrentStatePanel`. Plain functions rather than components, for the reason
  * the PR card's parts are: none calls a hook, and a component each would add
  * a render per part to every revalidation (ruling 457).

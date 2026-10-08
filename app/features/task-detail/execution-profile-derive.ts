@@ -12,7 +12,7 @@ import { backendRunRefusal, type TaskRunPrincipalView } from "./run-principal-vi
 
 /**
  * What the execution profile reads off its props before it draws (ruling
- * 695(e), the split of `execution-profile.tsx` along the task page's recipe):
+ * 696(e), the split of `execution-profile.tsx` along the task page's recipe):
  * who owns the task, what holds the operator's manual run, what a pick on the
  * run-an-agent control would meet (its refusal, its posture, its button's
  * title) and the words on both run buttons. Pure functions of the panel's

@@ -92,7 +92,7 @@ scan run from inside an agent worktree under `.claude/` sees no files at all.
   only when the step changes the tab (the "all" row of timeline-target.test.tsx).
 
 - `react-doctor/no-reset-all-state-on-prop-change` / `no-adjust-state-on-prop-change` —
-  decision-packet-actions.ts `usePacketChoice` (DecisionPacket's choice, ruling 695(e))
+  decision-packet-actions.ts `usePacketChoice` (DecisionPacket's choice, ruling 696(e))
   `seededFrom`: when a replacement packet arrives with a new `id` (F10-09), the card re-seeds its own choice, note, repository answer, directive,
   refusal count and open ask-first step during render, guarded on `p.id !== seededFrom`,
   through the same `initialChoice` / `initialRepository` helpers its useState calls use.
@@ -300,7 +300,7 @@ scan run from inside an agent worktree under `.claude/` sees no files at all.
   which spawns each mounted stdio server and, on a failure, writes the shared health row
   and drops the server from the run. Parallel starts would probe the same org stdio
   servers at once (every operator in a project mounts the same ones; reviewers do when
-  granted the same), the contention ruling 695(b) bounds within one run to two
+  granted the same), the contention ruling 696(b) bounds within one run to two
   handshakes at a time. Per loop: dependencies.server.ts `drainQueuedQuestions` must stay serial regardless.
   Queued questions can name the same reviewer twice; a supporting run's `cloneRepo`
   removes and re-clones its `workspace/support/<profileId>` checkout; `dispatchAgentRun`'s
@@ -522,10 +522,10 @@ design-system or cross-file decision — revisit deliberately, not per lint run.
   each.
 
 - `react-doctor/no-high-complexity-react-function` / `no-giant-component` — none left.
-  Ruling 695(d) piloted the split on TaskDetailPage and ruling 695(e) rolled it out to
+  Ruling 696(d) piloted the split on TaskDetailPage and ruling 696(e) rolled it out to
   every other surface these two rules flagged (85 findings in 42 files): each surface's
   posts became hooks its component still calls in the order its fetchers registered
   (`*-actions`), what it reads off its props became pure functions (`*-derive.ts`), and
   its regions became hook-free components in sibling modules, with the server and
   hydrated DOM byte-identical. A new finding of either rule is real, not a deferral:
-  split it the same way and record its measured cost under ruling 695(e).
+  split it the same way and record its measured cost under ruling 696(e).

@@ -119,7 +119,7 @@ archived: true                    # optional; only an archived project carries t
 repo: akin-ozer/viberr            # THE project's GitHub repo (one per project), or
                                   # null: a board that delivers results needs none
                                   # (ruling 667). `owner/name` as GitHub allows it
-                                  # (ruling 695(a), `REPO_SLUG_RE`): an owner of
+                                  # (ruling 696(a), `REPO_SLUG_RE`): an owner of
                                   # letters, digits and single hyphens, up to 39; a
                                   # name of letters, digits, `.`, `_`, `-`, up to
                                   # 100, never `.` or `..`. Any other value reads as

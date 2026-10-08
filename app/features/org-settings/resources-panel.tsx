@@ -46,7 +46,7 @@ import {
  * orchestration: which modal/confirm is open, which row is busy, and the
  * governed submissions. The pieces live in `resource-helpers.ts`,
  * `resource-modals.tsx`, `agent-template-modal.tsx` and `resource-rows.tsx`.
- * Ruling 695(e) split the panel again along the task-page recipe: its state
+ * Ruling 696(e) split the panel again along the task-page recipe: its state
  * and posts live in `resources-panel-actions.ts` (hooks), and what it reads
  * off that state, the removal confirm's copy among it, in
  * `resources-panel-derive.ts`.

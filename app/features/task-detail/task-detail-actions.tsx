@@ -28,7 +28,7 @@ import type { TaskRunPrincipalView } from "./run-principal-view";
 import { useLogSelection, useRunControls, type ActionResult } from "./task-detail-hooks";
 
 /**
- * The task page's posts (ruling 695(d), the pilot split of
+ * The task page's posts (ruling 696(d), the pilot split of
  * `task-detail-page.tsx`), each with its fetcher, toast, local state and
  * confirm: who owns the task, the open decision, the archive, the acceptance,
  * the run console, the recommendations and the stage. The page calls them in

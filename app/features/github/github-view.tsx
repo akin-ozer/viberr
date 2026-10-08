@@ -459,7 +459,7 @@ export interface ReconcileCheckView {
   stale: boolean;
 }
 
-/** The freshness chip's tone, line and sentence (ruling 695(e), the split of
+/** The freshness chip's tone, line and sentence (ruling 696(e), the split of
  *  `GithubViewPage`). */
 interface Freshness {
   staleCache: boolean;
@@ -469,7 +469,7 @@ interface Freshness {
 
 /**
  * What the freshness chip says, from the last CHANGE and the last CHECK
- * (ruling 695(e): a pure function of the loader's two values, read once per
+ * (ruling 696(e): a pure function of the loader's two values, read once per
  * render by {@link GithubViewPage}).
  */
 function reconcileFreshness(
@@ -516,7 +516,7 @@ function reconcileFreshness(
   return { staleCache, text, title };
 }
 
-/** Ruling 667's page for a project with no repository (ruling 695(e): the
+/** Ruling 667's page for a project with no repository (ruling 696(e): the
  *  early return of `GithubViewPage`, hook-free). */
 function NoRepositoryPage({ name, slug }: { name: string; slug: string }) {
   return (
@@ -547,7 +547,7 @@ function NoRepositoryPage({ name, slug }: { name: string; slug: string }) {
 }
 
 /** The page head: title, the freshness chip, Update status and Open on GitHub
- *  (ruling 695(e): the `.board-head` slot of `GithubViewPage`, hook-free). */
+ *  (ruling 696(e): the `.board-head` slot of `GithubViewPage`, hook-free). */
 function GithubHead({
   name,
   repo,
@@ -633,7 +633,7 @@ function GithubHead({
   );
 }
 
-/** The cred-warn action slot (ruling 695(e): the element `GithubViewPage`
+/** The cred-warn action slot (ruling 696(e): the element `GithubViewPage`
  *  hands the credential card, hook-free): Re-check scopes for a reader who
  *  holds the grant once a PAT is bound, and Fix in Settings. */
 function CredentialWarnActions({

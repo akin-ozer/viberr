@@ -13,7 +13,7 @@ import {
 import { kbDirsOf, kbLegacyOf } from "./kb-grants";
 
 /**
- * The global agent-template editor's draft (ruling 695(e), the split of
+ * The global agent-template editor's draft (ruling 696(e), the split of
  * `agent-template-modal.tsx`): the profile's own fields, its eligible stages
  * with the Custom stages list's order and page, and its context grants. The
  * editor calls the three in the order its state always registered, so the two

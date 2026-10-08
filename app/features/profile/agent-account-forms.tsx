@@ -5,7 +5,7 @@ import type { ProfileBackendAccount } from "./profile-query.server";
 
 /**
  * Profile → Agent accounts: the two forms a card opens, the pasted key and an
- * account's name (ruling 695(e), the split of `agent-accounts-panel.tsx` along
+ * account's name (ruling 696(e), the split of `agent-accounts-panel.tsx` along
  * the task page's recipe), moved whole with the hooks they always owned.
  */
 

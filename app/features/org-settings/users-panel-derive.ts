@@ -2,7 +2,7 @@ import type { OrgUserView } from "~/server/org/org-users.server";
 import { isValidGithubHandle, normalizeHandle } from "~/shared/github-handle";
 
 /**
- * What the Users & access modals read off their fields (ruling 695(e), the
+ * What the Users & access modals read off their fields (ruling 696(e), the
  * split of `users-panel.tsx`): the sign-in method Allow access opens on,
  * whether its entry is a whole Google domain, whether it is complete, and
  * what its Save and foot say; and whether Edit user's fields can be saved.

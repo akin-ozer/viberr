@@ -22,7 +22,7 @@ import {
 } from "./task-detail-derive";
 
 /**
- * The task page's regions that stand only some of the time (ruling 695(d), the
+ * The task page's regions that stand only some of the time (ruling 696(d), the
  * pilot split of `task-detail-page.tsx`): the decision region and the
  * acceptance ceremony. Each takes the slot its markup held in the page and
  * calls no hook, so the page's markup, and every id React derives from its

@@ -4,7 +4,7 @@ import { Icon } from "~/ui/icon";
 import type { McpWriteTools } from "./resource-modals-draft";
 
 /**
- * The MCP-server editor's fields (ruling 695(e), the split of
+ * The MCP-server editor's fields (ruling 696(e), the split of
  * `resource-modals.tsx`): name and transport, the command or endpoint, the
  * grants a rename rewrites, the credential, the requested scopes and the
  * write tools. Each takes the slot its markup held in McpModal and calls no

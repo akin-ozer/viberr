@@ -201,7 +201,7 @@ describe("checkStore", () => {
   });
 
   /**
-   * Ruling 695(a): a project.md `repo` GitHub could not name reads as no
+   * Ruling 696(a): a project.md `repo` GitHub could not name reads as no
    * repository. The file stays trusted, so the error diagnostic is what tells
    * an admin why the repository went, and the degraded listing is where they
    * read it.

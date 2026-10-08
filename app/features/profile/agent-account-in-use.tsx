@@ -26,7 +26,7 @@ import type {
 } from "./profile-query.server";
 
 /**
- * An agent account card with an account in use (ruling 695(e), the split of
+ * An agent account card with an account in use (ruling 696(e), the split of
  * `agent-accounts-panel.tsx` along the task page's recipe): the picker, that
  * account's health, usage and last refusal, its controls, and what the
  * picker's menu opens. Hook-free: the card owns the state and the picker owns

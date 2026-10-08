@@ -400,7 +400,7 @@ const S3_UNMET = {
 
 /** Ruling 147: the first field a save still lacks, in the form's order (the
  *  secret only until one is on file), or null once the target is complete.
- *  Ruling 695(e): read off the modal's fields as a pure function, so the
+ *  Ruling 696(e): read off the modal's fields as a pure function, so the
  *  modal itself holds no chain of conditions. */
 function missingS3Field(
   fields: Record<S3Field, string>,

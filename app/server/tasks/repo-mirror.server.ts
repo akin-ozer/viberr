@@ -109,7 +109,7 @@ const execFileAsync = promisify(execFile);
 
 /**
  * Where this project caches its repository, or null when `repo` is not a plain
- * `owner/name` pair (`REPO_SLUG_RE`, ruling 695(a)). `project.md` already reads
+ * `owner/name` pair (`REPO_SLUG_RE`, ruling 696(a)). `project.md` already reads
  * any other value as no repository; a caller that hands one in anyway skips
  * the cache rather than deriving a path from it.
  *

@@ -3,7 +3,7 @@ import { mcpSignInPhrase, type McpOAuthView } from "~/shared/mcp-oauth";
 
 /**
  * What the MCP-server editor and its OAuth sign-in read off the row and the
- * draft (ruling 695(e), the split of `resource-modals.tsx`): what the editor
+ * draft (ruling 696(e), the split of `resource-modals.tsx`): what the editor
  * opens with, which refusal names the credential, when a live sign-in stands
  * in for it, when a save drops the sign-in, and the copy the editor's chrome
  * and the sign-in's status line say. Pure functions, no React.

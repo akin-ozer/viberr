@@ -100,7 +100,7 @@ import {
  *     stop, in both layouts — see `onCardKeyDown` in `useBoardKeyboard`
  *     (board-page-actions.tsx).
  *
- * Ruling 695(e) split the page along the task-page recipe: its state and posts
+ * Ruling 696(e) split the page along the task-page recipe: its state and posts
  * are hooks in `board-page-actions.tsx`, what it derives from its props and
  * URL is `board-page-derive.ts`, and the acceptance ceremony is
  * `board-accept-confirm.tsx`.
@@ -670,7 +670,7 @@ function DropPreview({ task, landing = false }: { task: BoardTask; landing?: boo
 }
 
 /**
- * An empty lane's one child (ruling 695(e), split out of `Column`): the drop
+ * An empty lane's one child (ruling 696(e), split out of `Column`): the drop
  * preview while a drag hovers the lane, else the landing of a move awaiting the
  * server, else the empty copy — with, in a virgin board's entry lane, its call
  * to action. `Column` renders it only while its lane draws no cards.
@@ -1342,7 +1342,7 @@ function NewTaskModal({
 }
 
 /**
- * The new-task dialog's foot (ruling 695(e), split out of `NewTaskModal`): the
+ * The new-task dialog's foot (ruling 696(e), split out of `NewTaskModal`): the
  * one hint line — the title's length rule once it is unmet, else the server's
  * refusal, else how the key is assigned — and the two actions. The modal owns
  * the form and the post and hands this what it shows.
@@ -1700,7 +1700,7 @@ function FilterBar({
 /**
  * Ruling 503: one epic's tasks, or those in none. A select rather than chips: a
  * project can hold many epics, and their names are long. Split out of
- * `FilterBar` by ruling 695(e); the bar draws it only when the project has
+ * `FilterBar` by ruling 696(e); the bar draws it only when the project has
  * epics, or the filter is already on.
  */
 function EpicFilter({

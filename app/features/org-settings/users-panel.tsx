@@ -71,7 +71,7 @@ export interface SetupNotice {
   tempPassword: string;
 }
 
-/** Allow access's sign-in method picker (ruling 695(e), split out of
+/** Allow access's sign-in method picker (ruling 696(e), split out of
  *  `InviteModal`, which keeps the state): a method this deployment has not
  *  configured is drawn, disabled and marked off (F18-3). */
 function InviteMethodPicker({
@@ -150,7 +150,7 @@ function InviteMethodPicker({
   );
 }
 
-/** The instance-role toggle both user modals end on (ruling 695(e), split out
+/** The instance-role toggle both user modals end on (ruling 696(e), split out
  *  of `InviteModal` and `EditUserModal`, which keep the role's state). */
 function InstanceRoleField({
   label,
@@ -341,7 +341,7 @@ function InviteModal({
   );
 }
 
-/** A local account's Password field in Edit user (ruling 695(e), split out of
+/** A local account's Password field in Edit user (ruling 696(e), split out of
  *  `EditUserModal`, which keeps the reset's fetcher and the one-time temp
  *  password it returned). */
 function PasswordResetField({

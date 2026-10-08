@@ -256,7 +256,7 @@ function LightboxTextBody({
 }
 
 /**
- * Every body but the text reader's (ruling 695(e)): the no-preview card, the
+ * Every body but the text reader's (ruling 696(e)): the no-preview card, the
  * picture that would not load, a page capture, or the image. Lightbox owns
  * the state and hands it in, so the markup is what it was.
  */

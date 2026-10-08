@@ -402,7 +402,7 @@ describe("ruling 503(e): New epic, for manage-epics", () => {
   });
 });
 
-describe("ruling 695(c): each opening of New epic is a create of its own", () => {
+describe("ruling 696(c): each opening of New epic is a create of its own", () => {
   /** Opens New epic, names the epic and presses Create epic. */
   async function create(title: string): Promise<HTMLElement> {
     fireEvent.click(await screen.findByRole("button", { name: "New epic" }));

@@ -139,7 +139,7 @@ export const CONSOLE_BUDGETS: PerfBudgetTable = {
   // property rows are memoised on its stabilised values, so an unchanged task
   // re-renders only the panel's shell and its head glyph; 44 before ruling
   // 511's PR card, where the branch is the link to its tree and the "Open on
-  // GitHub" button's glyph is gone). Raised to 44 by ruling 695(d): the
+  // GitHub" button's glyph is gone). Raised to 44 by ruling 696(d): the
   // TaskMainColumn region, the page's main column as a component of its own,
   // renders once with the page; every panel under it renders as before.
   "console:task-page.renders-per-noop-revalidation": {

@@ -614,7 +614,7 @@ function StageColorMenu({
   );
 }
 
-/** A stage row's class (ruling 695(e) took it out of `StageRow`): the
+/** A stage row's class (ruling 696(e) took it out of `StageRow`): the
  *  grab cursor while it can drag, the lifted row while it does, and the
  *  insertion line where the dragged row would land. */
 function stageRowClass(canDrag: boolean, dragging: boolean, over: boolean): string {
@@ -1932,7 +1932,7 @@ export function MembersPanel({
 
 // -------------------------------------------------- repository & credentials
 
-/** What the dialog says it checks the new repository with (ruling 695(e) took
+/** What the dialog says it checks the new repository with (ruling 696(e) took
  *  it out of the markup). */
 function repoCheckNote(current: string | null, hasCredential: boolean): string {
   return current && hasCredential
@@ -2091,7 +2091,7 @@ function ChangeRepoDialog({
 }
 
 /**
- * The Repository panel's credential slot (ruling 695(e), the split of
+ * The Repository panel's credential slot (ruling 696(e), the split of
  * `RepoPanel`): the shared CredentialCard with its Re-check scopes and manage
  * actions for a reader who holds `grant-github-scope`, and the lock note for
  * everyone else. Hook-free; the panel renders it only while a repository is

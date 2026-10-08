@@ -3,7 +3,7 @@ import type { ProjectCustomStages } from "~/server/org/org-view.server";
 import type { StageDef } from "~/schemas/project-file.schema";
 
 /**
- * What the global agent-template editor reads off its props (ruling 695(e), the
+ * What the global agent-template editor reads off its props (ruling 696(e), the
  * split of `agent-template-modal.tsx`): a grant list matched against the org's
  * resources, the stage a new profile starts on, the stored stages no board
  * offers, the Custom stages list's order and the page of it on screen. Pure

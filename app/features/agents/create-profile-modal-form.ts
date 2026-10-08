@@ -10,7 +10,7 @@ import {
 } from "./create-profile-modal-derive";
 
 /**
- * The agent profile editor's form (ruling 695(e), the large-component split of
+ * The agent profile editor's form (ruling 696(e), the large-component split of
  * `create-profile-modal.tsx`, on the task page's recipe): the fields, the grant
  * pickers and the save gate, each a hook that `CreateProfileModal` calls in the
  * order its state always registered (the fields, the grants, then the model

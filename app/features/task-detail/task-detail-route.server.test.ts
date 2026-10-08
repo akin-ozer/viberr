@@ -1951,7 +1951,7 @@ describe("ruling 320 — the loader-to-page wire", () => {
     expect(loaderKeys.length).toBeGreaterThan(20);
 
     // The page's declared props: the `interface TaskDetailPageProps` block its
-    // signature names (ruling 695(d) moved it out of the signature).
+    // signature names (ruling 696(d) moved it out of the signature).
     const propsAt = pageSrc.indexOf("interface TaskDetailPageProps {");
     const propsBlock = pageSrc.slice(propsAt, pageSrc.indexOf("\n}\n", propsAt));
     const props = new Set(

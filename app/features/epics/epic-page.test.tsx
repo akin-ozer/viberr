@@ -252,7 +252,7 @@ describe("ruling 503(e): the epic page's head", () => {
     fireEvent.change(name, { target: { value: "Checkout v2" } });
     fireEvent.keyDown(name, { key: "Enter" });
     expect(await screen.findByText(RENAMED)).toBeTruthy();
-    // An edit's answer is the dialog's own (ruling 695(c)). CANARY: drop
+    // An edit's answer is the dialog's own (ruling 696(c)). CANARY: drop
     // `close()` from EpicDialog's own result handler and the dialog stays
     // open over its toast.
     expect(dialog.hasAttribute("data-closing")).toBe(true);
