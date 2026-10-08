@@ -5,7 +5,9 @@ import { createTestDbContext } from "../../../test-support/test-db";
 import { listAuditEvents } from "../../../test-support/audit-log";
 import {
   consentAt,
+  signInWithOAuth,
   startOAuthMcpServer,
+  TEST_OAUTH_ADMIN as ADMIN,
   type OAuthMcpServerHandle,
   type OAuthServerOptions,
 } from "../../../test-support/mcp-oauth-server";
@@ -44,11 +46,6 @@ let db: DatabaseSync;
 let server: OAuthMcpServerHandle;
 const MCP_ID = "mcp_cf";
 const REDIRECT = "http://localhost:5173/resources/mcp-oauth/callback";
-const ADMIN = {
-  userId: "usr_arda",
-  sessionId: "ses_arda",
-  actor: { userId: "usr_arda", label: "arda@viberr.dev" },
-};
 
 async function startServer(options: Partial<OAuthServerOptions> = {}): Promise<void> {
   server = await startOAuthMcpServer(options);
@@ -81,18 +78,7 @@ function callbackInput(back: URL, session = ADMIN) {
 }
 
 /** Start, consent at the in-test authorization server, complete. */
-async function signIn() {
-  const started = await startMcpOAuthSignIn(db, {
-    mcpId: MCP_ID,
-    redirectUri: REDIRECT,
-    userId: ADMIN.userId,
-    sessionId: ADMIN.sessionId,
-    actor: ADMIN.actor,
-  });
-  const back = await consentAt(started.authorizationUrl);
-  const result = await completeMcpOAuthSignIn(db, callbackInput(back));
-  return { started, back, result };
-}
+const signIn = () => signInWithOAuth(db, MCP_ID);
 
 function rawRow(): { cred_ref: string | null; oauth_ref: string | null; oauth_json: string | null } {
   // SAFETY: three nullable TEXT columns of `org_mcp_servers` (0001_baseline.sql).
@@ -164,7 +150,7 @@ describe("the callback: exchange and seal (ruling 469)", () => {
   it("exchanges the code with the verifier, seals the tokens and drops a pasted credential", async () => {
     await startServer();
     db.prepare(`UPDATE org_mcp_servers SET cred_ref = ? WHERE id = ?`).run(sealSecret("pasted-static-token"), MCP_ID);
-    const { result } = await signIn();
+    const result = await signIn();
     expect(result).toEqual({ ok: true, mcpId: MCP_ID, name: "cloudflare-api", replacedStaticCredential: true });
     expect(server.tokenRequests).toEqual([{ grant: "authorization_code", answered: "tokens" }]);
     const row = rawRow();
@@ -232,7 +218,7 @@ describe("the callback: exchange and seal (ruling 469)", () => {
 
   it("records a consent the person declined", async () => {
     await startServer({ consent: "deny" });
-    const { result } = await signIn();
+    const result = await signIn();
     expect(result.ok === false && result.message).toMatch(/access_denied: The user declined/);
     expect(listAuditEvents(db, { action: "org.mcp.oauth_failed" })[0]?.details).toMatchObject({
       name: "cloudflare-api",
@@ -477,7 +463,7 @@ describe("a registered client the authorization server no longer accepts (R-oaut
     expect(getMcpServer(db, MCP_ID)?.oauth).toMatchObject({ status: "expired", reason: expect.stringContaining("invalid_client") });
 
     const again = await signIn();
-    expect(again.result.ok).toBe(true);
+    expect(again.ok).toBe(true);
     expect(server.registrations.map((client) => client.clientId)).not.toContain(first);
     expect(server.registrations).toHaveLength(1);
     expect(await callWhoami()).toContain("whoami");
@@ -490,12 +476,12 @@ describe("a registered client the authorization server no longer accepts (R-oaut
     await signIn();
     server.rotateClientSecrets();
     const refused = await signIn();
-    expect(refused.result).toMatchObject({ ok: false, message: expect.stringContaining("invalid_client") });
+    expect(refused).toMatchObject({ ok: false, message: expect.stringContaining("invalid_client") });
     expect(rawRow().oauth_ref).toBeNull();
     expect(getMcpServer(db, MCP_ID)?.oauth?.status).toBe("expired");
 
     const again = await signIn();
-    expect(again.result.ok).toBe(true);
+    expect(again.ok).toBe(true);
     expect(server.registrations).toHaveLength(2);
     expect(await callWhoami()).toContain("whoami");
   });
