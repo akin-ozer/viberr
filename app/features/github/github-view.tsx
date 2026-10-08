@@ -487,7 +487,7 @@ function reconcileFreshness(
   // last change. An hour without a change is what a quiet repository looks like
   // and must not shout; an hour without a CHECK means the poller or the
   // credential is down, which is the only case here worth a warning — and the
-  // case the old chip could not see (`reconcileTaskExclusive` returns BEFORE the
+  // case the old chip could not see (`reconcileTaskUnlocked` returns BEFORE the
   // `github.reconcile.task` audit write on `auth_failed` / `network_unavailable`,
   // so a poller running against a dead PAT stops this clock while the change
   // clock, frozen anyway, looks no different than on a quiet day).

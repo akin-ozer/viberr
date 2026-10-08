@@ -488,8 +488,9 @@ describe("the turn carries the context read (ruling 121)", () => {
     });
 
     const prompt = buildTurnPrompt(app.db, conversation, part2, null, null, 1);
-    // CANARY: read the newest rows unbounded again (`recentMessages`) and the
-    // queued correction and its refusal are in this turn's prompt.
+    // CANARY: read the newest rows unbounded again (the last `CONTEXT_MESSAGES`
+    // of `listMessages` in place of `messagesUpTo`) and the queued correction
+    // and its refusal are in this turn's prompt.
     expect(prompt).not.toContain("CORRECTION-04");
     expect(prompt).not.toContain("REFUSED-LATER");
     // The reply to an EARLIER message is in, under that message, even though

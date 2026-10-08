@@ -666,7 +666,7 @@ export async function loader({ request, params }: Route.LoaderArgs) {
     // task the poller is verifying every five minutes, and the panel rendering
     // it as "Synced" contradicted its own tooltip. The last CHECK is a
     // different fact with a different writer: `github.reconcile.task` is
-    // recorded after every early return in `reconcileTaskExclusive`, so a row
+    // recorded after every early return in `reconcileTaskUnlocked`, so a row
     // exists iff a pass completed — changed or not — and audit retention (90d)
     // bounds it. Both ship; the panel renders them as two rows, because one
     // number cannot answer both questions.

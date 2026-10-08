@@ -1131,7 +1131,8 @@ export async function recordAgentCompletion(
       );
     }
     // The deduped-reply case is fanned out earlier (before the nothing-to-record
-    // early return), so it is NOT repeated here — see notifyAddedReplyMentions.
+    // early return), so it is NOT repeated here — see the
+    // `prepared.duplicatedText` fan-out near the top of this function.
     // Recovery-idempotency audit for the reply (posted, guardrail-dropped, or
     // deduped as an F22-12 duplicate). Skip only a genuinely empty reply.
     if (prepared.status !== "empty") {

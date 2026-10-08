@@ -71,7 +71,7 @@ describe("runLabel / roleShort", () => {
   it("roleShort speaks engagement vocabulary: operator / delivering / supporting", () => {
     // UXV19-3: the run picker printed the internal RunKind literal "primary"
     // for the delivering run — a third name for the agent the Execution
-    // profile on the SAME page calls "Delivering agent" and the Agents roster
+    // profile on the SAME page calls "the delivering agent" and the Agents roster
     // calls "delivering" (F10-20's mapping). The kind literals stay on the row.
     // Canary: restore `kind === "primary" ? "primary" : "reviewer"` and both
     // halves below fail.

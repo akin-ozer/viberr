@@ -108,9 +108,10 @@ function supportCheckoutDir(
 
 // NOTE: agent runs are NO LONGER handed push credentials — delivery is
 // server-side for both backends (see the delivery-contract comment in
-// `startSpecialistRun`). The GIT_ASKPASS push credential now lives ONLY in the
-// server-side `pushWorkspaceBranch` (push-workspace.server), whose process env
-// is token-safe and backend-agnostic.
+// `dispatchAgentRun`, behind `startAgentRun`). The GIT_ASKPASS push credential
+// now lives ONLY in the server-side `pushWorkspaceBranch`
+// (push-workspace.server), whose process env is token-safe and
+// backend-agnostic.
 
 export function workspaceRunEnv(
   projectSlug: string,

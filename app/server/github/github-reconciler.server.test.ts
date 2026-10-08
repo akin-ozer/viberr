@@ -978,9 +978,9 @@ describe("reconcileTask", () => {
     // divergence note TWICE plus two inbox rows for one event.
     //
     // The sequential case was already covered (the test above) and always
-    // passed; only the concurrent one was uncovered. Canary: call
-    // `reconcileTaskExclusive` directly (drop `serializePerTask`) and the
-    // counts below become 2.
+    // passed; only the concurrent one was uncovered. Canary: have
+    // `reconcileTask` call `reconcileTaskGuarded` directly (drop
+    // `withTaskReconcileLock`) and the counts below become 2.
     const { store, actor } = setup(); // VIB-301 at "review", owner arda (admin)
     const routes = happyRoutes();
     routes[`GET ${REPO_PATH}/pulls/318`] = {
@@ -3118,8 +3118,8 @@ describe("F34-9: PR adoption is recorded", () => {
  * the reviewed revision instead of counting them, so an operator's base
  * refresh (four base commits plus its recorded merge) is reported as a base
  * refresh and never as five unreviewed commits. Canaries: drop the
- * `notOnBase` membership test; treat any two-parent commit as clean; remove the
- * base-compare completeness guard.
+ * `branchOwn` membership test in `classifyRevisionDrift`; treat any two-parent
+ * commit as clean; remove the base-compare completeness guard.
  */
 describe("ruling 132: drift is classified, not counted", () => {
   const REV = "rev0delivered";

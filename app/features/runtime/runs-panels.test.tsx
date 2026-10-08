@@ -1172,7 +1172,7 @@ describe("the run picker speaks the same vocabulary as the panel around it", () 
     const role = () => container.querySelector(".rsel-role")!.textContent!;
     expect(role()).toContain("delivering");
     // "primary" is the internal kind literal — a THIRD name for the agent the
-    // Execution profile on this same page calls "Delivering agent".
+    // Execution profile on this same page calls "the delivering agent".
     expect(role()).not.toContain("primary");
     rerender(
       <Logs runtime={runs} sel="c0" onSel={() => {}} linesByThread={{ primary: [], c0: [] }} />,

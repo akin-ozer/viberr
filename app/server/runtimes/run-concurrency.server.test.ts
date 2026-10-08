@@ -518,7 +518,8 @@ describe("run concurrency cap — the coordination lane (ruling 152)", () => {
 
   it("an operator turn launches in the lane past a full cap; a third delivery run parks", async () => {
     // Canary: admit every kind through the delivery bound (drop the lane from
-    // `admissionBound`) and the operator lands `queued` behind the two builds.
+    // `canAdmit`: `laneSize` 0) and the operator lands `queued` behind the two
+    // builds.
     setMaxConcurrentRuns(store.db, 2);
     const a = await startHeldRun("d0");
     const b = await startHeldRun("d1");

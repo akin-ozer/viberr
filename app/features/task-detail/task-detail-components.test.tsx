@@ -2504,7 +2504,7 @@ describe("GithubTrace — admin force-accept (DG-2)", () => {
  * DG-3 stays. This component owns the NAME of the number it renders — and, since
  * `checkedAt` was wired through the loader, the second fact beside it: the
  * per-tick `github.reconcile.task` audit row, which is written after every early
- * return in `reconcileTaskExclusive` and is therefore the app's only evidence
+ * return in `reconcileTaskUnlocked` and is therefore the app's only evidence
  * that a pass ran at all. `server/audit/audit-query.server.test.ts` proves the
  * two clocks diverge against the real reconciler; these pin what the human sees.
  */

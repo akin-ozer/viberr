@@ -156,7 +156,7 @@ export function GithubTrace({
   /** F19-22 (second half): ISO of the newest COMPLETED reconcile pass for this
    *  task — `MAX(occurred_at)` over the `github.reconcile.task` AUDIT rows
    *  (`server/audit/audit-query.server.ts`). That write is unconditional and
-   *  sits after every early return in `reconcileTaskExclusive`, so a row exists
+   *  sits after every early return in `reconcileTaskUnlocked`, so a row exists
    *  iff a pass ran to completion, changed or not: it is the only fact in the
    *  app that can tell a human the poller is alive. Rendered as its own row
    *  because it answers a different question from `reconciledAt` — "we looked"
