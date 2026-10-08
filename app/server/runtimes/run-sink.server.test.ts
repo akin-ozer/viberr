@@ -40,6 +40,7 @@ const SAVED = {
   ANTHROPIC_API_KEY: process.env.ANTHROPIC_API_KEY,
   CODEX_ACCESS_TOKEN: process.env.CODEX_ACCESS_TOKEN,
   GIT_TERMINAL_PROMPT: process.env.GIT_TERMINAL_PROMPT,
+  INNER_TOKEN: process.env.INNER_TOKEN,
 };
 
 const CLAUDE_KEY = "sk-ant-api03-VERYSECRETVALUE0123456789abcdef";
@@ -243,7 +244,7 @@ describe("createLineRedactor", () => {
   });
 
   it("redacts token PATTERNS the app never held (a PAT the agent minted itself)", () => {
-    const redact = createLineRedactor({});
+    const redact = createLineRedactor();
     expect(redact("remote: ghp_AAAAAAAAAAAAAAAAAAAAAAAAAAAAAA")).toBe(
       "remote: [redacted]",
     );
@@ -276,7 +277,7 @@ describe("createLineRedactor", () => {
     // Proof the env sweep alone misses it: the value is in no variable here,
     // and no token pattern claims it either.
     expect(createLineRedactor()(PERSONAL_TOKEN)).toBe(PERSONAL_TOKEN);
-    const redact = createLineRedactor(process.env, [PERSONAL_TOKEN]);
+    const redact = createLineRedactor([PERSONAL_TOKEN]);
     expect(redact(`CODEX_ACCESS_TOKEN=${PERSONAL_TOKEN}`)).toBe(
       "CODEX_ACCESS_TOKEN=[redacted]",
     );
@@ -287,7 +288,7 @@ describe("createLineRedactor", () => {
   it("holds the per-run secrets to the same length floor as the env sweep", () => {
     // A short "secret" is a flag or a fixture stub; redacting it would scrub
     // ordinary prose, and no provider issues a credential this short.
-    const redact = createLineRedactor({}, ["short", PERSONAL_TOKEN]);
+    const redact = createLineRedactor(["short", PERSONAL_TOKEN]);
     expect(redact("the short answer")).toBe("the short answer");
     expect(redact(`key ${PERSONAL_TOKEN} here`)).toBe("key [redacted] here");
   });
@@ -295,10 +296,8 @@ describe("createLineRedactor", () => {
   it("sorts a per-run secret against the env values longest-first", () => {
     // One credential CONTAINING another (a token and its prefix) must be
     // replaced whole, or the longer value leaks its tail.
-    const redact = createLineRedactor(
-      { INNER_TOKEN: PERSONAL_TOKEN.slice(0, 20) },
-      [PERSONAL_TOKEN],
-    );
+    process.env.INNER_TOKEN = PERSONAL_TOKEN.slice(0, 20);
+    const redact = createLineRedactor([PERSONAL_TOKEN]);
     expect(redact(`v=${PERSONAL_TOKEN}`)).toBe("v=[redacted]");
   });
 });
