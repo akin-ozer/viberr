@@ -4,11 +4,11 @@ import {
   setupAppTest,
   type AppTestContext,
 } from "../../../test-support/test-app";
+import { createTempDirs } from "../../../test-support/temp-dirs";
 import {
   deployedSpecialistBackends,
   deployedSpecialistIdentities,
   deploymentRuntimeIdentity,
-  parseDeploymentDefinition,
   primaryRunBackend,
 } from "./deployment-view.server";
 
@@ -48,13 +48,26 @@ interface HandEditedDeployment {
   backends?: unknown;
 }
 
-describe("parseDeploymentDefinition — tolerant per-field decode", () => {
+describe("deploymentRuntimeIdentity — the override's tolerant per-field decode", () => {
   // The decode exists to survive a hand-edited (untrusted) project.md, so every
-  // case below feeds a shape the TS type forbids on purpose.
+  // case below feeds a shape the TS type forbids on purpose. In an empty store
+  // the profile has no template, so it resolves as a specialist and `def` is
+  // the decoded override as written.
+  const temp = createTempDirs();
+  afterAll(temp.cleanup);
+  const store = temp.make("viberr-deployment-view-");
   const raw = (v: HandEditedDeployment) =>
-    // SAFETY: the decode's whole job is to accept malformed input; the test
-    // deliberately feeds shapes the compile-time type rules out.
-    parseDeploymentDefinition(v as AgentDeploymentDefinition | undefined);
+    deploymentRuntimeIdentity(
+      {
+        profileId: "ghost-no-template",
+        capabilities: [],
+        extras: [],
+        // SAFETY: the decode's whole job is to accept malformed input; the test
+        // deliberately feeds shapes the compile-time type rules out.
+        definition: v as AgentDeploymentDefinition,
+      },
+      store,
+    ).def;
 
   it("drops one junk field without losing the rest of the override", () => {
     expect(raw({ kind: 42, name: "Dev" })).toEqual({ name: "Dev" });

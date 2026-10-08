@@ -149,7 +149,7 @@ const deploymentDefinitionOverrideSchema = z.object({
  * column, which `mapProjectRow` re-hydrates with an unchecked
  * `JSON.parse(...) as AgentDeployment[]` — so this is the one place on the read
  * path that actually validates the override against a schema. */
-export function parseDeploymentDefinition(
+function parseDeploymentDefinition(
   raw: AgentDeploymentDefinition | undefined,
 ): AgentDeploymentDefinition | null {
   const parsed = deploymentDefinitionOverrideSchema.safeParse(raw);
@@ -181,7 +181,7 @@ export interface DeploymentRuntimeIdentity {
 }
 
 /** Ruling 518: the operator's one name, on every surface. */
-export const OPERATOR_NAME = "Operator";
+const OPERATOR_NAME = "Operator";
 
 /** Ruling 518: the line under the operator's name, whatever its template says.
  *  A store copy seeded before the ruling still reads "System role · one per
