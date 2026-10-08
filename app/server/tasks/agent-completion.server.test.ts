@@ -231,7 +231,10 @@ beforeEach(async () => {
   await connectFakeBackend(store.db, store.users.arda.id, "codex");
 });
 
-afterEach(() => {
+afterEach(async () => {
+  // An operator drive a react started still settles after the assertions; the
+  // store must outlive it.
+  await drainRunCompletions();
   ctx.cleanup();
 });
 
@@ -378,7 +381,6 @@ describe("applyAgentCompletionEffects (the shared effects)", () => {
       },
       { id: runId, state: "finished" },
     );
-    await new Promise((r) => setTimeout(r, 80));
 
     // SAFETY: `backend` is a TEXT NOT NULL column on `agent_runs`
     // (0001_baseline.sql); only operator rows are selected and this test
@@ -399,7 +401,7 @@ describe("applyAgentCompletionEffects (the shared effects)", () => {
    * there. The completion is recorded (the report is evidence), a note says the
    * task had closed, and NO operator wake follows — however the run was
    * dispatched. Canary: delete the `taskClosure` branch in
-   * `applyAgentCompletionEffects` (the operator run row appears again).
+   * `applyAgentCompletionEffects` (no "Completed after the task closed" note).
    */
   it("ruling 177: a run finishing after the task closed leaves a note and wakes no operator", async () => {
     deployOperator();
@@ -425,7 +427,6 @@ describe("applyAgentCompletionEffects (the shared effects)", () => {
       },
       { id: runId, state: "finished" },
     );
-    await new Promise((r) => setTimeout(r, 50));
     const operatorRows = store.db
       .prepare(`SELECT id FROM agent_runs WHERE kind = 'operator'`)
       .all();
@@ -2467,7 +2468,6 @@ describe("applyAgentCompletionEffects (the shared effects)", () => {
       },
       { id: runId, state: "finished" },
     );
-    await new Promise((r) => setTimeout(r, 80));
 
     // Premises: the approve was recorded, and the task is still not acceptable.
     expect(
@@ -2539,7 +2539,6 @@ describe("applyAgentCompletionEffects (the shared effects)", () => {
         },
         { id: runId, state: "finished" },
       );
-      await new Promise((r) => setTimeout(r, 80));
     }
 
     it("a reply at the cap that committed a new head opens no stuck packet — the operator reacts from a fresh depth", async () => {
@@ -2641,7 +2640,6 @@ describe("applyAgentCompletionEffects (the shared effects)", () => {
         },
         { id: runId, state: "finished" },
       );
-      await new Promise((r) => setTimeout(r, 80));
     }
     const FILES_TASK: Parameters<typeof baseTaskFrontmatter>[1] = {
       stage: "impl",
