@@ -1320,7 +1320,7 @@ export type StdioDiscovery =
  * whitespace, so a command with a quoted path or a JSON argument connected
  * perfectly inside a run while Settings reported it "unreachable" — the exact
  * health-vs-runtime divergence P13-KM-05 fixed for credentials (P14-KM-04).
- * One parser, used by discovery here and by `resolveSpecialistMcpServers`.
+ * One parser, used by discovery here and by `resolveSpecialistMcpServersDetailed`.
  */
 export function splitMcpCommand(target: string): string[] {
   const out: string[] = [];
@@ -1379,7 +1379,7 @@ export async function discoverStdioMcpTools(
     let child: McpChild;
     try {
       // P13-KM-05: a credentialed stdio server is spawned WITH its credential,
-      // exactly as `resolveSpecialistMcpServers` does at run time. Probing
+      // exactly as `resolveSpecialistMcpServersDetailed` does at run time. Probing
       // without it reported "unreachable" in Settings for servers that work
       // perfectly inside a run.
       child = spawnImpl(parts[0]!, parts.slice(1), options.token ?? null);

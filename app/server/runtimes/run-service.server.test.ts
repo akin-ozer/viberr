@@ -62,7 +62,7 @@ import { settle } from "../../../test-support/polling";
 // adapters that never connect, so the instance-bearing fields are never
 // dereferenced and the toEqual fixtures stay byte-identical.
 const sdkServerStub = { type: "sdk" } as McpSdkServerConfigWithInstance;
-/** A portable stdio mount, shaped as `resolveSpecialistMcpServers` builds it. */
+/** A portable stdio mount, shaped as `resolveSpecialistMcpServersDetailed` builds it. */
 const stdioServerStub = { command: "npx", args: ["-y", "example-mcp"] };
 
 /** Ruling 636(a): a launched run's temporary directory, `<root>/<runId>` under

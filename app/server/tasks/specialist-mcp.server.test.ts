@@ -18,7 +18,6 @@ import { logger } from "~/server/logging/logger.server";
 import { sealSecret } from "~/server/secrets/secret-box.server";
 import { RESERVED_MCP_NAMES } from "~/shared/mcp-reserved";
 import {
-  resolveSpecialistMcpServers,
   resolveSpecialistMcpServersDetailed,
   unavailableMcpSection,
   verifyStdioMcpMountsForRun,
@@ -187,7 +186,7 @@ function markWriteTools(
   );
 }
 
-describe("resolveSpecialistMcpServers (item-1: MCP wiring)", () => {
+describe("resolveSpecialistMcpServersDetailed (item-1: MCP wiring)", () => {
   it.each([
     {
       row: "an HTTP row",
@@ -213,7 +212,7 @@ describe("resolveSpecialistMcpServers (item-1: MCP wiring)", () => {
   ] as const)("builds the mcpServer config from $row", ({ name, transport, target, config }) => {
     const store = setupTestStore(ctx);
     addMcp(store.db, name, transport, target);
-    expect(resolveSpecialistMcpServers(store.db, [name])).toEqual({ [name]: config });
+    expect(resolveSpecialistMcpServersDetailed(store.db, [name]).servers).toEqual({ [name]: config });
   });
 
   it("ruling 107: every name on the ONE reserved list resolves to nothing, even as a registry row", () => {
