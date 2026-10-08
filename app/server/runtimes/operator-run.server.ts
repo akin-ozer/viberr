@@ -126,7 +126,7 @@ import {
  *     `mcp__viberr__*` tools; every call mutates the store and updates the
  *     board live. This is the path the "operator end to end" proof exercises.
  *   codex + credential present → STRUCTURED-PLAN run: Codex emits a structured
- *     JSON plan (OPERATOR_PLAN_SCHEMA), which `executeCodexPlan` runs through the
+ *     JSON plan (`operatorPlanSchemaFor`), which `executeCodexPlan` runs through the
  *     same gated actions as the Claude tools (operator-actions, operator-packets,
  *     operator-dispatch, operator-moves) — so Codex honors the identical RBAC +
  *     autonomy, it just plans-then-executes instead of calling tools live.

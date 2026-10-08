@@ -2662,8 +2662,9 @@ function stopRunProcess(
     // flight, so no live handle exists yet) must release its committed
     // concurrency slot NOW. Otherwise the slot stays counted against the cap —
     // starving every other dispatch — until the ABANDONED clone finishes on its
-    // own, up to CLONE_TIMEOUT (~15 min). The reserve→clone path still aborts
-    // cleanly at its post-clone `assertRunReservationLive` check, and the later
+    // own, up to `cloneTimeoutMs()` (15 min by default). The
+    // reserve→clone path still aborts cleanly at its post-clone
+    // `assertRunReservationLive` check, and the later
     // `reservation.abandon()` finds the row already `interrupted` (its
     // precedence guard won't demote it) and the slot already freed (the delete
     // is idempotent) — so no double-release and no launch-after-interrupt.

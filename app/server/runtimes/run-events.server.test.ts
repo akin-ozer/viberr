@@ -205,7 +205,7 @@ describe("publishRunLogAppended", () => {
     const headBefore = getSseBrokerStats().headId;
 
     publishRunLogAppended({
-      // Exactly what `startController`'s StartRunInput carries: no project, and
+      // Exactly what `startTurnRun`'s StartRunInput carries: no project, and
       // the conversation id standing in for a task key.
       projectSlug: "",
       taskKey: "cconv_01H8XABCDEF",

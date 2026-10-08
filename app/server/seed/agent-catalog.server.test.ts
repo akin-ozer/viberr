@@ -22,7 +22,7 @@ const SCOPE_OF = (id: string) =>
 
 describe("seeded agent catalog copy", () => {
   it("preinstalled specialists claim the same scope the app writes for a new profile", () => {
-    // `createGlobalAgentTemplate` (org/gagents.server.ts) writes exactly this
+    // `saveGlobalAgentProfile` (org/gagents.server.ts) writes exactly this
     // for every profile a user creates — seeded and user-made profiles must be
     // describable in the same words, or the roster reads as two products.
     expect(SCOPE_OF("developer")).toBe("Global base");

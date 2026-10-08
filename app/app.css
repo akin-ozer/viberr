@@ -369,7 +369,7 @@ svg.ico { width: 16px; height: 16px; flex: none; }
 
    The design system shipped without a select rule, so four ad-hoc ones grew:
    `.op-sel`, the (since removed) schedule form's select, `.fm-toolbar select`, plus an inline
-   `selectStyle` in create-profile-modal.tsx that says so in a comment. This is
+   `selectStyle` in create-profile-modal.tsx whose comment said so. This is
    the missing base, and it deliberately mirrors `.field input` — same border
    token, same radius, same surface, same focus ring — so a select reads as a
    sibling of the app's inputs rather than as OS chrome.

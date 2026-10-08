@@ -7153,8 +7153,8 @@ describe("ruling 178: the snapshot carries the project's required reviewers", ()
  */
 describe("F37-11: the operator snapshot carries the base compare", () => {
   /** One `github.reconcile` observation row, shaped exactly as the reconciler
-   *  writes it — the same three fields `latestReconcileSync` and
-   *  `createReconcileBehindByLookup` read back. */
+   *  writes it — the fields `latestReconcileObservation` (`sync`) and
+   *  `createReconcileBehindByLookup` (`behindBy`) read back. */
   function seedCompare(behindBy: number): void {
     const details = {
       branch: "vib-1",

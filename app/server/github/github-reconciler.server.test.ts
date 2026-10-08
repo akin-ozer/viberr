@@ -1319,7 +1319,7 @@ describe("reconcileTask", () => {
     };
     await reconcileVib301(store, actor, fakeGithubFetch(routes).fetchImpl);
     const fm = readVib301(store)!.parsed.frontmatter;
-    // transition + accept_completion withdrawn (PR is gone); assign_specialist survives.
+    // transition + accept_completion withdrawn (PR is gone); the `run_agent` rec survives.
     expect(fm.recommendations.map((r) => r.id).sort()).toEqual(["r-assign"]);
     // SAFETY: the SELECT names one column, declared `text TEXT NOT NULL`.
     const events = store.db.prepare(`SELECT text FROM task_events WHERE task_key = 'VIB-301'`).all() as { text: string }[];
