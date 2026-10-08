@@ -41,7 +41,7 @@ import { defaultModelFor } from "~/server/runtimes/model-catalog.server";
 import type { RealBackend } from "~/server/runtimes/runtime-registry.server";
 import { errorMessage } from "~/shared/errors";
 import { runFailureReason } from "~/server/tasks/agent-reply.server";
-import { LOOP_REPEATS, mcpGatewayStatus, startMcpGateway, stopMcpGateway } from "./gateway.server";
+import { mcpGatewayStatus, startMcpGateway, stopMcpGateway } from "./gateway.server";
 
 /**
  * Ruling 461 through the run service: `startRun` is the one funnel that puts a
@@ -58,6 +58,8 @@ const READS_ONLY = {
   webEgress: true,
   agent: { profileId: "workflow-researcher", roleHint: "Workflow Researcher" },
 };
+/** Ruling 598(a): one call with one answer, 100 times within 60 seconds. */
+const LOOP_REPEATS = 100;
 let ctx: TestDbContext;
 let store: TestStore;
 let upstream: UpstreamHandle;

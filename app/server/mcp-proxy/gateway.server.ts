@@ -1288,8 +1288,8 @@ async function connectSession(
  * reaches it; a script that retries without reading the answer reaches it in
  * about two seconds.
  */
-export const LOOP_REPEATS = 100;
-export const LOOP_WINDOW_MS = 60_000;
+const LOOP_REPEATS = 100;
+const LOOP_WINDOW_MS = 60_000;
 /** Past this many remembered calls, the ones outside the window are dropped. */
 const LOOP_KEYS_PRUNE_AT = 2_000;
 
