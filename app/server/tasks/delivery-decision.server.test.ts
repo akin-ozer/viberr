@@ -584,33 +584,65 @@ describe("F15-15/B-GH1: performDelivery refuses a PR over a conflicted or failed
     expect(outcome).toMatchObject({ status: "delivered", prNumber: 9, created: true });
   });
 
-  it("F29-7: a successful delivery supersedes a stale delivery-conflict blocked packet", async () => {
-    // A prior server-owned push conflicted; the operator opened a blocked
-    // "push conflict … no PR opened" packet (its branch/delivery family is
-    // marked by the `discard_branch` option) and readiness floored to blocked.
-    // The human then clears the remote branch and re-delivers from the panel —
-    // the packet's premise is now moot and must not persist next to a live PR.
-    const CONFLICT_PACKET: TaskPacket = {
-      id: "pkt_conflict",
-      type: "blocked",
-      kind: "Blocked decision",
-      from: "operator",
-      title: "Delivery push conflict on branch `vib-1` — remote holds unrelated commits",
-      body: "No review PR was opened.",
-      observations: [],
-      options: [
-        { kind: "custom", t: "Delete or rename the remote branch, then retry delivery", d: "", rec: true },
-        { kind: "discard_branch", t: "Give this task a different branch name and re-deliver", d: "", rec: false },
-        { kind: "custom", t: "Deliberate force-push to `vib-1`", d: "", rec: false },
-      ],
-    };
+  // F29-7: a prior server-owned push conflicted; the operator opened a blocked
+  // "push conflict … no PR opened" packet (its branch/delivery family is
+  // marked by the `discard_branch` option) and readiness floored to blocked.
+  // The human then clears the remote branch and re-delivers from the panel —
+  // the packet's premise is now moot and must not persist next to a live PR.
+  //
+  // V10 (pass-31 review): F31-6 refuses `discard_branch` authoring exactly when
+  // delivered work stands on the branch, so post-F31-6 push-conflict packets
+  // carry `resolve_remote_collision` instead. Keying the supersession on
+  // `discard_branch` alone reopened F29-7 for every such packet: the human
+  // resolves the branch out-of-band, re-delivers, and the task keeps a
+  // blocked "no PR opened" card beside a live "PR #N" panel.
+  it.each<{ marker: string; packet: TaskPacket }>([
+    {
+      marker: "discard_branch",
+      packet: {
+        id: "pkt_conflict",
+        type: "blocked",
+        kind: "Blocked decision",
+        from: "operator",
+        title: "Delivery push conflict on branch `vib-1` — remote holds unrelated commits",
+        body: "No review PR was opened.",
+        observations: [],
+        options: [
+          { kind: "custom", t: "Delete or rename the remote branch, then retry delivery", d: "", rec: true },
+          { kind: "discard_branch", t: "Give this task a different branch name and re-deliver", d: "", rec: false },
+          { kind: "custom", t: "Deliberate force-push to `vib-1`", d: "", rec: false },
+        ],
+      },
+    },
+    {
+      marker: "resolve_remote_collision, V10",
+      packet: {
+        id: "pkt_conflict_rrc",
+        type: "blocked",
+        kind: "Blocked decision",
+        from: "operator",
+        title: "Delivery push conflict on branch `vib-1` — remote holds unrelated commits",
+        body: "No review PR was opened.",
+        observations: [],
+        options: [
+          {
+            kind: "resolve_remote_collision",
+            t: "Clear the stale remote branch and re-deliver",
+            d: "",
+            rec: true,
+          },
+          { kind: "archive_task", t: "Archive this task", d: "", rec: false },
+        ],
+      },
+    },
+  ])("F29-7: a successful delivery supersedes a stale delivery-conflict blocked packet ($marker)", async ({ packet }) => {
     writeTask(store.dataRoot, store.slug, {
       frontmatter: baseTaskFrontmatter("VIB-1", {
         stage: "review",
         branch: "vib-1",
         readiness: "blocked",
       }),
-      packet: CONFLICT_PACKET,
+      packet,
     });
     rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
     pushMock.mockResolvedValue({ status: "pushed", branch: "vib-1", commits: 2, headSha: "a".repeat(40), remoteHeadBefore: null, workflowFiles: [] });
@@ -629,65 +661,6 @@ describe("F15-15/B-GH1: performDelivery refuses a PR over a conflicted or failed
       actorOf(store.users.arda),
     );
     expect(outcome).toMatchObject({ status: "delivered", prNumber: 11 });
-
-    const after = fm();
-    expect(after.packet).toBeNull();
-    expect(after.frontmatter.readiness).not.toBe("blocked");
-    expect(after.timeline.some((e) => /Packet withdrawn/.test(e.text ?? ""))).toBe(
-      true,
-    );
-  });
-
-  it("V10 (pass-31 review): a conflict packet authored with resolve_remote_collision is superseded too", async () => {
-    // F31-6 refuses `discard_branch` authoring exactly when delivered work
-    // stands on the branch, so post-F31-6 push-conflict packets carry
-    // `resolve_remote_collision` instead. Keying the supersession on
-    // `discard_branch` alone reopened F29-7 for every such packet: the human
-    // resolves the branch out-of-band, re-delivers, and the task keeps a
-    // blocked "no PR opened" card beside a live "PR #N" panel.
-    const COLLISION_CONFLICT_PACKET: TaskPacket = {
-      id: "pkt_conflict_rrc",
-      type: "blocked",
-      kind: "Blocked decision",
-      from: "operator",
-      title: "Delivery push conflict on branch `vib-1` — remote holds unrelated commits",
-      body: "No review PR was opened.",
-      observations: [],
-      options: [
-        {
-          kind: "resolve_remote_collision",
-          t: "Clear the stale remote branch and re-deliver",
-          d: "",
-          rec: true,
-        },
-        { kind: "archive_task", t: "Archive this task", d: "", rec: false },
-      ],
-    };
-    writeTask(store.dataRoot, store.slug, {
-      frontmatter: baseTaskFrontmatter("VIB-1", {
-        stage: "review",
-        branch: "vib-1",
-        readiness: "blocked",
-      }),
-      packet: COLLISION_CONFLICT_PACKET,
-    });
-    rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
-    pushMock.mockResolvedValue({ status: "pushed", branch: "vib-1", commits: 2, headSha: "a".repeat(40), remoteHeadBefore: null, workflowFiles: [] });
-    openPrMock.mockResolvedValue({
-      status: "ok",
-      prNumber: 13,
-      created: true,
-      url: "https://github.com/x/y/pull/13",
-    });
-
-    const outcome = await performDelivery(
-      store.db,
-      dataCtx(),
-      store.slug,
-      "VIB-1",
-      actorOf(store.users.arda),
-    );
-    expect(outcome).toMatchObject({ status: "delivered", prNumber: 13 });
 
     const after = fm();
     expect(after.packet).toBeNull();
