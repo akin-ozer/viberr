@@ -66,11 +66,11 @@ import {
 /**
  * UX19-4 — the exact label of the GitHub panel's delivery button
  * (`task-side-panels.tsx`). The note below points a human at a control BY NAME,
- * so it is exported and the co-located test renders `GithubTrace` beside this
- * card and asserts the panel's button carries this very string — two files that
- * cannot drift apart into a note pointing at a control nobody can find.
+ * so task-detail-components.test.tsx renders `GithubTrace` beside this card and
+ * pins this label on both — two files that cannot drift apart into a note
+ * pointing at a control nobody can find.
  */
-export const DELIVER_LABEL = "Deliver branch & open PR";
+const DELIVER_LABEL = "Deliver branch & open PR";
 
 /**
  * What an `archive_task` resolution destroys, for its confirm

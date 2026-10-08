@@ -14,7 +14,7 @@ import type {
 import type { TimelineEventRender } from "~/shared/mapping/task-event.server";
 import { MemoryRouter, createRoutesStub } from "react-router";
 import { ToastProvider } from "~/ui/toast";
-import { DELIVER_LABEL, DecisionPacket } from "./decision-packet";
+import { DecisionPacket } from "./decision-packet";
 import { GithubTrace } from "./task-side-panels";
 import { MoveBackConfirm } from "./move-back-confirm";
 import { DiagnosticsPanel, TaskHero } from "./task-main-sections";
@@ -3115,6 +3115,8 @@ describe("UX19-4: the recovery packet names the in-app re-delivery path", () => 
       },
     ],
   };
+  /** The words the note sends a person to find, and the panel's button wears. */
+  const DELIVER_LABEL = "Deliver branch & open PR";
 
   const noteOf = (container: HTMLElement) =>
     [...container.querySelectorAll(".packet-body > .packet-lede")].find((p) =>
