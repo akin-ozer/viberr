@@ -241,25 +241,9 @@ const HEALTH_REPLY = z.object({
   runs: z.object({ cap: z.number(), live: z.number(), queued: z.number() }),
   // C05-A (pass 32): the pinned browser executable's PATH, org admins only.
   browserDetail: z.string().optional(),
-  // Ruling 182, narrowed by ruling 185: what this host can run — tool versions
-  // (null when absent) and the pinned CLI packages; the sandbox verdict went
-  // with the sandbox. Inherited from `healthSnapshot`, never a second probe.
-  toolchain: z.strictObject({
-    node: z.string().nullable(),
-    npm: z.string().nullable(),
-    git: z.string().nullable(),
-    python3: z.string().nullable(),
-    go: z.string().nullable(),
-    // Ruling 191: the five a run reaches for and cannot install.
-    make: z.string().nullable(),
-    docker: z.string().nullable(),
-    pnpm: z.string().nullable(),
-    yarn: z.string().nullable(),
-    curl: z.string().nullable(),
-    codexCli: z.string().nullable(),
-    claudeAgentSdk: z.string().nullable(),
-
-  }),
+  // Ruling 182: the host toolchain. Its key list is toolchain.server.test.ts's;
+  // this reply relays the snapshot's (asserted at the first instance_health case).
+  toolchain: z.record(z.string(), z.string().nullable()),
   // F32-9 (pass 32): what each backend last told us — the reading the
   // Insights page shows, so the controller cannot answer "no quota exhaustion
   // flagged" from a poorer source than the admin's own page.
@@ -537,13 +521,7 @@ describe("instance_health: aggregates, open to any signed-in person", () => {
         HEALTH_REPLY,
         await call(ids.orgAdmin, "instance_health"),
       );
-      for (const row of [...member.backendCredentials, ...admin.backendCredentials]) {
-        expect(Object.keys(row).sort()).toEqual([
-          "askerConnected",
-          "backend",
-          "connectedUsers",
-        ]);
-      }
+      // Both parsed through HEALTH_REPLY's strict row: its three keys, no other.
       // The instance-level count is the same for both — it is a fact about the
       // instance, not about the asker.
       expect(member.backendCredentials.map((c) => c.connectedUsers)).toEqual(
