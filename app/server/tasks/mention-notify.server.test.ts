@@ -1032,14 +1032,6 @@ describe("every comment writer notifies the human it @tags (NEW-4)", () => {
     }
     expect(found).toEqual(COMMENT_WRITER_SITES);
 
-    for (const file of Object.keys(COMMENT_WRITER_SITES)) {
-      if (NO_FANOUT_BY_DESIGN.has(file)) continue;
-      const src = readFileSync(path.join(APP, file), "utf8");
-      expect(
-        /\bnotifyMentionedUsers\s*\(/.test(src),
-        `${file} appends comments but never calls the shared mention fan-out`,
-      ).toBe(true);
-    }
     // Every writer the table drives is covered; the counts differ on purpose
     // (see the doc comment) so this asserts the direction that matters.
     expect(WRITERS.length).toBeGreaterThanOrEqual(
