@@ -13,6 +13,7 @@ import type { GagentView } from "~/server/org/gagents.server";
 import type { DomainRecord, OrgUserView } from "~/server/org/org-users.server";
 import type { KbView, McpView, SkillView } from "~/server/org/resources.server";
 import { ToastProvider } from "~/ui/toast";
+import { FakeEventSource } from "../../../test-support/fake-event-source";
 import { ConnectionsPanel } from "./connections-panel";
 import { OrgSettingsPage } from "./org-settings-page";
 import type {
@@ -1602,23 +1603,11 @@ describe("F32-2 (pass 32): the Settings page holds a live stream", () => {
     // reload — this page had no stream at all. Broadcast events reach every
     // connection, so the `user` scope is enough.
     // Canary: drop the `useLiveUpdates` call from OrgSettingsPage.
-    const opened: string[] = [];
-    class FakeEventSource {
-      static CONNECTING = 0;
-      static OPEN = 1;
-      static CLOSED = 2;
-      readyState = 1;
-      onopen: (() => void) | null = null;
-      onerror: (() => void) | null = null;
-      constructor(url: string) {
-        opened.push(url);
-      }
-      addEventListener() {}
-      close() {}
-    }
+    FakeEventSource.instances = [];
     vi.stubGlobal("EventSource", FakeEventSource);
     try {
       renderPanel(orgPage());
+      const opened = FakeEventSource.instances.map((source) => source.url);
       expect(opened).toHaveLength(1);
       expect(opened[0]).toContain("/resources/events");
       expect(opened[0]).toContain("scope=user");
