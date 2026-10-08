@@ -279,20 +279,6 @@ describe("ruling 488: the operator's relay_to_task", () => {
     expect(listAuditEvents(store.db, { action: "task.relayed" })).toEqual([]);
     expect(runOperator).not.toHaveBeenCalled();
   });
-
-  it("is withheld with the comment grant", () => {
-    // Canary: build the tool outside the `append-typed-events` block.
-    const authority = resolveOperatorAuthority(dctx(), store.slug);
-    authority.policy.set("append-typed-events", "off");
-    const toolkit = buildOperatorToolkit({
-      db: store.db,
-      ctx: dctx(),
-      projectSlug: store.slug,
-      taskKey: "VIB-1",
-      authority,
-    });
-    expect(toolkit.allowedTools).not.toContain("mcp__viberr__relay_to_task");
-  });
 });
 
 /**

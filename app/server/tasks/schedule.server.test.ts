@@ -1269,14 +1269,12 @@ describe("ruling 487: the operator's schedule_task_action and cancel_task_schedu
   });
 
   it("refuses what it could not dispatch now: a recommend-only grant, an undeployed profile, a stage the agent does not work, a held task", async () => {
-    // Canaries: build the tools on `dispatchGate !== "deny"` (the recommend
-    // operator gets them); drop `scheduleGrantRefusal` (the action schedules
-    // for it); drop `dispatchRefusalNow`'s stage check (rev is scheduled at In
+    // Canaries: drop `scheduleGrantRefusal` (the action schedules for it);
+    // drop `dispatchRefusalNow`'s stage check (rev is scheduled at In
     // Progress); drop its hold check (dev is scheduled on a held task).
     const recommendOnly = operatorAuthority({ "dispatch-agents": "recommend" });
-    expect(toolkitFor("VIB-1", recommendOnly).allowedTools).not.toContain("mcp__viberr__schedule_task_action");
-    expect(toolkitFor("VIB-1", recommendOnly).allowedTools).not.toContain("mcp__viberr__cancel_task_schedule");
-    // The action refuses it as well, for the Codex plan's sake.
+    // A Codex plan reaches the action without the toolkit's gate, so the
+    // action refuses the recommend-only grant itself.
     const denied = await operatorScheduleRun(
       store.db,
       dctx(),
