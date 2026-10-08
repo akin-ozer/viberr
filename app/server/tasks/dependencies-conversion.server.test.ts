@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createTestDbContext, type TestDbContext } from "../../../test-support/test-db";
 import {
   actorOf,
@@ -68,18 +68,7 @@ class ControlledAdapter implements RuntimeAdapter {
   }
 }
 
-async function eventually(assertion: () => void, ms = 5000): Promise<void> {
-  const deadline = Date.now() + ms;
-  for (;;) {
-    try {
-      assertion();
-      return;
-    } catch (error) {
-      if (Date.now() > deadline) throw error;
-      await new Promise((resolve) => setTimeout(resolve, 25));
-    }
-  }
-}
+const eventually = (assertion: () => void, ms = 5000) => vi.waitFor(assertion, { timeout: ms, interval: 25 });
 
 const planStep = (tool: string, reason: string) => ({
   tool,

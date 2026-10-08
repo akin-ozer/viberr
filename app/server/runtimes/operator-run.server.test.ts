@@ -197,19 +197,7 @@ function transitionAction(extra: PlanActionPatch = {}) {
   };
 }
 
-async function eventually(assertion: () => void): Promise<void> {
-  let lastError: unknown;
-  for (let i = 0; i < 100; i += 1) {
-    try {
-      assertion();
-      return;
-    } catch (error) {
-      lastError = error;
-      await new Promise((resolve) => setTimeout(resolve, 1));
-    }
-  }
-  throw lastError;
-}
+const eventually = (assertion: () => void) => vi.waitFor(assertion, { timeout: 5_000, interval: 1 });
 
 describe("Codex structured operator completion", () => {
   let ctx: TestDbContext;

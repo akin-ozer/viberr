@@ -163,18 +163,7 @@ async function relay(
   return replyText.parse(await def.handler(args, {}));
 }
 
-async function eventually(assertion: () => void, ms = 8_000): Promise<void> {
-  const deadline = Date.now() + ms;
-  for (;;) {
-    try {
-      assertion();
-      return;
-    } catch (error) {
-      if (Date.now() > deadline) throw error;
-      await new Promise((resolve) => setTimeout(resolve, 20));
-    }
-  }
-}
+const eventually = (assertion: () => void, ms = 8_000) => vi.waitFor(assertion, { timeout: ms, interval: 20 });
 
 const NUMBERS =
   "Deployed cron CPU: 5 ms and 6 ms of the 10 ms limit, 3/50 subrequests.\n\n" +

@@ -290,18 +290,7 @@ describe("setTaskDependencies", () => {
   });
 });
 
-async function eventually(assertion: () => void, ms = 4000): Promise<void> {
-  const deadline = Date.now() + ms;
-  for (;;) {
-    try {
-      assertion();
-      return;
-    } catch (error) {
-      if (Date.now() > deadline) throw error;
-      await new Promise((resolve) => setTimeout(resolve, 20));
-    }
-  }
-}
+const eventually = (assertion: () => void, ms = 4000) => vi.waitFor(assertion, { timeout: ms, interval: 20 });
 
 const runOperatorStub = () =>
   vi.fn((_db: DatabaseSync, _input: RunOperatorInput) =>
