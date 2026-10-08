@@ -1384,9 +1384,10 @@ describe("rulings 507 and 616: several accounts on one backend", () => {
   // `AgentAccountCard` (agent-accounts-panel.tsx) and the sign-in row ends
   // with the dialog open; render the dialog from the account the Disconnect
   // was pressed on instead of finding it in the load (agent-account-in-use.tsx)
-  // and the other rows do too; hold the account itself and find it by
-  // identity instead of id, and the load that changed nothing closes it under
-  // the person reading it.
+  // and the row where other accounts remain does too; do both and the row
+  // where every account goes does as well; hold the account itself and find
+  // it by identity instead of id, and the load that changed nothing closes it
+  // under the person reading it.
   it.each<[string, ClaudeOnServer[], string]>([
     [
       "another tab disconnects it and other accounts remain",
