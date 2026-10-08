@@ -52,7 +52,7 @@ const ACCEPT_DISCLOSURE_FIELDS = {
 } as const;
 
 /** The echo as form fields — what the confirmed click submits. */
-export function acceptanceDisclosureFields(disclosure: AcceptanceDisclosure) {
+function acceptanceDisclosureFields(disclosure: AcceptanceDisclosure) {
   return {
     [ACCEPT_DISCLOSURE_FIELDS.pr]: disclosure.pr,
     [ACCEPT_DISCLOSURE_FIELDS.revision]: disclosure.revision,

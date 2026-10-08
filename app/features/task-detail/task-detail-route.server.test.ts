@@ -1358,19 +1358,14 @@ describe("acceptance affordance (P14-LV-06)", () => {
     // The POST carries the echo the dialog would send for VIB-166 as the page
     // shows it, so it clears ruling 88's disclosure check (a bare POST is
     // refused there first) and meets the boundary itself.
-    const { acceptanceDisclosureFields } = await import(
-      "~/shared/acceptance-disclosure"
-    );
     const shown = await runLoader("VIB-166", ids.arda);
     // SAFETY: VIB-166 is not at the review boundary, so acceptance is refused
     // inside the try instead of granted.
     const result = (await postIntent("VIB-166", ids.arda, {
       intent: "accept-completion",
-      ...acceptanceDisclosureFields({
-        pr: shown.task.pr?.state ?? "none",
-        revision: shown.workRevisionSha ?? "none",
-        verdict: shown.task.validation,
-      }),
+      ackPr: shown.task.pr?.state ?? "none",
+      ackRevision: shown.workRevisionSha ?? "none",
+      ackVerdict: shown.task.validation,
     })) as ActionRefusal;
     expect(result.init.status).toBe(409);
     expect(result.data.error).toContain(
