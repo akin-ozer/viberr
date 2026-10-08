@@ -6,7 +6,6 @@ import {
   assertSkillBodyWellFormed,
   lstatOr,
   readSkillBodies,
-  readSkillBodyDetailed,
 } from "./skill-body.server";
 import { createTempDirs } from "../../../test-support/temp-dirs";
 
@@ -26,7 +25,14 @@ function freshSkill(name = "craft") {
   return { dataRoot, skillDir };
 }
 
-describe("readSkillBodyDetailed — the body", () => {
+/** One skill as a run is given it: `readSkillBodies`, the reader a run's
+ *  prompt is built from, for that one name under `budget`. */
+function skillOf(name: string, dataRoot: string, budget?: number) {
+  const set = readSkillBodies([name], dataRoot, budget);
+  return { body: set.parts[0]?.body ?? "", unresolved: set.unresolved[0] };
+}
+
+describe("one skill's body", () => {
   it("returns the body with frontmatter stripped", () => {
     const { dataRoot, skillDir } = freshSkill();
     writeFileSync(
@@ -34,20 +40,20 @@ describe("readSkillBodyDetailed — the body", () => {
       "---\nname: craft\n---\n\n# Craft\nMARKER-BODY",
       "utf8",
     );
-    const body = readSkillBodyDetailed("craft", dataRoot).body;
+    const body = skillOf("craft", dataRoot).body;
     expect(body).toContain("MARKER-BODY");
     expect(body).not.toContain("name: craft");
   });
 
   it("returns '' for a skill with no folder on disk", () => {
     const { dataRoot } = freshSkill();
-    expect(readSkillBodyDetailed("does-not-exist", dataRoot).body).toBe("");
+    expect(skillOf("does-not-exist", dataRoot).body).toBe("");
   });
 
   it("clips an oversized SKILL.md at the budget and says so", () => {
     const { dataRoot, skillDir } = freshSkill();
     writeFileSync(path.join(skillDir, "SKILL.md"), "X".repeat(200), "utf8");
-    const body = readSkillBodyDetailed("craft", dataRoot, 50).body;
+    const body = skillOf("craft", dataRoot, 50).body;
     expect(body).toContain("skill truncated");
     expect(body).toContain("200 chars");
     // The clipped text is the budget, not the whole file.
@@ -57,7 +63,7 @@ describe("readSkillBodyDetailed — the body", () => {
   it("leaves a body that fits untouched — no marker", () => {
     const { dataRoot, skillDir } = freshSkill();
     writeFileSync(path.join(skillDir, "SKILL.md"), "short", "utf8");
-    expect(readSkillBodyDetailed("craft", dataRoot, 50).body).toBe("short");
+    expect(skillOf("craft", dataRoot, 50).body).toBe("short");
   });
 
   it("defaults to the KB-sized budget rather than no cap at all", () => {
@@ -67,7 +73,7 @@ describe("readSkillBodyDetailed — the body", () => {
       "Y".repeat(SKILL_INJECTION_BUDGET + 5_000),
       "utf8",
     );
-    const body = readSkillBodyDetailed("craft", dataRoot).body;
+    const body = skillOf("craft", dataRoot).body;
     expect(body.length).toBeLessThan(SKILL_INJECTION_BUDGET + 300);
     expect(body).toContain("skill truncated");
   });
@@ -82,7 +88,7 @@ describe("readSkillBodyDetailed — the body", () => {
  * skill folder) put arbitrary host content into the model's context AS TRUSTED
  * PERSONA.
  */
-describe("readSkillBodyDetailed — store containment (A5)", () => {
+describe("one skill's body — store containment (A5)", () => {
   function outsideFile(body: string): string {
     const outside = temp.make("viberr-outside-");
     writeFileSync(path.join(outside, "SKILL.md"), body, "utf8");
@@ -93,7 +99,7 @@ describe("readSkillBodyDetailed — store containment (A5)", () => {
     const { dataRoot, skillDir } = freshSkill();
     const outside = outsideFile("MARKER-EVIL-INSTRUCTIONS");
     symlinkSync(path.join(outside, "SKILL.md"), path.join(skillDir, "SKILL.md"));
-    const detailed = readSkillBodyDetailed("craft", dataRoot);
+    const detailed = skillOf("craft", dataRoot);
     expect(detailed.body).toBe("");
     expect(detailed.body).not.toContain("MARKER-EVIL-INSTRUCTIONS");
     expect(detailed.unresolved?.reason).toContain("symlink");
@@ -103,7 +109,7 @@ describe("readSkillBodyDetailed — store containment (A5)", () => {
     const { dataRoot } = freshSkill();
     const outside = outsideFile("MARKER-EVIL-FOLDER");
     symlinkSync(outside, path.join(dataRoot, "skills", "linked"));
-    const detailed = readSkillBodyDetailed("linked", dataRoot);
+    const detailed = skillOf("linked", dataRoot);
     expect(detailed.body).toBe("");
     expect(detailed.body).not.toContain("MARKER-EVIL-FOLDER");
     expect(detailed.unresolved?.reason).toContain("symlink");
@@ -112,7 +118,7 @@ describe("readSkillBodyDetailed — store containment (A5)", () => {
   it("a real SKILL.md in a real folder still reads (containment is not a ban)", () => {
     const { dataRoot, skillDir } = freshSkill();
     writeFileSync(path.join(skillDir, "SKILL.md"), "MARKER-REAL", "utf8");
-    expect(readSkillBodyDetailed("craft", dataRoot).body).toContain("MARKER-REAL");
+    expect(skillOf("craft", dataRoot).body).toContain("MARKER-REAL");
   });
 });
 
@@ -121,10 +127,10 @@ describe("readSkillBodyDetailed — store containment (A5)", () => {
  * `logger.warn` and nothing else, so a typo'd or renamed skill folder was
  * invisible to the run while every UI still showed it attached.
  */
-describe("readSkillBodyDetailed — structured misses (C1)", () => {
+describe("one skill's body — structured misses (C1)", () => {
   it("names a missing skill folder as an unresolved grant", () => {
     const { dataRoot } = freshSkill();
-    const detailed = readSkillBodyDetailed("typo-expertise", dataRoot);
+    const detailed = skillOf("typo-expertise", dataRoot);
     expect(detailed.body).toBe("");
     expect(detailed.unresolved).toEqual({
       name: "typo-expertise",
@@ -134,14 +140,14 @@ describe("readSkillBodyDetailed — structured misses (C1)", () => {
 
   it("names a folder that exists but ships no SKILL.md", () => {
     const { dataRoot } = freshSkill();
-    expect(readSkillBodyDetailed("craft", dataRoot).unresolved?.reason).toBe(
+    expect(skillOf("craft", dataRoot).unresolved?.reason).toBe(
       "its folder holds no SKILL.md",
     );
   });
 
   it("a traversal-shaped grant is DENIED, never escaped", () => {
     const { dataRoot } = freshSkill();
-    const detailed = readSkillBodyDetailed("../../projects", dataRoot);
+    const detailed = skillOf("../../projects", dataRoot);
     expect(detailed.body).toBe("");
     expect(detailed.unresolved?.name).toBe("../../projects");
   });
@@ -149,7 +155,7 @@ describe("readSkillBodyDetailed — structured misses (C1)", () => {
   it("a resolvable skill carries NO unresolved row", () => {
     const { dataRoot, skillDir } = freshSkill();
     writeFileSync(path.join(skillDir, "SKILL.md"), "MARKER", "utf8");
-    expect(readSkillBodyDetailed("craft", dataRoot).unresolved).toBeUndefined();
+    expect(skillOf("craft", dataRoot).unresolved).toBeUndefined();
   });
 });
 
