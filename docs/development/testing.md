@@ -5,7 +5,7 @@
 > `package.json` scripts, `vitest.config.ts`, `test-support/*`, `app/shared/docs/*`,
 > `.oxlintrc.json`, `tools/oxlint/anti-slop/`, `playwright.config.ts`, `scripts/e2e.ts`,
 > `compose.e2e.yml`, `e2e/*`, `.github/workflows/ci.yml`. Requires Node 26+ and `npm ci`.
-> Verified against `claude/test-audit` @ `8748a583` (2026-09-27, ruling 512).
+> Verified against `claude/fervent-goodall-u18pnu` @ `9e5db35a` (2026-10-08, ruling 704).
 
 ## 0. Before you add or change a test
 
@@ -143,11 +143,11 @@ the only gates. Jobs run again since 2026-10-01.
   tests and hooks alike, `testTimeout: 20_000` and `hookTimeout: 20_000` (a suite that
   seeds the demo store in `beforeAll` needs the same room as its tests; raise them there,
   and let a test raise its own only while it waits on a real process). A component test
-  opts into jsdom per file with a `// @vitest-environment jsdom` comment (100 files).
+  opts into jsdom per file with a `// @vitest-environment jsdom` comment (107 files).
   `db/`, `scripts/`, `e2e/`, `test-support/` and `tools/` are not collected; cover script
   behaviour by extracting it into `app/` (the CLIs are thin wrappers over `app/server`
-  modules) or through e2e. The tree holds 510 test files under `app/`, 290 of them
-  `*.server.test.ts` (counted 2026-09-27).
+  modules) or through e2e. The tree holds 547 test files under `app/`, 313 of them
+  `*.server.test.ts` (counted 2026-10-08).
 - `test-support/setup-env.ts` runs before any app module loads and makes the suite
   hermetic:
   - seeds `VIBERR_SESSION_SECRET` and `VIBERR_SECRET_ENCRYPTION_KEY` (`??=`, so an
