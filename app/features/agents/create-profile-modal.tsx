@@ -1226,8 +1226,9 @@ export function CreateProfileModal({
   error: string | null;
   onClose: () => void;
   onSubmit: (payload: ProfileFormPayload) => void;
-  /** Live store resources for the context-resource picker. Falls back to the
-   *  built-in defaults when omitted (e.g. in isolated component tests). */
+  /** Live store resources for the context-resource picker. Omitted (the
+   *  page's loader had none to give, or an isolated component test), the
+   *  picker offers nothing. */
   resourceCatalog?: readonly ResCatalogGroup[];
   /** Ruling 127: which backends the VIEWER has connected (from the loader).
    *  Advisory only, never a gate on authoring (see `BackendField`). Omitted
