@@ -1390,6 +1390,28 @@ describe("ruling 505: resumes by idle time (PLAN.md's Codex retention probe)", (
     expect(codex!.cells[0]!.warmRate).toBe(1);
   });
 
+  it("ruling 701: idle time runs from the end of the earlier run's compaction, which follows its finish", () => {
+    // A specialist's run is finished before its session is compacted, and the
+    // compaction is the last call that touched the cache. CANARY: time the
+    // idle from the row's finish alone and this resume, four minutes after
+    // the compaction, lands in the bucket past five.
+    const db = ctx.makeDb();
+    const first = insertRun(db, {
+      backend: "claude", kind: "reviewer", sessionId: "s-compacted", startedAt: at(0), finishedAt: at(1),
+      firstCall: { write: 60_000, read: 0 }, credentialKind: "api_key",
+    });
+    db.prepare(
+      `INSERT INTO run_log_lines (run_id, seq, occurred_at, raw_json, display_json, created_at) VALUES (?, 1, ?, '{}', '{}', ?)`,
+    ).run(first, at(3), at(3));
+    insertRun(db, {
+      backend: "claude", kind: "reviewer", sessionId: "s-compacted", startedAt: at(7), finishedAt: at(8),
+      firstCall: { write: 900, read: 60_000 }, credentialKind: "api_key",
+    });
+    const rows = runsOf(db).cache.resumes.rows;
+    expect(rows.map((r) => r.label)).toEqual(["api_key"]);
+    expect(rows[0]!.cells.map((c) => `${c.warmStarts}/${c.firstCalls}`)).toEqual(["1/1", "0/0", "0/0", "0/0", "0/0"]);
+  });
+
   it("keys a resume by the kind the EARLIER run billed, and leaves out what it cannot time", () => {
     const db = ctx.makeDb();
     session(db, {

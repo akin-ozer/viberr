@@ -62,7 +62,7 @@ interface QueuedCompactions {
   codex: QueuedCompaction[];
 }
 const queuedCompactions: QueuedCompactions = { claude: [], codex: [] };
-const compactedSpecs: { spec: RunSpec; sessionId: string }[] = [];
+const compactedSpecs: { spec: RunSpec; sessionId: string; signal?: AbortSignal }[] = [];
 
 export function queueFakeCompaction(
   backend: RealBackend,
@@ -74,8 +74,9 @@ export function queueFakeCompaction(
   queuedCompactions[backend].push(queued);
 }
 
-/** The compactions the fake was asked for, oldest first. */
-export function compactedRunSpecs(): readonly { spec: RunSpec; sessionId: string }[] {
+/** The compactions the fake was asked for, oldest first, each with the signal
+ *  the run service aborts when it stops waiting (ruling 701). */
+export function compactedRunSpecs(): readonly { spec: RunSpec; sessionId: string; signal?: AbortSignal }[] {
   return compactedSpecs;
 }
 
@@ -194,7 +195,7 @@ function createFakeAdapter(backend: RealBackend): RuntimeAdapter {
   return {
     backend,
     async compact(spec: RunSpec, sessionId: string, cb: CompactCallbacks): Promise<CompactOutcome> {
-      compactedSpecs.push({ spec, sessionId });
+      compactedSpecs.push(cb.signal ? { spec, sessionId, signal: cb.signal } : { spec, sessionId });
       const queued = queuedCompactions[backend].shift();
       await queued?.onCompact?.();
       const outcome: CompactOutcome = queued?.outcome ?? {

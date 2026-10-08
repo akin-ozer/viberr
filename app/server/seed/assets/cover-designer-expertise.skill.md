@@ -75,9 +75,20 @@ Build the cover as one HTML page that holds one box of exactly the cover's size 
 
 ## Saving and recording
 
-1. When it is right, the same call with `scale` 1.5 makes the cover you keep. Look at that one too: it is the picture that goes out. Copy the picture `capture_page` saved for your run (its reply names the file) into the task's attachments folder as `cover.png`, or under the name the rulings ask for, before you capture anything else: each capture replaces the file of the one before. Keep `cover.html` beside it, so a person can change it later.
+1. Finish the page before you keep the cover, its `<title>` included: after that you edit it only to fix a fault you have seen, and then you keep a new cover over the old one. When it is right, the same call with `scale` 1.5 makes the cover you keep. Look at that one too: it is the picture that goes out. Copy the picture `capture_page` saved for your run (its reply names the file) into the task's attachments folder as `cover.png`, or under the name the rulings ask for, before you capture anything else: each capture replaces the file of the one before. Keep `cover.html` beside it, so a person can change it later.
 2. Write alt text that says what is on the cover, for someone who cannot see it.
-3. Name the cover where the destination takes one, as the rulings describe: a field of the piece, or its first image where the destination shows the cover inside the text. Where the rulings keep the piece's fields in a file beside it, the field that names its cover is yours to fill: the file, where it goes and its alt text, in place of what stood there. In a field that lists the piece's pictures, add the cover and leave every other entry as it is. Read those files again just before you change them: another agent may have changed them since you first read them. Change nothing else in the piece. Its words and its title are the writer's, and a sentence elsewhere that your change makes out of date (a word count, a publishing step) is a line of your report, not yours to rewrite.
+3. Name the cover where the destination takes one, as the rulings describe: a field of the piece, or its first image where the destination shows the cover inside the text. Where the rulings keep the piece's fields in a file beside it, the field that names its cover is yours to fill, whatever stands there now: the file, where it goes and its alt text. In a field that lists the piece's pictures, add the cover and leave every other entry as it is.
+4. Read those files again just before you change them: another agent may have changed them since you first read them. Make each change as an exact replacement of the lines it touches in the file as it stands, never a rewrite of the file. Change nothing else in the piece. Its words and its title are the writer's, and a sentence elsewhere that your change makes out of date (a word count, a publishing step) is a line of your report, not yours to rewrite.
+5. Where the cover sits inside a piece `capture_page` takes (an .html or .md file on the task), look at the piece at the phone width after you place it (`view` chooses the width), and again only when the cover changed or moved. Where it does not take the piece, say so in your report.
+
+## What you do not prove
+
+Your cover is what the reviewer judges: you looked at it, and the reviewer opens it and looks again.
+
+- Prove nothing about a file you did not change: no checksum, no copy kept to compare it with, no diff or `cmp`, no count of lines or bytes before and after. A render is for looking: make one for the looks above, or after you change the page.
+- Picture only your page and the piece. Every other file on the task (the writer's note, a file of fields, a brief, a list of sources) is text: read it, and do not `capture_page` it.
+- Write up no check of your own work and keep none as a source. Report every finding all the same: something on the cover that no source shows, a contradiction, what you could not confirm.
+- A rework that changes nothing on the cover and does not move it (an alt text, a field's entry) needs no render and no look: change the lines it names, and report.
 
 ## When it comes back
 
@@ -85,9 +96,11 @@ A review names what is wrong with the cover. Fix exactly that, render it, look a
 
 ## Before you hand it over
 
+On a rework that changed nothing on the cover, only the last two apply.
+
 1. You can say in one sentence what the cover shows and why only this piece could carry it.
 2. Everything on it is in the piece or in a kept source.
-3. You looked at the rendered picture at full size and as a thumbnail.
+3. You looked at the rendered picture at full size and as a thumbnail, and, where the cover sits in the piece, at the piece at the phone width.
 4. It is the size the destination takes, saved on the task with its page beside it, with alt text.
 5. The piece names it where the destination takes a cover, and nothing else in the piece changed.
 

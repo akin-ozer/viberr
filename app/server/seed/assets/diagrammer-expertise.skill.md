@@ -65,12 +65,21 @@ Draw each diagram as an SVG file with its `width`, `height` and `viewBox` set, o
 
 ## Saving and placing
 
-1. When it is right, the same call with `scale` 2 makes the picture you keep, and you look at that one too: it is the picture that goes out. Keep it within 2,000 px on a side (a canvas up to 1,000 px tall): past that it is saved and not shown, to you or to whoever opens it next. Copy the picture `capture_page` saved for your run (its reply names the file) into the task's attachments folder, named for what it shows: `request-path.png`. Copy it before you capture anything else: each capture replaces the file of the one before. Keep the drawing beside it under the same name (`request-path.svg`), so a person can change it later.
+1. Finish the drawing before you keep the picture, any `<title>` or `<desc>` in it included: after that you edit it only to fix a fault you have seen, and then you keep a new picture over the old one. When it is right, the same call with `scale` 2 makes the picture you keep, and you look at that one too: it is the picture that goes out. Keep it within 2,000 px on a side (a canvas up to 1,000 px tall): past that it is saved and not shown, to you or to whoever opens it next. Copy the picture `capture_page` saved for your run (its reply names the file) into the task's attachments folder, named for what it shows: `request-path.png`. Copy it before you capture anything else: each capture replaces the file of the one before. Keep the drawing beside it under the same name (`request-path.svg`), so a person can change it later.
 2. Place it in the piece at the point where the reader needs the structure, usually just after the paragraph that introduces the parts. Never at the very top as an ornament. Read the piece again just before you do, and add your line to the file as it stands then: another agent may have changed it since you first read it. A picture the piece already carries stays where it is, and you draw nothing that repeats it.
 3. Use the form the destination takes: in Markdown an image line. Add a caption only where the destination shows one.
-4. Write alt text that works for someone who cannot see the picture: the parts and how they connect, in a sentence or two. "Architecture diagram" is not alt text. Where the rulings keep a piece's fields in a file beside it, the field that lists its pictures is yours to bring up to date: each of yours with its file, where it goes and its alt text, in place of a line that says there are none.
-5. Change nothing else in the piece or in the files beside it. Make each change as an exact replacement of the lines it touches in the file as it stands, never a rewrite of the file: there is then nothing to prove about the rest, and no need to hash or compare it. If a sentence contradicts what you found, or your picture makes one elsewhere out of date (a word count, a publishing step), report it and leave the sentence to its writer.
-6. Look at it in place: `capture_page` on the piece at the phone width (`view` chooses the width), moving down the page with `from` until your picture is in the stretch. You are checking that the picture shows and sits where you meant: how it reads you judged at scale 0.5, and the desktop width needs no look. If a main label is plainly unreadable there all the same, fix it. Look again only when the picture itself changed.
+4. Write alt text that works for someone who cannot see the picture: the parts and how they connect, in a sentence or two. "Architecture diagram" is not alt text. Where the rulings keep a piece's fields in a file beside it, the field that lists its pictures is yours to bring up to date: each of yours with its file, where it goes and its alt text, into the field as it stands, leaving every other entry as it is.
+5. Change nothing else in the piece or in the files beside it. Make each change as an exact replacement of the lines it touches in the file as it stands, never a rewrite of the file: there is then nothing to prove about the rest. If a sentence contradicts what you found, or your picture makes one elsewhere out of date (a word count, a publishing step), report it and leave the sentence to its writer.
+6. Look at it in place: `capture_page` on the piece at the phone width (`view` chooses the width), moving down the page with `from` until your picture is in the stretch. You are checking that the picture shows and sits where you meant: how it reads you judged at scale 0.5, and the desktop width needs no look. If a main label is plainly unreadable there all the same, fix it. Look again only when the picture changed or moved. Where the piece is not a file `capture_page` takes, say so in your report.
+
+## What you do not prove
+
+Your picture is what the reviewer judges: you looked at it, and the reviewer opens it and looks again.
+
+- Prove nothing about a file you did not change: no checksum, no copy kept to compare it with, no diff or `cmp`, no count of lines or bytes before and after. A render is for looking: make one for the looks above, or after you change the drawing.
+- Picture only your drawing and the piece. Every other file on the task (the writer's note, a file of fields, a brief, a list of sources) is text: read it, and do not `capture_page` it.
+- Write up no check of your own work and keep none as a source. Report every finding all the same: a part no source shows, a contradiction, what you could not confirm.
+- A rework that changes no picture and moves none (an alt text, a field's entry) needs no render and no look: change the lines it names, and report. One that moves a picture gets one look at the piece at the phone width.
 
 ## When it comes back
 
@@ -78,11 +87,13 @@ A review names what is wrong with a picture. Fix exactly that in the drawing, re
 
 ## Before you hand it over
 
+On a rework that changed no picture, only the last two apply.
+
 1. Each diagram answers the one question you wrote for it.
 2. Every part and connection is in the piece or in a kept source you opened in this run.
 3. You looked at the rendered picture at its own size and at half size, and at the piece with the picture in it at the phone width.
 4. Each picture is on the task with its drawing beside it, and has alt text.
-5. Nothing in the piece changed but the lines that place your pictures.
+5. Nothing in the piece changed but the lines that place your pictures, each an exact replacement.
 
 ## Reporting
 

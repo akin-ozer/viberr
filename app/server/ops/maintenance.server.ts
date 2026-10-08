@@ -2,6 +2,8 @@ import type { DatabaseSync } from "node:sqlite";
 import { getEnv } from "~/server/config/env.server";
 import { applyRetention, type RetentionResult } from "~/server/db/retention.server";
 import { logger } from "~/server/logging/logger.server";
+import { COMPACTING_AFTER_RUN_STEP, RUN_PHASE } from "~/server/runtimes/adapter.server";
+import { COMPLETION_COMPACT_DEADLINE_MS } from "~/server/runtimes/context-policy.server";
 import {
   reclaimTerminalTaskWorkspaces,
   type WorkspaceReclamation,
@@ -111,16 +113,25 @@ const EMPTY_RETENTION: RetentionResult = {
   notifications: 0,
 };
 
-/** Runs that could be holding a working tree open right now. */
-export function activeRunCount(db: DatabaseSync): number {
+/**
+ * Runs that could be holding a working tree open right now: the live ones, and
+ * (ruling 701) a finished specialist run whose session is still being
+ * compacted, whose CLI works in the run's folder until it is done. A mark
+ * older than twice the compaction's deadline is nobody's compaction: its
+ * clear failed, and it must not hold every folder until the next restart.
+ */
+export function activeRunCount(db: DatabaseSync, nowMs = Date.now()): number {
   try {
+    const markedSince = new Date(nowMs - 2 * COMPLETION_COMPACT_DEADLINE_MS).toISOString();
     // SAFETY: `SELECT count(*) AS c` is an aggregate with no GROUP BY — sqlite
     // answers it with exactly one row carrying the single integer column `c`.
     const row = db
       .prepare(
-        `SELECT count(*) AS c FROM agent_runs WHERE state IN ('queued', 'running')`,
+        `SELECT count(*) AS c FROM agent_runs
+          WHERE state IN ('queued', 'running')
+             OR (phase = ? AND step = ? AND finished_at >= ?)`,
       )
-      .get() as { c: number };
+      .get(RUN_PHASE.compacting, COMPACTING_AFTER_RUN_STEP, markedSince) as { c: number };
     return row.c;
   } catch {
     // Unreadable table → assume busy. Skipping a reclaim costs disk; doing one

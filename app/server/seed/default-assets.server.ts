@@ -608,6 +608,10 @@ export const PRIOR_SHIPPED_HASHES: PriorShippedHashes = {
     "d7c78f20730ef44a8e1d490cc2efbb2a1cf1cd1c5bb21a63bf8343df7ba1b17e",
   ],
   [path.join("skills", "writer-expertise", "SKILL.md")]: [
+    // Ruling 699's second note of 2026-10-08, after the first live post:
+    // before the manual kept out of the writer's note what a later picture
+    // makes untrue (a count of the whole file, "no pictures").
+    "d6d81936257867a5e9989e6986262d8cbcc034a69b4f350c6f15eaaa21da6c11",
     // Ruling 699 (2026-10-08): before the manual left the diagrams and the
     // cover to a board's drawing agent where it has one.
     "8c133fa610e494f0497b114cf71f64f08d91c9d08e6974634f1f4129fb64e870",
@@ -630,11 +634,19 @@ export const PRIOR_SHIPPED_HASHES: PriorShippedHashes = {
     // reads from a half-size look at the drawing, and stopped the run reading
     // the writer's brief and proving by hash that the piece was unchanged.
     "e9fc50d6d8b5faec3d5cc42c1769c1294f754b1c646e8b4a7bbd2149f9041cb4",
+    // Ruling 699's second note of 2026-10-08, after the first live post:
+    // before the manual said what the agent does not prove (no hash, copy,
+    // diff or second render) and that a file of fields is never pictured.
+    "dee86c6136a016eeaf393b461996152fd62ee49ac879b9ad61a7ece73dbb3564",
   ],
   [path.join("skills", "cover-designer-expertise", "SKILL.md")]: [
     // Ruling 699's note of 2026-10-08: before the manual kept a first cover's
     // look at their earlier covers to the covers themselves.
     "2d5812d25c1d2a95b4dbc865c37fba3eec8c743bf4b0923fdcb51bf88940f5e0",
+    // Ruling 699's second note of 2026-10-08, after the first live post:
+    // before the manual said what the agent does not prove, and that a
+    // change to a file beside the piece is an exact replacement.
+    "943933d71103d9fc7665ba1ce87f887129cc87394d5171ecb09c81d857afbf78",
   ],
   [path.join("skills", "reviewer-expertise", "SKILL.md")]: [
     // Ruling 690 (2026-10-07): before the guardrails said to check a claim

@@ -13,6 +13,8 @@ import {
   resetEnvCacheForTests,
 } from "~/server/config/env.server";
 import { taskDir } from "~/server/files/file-store-root.server";
+import { COMPACTING_AFTER_RUN_STEP, RUN_PHASE } from "~/server/runtimes/adapter.server";
+import { COMPLETION_COMPACT_DEADLINE_MS } from "~/server/runtimes/context-policy.server";
 import { logger } from "~/server/logging/logger.server";
 import { rebuildAll } from "~/server/projections/rebuilder.server";
 import { formatBytes, measureDataRootSpace } from "./disk-space.server";
@@ -166,6 +168,31 @@ describe("runMaintenancePass (gaps 15 + 20)", () => {
       dataRoot: store.dataRoot,
     });
     expect(result.workspacesSkipped).toBeNull();
+    expect(existsSync(workspace)).toBe(false);
+  });
+
+  it("ruling 701: a finished run whose session is still being compacted holds its folder", () => {
+    // The compaction's CLI works in the run's folder after the run has
+    // ended. CANARY: count live rows alone and a pass removes it under that
+    // process.
+    const store = storeWithTerminalTask();
+    const workspace = seedWorkspace(store, "VIB-1");
+    insertRun(store, "run_done", "finished");
+    store.db
+      .prepare(`UPDATE agent_runs SET phase = ?, step = ?, finished_at = ? WHERE id = 'run_done'`)
+      .run(RUN_PHASE.compacting, COMPACTING_AFTER_RUN_STEP, new Date().toISOString());
+    expect(activeRunCount(store.db)).toBe(1);
+    const held = runMaintenancePass(store.db, { reason: "interval", dataRoot: store.dataRoot });
+    expect(held.workspacesSkipped).toBe("active-runs");
+    expect(existsSync(workspace)).toBe(true);
+    // A mark that outlived twice the compaction's deadline is one whose clear
+    // failed, not a compaction. CANARY: count every marked row and one failed
+    // write holds every folder until the next restart.
+    expect(activeRunCount(store.db, Date.now() + 2 * COMPLETION_COMPACT_DEADLINE_MS + 1_000)).toBe(0);
+    // The mark goes when the compaction is over, and the folder with it.
+    store.db.prepare(`UPDATE agent_runs SET phase = NULL, step = NULL WHERE id = 'run_done'`).run();
+    expect(activeRunCount(store.db)).toBe(0);
+    runMaintenancePass(store.db, { reason: "interval", dataRoot: store.dataRoot });
     expect(existsSync(workspace)).toBe(false);
   });
 

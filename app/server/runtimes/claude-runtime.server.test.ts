@@ -2616,6 +2616,32 @@ describe("claude adapter compact() (ruling 376)", () => {
     expect(lines[1]!.facts.cache).toBeUndefined();
   });
 
+  it("ruling 701: stops its request when the run service stops waiting for it", async () => {
+    // The request has no timeout of its own. CANARY: build the request with
+    // an abort controller nothing ever aborts, and a compaction given up at
+    // its deadline keeps its CLI until the sweep finds it.
+    const { q } = fakeQuery([
+      { type: "system", subtype: "compact_boundary", compact_metadata: { trigger: "manual", pre_tokens: 120_000, post_tokens: 18_000 } },
+      { type: "result", subtype: "success", is_error: false, num_turns: 1, usage: { input_tokens: 0, output_tokens: 0 }, total_cost_usd: 0.1 },
+    ]);
+    let requestAbort: AbortController | undefined;
+    const adapter = createClaudeAdapter({
+      queryFn: (args) => {
+        requestAbort = args.options?.abortController;
+        return q;
+      },
+    });
+    const givenUp = new AbortController();
+    await adapter.compact!({ ...SPEC, env: { VIBERR_RUN_ID: "r1" } }, "sess-1", {
+      onLine: () => {},
+      onPhase: () => {},
+      signal: givenUp.signal,
+    });
+    expect(requestAbort?.signal.aborted).toBe(false);
+    givenUp.abort();
+    expect(requestAbort?.signal.aborted).toBe(true);
+  });
+
   it("ruling 536: records the compaction's own share when the resumed session reports its totals", async () => {
     // The live controller turn of 2026-09-28: the run's result, then the
     // `/compact` on its resumed session, whose result carried the SESSION's

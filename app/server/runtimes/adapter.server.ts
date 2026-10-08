@@ -310,6 +310,24 @@ export interface RunCallbacks {
  *  types, because the controller page names the phase too (ruling 457). */
 export { RUN_PHASE } from "~/features/runtime/runtime-types";
 
+/**
+ * Ruling 701: the step a FINISHED specialist run carries, beside the phase
+ * `RUN_PHASE.compacting`, for as long as its session is being compacted after
+ * it. The run service writes and clears it. It is the durable record that a
+ * compaction is in flight on a row that is terminal: boot recovery finishes
+ * what a restart cut, and the workspace reclaim counts the run as still
+ * holding its folder.
+ */
+export const COMPACTING_AFTER_RUN_STEP = "after the run ended";
+
+/**
+ * Ruling 701: the step of a `queued` run that waits for its session, which is
+ * still being compacted after the run that left it, and not for a slot. The
+ * console's footer prints it in place of the cap's reason, and the restart
+ * note says it of a run a restart found waiting so.
+ */
+export const SESSION_SETTLING_STEP = "waiting for the summary of its last run";
+
 /** Longest `step` we persist — the strip truncates at ~44ch and the column is
  *  a live hint, not a transcript. */
 const STEP_MAX = 120;
@@ -402,7 +420,13 @@ export type CompactOutcome =
 
 /** The callbacks a completion compaction drives: the same line sink and
  *  phase writer as the run it closes; no exit, it returns its outcome. */
-export type CompactCallbacks = Pick<RunCallbacks, "onLine" | "onPhase">;
+export type CompactCallbacks = Pick<RunCallbacks, "onLine" | "onPhase"> & {
+  /** Ruling 701: aborted when the run service stops waiting for the
+   *  compaction (`COMPLETION_COMPACT_DEADLINE_MS`). An adapter that can stop
+   *  its request stops it; the service sweeps the compaction's process by its
+   *  marker either way and drops what is said after. */
+  signal?: AbortSignal;
+};
 
 export interface RuntimeAdapter {
   readonly backend: RunBackend;
