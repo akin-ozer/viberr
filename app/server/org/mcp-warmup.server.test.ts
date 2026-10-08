@@ -1,6 +1,8 @@
 import { EventEmitter } from "node:events";
+import type { DatabaseSync } from "node:sqlite";
 import { afterEach, describe, expect, it } from "vitest";
 import { z } from "zod";
+import { waitFor } from "../../../test-support/polling";
 import { createTestDbContext } from "../../../test-support/test-db";
 import {
   listMcpServers,
@@ -89,7 +91,11 @@ const silentSpawn: McpSpawn = () => ({
   kill() {},
 });
 
-const settle = () => new Promise((r) => setTimeout(r, 120));
+/** A warm-up has ended once its row stops claiming to install: the runner
+ *  clears the flag after its verdict lands, and arms a re-point's warm-up in
+ *  the same turn. */
+const warmedUp = (db: DatabaseSync, name: string) =>
+  waitFor(() => listMcpServers(db).find((m) => m.name === name)?.warmingSince === null, `${name}'s warm-up`);
 
 describe("startMcpWarmup (R19-18)", () => {
   it("flags the row installing, then turns it green on its own", async () => {
@@ -105,7 +111,7 @@ describe("startMcpWarmup (R19-18)", () => {
     expect(saved.mcp.warmingSince).not.toBeNull();
     expect(saved.toast).toContain("installing in the background");
 
-    await settle();
+    await warmedUp(db, "slow-stdio");
     const row = listMcpServers(db).find((m) => m.name === "slow-stdio")!;
     expect(row).toMatchObject({ up: true, tools: 2, warmingSince: null, lastError: null });
   });
@@ -119,9 +125,8 @@ describe("startMcpWarmup (R19-18)", () => {
       ACTOR,
       { spawnImpl: installerSpawn(10_000), timeoutMs: 5, capMs: 40 },
     );
-    await settle();
+    await warmedUp(db, "doomed-stdio");
     const row = listMcpServers(db).find((m) => m.name === "doomed-stdio")!;
-    expect(row.warmingSince).toBeNull();
     expect(row.up).toBe(false);
     expect(row.lastError).toBeTruthy();
   });
@@ -151,14 +156,13 @@ describe("startMcpWarmup (R19-18)", () => {
       saved.mcp.id,
     );
 
-    await settle();
+    // The warm-up ends, and the row is not left claiming to install forever.
+    await warmedUp(db, "moving-stdio");
     const row = listMcpServers(db).find((m) => m.name === "moving-stdio")!;
     expect(row.target).toBe("uvx replacement");
     // The old command's success did not become the new command's.
     expect(row.up).not.toBe(true);
     expect(row.tools).toBeNull();
-    // …and the row is not left claiming to install forever.
-    expect(row.warmingSince).toBeNull();
   });
 
   /**
@@ -195,9 +199,8 @@ describe("startMcpWarmup (R19-18)", () => {
       { spawnImpl: installerSpawn(40, 5), timeoutMs: 5, capMs: 5000 },
     );
 
-    // A finishes (~60ms), which re-arms B; B finishes (~40ms).
-    await settle();
-    await settle();
+    // A finishes (~60ms) and re-arms B in the same turn; B finishes (~40ms).
+    await warmedUp(db, "moving2");
     const row = listMcpServers(db).find((m) => m.name === "moving2")!;
     expect(row.target).toBe("uvx replacement");
     // The NEW command's own verdict landed — green, with ITS tool count.
@@ -223,7 +226,7 @@ describe("startMcpWarmup (R19-18)", () => {
     expect(row.lastError).toBeTruthy();
     // The orphaned warm-up still writes its verdict; let it land before the
     // database closes.
-    await settle();
+    await new Promise((r) => setTimeout(r, 120));
   });
 });
 
@@ -250,7 +253,8 @@ describe("first-run npx warm-up (R20-4 / N20-2)", () => {
     );
     expect(evid.mcp.warmingSince).not.toBeNull();
     expect(evid.mcp.heuristicWarmups).toBe(0);
-    await settle();
+    await warmedUp(db, "cold-npx");
+    await warmedUp(db, "loud-uvx");
   });
 
   it("a warm-up that finally answers stamps first_success_at", async () => {
@@ -264,7 +268,7 @@ describe("first-run npx warm-up (R20-4 / N20-2)", () => {
     );
     expect(saved.mcp.firstSuccessAt ?? null).toBeNull();
 
-    await settle();
+    await warmedUp(db, "cold-npx");
     const row = listMcpServers(db).find((m) => m.name === "cold-npx")!;
     expect(row).toMatchObject({ up: true, warmingSince: null });
     expect(row.firstSuccessAt).toBeTruthy();
@@ -282,7 +286,7 @@ describe("first-run npx warm-up (R20-4 / N20-2)", () => {
     expect(
       listMcpServers(db).find((m) => m.name === "orphan-npx")!.heuristicWarmups,
     ).toBe(1);
-    await settle();
+    await warmedUp(db, "orphan-npx");
 
     // Simulate the process that owned the warm-up going away mid-install.
     db.prepare(`UPDATE org_mcp_servers SET warming_since = ? WHERE name = 'orphan-npx'`)

@@ -12,6 +12,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import { z } from "zod";
 import { unreachableFetch } from "../../../test-support/fake-github";
 import { startHttpUpstream, startSseUpstream } from "../../../test-support/mcp-upstream";
+import { waitFor } from "../../../test-support/polling";
 import { createTestDbContext } from "../../../test-support/test-db";
 import { listAuditEvents } from "../../../test-support/audit-log";
 import { writeBoardHolding } from "../../../test-support/resource-boards";
@@ -1121,9 +1122,11 @@ describe("MCP probe crash-safety, honesty, and teardown (pass 20)", () => {
     expect(saved.toast).toContain("installing in the background");
 
     // Let the (also silent) warm-up time out and settle the row down.
-    await new Promise((r) => setTimeout(r, 120));
+    await waitFor(
+      () => listMcpServers(db).find((m) => m.name === "cold-npx")?.warmingSince === null,
+      "cold-npx's warm-up",
+    );
     const afterWarmup = listMcpServers(db).find((m) => m.name === "cold-npx")!;
-    expect(afterWarmup.warmingSince).toBeNull();
     expect(afterWarmup.up).toBe(false);
     expect(afterWarmup.firstSuccessAt ?? null).toBeNull();
     expect(afterWarmup.heuristicWarmups).toBe(1);
