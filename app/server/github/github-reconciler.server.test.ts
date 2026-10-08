@@ -61,7 +61,13 @@ afterEach(ctx.cleanup);
 
 const REPO_PATH = "/repos/akin-ozer/viberr";
 
-function setup() {
+/**
+ * VIB-301 at Review on `vib-301-workspace`, owned by arda and owning PR #318,
+ * with a PAT bound to the project. `fmPatch` is spread last, so a test states
+ * only what its scenario changes (`{ stage: "impl", pr: null }` for a task
+ * that never opened a PR).
+ */
+function setup(fmPatch: Parameters<typeof baseTaskFrontmatter>[1] = {}) {
   const store = setupTestStore(ctx);
   writeTask(store.dataRoot, store.slug, {
     frontmatter: baseTaskFrontmatter("VIB-301", {
@@ -75,6 +81,7 @@ function setup() {
       // the branch, which is precisely the bug: a task-key branch is not unique,
       // and on a reused key that adopts a previous task's PR.
       pr: { number: 318, state: "review", title: "Attach execution workspace" },
+      ...fmPatch,
     }),
   });
   rebuildAll(store.db, { dataRoot: store.dataRoot });
@@ -275,33 +282,17 @@ describe("reconcileTask", () => {
   });
 
   it("R17-1: an owned PR head AHEAD of the reviewed revision records revisionDrift", async () => {
-    const store = setupTestStore(ctx);
-    writeTask(store.dataRoot, store.slug, {
-      frontmatter: baseTaskFrontmatter("VIB-301", {
-        title: "Attach execution workspace",
-        stage: "review",
+    const { store, actor } = setup({
+      // The delivered/reviewed revision is NOT the current PR head.
+      workRevision: {
+        id: "rev_1",
+        headSha: "rev0delivered",
+        treeSha: null,
         branch: "vib-301-workspace",
-        ownerUserId: store.users.arda.id,
-        pr: { number: 318, state: "review", title: "Attach execution workspace" },
-        // The delivered/reviewed revision is NOT the current PR head.
-        workRevision: {
-          id: "rev_1",
-          headSha: "rev0delivered",
-          treeSha: null,
-          branch: "vib-301-workspace",
-          createdAt: "2026-08-04T08:00:00.000Z",
-          sourceProfileId: "developer",
-        },
-      }),
+        createdAt: "2026-08-04T08:00:00.000Z",
+        sourceProfileId: "developer",
+      },
     });
-    rebuildAll(store.db, { dataRoot: store.dataRoot });
-    const actor = { userId: store.users.arda.id, label: "arda@viberr.test" };
-    const pat = createPat(
-      store.db,
-      { userId: store.users.arda.id, label: "bot", token: "ghp_reconciler02" },
-      actor,
-    );
-    setProjectCredential(store.db, { projectSlug: store.slug, patId: pat.id }, actor);
 
     const routes = happyRoutes();
     // The reviewed revision is an ancestor of the head, plus 2 extra commits.
@@ -320,32 +311,16 @@ describe("reconcileTask", () => {
     // commits past what was reviewed" while a human decides rework vs archive —
     // was therefore structurally blind to it, one pass after it was true.
     // Canary: drop the carry-forward → drift is `undefined` after the close.
-    const store = setupTestStore(ctx);
-    writeTask(store.dataRoot, store.slug, {
-      frontmatter: baseTaskFrontmatter("VIB-301", {
-        title: "Attach execution workspace",
-        stage: "review",
+    const { store, actor } = setup({
+      workRevision: {
+        id: "rev_1",
+        headSha: "rev0delivered",
+        treeSha: null,
         branch: "vib-301-workspace",
-        ownerUserId: store.users.arda.id,
-        pr: { number: 318, state: "review", title: "Attach execution workspace" },
-        workRevision: {
-          id: "rev_1",
-          headSha: "rev0delivered",
-          treeSha: null,
-          branch: "vib-301-workspace",
-          createdAt: "2026-08-04T08:00:00.000Z",
-          sourceProfileId: "developer",
-        },
-      }),
+        createdAt: "2026-08-04T08:00:00.000Z",
+        sourceProfileId: "developer",
+      },
     });
-    rebuildAll(store.db, { dataRoot: store.dataRoot });
-    const actor = { userId: store.users.arda.id, label: "arda@viberr.test" };
-    const pat = createPat(
-      store.db,
-      { userId: store.users.arda.id, label: "bot", token: "ghp_reconciler04" },
-      actor,
-    );
-    setProjectCredential(store.db, { projectSlug: store.slug, patId: pat.id }, actor);
     const readFm = () => readVib301(store)!.parsed.frontmatter;
 
     // Pass 1 — the PR is open and its head carries 2 commits the review never saw.
@@ -398,33 +373,17 @@ describe("reconcileTask", () => {
   });
 
   it("R17-1: a head IDENTICAL to the reviewed revision records no drift (no extra compare)", async () => {
-    const store = setupTestStore(ctx);
-    writeTask(store.dataRoot, store.slug, {
-      frontmatter: baseTaskFrontmatter("VIB-301", {
-        title: "Attach execution workspace",
-        stage: "review",
+    const { store, actor } = setup({
+      // Reviewed revision == the live PR head — no drift, no compare call.
+      workRevision: {
+        id: "rev_1",
+        headSha: "headsha318",
+        treeSha: null,
         branch: "vib-301-workspace",
-        ownerUserId: store.users.arda.id,
-        pr: { number: 318, state: "review", title: "Attach execution workspace" },
-        // Reviewed revision == the live PR head — no drift, no compare call.
-        workRevision: {
-          id: "rev_1",
-          headSha: "headsha318",
-          treeSha: null,
-          branch: "vib-301-workspace",
-          createdAt: "2026-08-04T08:00:00.000Z",
-          sourceProfileId: "developer",
-        },
-      }),
+        createdAt: "2026-08-04T08:00:00.000Z",
+        sourceProfileId: "developer",
+      },
     });
-    rebuildAll(store.db, { dataRoot: store.dataRoot });
-    const actor = { userId: store.users.arda.id, label: "arda@viberr.test" };
-    const pat = createPat(
-      store.db,
-      { userId: store.users.arda.id, label: "bot", token: "ghp_reconciler03" },
-      actor,
-    );
-    setProjectCredential(store.db, { projectSlug: store.slug, patId: pat.id }, actor);
     // No `rev...head` compare route is registered, and the fake answers an
     // unknown route 404 (which reads as a never-pushed revision), so the call
     // itself is what gets asserted: the shas are equal and none is made.
@@ -447,18 +406,12 @@ describe("reconcileTask", () => {
     // moving the task to Review while its developer was still writing code.
     // The task's own delivered revision was not in that PR and never had been.
     // Canary: drop `&& ownsAPr` from newPr and this adopts #318 again.
-    const { store, actor } = setup();
-    writeTask(store.dataRoot, store.slug, {
-      frontmatter: baseTaskFrontmatter("VIB-301", {
-        title: "Attach execution workspace",
-        stage: "impl",
-        branch: "vib-301-workspace",
-        ownerUserId: store.users.arda.id,
-        // No `pr`: this task never opened one. The PR on the branch is a
-        // stranger's.
-      }),
+    const { store, actor } = setup({
+      stage: "impl",
+      // No `pr`: this task never opened one. The PR on the branch is a
+      // stranger's.
+      pr: null,
     });
-    rebuildAll(store.db, { dataRoot: store.dataRoot });
 
     await reconcileVib301(store, actor, fakeGithubFetch(happyRoutes()).fetchImpl);
 
@@ -492,17 +445,11 @@ describe("reconcileTask", () => {
     // nothing as this task's.
     // Canary: drop `&& !unownedPr` from `prefixCommits` and the foreign
     // `[VIB-301]` commits land in `github.commits` again.
-    const { store, actor } = setup();
-    writeTask(store.dataRoot, store.slug, {
-      frontmatter: baseTaskFrontmatter("VIB-301", {
-        title: "Attach execution workspace",
-        stage: "impl",
-        branch: "vib-301-workspace",
-        ownerUserId: store.users.arda.id,
-        // No pr, no workRevision: nothing was ever delivered by THIS task.
-      }),
+    const { store, actor } = setup({
+      stage: "impl",
+      // No pr, no workRevision: nothing was ever delivered by THIS task.
+      pr: null,
     });
-    rebuildAll(store.db, { dataRoot: store.dataRoot });
 
     await reconcileVib301(store, actor, fakeGithubFetch(happyRoutes()).fetchImpl);
 
@@ -521,16 +468,10 @@ describe("reconcileTask", () => {
     // the collision only by visiting the task page. The adoption and the
     // divergence trio already notify from this same pass; the collision did
     // not. Canary: drop the collision `notifyTaskWatchers` call.
-    const { store, actor } = setup();
-    writeTask(store.dataRoot, store.slug, {
-      frontmatter: baseTaskFrontmatter("VIB-301", {
-        title: "Attach execution workspace",
-        stage: "impl",
-        branch: "vib-301-workspace",
-        ownerUserId: store.users.arda.id,
-      }),
+    const { store, actor } = setup({
+      stage: "impl",
+      pr: null,
     });
-    rebuildAll(store.db, { dataRoot: store.dataRoot });
     const policyNotes = () =>
       listNotifications(store.db, store.users.arda.id).filter((n) => n.kind === "policy");
 
@@ -558,17 +499,10 @@ describe("reconcileTask", () => {
     // it against GitHub when the explicit close was refused.
     // Canary: gate the event on `close.ok` again and the 422 arm below writes
     // nothing about PR #318.
-    const { store, actor } = setup();
-    writeTask(store.dataRoot, store.slug, {
-      frontmatter: baseTaskFrontmatter("VIB-301", {
-        title: "Attach execution workspace",
-        stage: "review",
-        branch: "vib-301-workspace",
-        ownerUserId: store.users.arda.id,
-        github: { commits: [], changed: null, unownedPr: 318 },
-      }),
+    const { store, actor } = setup({
+      github: { commits: [], changed: null, unownedPr: 318 },
+      pr: null,
     });
-    rebuildAll(store.db, { dataRoot: store.dataRoot });
     const gh = fakeGithubFetch({
       [`DELETE ${REPO_PATH}/git/refs/heads/vib-301-workspace`]: { status: 204, body: "" },
       [`PATCH ${REPO_PATH}/pulls/318`]: {
@@ -612,17 +546,11 @@ describe("reconcileTask", () => {
     // task's footprint with no collision row to explain them.
     // Canary: relax `deliveredThisBranch` back to `!unownedPr` (drop the
     // positive test) and the two foreign commits land in `github.commits`.
-    const { store, actor } = setup();
-    writeTask(store.dataRoot, store.slug, {
-      frontmatter: baseTaskFrontmatter("VIB-301", {
-        title: "Attach execution workspace",
-        stage: "impl",
-        branch: "vib-301-workspace",
-        ownerUserId: store.users.arda.id,
-        // No pr, no workRevision: this task has delivered nothing anywhere.
-      }),
+    const { store, actor } = setup({
+      stage: "impl",
+      // No pr, no workRevision: this task has delivered nothing anywhere.
+      pr: null,
     });
-    rebuildAll(store.db, { dataRoot: store.dataRoot });
 
     const routes = happyRoutes();
     // Nobody opened a PR on the branch — the squatter is the branch itself.
@@ -642,18 +570,12 @@ describe("reconcileTask", () => {
   it("ruling 161 (U35-8): a head the task's record does not account for is written as github.foreignHead", async () => {
     // Canary: drop the `foreignHead` write in the reconciler and both records
     // below are absent; the archive dialog then cannot say what origin holds.
-    const { store, actor } = setup();
+    const { store, actor } = setup({
+      stage: "impl",
+      pr: null,
+    });
     const fmOf = () => readVib301(store)!.parsed.frontmatter;
     // 1. A stranger's PR stands on the branch: its head is the foreign head.
-    writeTask(store.dataRoot, store.slug, {
-      frontmatter: baseTaskFrontmatter("VIB-301", {
-        title: "Attach execution workspace",
-        stage: "impl",
-        branch: "vib-301-workspace",
-        ownerUserId: store.users.arda.id,
-      }),
-    });
-    rebuildAll(store.db, { dataRoot: store.dataRoot });
     await reconcileVib301(store, actor, fakeGithubFetch(happyRoutes()).fetchImpl);
     expect(fmOf().github?.unownedPr).toBe(318);
     expect(fmOf().github?.foreignHead).toEqual({ sha: "headsha318", prNumber: 318 });
@@ -718,24 +640,18 @@ describe("reconcileTask", () => {
     // so the branch's `[VIB-301]` commits are its own — before any PR exists.
     // Canary: narrow `deliveredThisBranch` to `ownsAPr || fm.pr !== null` and
     // this task's real commits vanish from its footprint.
-    const { store, actor } = setup();
-    writeTask(store.dataRoot, store.slug, {
-      frontmatter: baseTaskFrontmatter("VIB-301", {
-        title: "Attach execution workspace",
-        stage: "impl",
+    const { store, actor } = setup({
+      stage: "impl",
+      workRevision: {
+        id: "rev_1",
+        headSha: "a91f7c2ffff",
+        treeSha: null,
         branch: "vib-301-workspace",
-        ownerUserId: store.users.arda.id,
-        workRevision: {
-          id: "rev_1",
-          headSha: "a91f7c2ffff",
-          treeSha: null,
-          branch: "vib-301-workspace",
-          createdAt: "2026-08-31T08:00:00.000Z",
-          sourceProfileId: "developer",
-        },
-      }),
+        createdAt: "2026-08-31T08:00:00.000Z",
+        sourceProfileId: "developer",
+      },
+      pr: null,
     });
-    rebuildAll(store.db, { dataRoot: store.dataRoot });
 
     const routes = happyRoutes();
     routes[`GET ${REPO_PATH}/pulls`] = { body: [] };
@@ -760,25 +676,19 @@ describe("reconcileTask", () => {
     // Canary: restore `commits: branchCommits ?? existingCommits` and
     // `changed: ownedChanged ?? existingGithub?.changed ?? null` and the stale
     // foreign footprint survives every reconcile forever.
-    const { store, actor } = setup();
-    writeTask(store.dataRoot, store.slug, {
-      frontmatter: baseTaskFrontmatter("VIB-301", {
-        title: "Attach execution workspace",
-        stage: "impl",
-        branch: "vib-301-workspace",
-        ownerUserId: store.users.arda.id,
-        // No pr, no workRevision — but a footprint an earlier pass wrote.
-        github: {
-          commits: [
-            { sha: "a91f7c2", msg: "[VIB-301] add repo attach policy gate" },
-            { sha: "4ce0b18", msg: "[VIB-301] branch reconciler" },
-          ],
-          changed: { files: 14, add: 313, del: 30 },
-          unownedPr: null,
-        },
-      }),
+    const { store, actor } = setup({
+      stage: "impl",
+      // No pr, no workRevision — but a footprint an earlier pass wrote.
+      github: {
+        commits: [
+          { sha: "a91f7c2", msg: "[VIB-301] add repo attach policy gate" },
+          { sha: "4ce0b18", msg: "[VIB-301] branch reconciler" },
+        ],
+        changed: { files: 14, add: 313, del: 30 },
+        unownedPr: null,
+      },
+      pr: null,
     });
-    rebuildAll(store.db, { dataRoot: store.dataRoot });
 
     await reconcileVib301(store, actor, fakeGithubFetch(happyRoutes()).fetchImpl);
 
@@ -799,31 +709,24 @@ describe("reconcileTask", () => {
     // the branch stops new derivation (F31-1) but must not erase honest history.
     // Canary: gate `cachedCommits` on `provenBranchHead` instead of
     // `deliveredThisBranch` and the delivered footprint is wiped by the squatter.
-    const { store, actor } = setup();
-    writeTask(store.dataRoot, store.slug, {
-      frontmatter: baseTaskFrontmatter("VIB-301", {
-        title: "Attach execution workspace",
-        stage: "review",
+    const { store, actor } = setup({
+      // Delivered here, but the PR standing on the branch is somebody else's
+      // (its head is not this revision, so R16-1 refuses adoption).
+      workRevision: {
+        id: "rev_1",
+        headSha: "deliveredsha",
+        treeSha: null,
         branch: "vib-301-workspace",
-        ownerUserId: store.users.arda.id,
-        // Delivered here, but the PR standing on the branch is somebody else's
-        // (its head is not this revision, so R16-1 refuses adoption).
-        workRevision: {
-          id: "rev_1",
-          headSha: "deliveredsha",
-          treeSha: null,
-          branch: "vib-301-workspace",
-          createdAt: "2026-08-31T08:00:00.000Z",
-          sourceProfileId: "developer",
-        },
-        github: {
-          commits: [{ sha: "de11ver", msg: "delivered from the workspace" }],
-          changed: null,
-          unownedPr: null,
-        },
-      }),
+        createdAt: "2026-08-31T08:00:00.000Z",
+        sourceProfileId: "developer",
+      },
+      github: {
+        commits: [{ sha: "de11ver", msg: "delivered from the workspace" }],
+        changed: null,
+        unownedPr: null,
+      },
+      pr: null,
     });
-    rebuildAll(store.db, { dataRoot: store.dataRoot });
 
     await reconcileVib301(store, actor, fakeGithubFetch(happyRoutes()).fetchImpl);
 
@@ -847,17 +750,11 @@ describe("reconcileTask", () => {
     // Canary: drop `unownedPr: unownedPr?.number ?? null` from `newGithub` in
     // `reconcileTaskUnlocked` and the projected value reads null while the
     // task's own `pr` assertion still passes.
-    const { store, actor } = setup();
-    writeTask(store.dataRoot, store.slug, {
-      frontmatter: baseTaskFrontmatter("VIB-301", {
-        title: "Attach execution workspace",
-        stage: "impl",
-        branch: "vib-301-workspace",
-        ownerUserId: store.users.arda.id,
-        // No `pr`: this task opened nothing. #318 on the branch is a stranger's.
-      }),
+    const { store, actor } = setup({
+      stage: "impl",
+      // No `pr`: this task opened nothing. #318 on the branch is a stranger's.
+      pr: null,
     });
-    rebuildAll(store.db, { dataRoot: store.dataRoot });
 
     await reconcileVib301(store, actor, fakeGithubFetch(happyRoutes()).fetchImpl);
 
@@ -936,16 +833,10 @@ describe("reconcileTask", () => {
     // Polling stays — tracking PR updates is the point of it. What must not
     // repeat is the warning: ~288 identical notes a day would bury the timeline
     // the note exists to inform.
-    const { store, actor } = setup();
-    writeTask(store.dataRoot, store.slug, {
-      frontmatter: baseTaskFrontmatter("VIB-301", {
-        title: "Attach execution workspace",
-        stage: "impl",
-        branch: "vib-301-workspace",
-        ownerUserId: store.users.arda.id,
-      }),
+    const { store, actor } = setup({
+      stage: "impl",
+      pr: null,
     });
-    rebuildAll(store.db, { dataRoot: store.dataRoot });
     const run = () => reconcileVib301(store, actor, fakeGithubFetch(happyRoutes()).fetchImpl);
     await run();
     await run();
@@ -997,24 +888,10 @@ describe("reconcileTask", () => {
   it("preserves a human-set 'accepted' (merge-pending) state while the PR is still open", async () => {
     // D3/S2: a task accepted "merge pending" must NOT be downgraded to "review"
     // by a reconcile, or the "Complete merge" affordance silently disappears.
-    const store = setupTestStore(ctx);
-    writeTask(store.dataRoot, store.slug, {
-      frontmatter: baseTaskFrontmatter("VIB-301", {
-        title: "Attach execution workspace",
-        stage: "done",
-        branch: "vib-301-workspace",
-        ownerUserId: store.users.arda.id,
-        pr: { number: 318, state: "accepted", title: "Attach execution workspace" },
-      }),
+    const { store, actor } = setup({
+      stage: "done",
+      pr: { number: 318, state: "accepted", title: "Attach execution workspace" },
     });
-    rebuildAll(store.db, { dataRoot: store.dataRoot });
-    const actor = { userId: store.users.arda.id, label: "arda@viberr.test" };
-    const pat = createPat(
-      store.db,
-      { userId: store.users.arda.id, label: "bot", token: "ghp_reconciler02" },
-      actor,
-    );
-    setProjectCredential(store.db, { projectSlug: store.slug, patId: pat.id }, actor);
     await reconcileVib301(store, actor, fakeGithubFetch(happyRoutes()).fetchImpl);
     const fm = readVib301(store)!.parsed.frontmatter;
     expect(fm.pr?.state).toBe("accepted"); // still open on GitHub → stays accepted
@@ -1113,24 +990,10 @@ describe("reconcileTask", () => {
   });
 
   it("advances 'accepted' → 'merged' once GitHub reports the PR merged", async () => {
-    const store = setupTestStore(ctx);
-    writeTask(store.dataRoot, store.slug, {
-      frontmatter: baseTaskFrontmatter("VIB-301", {
-        title: "Attach execution workspace",
-        stage: "done",
-        branch: "vib-301-workspace",
-        ownerUserId: store.users.arda.id,
-        pr: { number: 318, state: "accepted", title: "Attach execution workspace" },
-      }),
+    const { store, actor } = setup({
+      stage: "done",
+      pr: { number: 318, state: "accepted", title: "Attach execution workspace" },
     });
-    rebuildAll(store.db, { dataRoot: store.dataRoot });
-    const actor = { userId: store.users.arda.id, label: "arda@viberr.test" };
-    const pat = createPat(
-      store.db,
-      { userId: store.users.arda.id, label: "bot", token: "ghp_reconciler02" },
-      actor,
-    );
-    setProjectCredential(store.db, { projectSlug: store.slug, patId: pat.id }, actor);
     const routes = happyRoutes();
     routes[`GET ${REPO_PATH}/pulls/318`] = {
       body: {
@@ -1254,30 +1117,19 @@ describe("reconcileTask", () => {
     expect(settled[2]).toMatchObject({ status: "fulfilled", value: { status: "reconciled" } });
   });
 
-  function seedWithRecs(store: TestStore) {
-    writeTask(store.dataRoot, store.slug, {
-      frontmatter: baseTaskFrontmatter("VIB-301", {
-        title: "Attach execution workspace",
-        stage: "review",
-        branch: "vib-301-workspace",
-        ownerUserId: store.users.arda.id,
-        // R15-15: this rewrite replaces setup()'s task wholesale, so it has to
-        // carry the same PR ownership — a divergence is only reportable about a
-        // PR the task actually owns.
-        pr: { number: 318, state: "review", title: "Attach execution workspace" },
-        recommendations: [
-          { id: "r-trans", kind: "transition", toStageId: "done", label: "Move VIB-301 to Done", detail: "" },
-          { id: "r-accept", kind: "accept_completion", toStageId: "done", label: "Accept completion", detail: "" },
-          { id: "r-assign", kind: "run_agent", profileId: "developer", label: "Run Developer", detail: "" },
-        ],
-      }),
+  /** The owned-PR fixture carrying a transition, an accept and an assign card. */
+  function setupWithRecs() {
+    return setup({
+      recommendations: [
+        { id: "r-trans", kind: "transition", toStageId: "done", label: "Move VIB-301 to Done", detail: "" },
+        { id: "r-accept", kind: "accept_completion", toStageId: "done", label: "Accept completion", detail: "" },
+        { id: "r-assign", kind: "run_agent", profileId: "developer", label: "Run Developer", detail: "" },
+      ],
     });
-    rebuildAll(store.db, { dataRoot: store.dataRoot });
   }
 
   it("R8-6: a CLOSED-out-of-band divergence withdraws the moot transition + accept_completion recs (assign survives)", async () => {
-    const { store, actor } = setup();
-    seedWithRecs(store);
+    const { store, actor } = setupWithRecs();
     const routes = happyRoutes();
     routes[`GET ${REPO_PATH}/pulls/318`] = {
       body: { number: 318, title: "Attach execution workspace", state: "closed",
@@ -1317,8 +1169,7 @@ describe("reconcileTask", () => {
     // Agent Review. A merged PR does not falsify advancing; it is the reason to.
     // Canary: put `divergenceText !== null` back in the transition filter and
     // `r-trans` disappears again.
-    const { store, actor } = setup();
-    seedWithRecs(store);
+    const { store, actor } = setupWithRecs();
     const { fm, divergence } = await mergedOutOfBand(store, actor);
     expect(fm.recommendations.map((r) => r.id).sort()).toEqual(["r-accept", "r-assign", "r-trans"]);
     // This task IS at the boundary (`review` → `done`), so the note says accept.
@@ -1331,8 +1182,7 @@ describe("reconcileTask", () => {
     // at In Progress to "Accept the completion" — the operator's own
     // `accept_completion` is refused there with "not Review", and no control
     // offers it.
-    const { store, actor } = setup();
-    seedWithRecs(store);
+    const { store, actor } = setupWithRecs();
     const file = readVib301(store)!;
     writeTask(store.dataRoot, store.slug, {
       frontmatter: { ...file.parsed.frontmatter, stage: "impl" },
@@ -1351,43 +1201,29 @@ describe("reconcileTask", () => {
     // A real agent committed WITHOUT the `[VIB-301]` prefix; the workspace
     // reconcile cached those commits. The server reconcile's prefix filter
     // finds nothing — it must keep the honest cache, not zero it.
-    const store = setupTestStore(ctx);
-    writeTask(store.dataRoot, store.slug, {
-      frontmatter: baseTaskFrontmatter("VIB-301", {
-        title: "Attach execution workspace",
-        stage: "review",
+    const { store, actor } = setup({
+      // The workspace delivery that captured those commits stamped the
+      // revision they came from in the same pass — the record that makes this
+      // branch (and so this cache) demonstrably the task's own (V5). Its head
+      // is the branch's PR head, so the reconcile owns the PR it discovers
+      // and the prefix filter actually runs.
+      workRevision: {
+        id: "rev_1",
+        headSha: "headsha318",
+        treeSha: null,
         branch: "vib-301-workspace",
-        ownerUserId: store.users.arda.id,
-        // The workspace delivery that captured those commits stamped the
-        // revision they came from in the same pass — the record that makes this
-        // branch (and so this cache) demonstrably the task's own (V5). Its head
-        // is the branch's PR head, so the reconcile owns the PR it discovers
-        // and the prefix filter actually runs.
-        workRevision: {
-          id: "rev_1",
-          headSha: "headsha318",
-          treeSha: null,
-          branch: "vib-301-workspace",
-          createdAt: "2026-07-01T09:00:00.000Z",
-          sourceProfileId: "developer",
-        },
-        github: {
-          commits: [
-            { sha: "a91f7c2", msg: "VIB-301: add repo attach policy gate" },
-            { sha: "4ce0b18", msg: "wire the branch reconciler" },
-          ],
-          changed: null,
-        },
-      }),
+        createdAt: "2026-07-01T09:00:00.000Z",
+        sourceProfileId: "developer",
+      },
+      github: {
+        commits: [
+          { sha: "a91f7c2", msg: "VIB-301: add repo attach policy gate" },
+          { sha: "4ce0b18", msg: "wire the branch reconciler" },
+        ],
+        changed: null,
+      },
+      pr: null,
     });
-    rebuildAll(store.db, { dataRoot: store.dataRoot });
-    const actor = { userId: store.users.arda.id, label: "arda@viberr.test" };
-    const pat = createPat(
-      store.db,
-      { userId: store.users.arda.id, label: "bot", token: "ghp_reconciler03" },
-      actor,
-    );
-    setProjectCredential(store.db, { projectSlug: store.slug, patId: pat.id }, actor);
 
     const routes = happyRoutes();
     routes[`GET ${REPO_PATH}/compare/main...vib-301-workspace`] = {
@@ -1475,24 +1311,10 @@ describe("reconcileTask", () => {
   });
 
   it("accepted PR closed on GitHub without merging → downgrade + typed policy event explaining why (B9)", async () => {
-    const store = setupTestStore(ctx);
-    writeTask(store.dataRoot, store.slug, {
-      frontmatter: baseTaskFrontmatter("VIB-301", {
-        title: "Attach execution workspace",
-        stage: "done",
-        branch: "vib-301-workspace",
-        ownerUserId: store.users.arda.id,
-        pr: { number: 318, state: "accepted", title: "Attach execution workspace" },
-      }),
+    const { store, actor } = setup({
+      stage: "done",
+      pr: { number: 318, state: "accepted", title: "Attach execution workspace" },
     });
-    rebuildAll(store.db, { dataRoot: store.dataRoot });
-    const actor = { userId: store.users.arda.id, label: "arda@viberr.test" };
-    const pat = createPat(
-      store.db,
-      { userId: store.users.arda.id, label: "bot", token: "ghp_reconciler04" },
-      actor,
-    );
-    setProjectCredential(store.db, { projectSlug: store.slug, patId: pat.id }, actor);
 
     const routes = happyRoutes();
     routes[`GET ${REPO_PATH}/pulls/318`] = {
@@ -2124,17 +1946,10 @@ describe("mergeTaskPr (the real merge behind accept_completion)", () => {
   });
 
   it("403 on a task WITHOUT a prior violation flags it with event + owner notification", async () => {
-    const { store, actor } = setup(); // VIB-301, owner arda, no violation yet
-    writeTask(store.dataRoot, store.slug, {
-      frontmatter: baseTaskFrontmatter("VIB-301", {
-        title: "Attach execution workspace",
-        stage: "review",
-        branch: "vib-301-workspace",
-        ownerUserId: store.users.arda.id,
-        pr: { number: 400, state: "review", title: "Workspace PR" },
-      }),
+    // VIB-301, owner arda, no violation yet.
+    const { store, actor } = setup({
+      pr: { number: 400, state: "review", title: "Workspace PR" },
     });
-    rebuildAll(store.db, { dataRoot: store.dataRoot });
 
     const result = await mergeTaskPr(
       store.db,
@@ -2611,27 +2426,17 @@ describe("reconcileTask records the human PR approval (R19-B)", () => {
 
   /** The happy fixture, plus a delivered revision whose head IS the PR head. */
   function setupDelivered(headSha = "headsha318"): ReturnType<typeof setup> {
-    const s = setup();
-    writeTask(s.store.dataRoot, s.store.slug, {
-      frontmatter: baseTaskFrontmatter("VIB-301", {
-        title: "Attach execution workspace",
-        stage: "review",
+    return setup({
+      workRevision: {
+        id: "rev_1",
+        headSha,
+        treeSha: null,
         branch: "vib-301-workspace",
-        ownerUserId: s.store.users.arda.id,
-        pr: { number: 318, state: "review", title: "Attach execution workspace" },
-        workRevision: {
-          id: "rev_1",
-          headSha,
-          treeSha: null,
-          branch: "vib-301-workspace",
-          createdAt: "2026-08-08T08:00:00Z",
-          sourceProfileId: "developer",
-          kind: "delivered",
-        },
-      }),
+        createdAt: "2026-08-08T08:00:00Z",
+        sourceProfileId: "developer",
+        kind: "delivered",
+      },
     });
-    rebuildAll(s.store.db, { dataRoot: s.store.dataRoot, force: true });
-    return s;
   }
 
   function readPr(store: TestStore) {
@@ -2753,7 +2558,6 @@ describe("reconcileTask records the human PR approval (R19-B)", () => {
 describe("ruling 135: the unpushed delivered revision", () => {
   const REV = "rev0delivered";
   function seedOwned(opts: { unpushed?: PrRef["unpushedRevision"]; kind?: "delivered" | "verified" } = {}) {
-    const store = setupTestStore(ctx);
     const pr: PrRef = { number: 318, state: "review", title: "Attach execution workspace" };
     if (opts.unpushed) pr.unpushedRevision = opts.unpushed;
     const workRevision: WorkRevision = {
@@ -2765,20 +2569,7 @@ describe("ruling 135: the unpushed delivered revision", () => {
       sourceProfileId: "developer",
     };
     if (opts.kind) workRevision.kind = opts.kind;
-    writeTask(store.dataRoot, store.slug, {
-      frontmatter: baseTaskFrontmatter("VIB-301", {
-        title: "Attach execution workspace",
-        stage: "review",
-        branch: "vib-301-workspace",
-        ownerUserId: store.users.arda.id,
-        pr,
-        workRevision,
-      }),
-    });
-    rebuildAll(store.db, { dataRoot: store.dataRoot });
-    const actor = { userId: store.users.arda.id, label: "arda@viberr.test" };
-    const pat = createPat(store.db, { userId: store.users.arda.id, label: "bot", token: "ghp_reconciler135" }, actor);
-    setProjectCredential(store.db, { projectSlug: store.slug, patId: pat.id }, actor);
+    const { store, actor } = setup({ pr, workRevision });
     const run = async (routes: FakeRoutes) => {
       await reconcileVib301(store, actor, fakeGithubFetch(routes).fetchImpl);
       return readVib301(store)!.parsed.frontmatter;
@@ -2927,12 +2718,8 @@ describe("F34-9: PR adoption is recorded", () => {
     };
   }
   function seedDelivered(pr: PrRef | null) {
-    const store = setupTestStore(ctx);
-    const fmPatch: Parameters<typeof baseTaskFrontmatter>[1] = {
-      title: "Attach execution workspace",
-      stage: "review",
-      branch: "vib-301-workspace",
-      ownerUserId: store.users.arda.id,
+    return setup({
+      pr,
       workRevision: {
         id: "rev_1",
         headSha: REV,
@@ -2941,14 +2728,7 @@ describe("F34-9: PR adoption is recorded", () => {
         createdAt: "2026-08-04T08:00:00.000Z",
         sourceProfileId: "developer",
       },
-    };
-    if (pr) fmPatch.pr = pr;
-    writeTask(store.dataRoot, store.slug, { frontmatter: baseTaskFrontmatter("VIB-301", fmPatch) });
-    rebuildAll(store.db, { dataRoot: store.dataRoot });
-    const actor = { userId: store.users.arda.id, label: "arda@viberr.test" };
-    const pat = createPat(store.db, { userId: store.users.arda.id, label: "bot", token: "ghp_reconciler349" }, actor);
-    setProjectCredential(store.db, { projectSlug: store.slug, patId: pat.id }, actor);
-    return { store, actor };
+    });
   }
   const adoptedLines = (store: ReturnType<typeof setupTestStore>) =>
     readVib301(store)!.parsed.timeline.filter(
@@ -3036,27 +2816,16 @@ describe("ruling 132: drift is classified, not counted", () => {
   const B = ["b1", "b2", "b3", "b4"].map((x) => x.padEnd(40, "0"));
   const A0 = "a0".padEnd(40, "0");
   function seedReviewed(opts: { recordMerge?: boolean; cachedDrift?: RevisionDrift } = {}) {
-    const store = setupTestStore(ctx);
     const pr: PrRef = { number: 318, state: "review", title: "Attach execution workspace" };
     if (opts.cachedDrift) pr.revisionDrift = opts.cachedDrift;
-    writeTask(store.dataRoot, store.slug, {
-      frontmatter: baseTaskFrontmatter("VIB-301", {
-        title: "Attach execution workspace",
-        stage: "review",
-        branch: "vib-301-workspace",
-        ownerUserId: store.users.arda.id,
-        pr,
-        workRevision: {
-          id: "rev_1", headSha: REV, treeSha: null, branch: "vib-301-workspace",
-          createdAt: "2026-08-04T08:00:00.000Z", sourceProfileId: "developer",
-        },
-        baseRefreshes: opts.recordMerge === false ? [] : [{ mergeSha: M, baseSha: B[3]!, base: "main", commits: 4, at: "2026-09-04T00:00:00.000Z" }],
-      }),
+    const { store, actor } = setup({
+      pr,
+      workRevision: {
+        id: "rev_1", headSha: REV, treeSha: null, branch: "vib-301-workspace",
+        createdAt: "2026-08-04T08:00:00.000Z", sourceProfileId: "developer",
+      },
+      baseRefreshes: opts.recordMerge === false ? [] : [{ mergeSha: M, baseSha: B[3]!, base: "main", commits: 4, at: "2026-09-04T00:00:00.000Z" }],
     });
-    rebuildAll(store.db, { dataRoot: store.dataRoot });
-    const actor = { userId: store.users.arda.id, label: "arda@viberr.test" };
-    const pat = createPat(store.db, { userId: store.users.arda.id, label: "bot", token: "ghp_reconciler132" }, actor);
-    setProjectCredential(store.db, { projectSlug: store.slug, patId: pat.id }, actor);
     const run = async (routes: FakeRoutes) => {
       await reconcileVib301(store, actor, fakeGithubFetch(routes).fetchImpl);
       return readVib301(store)!.parsed.frontmatter;
@@ -3147,7 +2916,26 @@ describe("ruling 179: a PR head moved after the verdict voids it", () => {
   const sinceRoute = `GET ${REPO_PATH}/compare/${REV}...${HEAD}`;
 
   function seedApproved(opts: { stage?: string; deployReviewerAt?: string[]; recs?: boolean } = {}) {
-    const store = setupTestStore(ctx);
+    const { store, actor } = setup({
+      stage: opts.stage ?? "review",
+      engagements: [
+        { profileId: "reviewer", backend: "claude", role: "Review", delivers: false, verdictCapable: true },
+      ],
+      pr: { number: 318, state: "review", title: "Attach execution workspace", headSha: REV },
+      workRevision: {
+        id: "rev_1", headSha: REV, treeSha: null, branch: "vib-301-workspace",
+        createdAt: "2026-08-04T08:00:00.000Z", sourceProfileId: "developer", kind: "delivered",
+      },
+      verdicts: [
+        { profileId: "reviewer", revisionId: "rev_1", headSha: REV, result: "approve", reason: "clean", at: "2026-09-11T15:00:00.000Z", rounds: 1 },
+      ],
+      validation: "healthy",
+      recommendations: opts.recs
+        ? [
+            { id: "rec_accept", kind: "accept_completion", toStageId: "done", label: "Accept completion and move VIB-301 to Done", detail: "for revision rev0del", forHeadSha: REV },
+          ]
+        : [],
+    });
     if (opts.deployReviewerAt) {
       const pf = readProjectFile({ projectSlug: store.slug, dataRoot: store.dataRoot })!;
       writeProject(store.dataRoot, {
@@ -3169,36 +2957,9 @@ describe("ruling 179: a PR head moved after the verdict voids it", () => {
           },
         ],
       });
+      // The project changed after the task was projected: project both again.
+      rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
     }
-    writeTask(store.dataRoot, store.slug, {
-      frontmatter: baseTaskFrontmatter("VIB-301", {
-        title: "Attach execution workspace",
-        stage: opts.stage ?? "review",
-        branch: "vib-301-workspace",
-        ownerUserId: store.users.arda.id,
-        engagements: [
-          { profileId: "reviewer", backend: "claude", role: "Review", delivers: false, verdictCapable: true },
-        ],
-        pr: { number: 318, state: "review", title: "Attach execution workspace", headSha: REV },
-        workRevision: {
-          id: "rev_1", headSha: REV, treeSha: null, branch: "vib-301-workspace",
-          createdAt: "2026-08-04T08:00:00.000Z", sourceProfileId: "developer", kind: "delivered",
-        },
-        verdicts: [
-          { profileId: "reviewer", revisionId: "rev_1", headSha: REV, result: "approve", reason: "clean", at: "2026-09-11T15:00:00.000Z", rounds: 1 },
-        ],
-        validation: "healthy",
-        recommendations: opts.recs
-          ? [
-              { id: "rec_accept", kind: "accept_completion", toStageId: "done", label: "Accept completion and move VIB-301 to Done", detail: "for revision rev0del", forHeadSha: REV },
-            ]
-          : [],
-      }),
-    });
-    rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
-    const actor = { userId: store.users.arda.id, label: "arda@viberr.test" };
-    const pat = createPat(store.db, { userId: store.users.arda.id, label: "bot", token: "ghp_reconciler179" }, actor);
-    setProjectCredential(store.db, { projectSlug: store.slug, patId: pat.id }, actor);
     const wakes: string[] = [];
     const run = async () => {
       const routes = happyRoutes();
@@ -3310,28 +3071,16 @@ describe("ruling 179: a PR head moved after the verdict voids it", () => {
  * offer the gate would refuse.
  */
 describe("pass 35 S15: ruling 162 in the reconciler", () => {
-  function seedWithAcceptRec(store: TestStore) {
-    writeTask(store.dataRoot, store.slug, {
-      frontmatter: baseTaskFrontmatter("VIB-301", {
-        title: "Attach execution workspace",
-        stage: "review",
-        branch: "vib-301-workspace",
-        ownerUserId: store.users.arda.id,
-        pr: { number: 318, state: "review", title: "Attach execution workspace", mergeable: "clean" },
-        recommendations: [
-          { id: "r-accept", kind: "accept_completion", toStageId: "done", label: "Accept completion and move VIB-301 to Done", detail: "" },
-          { id: "r-trans", kind: "transition", toStageId: "done", label: "Move VIB-301 to Done", detail: "" },
-          { id: "r-assign", kind: "run_agent", profileId: "developer", label: "Run Developer", detail: "" },
-        ],
-      }),
-    });
-    rebuildAll(store.db, { dataRoot: store.dataRoot });
-  }
-
   it("(d): a PR that flips to conflicting withdraws the pending accept_completion card with the gate's sentence on the timeline", async () => {
     // Canary: drop `conflictText` from the superseded filter.
-    const { store, actor } = setup();
-    seedWithAcceptRec(store);
+    const { store, actor } = setup({
+      pr: { number: 318, state: "review", title: "Attach execution workspace", mergeable: "clean" },
+      recommendations: [
+        { id: "r-accept", kind: "accept_completion", toStageId: "done", label: "Accept completion and move VIB-301 to Done", detail: "" },
+        { id: "r-trans", kind: "transition", toStageId: "done", label: "Move VIB-301 to Done", detail: "" },
+        { id: "r-assign", kind: "run_agent", profileId: "developer", label: "Run Developer", detail: "" },
+      ],
+    });
     const routes = happyRoutes();
     routes[`GET ${REPO_PATH}/pulls/318`] = {
       body: { number: 318, title: "Attach execution workspace", state: "open", merged: false,
@@ -3615,22 +3364,14 @@ describe("ruling 160: the reconciler records who closed the PR", () => {
   });
 
   it("a reopened PR drops the closure with the closed state", async () => {
-    const { store, actor } = setup();
-    writeTask(store.dataRoot, store.slug, {
-      frontmatter: baseTaskFrontmatter("VIB-301", {
+    const { store, actor } = setup({
+      pr: {
+        number: 318,
+        state: "closed",
         title: "Attach execution workspace",
-        stage: "review",
-        branch: "vib-301-workspace",
-        ownerUserId: store.users.arda.id,
-        pr: {
-          number: 318,
-          state: "closed",
-          title: "Attach execution workspace",
-          closure: { at: "2026-09-06T19:33:19.000Z", by: "akin-ozer", answered: null },
-        },
-      }),
+        closure: { at: "2026-09-06T19:33:19.000Z", by: "akin-ozer", answered: null },
+      },
     });
-    rebuildAll(store.db, { dataRoot: store.dataRoot });
     // happyRoutes: PR #318 is open again on GitHub.
     await reconcileVib301(store, actor, fakeGithubFetch(happyRoutes()).fetchImpl);
     const pr = read(store);
@@ -4061,27 +3802,18 @@ describe("ruling 496 (F40-72): an unchanged pass writes nothing", () => {
 
   /** VIB-301 delivered at {@link REV}, its PR recorded as `pr`. */
   function seed(pr: PrRef) {
-    const s = setup();
-    writeTask(s.store.dataRoot, s.store.slug, {
-      frontmatter: baseTaskFrontmatter("VIB-301", {
-        title: "Attach execution workspace",
-        stage: "review",
+    return setup({
+      pr,
+      workRevision: {
+        id: "rev_1",
+        headSha: REV,
+        treeSha: null,
         branch: "vib-301-workspace",
-        ownerUserId: s.store.users.arda.id,
-        pr,
-        workRevision: {
-          id: "rev_1",
-          headSha: REV,
-          treeSha: null,
-          branch: "vib-301-workspace",
-          createdAt: "2026-09-25T20:00:00.000Z",
-          sourceProfileId: "developer",
-          kind: "delivered",
-        },
-      }),
+        createdAt: "2026-09-25T20:00:00.000Z",
+        sourceProfileId: "developer",
+        kind: "delivered",
+      },
     });
-    rebuildAll(s.store.db, { dataRoot: s.store.dataRoot, force: true });
-    return s;
   }
 
   it("(a) the same refusal on the same PR keeps its first `at`: the second pass writes nothing and adds no row", async () => {
