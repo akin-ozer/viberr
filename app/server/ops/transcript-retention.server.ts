@@ -159,10 +159,6 @@ function pruneEmptyDirs(dir: string, depth = 6): void {
 export interface TranscriptRetentionOptions {
   dataRoot?: string;
   now?: Date;
-  /** Override the run-transcript window (days). 0 disables that half. */
-  transcriptDays?: number;
-  /** Override the session-home window (days). 0 disables that half. */
-  sessionDays?: number;
 }
 
 /**
@@ -174,8 +170,8 @@ export function pruneRuntimeTranscripts(
 ): TranscriptReclamation {
   const root = getDataRoot(options.dataRoot);
   const now = (options.now ?? new Date()).getTime();
-  const transcriptDays = options.transcriptDays ?? transcriptRetentionDays();
-  const sessionDays = options.sessionDays ?? sessionHomeRetentionDays();
+  const transcriptDays = transcriptRetentionDays();
+  const sessionDays = sessionHomeRetentionDays();
 
   let transcripts = 0;
   let sessions = 0;
