@@ -1171,7 +1171,9 @@ describe("U39-30: the answer does not wait for the compaction", () => {
     // check and the reply is posted twice.
     const { createConversation, listMessages } = await import("./controller-conversations.server");
     const { runControllerTurn } = await import("./controller-run.server");
-    const { queueFakeRun, queueFakeCompaction } = await import("../../../test-support/fake-runtime");
+    const { queueFakeRun, queueFakeCompaction, drainRunCompletions } = await import(
+      "../../../test-support/fake-runtime"
+    );
     const { getRun } = await import("~/server/runtimes/run-store.server");
     const conversation = createConversation(app.db, {
       userId: ownerId,
@@ -1222,7 +1224,7 @@ describe("U39-30: the answer does not wait for the compaction", () => {
       await new Promise((resolve) => setTimeout(resolve, 5));
     }
     // Let the settle that follows the compaction run.
-    for (let i = 0; i < 20; i += 1) await new Promise((resolve) => setTimeout(resolve, 5));
+    await drainRunCompletions();
     expect(duringCompaction).toEqual([answer]);
     const replies = listMessages(app.db, conversation.id).filter((m) => m.author === "controller");
     expect(replies.map((m) => [m.text, m.runId])).toEqual([[answer, result.runId]]);
@@ -1274,7 +1276,7 @@ describe("U39-30: the answer does not wait for the compaction", () => {
       if (state && state !== "running" && state !== "queued" && duringSecond) break;
       await new Promise((resolve) => setTimeout(resolve, 5));
     }
-    for (let i = 0; i < 20; i += 1) await new Promise((resolve) => setTimeout(resolve, 5));
+    await drainRunCompletions();
     expect(duringSecond).toEqual([answer, second]);
   });
 });

@@ -104,12 +104,13 @@ function logLines(runId: string): number {
 /** Wait until the run is terminal and its completion settle has run. */
 async function settled(runId: string): Promise<void> {
   const { getRun } = await import("~/server/runtimes/run-store.server");
+  const { drainRunCompletions } = await import("../../../test-support/fake-runtime");
   for (let i = 0; i < 400; i += 1) {
     const state = getRun(app.db, runId)?.state;
     if (state && state !== "running" && state !== "queued") break;
     await new Promise((resolve) => setTimeout(resolve, 5));
   }
-  for (let i = 0; i < 20; i += 1) await new Promise((resolve) => setTimeout(resolve, 5));
+  await drainRunCompletions();
 }
 
 /** Selin's turn in `conversationId`, played by the fake runtime. */
