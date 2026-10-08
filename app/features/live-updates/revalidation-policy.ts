@@ -256,7 +256,7 @@ const RECENT_EVENTS = 256;
  * loaders owe, the events it has recorded, and where its streams stand in the
  * broker's event ids.
  */
-export class LiveLedger {
+class LiveLedger {
   readonly router: DataRouter;
   /**
    * Ruling 457 (RF-1): the broker event id this tab stands at, for the first
