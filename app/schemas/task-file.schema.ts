@@ -408,7 +408,7 @@ export function supportingEngagements(fm: {
 
 /** Operator assignment — stage id captured when the operator attached
  * (ruling 16: store the stage id; UI renders "stage <1-based index>"). */
-export const operatorRefSchema = z
+const operatorRefSchema = z
   .object({ assignedAtStageId: z.string().min(1) })
   .loose();
 export type OperatorRef = z.infer<typeof operatorRefSchema>;
@@ -580,7 +580,7 @@ export type TaskSchedule = z.infer<typeof scheduleSchema>;
  * "accepted" = a human accepted the completion but the real merge is still
  * pending. Kept in ONE place; pr-linker/pr-open/reconcilers all write from
  * this set. */
-export const PR_STATE_VALUES = ["review", "merged", "closed", "accepted"] as const;
+const PR_STATE_VALUES = ["review", "merged", "closed", "accepted"] as const;
 export type PrState = (typeof PR_STATE_VALUES)[number];
 
 /**
@@ -634,7 +634,7 @@ export type PrMergeable = (typeof PR_MERGEABLE_VALUES)[number];
 
 /** P13-D-28: check-runs roll-up for the PR head sha. Fetched since phase 7 and
  * discarded until this pass — it now feeds the CI pill next to the PR pill. */
-export const prChecksSchema = z
+const prChecksSchema = z
   .object({
     total: z.number().int().min(0),
     passing: z.number().int().min(0),

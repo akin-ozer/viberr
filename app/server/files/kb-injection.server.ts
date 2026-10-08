@@ -199,7 +199,7 @@ export function collectKbDocs(dir: string): KbDoc[] {
  * run opens them from its shell. Walked by the rules {@link collectKbDocs}
  * walks by.
  */
-export function collectKbOtherFiles(dir: string): KbDoc[] {
+function collectKbOtherFiles(dir: string): KbDoc[] {
   return walkKbFiles(dir, (name) => !isInjectableKbDoc(name));
 }
 
@@ -557,7 +557,7 @@ export function resolveKbDocPath(
  *  document. The caller decides WHICH knowledge bases may be asked for — this
  *  reader does not know a run's grants and must never be handed an
  *  unfiltered name (ruling 283). */
-export function readKbDoc(
+function readKbDoc(
   kb: string,
   docPath: string,
   dataRoot?: string,
