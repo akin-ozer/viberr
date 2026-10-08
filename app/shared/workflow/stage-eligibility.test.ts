@@ -87,9 +87,6 @@ describe("resolveDeclaredStages", () => {
     expect(resolveDeclaredStages(["ready", "impl"], LEGACY_THREE.stages, LEGACY_THREE.workflow)).toEqual(
       ["todo", "doing"],
     );
-    expect(resolveDeclaredStages(["ready", "impl"], LEGACY_THREE.stages, LEGACY_THREE.workflow)).not.toContain(
-      "done",
-    );
     // No stage sits between entry and work there, so nothing fills `ready`.
     expect(resolveDeclaredStages(["ready"], LEGACY_THREE.stages, LEGACY_THREE.workflow)).toEqual([]);
   });

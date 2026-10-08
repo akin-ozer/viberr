@@ -104,7 +104,6 @@ describe("UTC variants (hydration-deterministic first pass)", () => {
       `${formatDayBucketUTC(today)} · ${formatClockUTC(today)}`,
     );
     expect(formatDayDotTimeUTC(yesterday)).toMatch(ABSOLUTE);
-    expect(formatDayDotTimeUTC(yesterday)).not.toContain("Yesterday");
   });
 });
 

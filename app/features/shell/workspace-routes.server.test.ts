@@ -267,7 +267,6 @@ describe("workspace layout loader (seeded)", () => {
         // …and identical to the LAYOUT loader's refusal, so switching surfaces
         // cannot be used as the oracle either.
         expect(nonMember.body).toBe("No project at projects/viberr-core.");
-        expect(nonMember.body).not.toMatch(/member/i);
       });
     }
 

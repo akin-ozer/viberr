@@ -144,13 +144,9 @@ describe("ruling 356: the hold sentence names a done entry as done, not as waite
       entry("AX-4", "done"),
       entry("AX-16", "done"),
     ]);
+    // No parenthesis opens straight after the pending entry, and every entry
+    // that is done says so inside its own.
     expect(s).toBe("AX-7, AX-4 (done) and AX-16 (done)");
-    // No parenthesis opens straight after the pending entry.
-    expect(s).not.toMatch(/AX-7 \(/);
-    // Every entry that is done says so inside its own parenthesis.
-    for (const label of ["AX-4", "AX-16"]) {
-      expect(s).toMatch(new RegExp(`${label} \\([^)]*done\\)`));
-    }
   });
 
   it("lists an all-done hold plainly: the release sweep is on its way", () => {
