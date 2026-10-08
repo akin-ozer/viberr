@@ -913,7 +913,7 @@ export interface RunStartResult {
 
 /** F21-13: the `meta` tag on the run's model-substitution disclosure line.
  *  A durable classified tag (no column, no migration), like `run·line_lost`. */
-export const MODEL_SUBSTITUTED_TAG = "run·model_substituted";
+const MODEL_SUBSTITUTED_TAG = "run·model_substituted";
 
 /** Ruling 636: the console line of a run that starts without a temporary
  *  directory of its own. */

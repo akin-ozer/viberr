@@ -16,7 +16,6 @@ import {
   configureRunServiceForTests,
   interruptRun,
   listRunsForTask,
-  MODEL_SUBSTITUTED_TAG,
   noteCompletionEffectsLost,
   registerRunCompletion,
   repoWriteWithheldFromDenylist,
@@ -1959,7 +1958,7 @@ describe("startRun — foreign model substitution is disclosed (F21-13)", () => 
     // never saw is the lie this closes.
     expect(getRun(store.db, runId)!.model).toBe(defaultModelFor("claude"));
     const first = listRunLines(store.db, runId)[0]!;
-    expect(first.display.tag).toBe(MODEL_SUBSTITUTED_TAG);
+    expect(first.display.tag).toBe("run·model_substituted");
     expect(first.display.text).toContain("gpt-5.6-terra");
     expect(first.display.text).toContain("Codex");
     expect(first.display.text).toContain("Claude");
@@ -1985,7 +1984,7 @@ describe("startRun — foreign model substitution is disclosed (F21-13)", () => 
     expect(getRun(store.db, runId)!.model).toBe("claude-sonnet-4-5");
     expect(
       listRunLines(store.db, runId).some(
-        (l) => l.display.tag === MODEL_SUBSTITUTED_TAG,
+        (l) => l.display.tag === "run·model_substituted",
       ),
     ).toBe(false);
   });

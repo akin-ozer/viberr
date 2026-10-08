@@ -82,7 +82,7 @@ import {
   connectFakeBackend,
   disconnectFakeBackend,
 } from "../../../test-support/backend-credentials";
-import { interruptRun, MODEL_SUBSTITUTED_TAG } from "~/server/runtimes/run-service.server";
+import { interruptRun } from "~/server/runtimes/run-service.server";
 import { startMcpGateway, stopMcpGateway } from "~/server/mcp-proxy/gateway.server";
 import { defaultModelFor } from "~/server/runtimes/model-catalog.server";
 import { assignReviewer, assignSpecialist, removeReviewer } from "./specialist-assignment.server";
@@ -1023,7 +1023,7 @@ describe("startAgentRun — delivering (specialist) dispatch, and ruling 133's s
     // … the run log OPENS with the F21-13 notice naming both models (the
     // profile's original id reached run-service, which did the swap) …
     const first = listRunLines(store.db, retry.runId)[0]!;
-    expect(first.display.tag).toBe(MODEL_SUBSTITUTED_TAG);
+    expect(first.display.tag).toBe("run·model_substituted");
     expect(first.display.text).toContain(profileModel);
     expect(first.display.text).toContain(`\`${ranModel}\``);
     // … and the timeline event names the model, the profile's own, and that
