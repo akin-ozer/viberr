@@ -6,7 +6,6 @@ import { afterEach, describe, expect, it } from "vitest";
 import {
   MAX_UPLOAD_BYTES,
   attachmentClaimsInFlight,
-  attachmentContentType,
   attachmentNamesSince,
   countTaskAttachments,
   isBrowserWorkingArtifact,
@@ -15,6 +14,7 @@ import {
   readTaskAttachment,
   resolveTaskAttachment,
   savedFilesText,
+  servedFileResponse,
   withAttachmentClaims,
   writeTaskAttachment,
 } from "./task-attachments.server";
@@ -23,6 +23,16 @@ import {
  *  containment, and the inline whitelist that keeps stored HTML inert. */
 
 let root: string;
+
+/** What every serving route answers for a stored file of this name: its type,
+ *  and whether a browser renders it on the app origin or saves it. */
+function served(name: string) {
+  const res = servedFileResponse(new Request("http://viberr.test/f"), name, new Uint8Array());
+  return {
+    type: res.headers.get("content-type"),
+    inline: res.headers.get("content-disposition")!.startsWith("inline"),
+  };
+}
 
 function seed(files: Record<string, { at: number }>): void {
   const dir = path.join(root, "projects", "p1", "tasks", "VIB-1", "attachments");
@@ -118,19 +128,19 @@ describe("resolveTaskAttachment", () => {
   });
 });
 
-describe("attachmentContentType", () => {
+describe("what the serving routes answer (servedFileResponse)", () => {
   it("whitelists images/pdf/text inline", () => {
-    expect(attachmentContentType("shot.png")).toEqual({
+    expect(served("shot.png")).toEqual({
       type: "image/png",
       inline: true,
     });
-    expect(attachmentContentType("Report.PDF").inline).toBe(true);
-    expect(attachmentContentType("notes.txt").type).toContain("text/plain");
+    expect(served("Report.PDF").inline).toBe(true);
+    expect(served("notes.txt").type).toContain("text/plain");
   });
 
   it("NEVER renders html/svg/unknown inline — stored pages must not execute on the app origin", () => {
     for (const name of ["page.html", "logo.svg", "payload.xhtml", "run.bin", "noext"]) {
-      const { type, inline } = attachmentContentType(name);
+      const { type, inline } = served(name);
       expect(inline).toBe(false);
       expect(type).toBe("application/octet-stream");
     }
@@ -250,9 +260,9 @@ describe("browser working artifacts (ruling 105)", () => {
   });
 
   it("yaml/csv serve as inert text for the read-only viewer, never renderable", () => {
-    expect(attachmentContentType("page-snap.yml").type).toContain("text/plain");
-    expect(attachmentContentType("page-snap.yml").inline).toBe(true);
-    expect(attachmentContentType("data.csv").type).toContain("text/plain");
+    expect(served("page-snap.yml").type).toContain("text/plain");
+    expect(served("page-snap.yml").inline).toBe(true);
+    expect(served("data.csv").type).toContain("text/plain");
   });
 });
 
@@ -281,7 +291,7 @@ describe("writeTaskAttachment", () => {
       "fixture.yaml",
     ]);
     // The read side must be able to serve exactly what the write side accepted.
-    expect(attachmentContentType("fixture.yaml").inline).toBe(true);
+    expect(served("fixture.yaml").inline).toBe(true);
     const again = write("fixture.yaml", "kind: Workspace\n");
     expect(again.replaced).toBe(true);
     expect(countTaskAttachments("p1", "VIB-1", root)).toBe(1);
@@ -313,7 +323,7 @@ describe("writeTaskAttachment", () => {
     // What keeps a stored page from running is the serving route's inline
     // list, never the store's: every kind a browser would execute downloads.
     for (const name of ["page.html", "icon.svg", "run.js"]) {
-      expect(attachmentContentType(name), name).toEqual({ type: "application/octet-stream", inline: false });
+      expect(served(name), name).toEqual({ type: "application/octet-stream", inline: false });
     }
   });
 

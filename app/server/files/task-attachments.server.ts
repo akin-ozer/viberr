@@ -412,7 +412,7 @@ export function taskAttachmentExists(
 /** Extension → inline content type (`INLINE_TYPES`). Anything absent there is
  *  served as a download (`application/octet-stream`), never rendered on the
  *  app origin. */
-export function attachmentContentType(name: string): {
+function attachmentContentType(name: string): {
   type: string;
   inline: boolean;
 } {
