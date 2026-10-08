@@ -1136,6 +1136,7 @@ describe("ruling 20 — every acceptance writer passes the confirm (pass 19)", (
     // no "Not yet". Canary: resolve straight through and click 1 merges.
     const { container, submitted, getByText } = renderPage({
       myRole: "admin",
+      workRevisionSha: "abcdef1234567890",
       task: { pr: acceptedPr({ state: "review" }), packet: packetWith("accept_completion") },
     });
     fireEvent.click(findButton(container, "Confirm decision")!);
@@ -1146,8 +1147,11 @@ describe("ruling 20 — every acceptance writer passes the confirm (pass 19)", (
       'dialog[data-screen-label="Accept completion dialog"]',
     )!;
     expect(dialog.textContent).toContain("Accept the completion and close it");
-    expect(dialog.textContent).toContain("PR #147");
+    expect(dialog.textContent).toContain("PR #147 · in review");
     expect(dialog.textContent).toContain("main");
+    expect(dialog.textContent).toContain("abcdef123456");
+    expect(dialog.textContent).toContain("Merging is one-way");
+    expect(findButton(container, "Not yet")).toBeDefined();
     fireEvent.click(findButton(container, "Accept → Done & merge")!);
     await waitFor(() => expect(submitted).toHaveLength(1));
     expect(submitted[0]!.intent).toBe("resolve-packet");
@@ -1156,7 +1160,7 @@ describe("ruling 20 — every acceptance writer passes the confirm (pass 19)", (
     // identity the server pins says WHICH decision this is, not what the human
     // saw merging.
     expect(submitted[0]!.ackPr).toBe("review");
-    expect(submitted[0]!.ackRevision).toBe("none");
+    expect(submitted[0]!.ackRevision).toBe("abcdef1234567890");
     expect(submitted[0]!.ackVerdict).toBe("healthy");
   });
 
@@ -1408,6 +1412,9 @@ describe("ruling 20 — every acceptance writer passes the confirm (pass 19)", (
     await waitFor(() => expect(submitted).toHaveLength(1));
     expect(submitted[0]!.intent).toBe("resolve-packet");
     expect(queryByText("Accept this completion?")).toBeNull();
+    expect(
+      container.ownerDocument.querySelector('dialog[data-screen-label="Packet archive dialog"]'),
+    ).toBeNull();
     // Ruling 88's scope, on the client: a decision that accepts nothing sends
     // no acknowledgment, and the server asks it for none.
     expect(submitted[0]!.ackPr).toBeUndefined();
@@ -1962,11 +1969,6 @@ describe("R14-3: the task archive", () => {
     await waitFor(() => expect(submitted).toHaveLength(1));
     expect(submitted[0]!.intent).toBe("restore-task");
   });
-
-  it("an archived task offers no acceptance — it is out of the flow", () => {
-    const { container } = renderPage({ archived: true });
-    expect(findButton(container, "Accept completion")).toBeUndefined();
-  });
 });
 
 const ACCEPT_DIALOG = 'dialog[data-screen-label="Accept completion dialog"]';
@@ -1995,58 +1997,6 @@ describe("F19-7: a packet accept_completion option discloses the merge", () => {
     body: "The delivered revision carries an approving verdict.",
     observations: [],
     options,
-  });
-
-  it("Confirm decision opens the acceptance dialog, then resolves the packet", async () => {
-    const { container, submitted } = renderPage({
-      task: {
-        pr: PR_147,
-        packet: acceptPacket([
-          {
-            kind: "accept_completion",
-            t: "Accept the completion and close it",
-            d: "Merge the PR and move to Done.",
-            rec: true,
-          },
-        ]),
-      },
-      workRevisionSha: "abcdef1234567890",
-    });
-    fireEvent.click(findButton(container, "Confirm decision")!);
-    // Canary: point `onResolve` straight at `submitResolve` and this fails —
-    // the PR merges from a button that promised only "Confirm decision".
-    await settle();
-    expect(submitted).toHaveLength(0);
-    const dialog = acceptDialog(container);
-    expect(dialog).toBeTruthy();
-    expect(dialog!.textContent).toContain("PR #147 · in review");
-    expect(dialog!.textContent).toContain("main");
-    expect(dialog!.textContent).toContain("abcdef123456");
-    expect(dialog!.textContent).toContain("Merging is one-way");
-    expect(findButton(container, "Not yet")).toBeDefined();
-    fireEvent.click(findButton(container, "Accept → Done & merge")!);
-    await waitFor(() => expect(submitted).toHaveLength(1));
-    expect(submitted[0]!.intent).toBe("resolve-packet");
-    expect(submitted[0]!.option).toBe("0");
-  });
-
-  it("a non-acceptance option still resolves from the card in one step", async () => {
-    const { container, submitted } = renderPage({
-      task: {
-        packet: acceptPacket([
-          {
-            kind: "request_edit",
-            t: "Send it back for edits",
-            d: "The operator reopens the work.",
-            rec: true,
-          },
-        ]),
-      },
-    });
-    fireEvent.click(findButton(container, "Confirm decision")!);
-    await waitFor(() => expect(submitted).toHaveLength(1));
-    expect(submitted[0]!.intent).toBe("resolve-packet");
-    expect(acceptDialog(container)).toBeNull();
   });
 
   it("names the refusal the PACKET path would hit, not the open-packet one", async () => {
@@ -2310,112 +2260,6 @@ describe("UX19-9: a packet archive_task option states what it destroys", () => {
     await settle();
     expect(onResolve).not.toHaveBeenCalled();
     expect(archiveDialog(container)).toBeNull();
-  });
-
-  it("a non-archive option still resolves from the card in one step", async () => {
-    const { container, submitted } = renderPage({
-      task: {
-        packet: {
-          ...archivePacket(true),
-          options: [
-            {
-              kind: "custom",
-              t: "Rework and reopen the PR",
-              d: "Send it back to the delivering agent.",
-              rec: true,
-            },
-          ],
-        },
-      },
-    });
-    fireEvent.click(findButton(container, "Confirm decision")!);
-    await waitFor(() => expect(submitted).toHaveLength(1));
-    expect(archiveDialog(container)).toBeNull();
-  });
-});
-
-/**
- * V1 — the `resolve_remote_collision` ceremony's "and closes its pull request
- * #N" clause was unreachable in the product. `PacketArchiveDisclosure.unownedPr`
- * was optional, and the ONE production producer (this page) built the
- * disclosure as an object literal carrying the other three fields and skipping
- * that one, so the card only ever saw `undefined` and the clause rendered
- * nowhere but in a component test that passed the number by hand. The number
- * was on `task.unownedPr` the whole time, beside the branch the same literal
- * already read.
- *
- * So these render the PAGE, not the card: the defect was the WIRING, and a test
- * that supplies the disclosure itself cannot see it. The field is required now,
- * which is what keeps the next literal from skipping it silently.
- */
-describe("V1: the page hands the collision ceremony the unowned PR", () => {
-  const collisionPacket: PacketRender = {
-    type: "blocked",
-    kind: "blocked decision",
-    from: "Operator",
-    title: "The remote vib-151 is not this task's work",
-    body: "An unrelated branch is squatting on this task's branch name.",
-    observations: [],
-    options: [
-      {
-        kind: "resolve_remote_collision",
-        t: "Delete the stale remote branch, then redeliver",
-        d: "Reclaims the branch name for this task.",
-        rec: true,
-      },
-    ],
-  };
-
-  const collisionDialog = (container: HTMLElement) =>
-    container.ownerDocument.querySelector(
-      'dialog[data-screen-label="Packet collision dialog"]',
-    );
-
-  it("names the pull request the resolution closes, read off the task", () => {
-    const { container } = renderPage({
-      task: { packet: collisionPacket, unownedPr: 232 },
-    });
-    fireEvent.click(findButton(container, "Confirm decision")!);
-    const text = collisionDialog(container)!.textContent!;
-    // Canary: drop `unownedPr: task.unownedPr` from `packetArchiveDisclosure`
-    // (task-detail-derive.ts) and both of these go red, which is exactly the
-    // state that shipped.
-    expect(text).toContain("closes its pull request");
-    expect(text).toContain("#232");
-    // The deletes/keeps split it sits inside is still intact.
-    expect(text).toContain("vib-151");
-    expect(text).toContain("cannot be undone");
-    expect(text).toContain("local delivery");
-  });
-
-  it("claims no pull-request closure when the task records none", () => {
-    const { container } = renderPage({
-      task: { packet: collisionPacket, unownedPr: null },
-    });
-    fireEvent.click(findButton(container, "Confirm decision")!);
-    const text = collisionDialog(container)!.textContent!;
-    expect(text).not.toContain("closes its pull request");
-    expect(text).not.toContain("#");
-    expect(text).toContain("vib-151");
-  });
-
-  it("confirming resolves the packet by index, with the note", async () => {
-    const { container, submitted } = renderPage({
-      task: { packet: collisionPacket, unownedPr: 232 },
-    });
-    fireEvent.change(container.querySelector("#pkt-note")!, {
-      target: { value: "the stale ref is from the old vib-5 experiment" },
-    });
-    fireEvent.click(findButton(container, "Confirm decision")!);
-    await settle();
-    expect(submitted).toHaveLength(0);
-    fireEvent.click(findButton(container, "Clear collision & redeliver")!);
-    await waitFor(() => expect(submitted).toHaveLength(1));
-    expect(submitted[0]!.intent).toBe("resolve-packet");
-    expect(submitted[0]!.option).toBe("0");
-    expect(submitted[0]!.note).toBe(
-      "the stale ref is from the old vib-5 experiment",
-    );
   });
 });
 
@@ -2866,6 +2710,8 @@ describe("C3: the collision confirm describes the right branch, and warns before
     expect(text).toContain("This task’s own remote branch");
     expect(text).toContain("vib-151");
     expect(text).toContain("No unrelated pull request is recorded on it");
+    expect(text).not.toContain("closes its pull request");
+    expect(text).not.toContain("#");
     expect(text).not.toContain("squatting");
     expect(text).not.toContain("stale branch");
     expect(text).toContain("cannot be undone");
@@ -2879,8 +2725,36 @@ describe("C3: the collision confirm describes the right branch, and warns before
     fireEvent.click(findButton(container, "Confirm decision")!);
     const text = dialogText(container);
     expect(text).toContain("squatting");
+    // V1: the page reads the PR off the task, which a render handing the card
+    // its disclosure cannot see. Canary: drop `unownedPr: task.unownedPr` from
+    // `packetArchiveDisclosure` (task-detail-derive.ts) and the dialog never
+    // names the pull request the resolution closes.
+    expect(text).toContain("closes its pull request");
     expect(text).toContain("#232");
+    // The deletes/keeps split it sits inside is still intact.
+    expect(text).toContain("vib-151");
+    expect(text).toContain("cannot be undone");
+    expect(text).toContain("local delivery");
     expect(findButton(container, "Clear collision & redeliver")).toBeTruthy();
+  });
+
+  it("confirming resolves the packet by index, with the note", async () => {
+    const { container, submitted } = renderPage({
+      task: { packet: collisionPacket, unownedPr: 232 },
+    });
+    fireEvent.change(container.querySelector("#pkt-note")!, {
+      target: { value: "the stale ref is from the old vib-5 experiment" },
+    });
+    fireEvent.click(findButton(container, "Confirm decision")!);
+    await settle();
+    expect(submitted).toHaveLength(0);
+    fireEvent.click(findButton(container, "Clear collision & redeliver")!);
+    await waitFor(() => expect(submitted).toHaveLength(1));
+    expect(submitted[0]!.intent).toBe("resolve-packet");
+    expect(submitted[0]!.option).toBe("0");
+    expect(submitted[0]!.note).toBe(
+      "the stale ref is from the old vib-5 experiment",
+    );
   });
 
   it("an OPEN pull request of this task's own says what the ceremony really does, read off the task", () => {
