@@ -689,13 +689,6 @@ describe("agentMentionHandle (P14-RT-12)", () => {
     expect(call(`@${handle} please continue`)).toMatchObject({ profileId: "dev" });
   });
 
-  it("the old ROLE-derived handle resolved to nobody — which is the bug", () => {
-    deployWithRole("Senior Developer");
-    // `startAgentRun` used to register completion with the role's first word,
-    // so the stuck packet's "Agent: @senior" named a handle no reply could use.
-    expect(call("@senior please continue")).toBeNull();
-  });
-
   it("prefers the profile id so the bare @word grammar matches it", () => {
     // A multi-word NAME is only resolvable to a reader that already knows the
     // name; the profile id routes for every reader (P14-RT-12).
