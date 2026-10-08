@@ -41,6 +41,7 @@ import {
   listRunsForTaskRows,
   patchRun,
   upsertRun,
+  type InsertRunInput,
 } from "~/server/runtimes/run-store.server";
 import {
   agentMentionHandle,
@@ -146,6 +147,27 @@ function writeTranscript(sessionId: string): void {
   const dir = path.join(home, "projects", "-fake-cwd");
   mkdirSync(dir, { recursive: true });
   writeFileSync(path.join(dir, `${sessionId}.jsonl`), "{}\n");
+}
+
+/** A run row on VIB-1: the fixture's `dev`, a finished primary Claude run
+ *  with a session of its own, unless `over` says otherwise. */
+function devRun(id: string, over: Partial<InsertRunInput> = {}): void {
+  upsertRun(store.db, {
+    id,
+    projectSlug: store.slug,
+    taskKey: "VIB-1",
+    threadId: "primary",
+    role: "developer",
+    kind: "primary",
+    backend: "claude",
+    model: "sonnet",
+    sdk: "claude",
+    sessionId: `${id}-session`,
+    agentName: "dev",
+    agentProfileId: "dev",
+    state: "finished",
+    ...over,
+  });
 }
 
 beforeEach(async () => {
@@ -427,21 +449,7 @@ describe("resolveMentionedAgent", () => {
 
   it("never resumes the DEAD backend's session after a backend switch (P13-RT-12)", () => {
     // The `dev` profile ran on Claude and has a live Claude session…
-    upsertRun(store.db, {
-      id: "run_claude_old",
-      projectSlug: store.slug,
-      taskKey: "VIB-1",
-      threadId: "primary",
-      role: "developer",
-      kind: "primary",
-      backend: "claude",
-      model: "sonnet",
-      sdk: "claude",
-      sessionId: "claude-session-1",
-      agentName: "dev",
-      agentProfileId: "dev",
-      state: "finished",
-    });
+    devRun("run_claude_old", { sessionId: "claude-session-1" });
     expect(call("@dev please continue")!.session?.session_id).toBe("claude-session-1");
 
     // …then an admin switches the profile to Codex (quota exhausted, say).
@@ -475,21 +483,7 @@ describe("resolveMentionedAgent", () => {
 
   it("resumes on the STUCK retry pin, not the live profile backend (F28-P1)", () => {
     // `dev` ran on Claude and has a live Claude session…
-    upsertRun(store.db, {
-      id: "run_claude_prepin",
-      projectSlug: store.slug,
-      taskKey: "VIB-1",
-      threadId: "primary",
-      role: "developer",
-      kind: "primary",
-      backend: "claude",
-      model: "sonnet",
-      sdk: "claude",
-      sessionId: "claude-session-prepin",
-      agentName: "dev",
-      agentProfileId: "dev",
-      state: "finished",
-    });
+    devRun("run_claude_prepin", { sessionId: "claude-session-prepin" });
     expect(call("@dev continue")!.session?.session_id).toBe(
       "claude-session-prepin",
     );
@@ -534,23 +528,8 @@ describe("resolveMentionedAgent", () => {
   it("skips a run whose provider session is PROVEN gone (P13-D-2 stranding)", () => {
     // Two Claude sessions for `dev`: an older live one and the newest, whose
     // transcript the provider has since swept.
-    const row = (id: string, threadId: string, sessionId: string) => ({
-      id,
-      projectSlug: store.slug,
-      taskKey: "VIB-1",
-      threadId,
-      role: "developer",
-      kind: "primary" as const,
-      backend: "claude" as const,
-      model: "sonnet",
-      sdk: "claude",
-      sessionId,
-      agentName: "dev",
-      agentProfileId: "dev",
-      state: "finished" as const,
-    });
-    upsertRun(store.db, row("run_live", "primary", "claude-session-live"));
-    upsertRun(store.db, row("run_dead", "primary-r1", "claude-session-dead"));
+    devRun("run_live");
+    devRun("run_dead", { threadId: "primary-r1" });
     // Newest wins while nothing is known to be dead.
     expect(call("@dev continue")!.session!.id).toBe("run_dead");
 
@@ -564,7 +543,7 @@ describe("resolveMentionedAgent", () => {
         t: "00:00:00",
         ev: "err",
         tag: "run·session_missing",
-        text: "The Claude Code session claude-session-dead no longer exists on this machine.",
+        text: "The Claude Code session run_dead-session no longer exists on this machine.",
       },
     });
 
@@ -575,21 +554,7 @@ describe("resolveMentionedAgent", () => {
   });
 
   it("falls back to a FRESH run when every session of the agent is gone", () => {
-    upsertRun(store.db, {
-      id: "run_only",
-      projectSlug: store.slug,
-      taskKey: "VIB-1",
-      threadId: "primary",
-      role: "developer",
-      kind: "primary",
-      backend: "claude",
-      model: "sonnet",
-      sdk: "claude",
-      sessionId: "claude-session-gone",
-      agentName: "dev",
-      agentProfileId: "dev",
-      state: "finished",
-    });
+    devRun("run_only");
     insertRunLine(store.db, {
       runId: "run_only",
       seq: 0,
@@ -601,21 +566,7 @@ describe("resolveMentionedAgent", () => {
   });
 
   it("an agent merely PRINTING the marker cannot strand its own session", () => {
-    upsertRun(store.db, {
-      id: "run_chatty",
-      projectSlug: store.slug,
-      taskKey: "VIB-1",
-      threadId: "primary",
-      role: "developer",
-      kind: "primary",
-      backend: "claude",
-      model: "sonnet",
-      sdk: "claude",
-      sessionId: "claude-session-fine",
-      agentName: "dev",
-      agentProfileId: "dev",
-      state: "finished",
-    });
+    devRun("run_chatty");
     insertRunLine(store.db, {
       runId: "run_chatty",
       seq: 0,
@@ -714,20 +665,7 @@ describe("fullReplyTextForRun", () => {
   function replyOf(lines: LogLine[]): string | null {
     runs += 1;
     const runId = `run_reply_${runs}`;
-    upsertRun(store.db, {
-      id: runId,
-      projectSlug: store.slug,
-      taskKey: "VIB-1",
-      threadId: runId,
-      role: "developer",
-      kind: "primary",
-      backend: "claude",
-      model: "sonnet",
-      sdk: "claude",
-      agentName: "dev",
-      agentProfileId: "dev",
-      state: "finished",
-    });
+    devRun(runId, { threadId: runId });
     lines.forEach((display, seq) => {
       insertRunLine(store.db, { runId, seq, occurredAt: new Date().toISOString(), raw: "", display });
     });
@@ -1120,20 +1058,12 @@ describe("ruling 133: the @mention resume door is stage-gated like every other d
     rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
   }
   const sessionRow = (id: string, profileId: string, kind: "primary" | "reviewer") =>
-    upsertRun(store.db, {
-      id,
-      projectSlug: store.slug,
-      taskKey: "VIB-1",
+    devRun(id, {
       threadId: `${profileId}-thread`,
       role: profileId === "dev" ? "developer" : "reviewer",
       kind,
-      backend: "claude",
-      model: "sonnet",
-      sdk: "claude",
-      sessionId: `${id}-session`,
       agentName: profileId,
       agentProfileId: profileId,
-      state: "finished",
     });
 
   it("an @mention of a SUPPORTING agent at an undeclared stage posts the comment and refuses the run with the dispatcher's sentence", async () => {
@@ -1246,17 +1176,10 @@ describe("ruling 133: the @mention resume door is stage-gated like every other d
     });
     rebuildAll(store.db, { dataRoot: store.dataRoot });
     const startedAt = new Date(Date.now() - 60_000).toISOString();
-    upsertRun(store.db, {
-      id: "run_rev_live",
-      projectSlug: store.slug,
-      taskKey: "VIB-1",
+    devRun("run_rev_live", {
       threadId: "rev-thread",
       role: "reviewer",
       kind: "reviewer",
-      backend: "claude",
-      model: "sonnet",
-      sdk: "claude",
-      sessionId: "run_rev_live-session",
       agentName: "rev",
       agentProfileId: "rev",
       state: "running",
@@ -1425,22 +1348,7 @@ describe("ruling 133: the @mention resume door is stage-gated like every other d
       }),
     });
     rebuildAll(store.db, { dataRoot: store.dataRoot });
-    upsertRun(store.db, {
-      id: "run_dev_pinned",
-      projectSlug: store.slug,
-      taskKey: "VIB-1",
-      threadId: "dev-thread",
-      role: "developer",
-      kind: "primary",
-      backend: "claude",
-      model: "sonnet",
-      sdk: "claude",
-      sessionId: "run_dev_pinned-session",
-      agentName: "dev",
-      agentProfileId: "dev",
-      state: "finished",
-      reviewSubject: "rev_1",
-    });
+    devRun("run_dev_pinned", { threadId: "dev-thread", reviewSubject: "rev_1" });
     const result = await commentToAgent(
       store.db,
       { projectSlug: store.slug, taskKey: "VIB-1", text: "@dev look again" },
@@ -1500,21 +1408,7 @@ describe("ruling 157: an @mention that RESUMES a session lifts a packet-less hol
       }),
     });
     rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
-    upsertRun(store.db, {
-      id: "run_dev_failed",
-      projectSlug: store.slug,
-      taskKey: "VIB-1",
-      threadId: "dev-thread",
-      role: "developer",
-      kind: "primary",
-      backend: "claude",
-      model: "sonnet",
-      sdk: "claude",
-      sessionId: "run_dev_failed-session",
-      agentName: "dev",
-      agentProfileId: "dev",
-      state: "finished",
-    });
+    devRun("run_dev_failed", { threadId: "dev-thread" });
 
     const result = await commentToAgent(
       store.db,
@@ -1561,21 +1455,7 @@ describe("ruling 152(c): an @mention that RESUMES a session is held like any oth
       }),
     });
     rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
-    upsertRun(store.db, {
-      id: "run_dev_failed",
-      projectSlug: store.slug,
-      taskKey: "VIB-1",
-      threadId: "dev-thread",
-      role: "developer",
-      kind: "primary",
-      backend: "claude",
-      model: "sonnet",
-      sdk: "claude",
-      sessionId: "run_dev_failed-session",
-      agentName: "dev",
-      agentProfileId: "dev",
-      state: "finished",
-    });
+    devRun("run_dev_failed", { threadId: "dev-thread" });
     const { recordBackendQuotaExhaustion } = await import(
       "~/server/runtimes/backend-quota.server"
     );
@@ -1632,21 +1512,7 @@ describe("ruling 152(c): an @mention that RESUMES a session is held like any oth
       }),
     });
     rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
-    upsertRun(store.db, {
-      id: "run_dev_done",
-      projectSlug: store.slug,
-      taskKey: "VIB-1",
-      threadId: "dev-thread",
-      role: "developer",
-      kind: "primary",
-      backend: "claude",
-      model: "sonnet",
-      sdk: "claude",
-      sessionId: "run_dev_done-session",
-      agentName: "dev",
-      agentProfileId: "dev",
-      state: "finished",
-    });
+    devRun("run_dev_done", { threadId: "dev-thread" });
     const { recordBackendQuotaExhaustion } = await import(
       "~/server/runtimes/backend-quota.server"
     );
@@ -1746,22 +1612,7 @@ describe("commentToAgent", () => {
   it("ruling 203: the @mention refused while the agent was busy is delivered when that run finishes", async () => {
     deployDevSpecialist();
     const startedAt = "2026-09-13T10:00:00.000Z";
-    upsertRun(store.db, {
-      id: "run_live_primary",
-      projectSlug: store.slug,
-      taskKey: "VIB-1",
-      threadId: "primary",
-      role: "developer",
-      kind: "primary",
-      backend: "claude",
-      model: "sonnet",
-      sdk: "claude",
-      sessionId: null,
-      agentName: "dev",
-      agentProfileId: "dev",
-      state: "running",
-      startedAt,
-    });
+    devRun("run_live_primary", { sessionId: null, state: "running", startedAt });
 
     const refused = await commentToAgent(
       store.db,
@@ -1870,22 +1721,7 @@ describe("commentToAgent", () => {
   it("ruling 205: a BURST posted while the agent was busy is delivered whole, not just its first", async () => {
     deployDevSpecialist();
     const startedAt = "2026-09-13T10:00:00.000Z";
-    upsertRun(store.db, {
-      id: "run_live_primary",
-      projectSlug: store.slug,
-      taskKey: "VIB-1",
-      threadId: "primary",
-      role: "developer",
-      kind: "primary",
-      backend: "claude",
-      model: "sonnet",
-      sdk: "claude",
-      sessionId: null,
-      agentName: "dev",
-      agentProfileId: "dev",
-      state: "running",
-      startedAt,
-    });
+    devRun("run_live_primary", { sessionId: null, state: "running", startedAt });
 
     // Each comment is longer than ANCHOR_EVENT_MAX_CHARS (220) and carries a
     // unique tail token, so the canonical anchor's clamped timeline summary
@@ -1948,16 +1784,10 @@ describe("commentToAgent", () => {
       ["run_live_dev", "dev", "primary"],
       ["run_live_rev", "reviewer", "support"],
     ] as const) {
-      upsertRun(store.db, {
-        id,
-        projectSlug: store.slug,
-        taskKey: "VIB-1",
+      devRun(id, {
         threadId: thread,
         role: profile,
         kind: profile === "dev" ? "primary" : "reviewer",
-        backend: "claude",
-        model: "sonnet",
-        sdk: "claude",
         sessionId: null,
         agentName: profile,
         agentProfileId: profile,
@@ -2080,21 +1910,7 @@ describe("commentToAgent", () => {
     // rather than by running an agent: a real run's async completion handler
     // rewrites task.md, and it raced this test's packet away.
     const priorSessionId = "sess_r1514_dev";
-    upsertRun(store.db, {
-      id: "run_r1514_prior",
-      projectSlug: store.slug,
-      taskKey: "VIB-1",
-      threadId: "t_r1514",
-      role: "developer",
-      kind: "primary",
-      backend: "claude",
-      model: "sonnet",
-      sessionId: priorSessionId,
-      sdk: "test",
-      agentName: "dev",
-      agentProfileId: "dev",
-      state: "finished",
-    });
+    devRun("run_r1514_prior", { threadId: "t_r1514", sessionId: priorSessionId, sdk: "test" });
     writeTranscript(priorSessionId);
     const priorCount = listRunsForTaskRows(store.db, store.slug, "VIB-1").length;
 
@@ -2204,21 +2020,7 @@ describe("commentToAgent", () => {
 
   it("ruling 447: an answer that names the operator goes to the operator, and the asker is not resumed", async () => {
     const priorSessionId = "sess_r447_dev";
-    upsertRun(store.db, {
-      id: "run_r447_prior",
-      projectSlug: store.slug,
-      taskKey: "VIB-1",
-      threadId: "t_r447",
-      role: "developer",
-      kind: "primary",
-      backend: "claude",
-      model: "sonnet",
-      sessionId: priorSessionId,
-      sdk: "test",
-      agentName: "dev",
-      agentProfileId: "dev",
-      state: "finished",
-    });
+    devRun("run_r447_prior", { threadId: "t_r447", sessionId: priorSessionId, sdk: "test" });
     writeTranscript(priorSessionId);
     const existing = readTaskFile({ projectSlug: store.slug, taskKey: "VIB-1", dataRoot: store.dataRoot })!;
     writeTask(store.dataRoot, store.slug, {
@@ -2265,21 +2067,7 @@ describe("commentToAgent", () => {
    */
   it("ruling 447: an option whose description mentions the operator still answers the asker", async () => {
     const priorSessionId = "sess_r447_desc";
-    upsertRun(store.db, {
-      id: "run_r447_desc",
-      projectSlug: store.slug,
-      taskKey: "VIB-1",
-      threadId: "t_r447_desc",
-      role: "developer",
-      kind: "primary",
-      backend: "claude",
-      model: "sonnet",
-      sessionId: priorSessionId,
-      sdk: "test",
-      agentName: "dev",
-      agentProfileId: "dev",
-      state: "finished",
-    });
+    devRun("run_r447_desc", { threadId: "t_r447_desc", sessionId: priorSessionId, sdk: "test" });
     writeTranscript(priorSessionId);
     const existing = readTaskFile({ projectSlug: store.slug, taskKey: "VIB-1", dataRoot: store.dataRoot })!;
     writeTask(store.dataRoot, store.slug, {
@@ -2585,12 +2373,7 @@ describe("a resumed @mention keeps the run's natively-mounted skills (pass-18)",
     mkdirSync(ws, { recursive: true });
     await exec("git", ["-C", ws, "init", "-q"]);
     // A finished run with a live transcript ⇒ the @mention RESUMES it.
-    upsertRun(store.db, {
-      id: "run_prior", projectSlug: store.slug, taskKey: "VIB-1", threadId: "primary",
-      role: "developer", kind: "primary", backend: "claude", model: "sonnet",
-      sdk: "claude", sessionId: "claude-session-skills", agentName: "dev",
-      agentProfileId: "dev", state: "finished",
-    });
+    devRun("run_prior", { sessionId: "claude-session-skills" });
     writeTranscript("claude-session-skills");
 
     const result = await commentToAgent(
@@ -2646,12 +2429,7 @@ describe("a resumed @mention keeps its known-down server optional (ruling 658)",
       ],
     });
     rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
-    upsertRun(store.db, {
-      id: "run_prior", projectSlug: store.slug, taskKey: "VIB-1", threadId: "primary",
-      role: "developer", kind: "primary", backend: "claude", model: "sonnet",
-      sdk: "claude", sessionId: "claude-session-mcp", agentName: "dev",
-      agentProfileId: "dev", state: "finished",
-    });
+    devRun("run_prior", { sessionId: "claude-session-mcp" });
     writeTranscript("claude-session-mcp");
 
     const result = await commentToAgent(
@@ -2682,12 +2460,7 @@ describe("a resumed @mention keeps the project's rulings (ruling 239)", () => {
     writeProject(store.dataRoot, { ...fm, rulingsKb: "project-rulings" });
     rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
     // A finished run with a live transcript ⇒ the @mention RESUMES it.
-    upsertRun(store.db, {
-      id: "run_prior", projectSlug: store.slug, taskKey: "VIB-1", threadId: "primary",
-      role: "developer", kind: "primary", backend: "claude", model: "sonnet",
-      sdk: "claude", sessionId: "claude-session-rulings", agentName: "dev",
-      agentProfileId: "dev", state: "finished",
-    });
+    devRun("run_prior", { sessionId: "claude-session-rulings" });
     writeTranscript("claude-session-rulings");
 
     const result = await commentToAgent(
