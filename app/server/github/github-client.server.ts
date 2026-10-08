@@ -3,7 +3,6 @@
  *
  * - Bearer token auth (or ANONYMOUS when `token` is null — GitHub serves
  *   public read endpoints unauthenticated, at the lower 60/hr IP quota).
- * - If-None-Match ETag support (pass `etag`, get a `not_modified` result).
  * - Rate-limit info surfaced on every response.
  * - NO retry storms: exactly ONE retry, only on 5xx responses.
  * - Network failures and HTTP failures come back as TYPED RESULTS, never
@@ -39,19 +38,11 @@ export type GithubResponse<T> =
       ok: true;
       status: number;
       data: T;
-      etag: string | null;
       rateLimit: RateLimitInfo;
       /** `x-oauth-scopes` header — classic PATs only (null for fine-grained). */
       scopesHeader: string | null;
       /** `github-authentication-token-expiration` header, ISO-normalized. */
       tokenExpiration: string | null;
-    }
-  | {
-      ok: false;
-      kind: "not_modified";
-      status: 304;
-      etag: string | null;
-      rateLimit: RateLimitInfo;
     }
   | {
       ok: false;
@@ -92,8 +83,6 @@ export interface GithubClientOptions {
 }
 
 export interface GithubRequestOptions {
-  /** Previous ETag — a 304 comes back as kind "not_modified". */
-  etag?: string;
   /** JSON body for POST/PUT/PATCH. */
   body?: unknown;
   searchParams?: Record<string, string | number>;
@@ -172,9 +161,7 @@ function decodeMessage(error: z.ZodError): string {
 export function githubFailureMessage(
   result: Extract<GithubResponse<unknown>, { ok: false }>,
 ): string {
-  return result.kind === "not_modified"
-    ? "GitHub reported the cached copy is still current"
-    : result.message;
+  return result.message;
 }
 
 /** A JSON value: everything `JSON.parse` can hand back, and nothing wider. */
@@ -228,7 +215,6 @@ export function createGithubClient(options: GithubClientOptions): GithubClient {
     // one. An EMPTY Authorization header is worse than none (401 on endpoints
     // that would otherwise have answered), so it is omitted entirely.
     if (token) headers["authorization"] = `Bearer ${token}`;
-    if (requestOptions.etag) headers["if-none-match"] = requestOptions.etag;
     // P13-UI-04: every GitHub call was unbounded, so an unreachable or hanging
     // api.github.com left a click looking dead (and, on a delivery path, held a
     // run's single-flight) until the socket eventually gave up. A request that
@@ -279,11 +265,6 @@ export function createGithubClient(options: GithubClientOptions): GithubClient {
     }
 
     const rateLimit = rateLimitFrom(response.headers);
-    const etag = response.headers.get("etag");
-
-    if (response.status === 304) {
-      return { ok: false, kind: "not_modified", status: 304, etag, rateLimit };
-    }
 
     // F21-9 (residual): reading the body is as much a network operation as the
     // fetch that started it. A truncated, aborted or timed-out response REJECTS
@@ -323,7 +304,6 @@ export function createGithubClient(options: GithubClientOptions): GithubClient {
         ok: true,
         status: response.status,
         data: parsed.data,
-        etag,
         rateLimit,
         scopesHeader: response.headers.get("x-oauth-scopes"),
         tokenExpiration: tokenExpirationFrom(response.headers),

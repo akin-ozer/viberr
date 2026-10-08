@@ -825,7 +825,7 @@ export async function openTaskPr(
   // could not decode is a REFUSAL that quotes GitHub, never "unreachable".
   return {
     status: "refused",
-    message: created.kind === "http" ? created.message : "GitHub answered 304 (not modified) to a create",
+    message: created.message,
   };
 }
 

@@ -32,12 +32,11 @@ describe("github-client", () => {
     expect(call.headers.accept).toContain("application/vnd.github+json");
   });
 
-  it("surfaces rate-limit info and etag", async () => {
+  it("surfaces rate-limit info", async () => {
     const { client: c } = client({
       "GET /rate": {
         body: { ok: true },
         headers: {
-          etag: 'W/"abc123"',
           "x-ratelimit-limit": "5000",
           "x-ratelimit-remaining": "4993",
           "x-ratelimit-reset": "1751700000",
@@ -47,33 +46,12 @@ describe("github-client", () => {
     const result = await c.request("GET", "/rate", z.unknown());
     expect(result.ok).toBe(true);
     if (result.ok) {
-      expect(result.etag).toBe('W/"abc123"');
       expect(result.rateLimit).toEqual({
         limit: 5000,
         remaining: 4993,
         reset: 1751700000,
       });
     }
-  });
-
-  it("returns a typed not_modified result for 304 + If-None-Match", async () => {
-    const { gh, client: c } = client({
-      "GET /cached": (call) =>
-        call.headers["if-none-match"] === 'W/"abc"'
-          ? { status: 304, headers: { "x-ratelimit-remaining": "10" } }
-          : { body: { fresh: true } },
-    });
-    const result = await c.request("GET", "/cached", z.unknown(), {
-      etag: 'W/"abc"',
-    });
-    expect(result.ok).toBe(false);
-    if (!result.ok) {
-      expect(result.kind).toBe("not_modified");
-      if (result.kind === "not_modified") {
-        expect(result.rateLimit.remaining).toBe(10);
-      }
-    }
-    expect(gh.calls[0]!.headers["if-none-match"]).toBe('W/"abc"');
   });
 
   it("retries exactly once on 5xx, then reports the failure", async () => {
@@ -337,7 +315,6 @@ describe("isMissingCommitAnswer (ruling 223)", () => {
         ok: true,
         status: 200,
         data: null,
-        etag: null,
         rateLimit: { limit: null, remaining: null, reset: null },
         scopesHeader: null,
         tokenExpiration: null,

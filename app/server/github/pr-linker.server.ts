@@ -586,7 +586,7 @@ export async function findPrForBranch(
       }
     } else if (checkRuns.kind === "network") {
       checksUnread = { status: null, message: checkRuns.message };
-    } else if (checkRuns.kind !== "not_modified") {
+    } else {
       // Ruling 360: the refusal is carried, not swallowed — it used to leave
       // `checks: null` indistinguishable from "never looked".
       checksUnread = { status: checkRuns.status, message: checkRuns.message };
