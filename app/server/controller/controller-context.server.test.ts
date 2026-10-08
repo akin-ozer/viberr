@@ -538,8 +538,9 @@ describe("gatherControllerContext", () => {
    */
   it("ruling 390: an open grant request rides in every scope, and leaves when answered", async () => {
     const { gatherControllerContext } = await import("./controller-context.server");
-    const { raiseResourceRequest, closeResourceRequest, openResourceRequests } =
-      await import("./controller-requests.server");
+    const { raiseResourceRequest, closeRequestsAnsweredByGrants } = await import(
+      "./controller-requests.server"
+    );
     raiseResourceRequest(
       {
         kind: "kb",
@@ -570,8 +571,12 @@ describe("gatherControllerContext", () => {
         "VIBERR_UNLOCK_CONTROLLER_KB=enabled",
       );
     }
-    const [open] = openResourceRequests(app.dataRoot);
-    closeResourceRequest(open!.id, "granted", "arda@viberr.dev", app.dataRoot);
+    closeRequestsAnsweredByGrants(
+      app.db,
+      { skills: [], kb: ["instance-standing-rules"], mcps: [] },
+      { userId: arda.id, label: "arda@viberr.dev" },
+      app.dataRoot,
+    );
     const after = gatherControllerContext(app.db, {
       projectSlug: SLUG,
       taskKey: null,
