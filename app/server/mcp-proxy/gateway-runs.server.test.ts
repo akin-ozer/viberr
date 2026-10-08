@@ -193,19 +193,14 @@ describe("startRun puts the run's token on its gateway mounts (ruling 461)", () 
 });
 
 describe("every path that ends a run revokes its token (ruling 461)", () => {
-  it("success: the settle revokes it", async () => {
-    await startWithMounts("claude");
+  it.each([
+    { backend: "claude", outcome: "finished" },
+    { backend: "codex", outcome: "error" },
+  ] as const)("a $backend run that ends $outcome: the settle revokes its token", async ({ backend, outcome }) => {
+    await startWithMounts(backend, { outcome });
     const cloudflare = mountSchema.parse(lastRunSpec()?.mcpServers?.cloudflare);
-    expect(getRun(store.db, lastRunSpec()!.runId)?.state).toBe("finished");
+    expect(getRun(store.db, lastRunSpec()!.runId)?.state).toBe(outcome);
     // CANARY: drop the settle's revoke (before the finalize) and a token outlives its run.
-    expect(mcpGatewayStatus().liveTokens).toBe(0);
-    expect(await gatewayAnswers(cloudflare.url, cloudflare.headers.Authorization)).toBe(401);
-  });
-
-  it("failure: a run that errors revokes it too", async () => {
-    await startWithMounts("codex", { outcome: "error" });
-    const cloudflare = mountSchema.parse(lastRunSpec()?.mcpServers?.cloudflare);
-    expect(getRun(store.db, lastRunSpec()!.runId)?.state).toBe("error");
     expect(mcpGatewayStatus().liveTokens).toBe(0);
     expect(await gatewayAnswers(cloudflare.url, cloudflare.headers.Authorization)).toBe(401);
   });
@@ -784,10 +779,6 @@ describe("ruling 598: a run that keeps sending one call and getting one answer i
     // tries, until a person stopped the run. CANARIES: skip the guard and the
     // hundredth answer is the tool's own; key the count on the call without
     // its answer and the changing reads below are stopped.
-    writeTask(store.dataRoot, store.slug, {
-      frontmatter: baseTaskFrontmatter("VIB-1", { stage: "impl", ownerUserId: store.users.arda.id }),
-    });
-    rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
     const mount = resolveBoardMcp({ backend: "codex", collaborates: true, ...READS_ONLY, dataRoot: store.dataRoot });
     queueFakeRun({ lines: [{ t: "1", ev: "text", tag: "assistant", text: "correcting" }], sessionId: "s", backend: "codex", keepRunning: true }, "codex");
     const { runId } = await startRun(store.db, {
