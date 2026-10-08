@@ -6,7 +6,6 @@ import {
   deleteSetting,
   getMaxConcurrentRuns,
   getSetting,
-  MAX_CONCURRENT_RUNS_CEILING,
   setMaxConcurrentRuns,
   setSetting,
 } from "./instance-settings.server";
@@ -32,8 +31,8 @@ describe("instance settings — run concurrency cap", () => {
     const db = ctx.makeDb();
     expect(setMaxConcurrentRuns(db, -5)).toBe(0);
     expect(getMaxConcurrentRuns(db)).toBe(0);
-    expect(setMaxConcurrentRuns(db, 999)).toBe(MAX_CONCURRENT_RUNS_CEILING);
-    expect(getMaxConcurrentRuns(db)).toBe(MAX_CONCURRENT_RUNS_CEILING);
+    expect(setMaxConcurrentRuns(db, 999)).toBe(64);
+    expect(getMaxConcurrentRuns(db)).toBe(64);
     expect(setMaxConcurrentRuns(db, 3.9)).toBe(3);
   });
 
@@ -55,7 +54,7 @@ describe("instance settings — run concurrency cap", () => {
     expect(coordinationLane(5)).toBe(2);
     expect(coordinationLane(8)).toBe(2);
     expect(coordinationLane(9)).toBe(3);
-    expect(coordinationLane(MAX_CONCURRENT_RUNS_CEILING)).toBe(16);
+    expect(coordinationLane(64)).toBe(16);
   });
 });
 

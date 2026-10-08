@@ -78,7 +78,7 @@ const MAX_CONCURRENT_RUNS_KEY = "maxConcurrentRuns";
 
 /** Upper bound accepted for the cap — a guard against a fat-fingered value that
  *  would let the machine spawn hundreds of provider processes. 0 = unlimited. */
-export const MAX_CONCURRENT_RUNS_CEILING = 64;
+const MAX_CONCURRENT_RUNS_CEILING = 64;
 
 const concurrencySchema = z.number().int().min(0).max(MAX_CONCURRENT_RUNS_CEILING);
 
