@@ -1,25 +1,16 @@
 import { readFileSync } from "node:fs";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
-import { STANDALONE_PAGES, standalonePageLabel, WORKSPACE_NAV } from "./nav";
+import type { RouteConfigEntry } from "@react-router/dev/routes";
+import routes from "~/routes";
+import { standalonePageLabel, WORKSPACE_NAV } from "./nav";
 
 describe("workspace rail order (A00-9, pass 32)", () => {
-  it("is the nine project views in the documented order — and the codebase map says the same", () => {
+  it("the codebase map names the rail's views in nav.ts order", () => {
     // The docs claimed the order lives in nav.ts "with no test pinning it";
-    // a reordered rail would silently contradict every screenshot and the
-    // codebase map. Pinned here, against the map's own sentence. Ruling 503
-    // put Epics after Board: the board's work, grouped.
-    expect(WORKSPACE_NAV.map((n) => n.id)).toEqual([
-      "board",
-      "epics",
-      "review",
-      "controller",
-      "agents",
-      "policy",
-      "github",
-      "activity",
-      "settings",
-    ]);
+    // a reordered rail would silently contradict the codebase map. Pinned
+    // here, against the map's own sentence; the rendered rail's order is the
+    // rail's own test (`shell-components.test.tsx`, ruling 667).
     const root = path.resolve(path.dirname(new URL(import.meta.url).pathname), "..", "..", "..");
     const map = readFileSync(path.join(root, "docs", "architecture", "codebase-map.md"), "utf8");
     expect(map).toContain(
@@ -34,7 +25,7 @@ describe("workspace rail order (A00-9, pass 32)", () => {
  * The header is mounted once by the `palette-shell` layout and this map is the
  * whole decision, so a route added to that layout gets a header only when it is
  * added here too. Both halves are pinned: the answer per path, and the fact that
- * every path on the list is actually under the layout that renders it.
+ * every route it names is actually under the layout that renders it.
  */
 describe("standalone pages carry the app header (ruling 145)", () => {
   it("answers on the path alone — a tab is not a page", () => {
@@ -63,19 +54,19 @@ describe("standalone pages carry the app header (ruling 145)", () => {
 
   it("only names routes the layout that renders the header actually wraps", () => {
     // A label for a route mounted somewhere else is a header nobody ever sees.
-    const root = path.resolve(
-      path.dirname(new URL(import.meta.url).pathname),
-      "..",
-      "..",
-      "..",
-    );
-    const routes = readFileSync(path.join(root, "app", "routes.ts"), "utf8");
-    const layout = routes.slice(
-      routes.indexOf('layout("routes/palette-shell.tsx"'),
-    );
-    const wrapped = layout.slice(0, layout.indexOf("]),"));
-    for (const page of STANDALONE_PAGES) {
-      expect(wrapped, page.path).toContain(`route("${page.path.slice(1)}"`);
-    }
+    // Read from the route config the framework builds the app from.
+    const pages: { path: string; wrapped: boolean }[] = [];
+    const walk = (entries: readonly RouteConfigEntry[], base: string, wrapped: boolean) => {
+      for (const entry of entries) {
+        const at = entry.path ? `${base}/${entry.path}` : base;
+        const under = wrapped || entry.file === "routes/palette-shell.tsx";
+        if (entry.path) pages.push({ path: at, wrapped: under });
+        walk(entry.children ?? [], at, under);
+      }
+    };
+    walk(routes, "", false);
+    const named = pages.filter((page) => standalonePageLabel(page.path) !== null);
+    expect(named.map((page) => page.path)).toContain("/org/settings");
+    expect(named.filter((page) => !page.wrapped)).toEqual([]);
   });
 });
