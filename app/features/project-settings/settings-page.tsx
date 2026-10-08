@@ -1801,7 +1801,9 @@ export function MembersPanel({
 
   // LV-04/UI-29: memberships whose org account was deleted are counted and
   // labelled separately — they are not active members, and the row exists so an
-  // admin can SEE and REMOVE the stale entry.
+  // admin can SEE and REMOVE the stale entry. Ruling 705: nor is a disabled
+  // account active, but it is still a member (its row says "disabled"), so the
+  // head counts members, as Policy's does.
   const stale = members.filter((m) => m.missing);
 
   return (
@@ -1810,7 +1812,7 @@ export function MembersPanel({
         <Icon name="user" />
         <h2>Members</h2>
         <span className="right sub fine">
-          {members.length - stale.length} active
+          {countLabel(members.length - stale.length, "member")}
           {stale.length > 0
             ? ` · ${countLabel(stale.length, "removed account")}`
             : ""}

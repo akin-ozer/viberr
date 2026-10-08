@@ -697,11 +697,15 @@ describe("MembersPanel", () => {
     onNavPolicy: () => {},
   };
 
-  it("renders the active count, the you-tag and the policy link", () => {
+  it("renders the member count, the you-tag and the policy link", () => {
+    // Ruling 705: a disabled account cannot sign in, so it is not "active",
+    // but it is a member, and the head counts it as Policy's does.
+    // CANARY: call the head "N active" again and Elif reads as active.
+    const elifDisabled = MEMBERS.map((m) => (m.userId === "u_elif" ? { ...m, disabled: true } : m));
     const { container, getByText } = render(
-      <MembersPanel {...base} onInvite={() => {}} onRemove={() => {}} />,
+      <MembersPanel {...base} members={elifDisabled} onInvite={() => {}} onRemove={() => {}} />,
     );
-    expect(getByText("3 active")).toBeTruthy();
+    expect(getByText("3 members")).toBeTruthy();
     expect(container.querySelector(".you-tag")).not.toBeNull();
     expect(getByText("Policy → Human access")).toBeTruthy();
   });
