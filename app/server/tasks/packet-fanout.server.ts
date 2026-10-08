@@ -268,7 +268,7 @@ export function fanOutArrivalText(input: {
  * "Send back now" and "redirect" re-run the agent on the account that just
  * refused it; standing, they would answer their own next refusal, in a loop.
  */
-export const STANDING_OPTION_KINDS: ReadonlySet<PacketOptionKind> = new Set([
+const STANDING_OPTION_KINDS: ReadonlySet<PacketOptionKind> = new Set([
   "wait_for_window",
   "retry_other_backend",
   "hold_runtime_debug",
@@ -291,7 +291,7 @@ export type StandingDecision = z.infer<typeof standingDecisionSchema>;
 
 /** The reopen instant a QUOTA packet names (its wait option's `dueAt`); null
  *  for any other cause, and for a quota whose reset the provider never named. */
-export function quotaWindowEnd(packet: TaskPacket): string | null {
+function quotaWindowEnd(packet: TaskPacket): string | null {
   if (!packet.cause || !/^backend:[^:]+:quota:/.test(packet.cause)) return null;
   return packet.options.find((o) => o.kind === "wait_for_window" && o.dueAt)?.dueAt ?? null;
 }

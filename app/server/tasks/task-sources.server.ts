@@ -291,7 +291,7 @@ export function keepTaskSource(db: DatabaseSync, ctx: TaskMutationContext, input
 }
 
 /** The title of the one entry a run's kept sources leave on the timeline. */
-export const SOURCES_KEPT_TITLE = "Sources kept";
+const SOURCES_KEPT_TITLE = "Sources kept";
 
 export interface RunSourcesNote {
   projectSlug: string;
