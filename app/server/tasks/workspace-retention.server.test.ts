@@ -42,25 +42,6 @@ describe("reclaimTerminalTaskWorkspaces", () => {
     });
   }
 
-  it("removes a finished task's clone and leaves an in-flight one alone", () => {
-    const store = setupTestStore(ctx);
-    task(store, "VIB-1", "done");
-    task(store, "VIB-2", "impl");
-    rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
-
-    const finished = seedWorkspace(store, "VIB-1");
-    const inFlight = seedWorkspace(store, "VIB-2");
-
-    const result = reclaimTerminalTaskWorkspaces(store.db, {
-      dataRoot: store.dataRoot,
-    });
-
-    expect(result.removed).toBe(1);
-    expect(result.bytes).toBeGreaterThan(0);
-    expect(existsSync(finished)).toBe(false);
-    expect(existsSync(inFlight)).toBe(true);
-  });
-
   it("never touches the canonical task file or its directory", () => {
     // The workspace is a cache; task.md is the source of truth. A reclamation
     // that took the record with it would be data loss, not housekeeping.
@@ -128,9 +109,9 @@ describe("reclaimTerminalTaskWorkspaces", () => {
     const terminal = seedWorkspace(store, "VIB-1");
     const middle = seedWorkspace(store, "VIB-2");
 
-    expect(
-      reclaimTerminalTaskWorkspaces(store.db, { dataRoot: store.dataRoot }).removed,
-    ).toBe(1);
+    const result = reclaimTerminalTaskWorkspaces(store.db, { dataRoot: store.dataRoot });
+    expect(result.removed).toBe(1);
+    expect(result.bytes).toBeGreaterThan(0);
     expect(existsSync(terminal)).toBe(false);
     expect(existsSync(middle)).toBe(true);
   });
