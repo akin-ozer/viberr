@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { encodeControllerInstrument } from "~/shared/mapping/actor.server";
 import { createTestDbContext } from "../../../test-support/test-db";
 import {
@@ -55,7 +55,6 @@ import {
   listAuditLog,
   streamFilterOptions,
   auditFilterActors,
-  displayAuditActorLabel,
 } from "./activity-feed.server";
 
 const ctx = createTestDbContext();
@@ -402,16 +401,26 @@ describe("listAuditLog", () => {
 
   it("sorts merged violations + audit rows newest-first and caps at limit", () => {
     const store = setupTestStore(ctx);
-    recordAudit(store.db, {
-      action: "project.settings.updated",
-      actor: { userId: store.users.arda.id, label: store.users.arda.email },
-      projectSlug: store.slug,
-      details: { fields: ["name"] },
-    });
-    const entries = listAuditLog(store.db, store.slug);
-    const times = entries.map((e) => e.occurredAt);
-    expect([...times].sort().reverse()).toEqual(times);
-    expect(listAuditLog(store.db, store.slug, { limit: 1 })).toHaveLength(1);
+    vi.useFakeTimers({ toFake: ["Date"] });
+    try {
+      // The older row is the violation, so the two legs only read newest
+      // first once they are merged.
+      vi.setSystemTime(new Date("2026-07-02T09:00:00.000Z"));
+      openScopeViolation(store.db, { projectSlug: store.slug, scope: "workflow" });
+      vi.setSystemTime(new Date("2026-07-02T10:00:00.000Z"));
+      recordAudit(store.db, {
+        action: "project.settings.updated",
+        actor: { userId: store.users.arda.id, label: store.users.arda.email },
+        projectSlug: store.slug,
+        details: { fields: ["name"] },
+      });
+    } finally {
+      vi.useRealTimers();
+    }
+    // CANARY: concatenate the legs without the final sort and the violation
+    // reads first.
+    expect(listAuditLog(store.db, store.slug).map((e) => e.kind)).toEqual(["change", "violation"]);
+    expect(listAuditLog(store.db, store.slug, { limit: 1 }).map((e) => e.kind)).toEqual(["change"]);
   });
 
   // P13-D-7: both rows were RECORDED and surfaced nowhere — the whitelist that
@@ -649,6 +658,14 @@ describe("audit-panel actor names (E32-8, pass 32)", () => {
       actor: { userId: null, label: "system:workspace-reconcile" },
       projectSlug: store.slug,
     });
+    // A bare system word, and the operator's own token.
+    for (const label of ["delivery", "operator"]) {
+      recordAudit(store.db, {
+        action: "github.reconcile",
+        actor: { userId: null, label },
+        projectSlug: store.slug,
+      });
+    }
     recordAudit(store.db, {
       action: "project.policy.boundary_changed",
       actor: { userId: arda.id, label: arda.email },
@@ -662,6 +679,8 @@ describe("audit-panel actor names (E32-8, pass 32)", () => {
       expect.arrayContaining([
         { value: "agent:claude/developer (Implementation)", label: "Developer (Implementation) · Claude" },
         { value: "system:workspace-reconcile", label: "Workspace reconcile" },
+        { value: "delivery", label: "Delivery" },
+        { value: "operator", label: "Operator" },
         { value: arda.name, label: arda.name },
       ]),
     );
@@ -680,8 +699,6 @@ describe("audit-panel actor names (E32-8, pass 32)", () => {
     expect(
       listAuditLog(store.db, store.slug, { filters: { actor: arda.name } }).length,
     ).toBeGreaterThan(0);
-    expect(displayAuditActorLabel("delivery")).toBe("Delivery");
-    expect(displayAuditActorLabel("operator")).toBe("Operator");
     // The rendered sentence uses the same name for a human (the users-table
     // row wins either way — the NON-human sentence path is the one that
     // exercises displayAuditActorLabel, locked below and in
