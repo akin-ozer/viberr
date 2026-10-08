@@ -17,7 +17,6 @@ import { rebuildAll } from "~/server/projections/rebuilder.server";
 import {
   mentionNonDeliveryNote,
   notifyMentionedUsers,
-  resolveMentionTargets,
   stampNotifiedRecipients,
   withAmbiguityDisclosure,
 } from "./mention-notify.server";
@@ -114,11 +113,23 @@ describe("notifyMentionedUsers", () => {
     expect(matched).toEqual([store.users.arda.id]);
   });
 
-  it("reserved agent handles never notify a person; no handles → no rows", () => {
+  it("reserved agent handles never notify a person, even one whose handle spells them (ruling 99); no handles → no rows", () => {
+    // Unprojected, so resolution runs app-wide and each handle below is the
+    // email local-part of exactly one enabled person. CANARY: drop the
+    // RESERVED_HANDLES filter from the resolver and all five are notified.
     const store = setupTestStore(ctx);
+    for (const [id, handle, name] of [
+      ["u_op", "operator", "Operator"],
+      ["u_ag", "agent", "Agent"],
+      ["u_cla", "claude", "Claude"],
+      ["u_cdx", "codex", "Codex"],
+      ["u_ctl", "controller", "Controller"],
+    ] as const) {
+      insertUser(store.db, { id, email: `${handle}@viberr.test`, name, role: "member" });
+    }
     expect(
       notifyMentionedUsers(store.db, {
-        text: "@operator @agent @claude @codex all reserved",
+        text: "@operator @agent @claude @codex @controller look",
         projectSlug: store.slug,
         taskKey: "VIB-1",
         from: OPERATOR_FROM,
@@ -133,14 +144,6 @@ describe("notifyMentionedUsers", () => {
       }),
     ).toEqual([]);
     expect(notificationRows(store)).toHaveLength(0);
-  });
-
-  it("a person whose handle spells a reserved word (controller, claude) is never the target (ruling 99)", () => {
-    const users = [
-      { id: "u_ctl", email: "controller@viberr.test", name: "Controller" },
-      { id: "u_cla", email: "claude@viberr.test", name: "Claude" },
-    ];
-    expect(resolveMentionTargets(users, "@controller @claude look").userIds).toEqual([]);
   });
 
   it("never notifies the excluded author, and skips disabled users", () => {
@@ -346,31 +349,6 @@ describe("mention disambiguation (B-FD2)", () => {
         excludeUserId: store.users.arda.id,
       }),
     ).toEqual([]);
-  });
-
-  it("resolveMentionTargets is pure and keeps users-table order", () => {
-    const users = [
-      { id: "u1", email: "arda.kaya@x.test", name: "Arda Kaya" },
-      { id: "u2", email: "selin@x.test", name: "Selin Ay" },
-      { id: "u3", email: "arda.yilmaz@x.test", name: "Arda Yilmaz" },
-    ];
-    expect(resolveMentionTargets(users, "@selin @arda-kaya ship it")).toEqual({
-      userIds: ["u1", "u2"],
-      // Ruling 233: which handle won which user, so a caller can quote the
-      // span that actually names the recipient.
-      matchedBy: new Map([
-        ["selin", "u2"],
-        ["arda-kaya", "u1"],
-      ]),
-      ambiguous: [],
-      nonMembers: [],
-    });
-    expect(resolveMentionTargets(users, "@arda ship it")).toEqual({
-      userIds: [],
-      matchedBy: new Map(),
-      ambiguous: ["arda"],
-      nonMembers: [],
-    });
   });
 
   it("the appended disclosure closes an unclosed ``` fence so the note renders as prose", () => {
