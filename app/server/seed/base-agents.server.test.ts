@@ -339,7 +339,17 @@ describe("ruling 699: the library ships a Diagrammer and a Cover Designer", () =
     expect(diagrammer).toContain("Read the piece again just before you do, and add your line to the file as it stands then");
     expect(diagrammer).toContain("A picture the piece already carries stays where it is");
     expect(diagrammer).toContain("Check what you see, not what you meant");
-    expect(diagrammer).toContain("If you cannot read a main label in the phone picture, neither can the reader");
+    // Rehearsed on a fourth post with the manuals as first shipped: 21
+    // minutes, three looks at the piece and a hash of both files to prove
+    // nothing else changed. The half-size look judges legibility without a
+    // hunt through the page. CANARY: drop any of the five sentences.
+    expect(diagrammer).toContain("the same call with `scale` 0.5 is about how wide a phone shows a canvas of 700 to 800 px. If you cannot read a main label there, neither can the reader");
+    expect(diagrammer).toContain("how it reads you judged at scale 0.5, and the desktop width needs no look");
+    // The half-size look flatters a wide canvas, and the reviewer judges the
+    // phone picture: what is plainly unreadable in place is still fixed.
+    expect(diagrammer).toContain("If a main label is plainly unreadable there all the same, fix it.");
+    expect(diagrammer).toContain("an exact replacement of the lines it touches in the file as it stands, never a rewrite of the file");
+    expect(diagrammer).toContain("Leave a brief or a list of sources alone unless the picture needs a fact from it");
     // Rehearsed: the run re-checked the piece's own facts in seven sources,
     // looked at the piece eight times, and left the pictures' field for the
     // writer, which would have cost a writer's run. CANARY: drop any of the
@@ -361,6 +371,12 @@ describe("ruling 699: the library ships a Diagrammer and a Cover Designer", () =
     // Rehearsed: a board's later covers follow its first, and a person who
     // publishes in two places has two looks.
     expect(cover).toContain("those are the look");
+    // Rehearsed: half of a first cover's 17 minutes went on the pages and
+    // stylesheets around their covers. CANARY: drop the sentence.
+    expect(cover).toContain("Open a page only to find their covers, and keep the covers, not the pages or stylesheets around them");
+    // One place that would not open must not become the series look in
+    // silence. CANARY: drop the sentence.
+    expect(cover).toContain("Name in your report any place you could not open");
     expect(cover).toContain("Another publication's covers are that publication's look, not the person's");
     expect(cover).toContain("the field that names its cover is yours to fill");
     // The list of the piece's pictures holds other makers' entries too.
@@ -419,6 +435,10 @@ describe("ruling 699: the library ships a Diagrammer and a Cover Designer", () =
       ["skills/controller-guide/SKILL.md", "e51e4710c9719b8bae32484e443a0c8be92e5fe6298e03dd53bc78eb26abb208"],
     ];
     for (const [rel, hash] of outgoing) expect(shippedCopyIsUnedited(rel, hash, {}), rel).toBe(true);
+    // The two new manuals as they first shipped, hours before their pace
+    // changed. CANARY: remove either hash.
+    expect(shippedCopyIsUnedited("skills/diagrammer-expertise/SKILL.md", "e9fc50d6d8b5faec3d5cc42c1769c1294f754b1c646e8b4a7bbd2149f9041cb4", {})).toBe(true);
+    expect(shippedCopyIsUnedited("skills/cover-designer-expertise/SKILL.md", "2d5812d25c1d2a95b4dbc865c37fba3eec8c743bf4b0923fdcb51bf88940f5e0", {})).toBe(true);
   });
 });
 

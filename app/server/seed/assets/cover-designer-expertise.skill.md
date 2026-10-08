@@ -38,7 +38,7 @@ A cover is seen before the piece is read, in a feed, a link preview or a list of
 
 A person's covers read as one series. On a board that has delivered covers before, those are the look: `read_board` lists the tasks, `read_task_attachment` opens a file of one, and the latest one or two are enough. Look no further.
 
-On a board's first cover, look at what they have published: the rulings say where their work is. Save two or three of their covers (`curl -sSL -o` to a staged source name, then `keep_source`, as your workspace contract describes) and look at them.
+On a board's first cover, look at what they have published: the rulings say where their work is. Save two or three of their covers (`curl -sSL -o` to a staged source name, then `keep_source`, as your workspace contract describes) and look at them. Open a page only to find their covers, and keep the covers, not the pages or stylesheets around them: you are after what a reader sees. Name in your report any place you could not open, so a person can point you to it.
 
 - Continue the look of the place this piece goes to. Another publication's covers are that publication's look, not the person's; where the place this piece goes to shows none of theirs, their own site is nearer than someone else's.
 - Continue what is constant: the palette, the typefaces, where the name sits, how much is left empty.

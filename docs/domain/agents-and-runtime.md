@@ -2308,7 +2308,7 @@ real screen) in the look of the person's earlier covers, with no generated or st
 no decoration and nothing invented. Each agent draws its picture as an SVG or an HTML page
 among the task's files, renders it at the size it names with `capture_page` (ruling 698),
 looks at the picture the tool returns (a cover also at a quarter of its size, as a feed
-shows it), fixes what it sees, makes the picture it keeps with one last call (scale 2 for a diagram,
+shows it, a diagram at half, about a phone's width), fixes what it sees, makes the picture it keeps with one last call (scale 2 for a diagram,
 1.5 for a cover, within 2,000 px a side so it is still shown), looks at that one too, and
 copies that PNG onto the task. Neither asks the person
 anything: `ask-human` is withheld by name, because an absent grant resolves to granted, and
