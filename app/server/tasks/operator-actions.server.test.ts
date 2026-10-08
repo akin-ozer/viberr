@@ -1116,7 +1116,7 @@ describe("operatorDispatchAgent — explicit delivers posture (P11-22 successor)
       { projectSlug: store.slug, taskKey: "VIB-1", profileId: "developer", delivers: true },
       authority("full"),
     );
-    expect(r.outcome).not.toBe("denied");
+    expect(r).toEqual({ outcome: "done", message: "Started a Claude run for Dev (the delivering agent)." });
     await interruptRunningRuns("VIB-1");
   });
 });
@@ -5515,7 +5515,7 @@ describe("operatorPostComment honest outcome (G1/B-FD8)", () => {
     seedTask("triage");
     const long =
       "Acceptance caveat the human must read in full. " +
-      "detail ".repeat(500) +
+      "detail ".repeat(2000) +
       "end.";
     const result = await operatorPostComment(
       store.db,
@@ -6681,7 +6681,7 @@ describe("ruling 138: edit_goal options carry an explicit goalDraft", () => {
    * SHOP-26 the operator wrote, verbatim: "You create the task — no option
    * here can."
    */
-  it("authors a create_task option, and refuses one with no task on it", async () => {
+  it("authors a create_task option carrying the task it creates", async () => {
     packetsRoster();
     seedTask("impl");
     const authored = await operatorOpenPacket(
@@ -6721,7 +6721,6 @@ describe("ruling 138: edit_goal options carry an explicit goalDraft", () => {
         labels: ["service"],
       },
     });
-
   });
 
   /**
