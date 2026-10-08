@@ -14,7 +14,6 @@ import {
 } from "../../../test-support/fake-runtime";
 import {
   normalizeEvidenceRows,
-  EVIDENCE_MAX_ROWS,
   type TaskFileEvent,
 } from "~/schemas/task-file.schema";
 import {
@@ -128,7 +127,7 @@ describe("normalizeEvidenceRows", () => {
       result: "1 passed",
       status: "pass",
     }));
-    expect(normalizeEvidenceRows(many)!.length).toBe(EVIDENCE_MAX_ROWS);
+    expect(normalizeEvidenceRows(many)!.length).toBe(8); // ruling 493: eight rows
   });
 
   it("round-trips through the task.md serializer/parser", () => {
