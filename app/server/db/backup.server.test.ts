@@ -19,13 +19,7 @@ import {
 import { acquireDataRootLock, DATA_ROOT_LOCK_FILENAME } from "./data-root-lock.server";
 import { runMigrations } from "./migration-runner.server";
 import { openDatabase } from "./sqlite.server";
-import {
-  createBackup,
-  projectionPathIn,
-  readManifest,
-  restoreBackup,
-  restoreStoreFile,
-} from "./backup.server";
+import { createBackup, restoreBackup, restoreStoreFile } from "./backup.server";
 
 /**
  * Gap 14 — there was no backup tooling at all, and the documented procedure
@@ -48,6 +42,10 @@ function dataRootDir(): string {
   return root;
 }
 
+/** Where a data root keeps its projection database (data-model.md), spelled
+ *  here: a path read from the module under test would agree with a wrong one. */
+const projectionPath = (root: string) => path.join(root, "state", "projection.sqlite");
+
 interface Fixture {
   dataRoot: string;
   db: DatabaseSync;
@@ -57,7 +55,7 @@ interface Fixture {
 /** A data root shaped like the real one: state/projection.sqlite + markdown. */
 function fixture(): Fixture {
   const dataRoot = dataRootDir();
-  const db = openDatabase(projectionPathIn(dataRoot));
+  const db = openDatabase(projectionPath(dataRoot));
   runMigrations(db);
   db.prepare(
     `INSERT INTO users (id, email, name, title, role, idp, avatar_tone,
@@ -92,11 +90,11 @@ describe("createBackup", () => {
        VALUES ('u_murat', 'murat@viberr.dev', 'Murat', NULL, 'member', 'local', NULL,
                0, 'system', 0, '2026-08-02T00:00:00.000Z', '2026-08-02T00:00:00.000Z', NULL)`,
     ).run();
-    expect(existsSync(`${projectionPathIn(f.dataRoot)}-wal`)).toBe(true);
+    expect(existsSync(`${projectionPath(f.dataRoot)}-wal`)).toBe(true);
 
     // The naive procedure: copy the main file only.
     const naive = path.join(f.out, "naive.sqlite");
-    copyFileSync(projectionPathIn(f.dataRoot), naive);
+    copyFileSync(projectionPath(f.dataRoot), naive);
 
     const backup = createBackup({ dataRoot: f.dataRoot, destination: f.out });
 
@@ -147,7 +145,7 @@ describe("createBackup", () => {
        VALUES ('u_murat', 'murat@viberr.dev', 'Murat', NULL, 'member', 'local', NULL,
                0, 'system', 0, '2026-08-02T00:00:00.000Z', '2026-08-02T00:00:00.000Z', NULL)`,
     ).run();
-    expect(existsSync(`${projectionPathIn(f.dataRoot)}-wal`)).toBe(true);
+    expect(existsSync(`${projectionPath(f.dataRoot)}-wal`)).toBe(true);
     // The app: this very process, alive by every probe, on this host.
     writeFileSync(
       path.join(f.dataRoot, "state", DATA_ROOT_LOCK_FILENAME),
@@ -164,7 +162,7 @@ describe("createBackup", () => {
     // The copy is removed with the handle; the store carries nothing of it.
     expect(existsSync(path.join(f.dataRoot, "state", "tmp", `reader-${process.pid}`))).toBe(false);
     // …and the live database's own sidecar was left alone.
-    expect(existsSync(`${projectionPathIn(f.dataRoot)}-wal`)).toBe(true);
+    expect(existsSync(`${projectionPath(f.dataRoot)}-wal`)).toBe(true);
   });
 
   it("with nothing holding the root, reads the file itself and says that instead", () => {
@@ -206,7 +204,11 @@ describe("createBackup", () => {
   it("states what the artefact contains and what it does NOT", () => {
     const f = fixture();
     const backup = createBackup({ dataRoot: f.dataRoot, destination: f.out });
-    const manifest = readManifest(backup.dir);
+    const manifest = backup.manifest;
+    // What a restore reads is the file in the artefact, not this return value.
+    expect(JSON.parse(readFileSync(path.join(backup.dir, "MANIFEST.json"), "utf8"))).toEqual(
+      manifest,
+    );
 
     expect(manifest.format).toBe("viberr-backup/1");
     expect(manifest.projection?.rows.users).toBe(1);
@@ -271,10 +273,10 @@ describe("restoreBackup", () => {
 
     // Lose everything: a deleted volume, a bad hand-edit, a botched upgrade.
     rmSync(path.join(f.dataRoot, "projects"), { recursive: true, force: true });
-    rmSync(projectionPathIn(f.dataRoot), { force: true });
+    rmSync(projectionPath(f.dataRoot), { force: true });
     // …and leave a stale WAL sidecar behind, which is the trap: it belongs to
     // the database being replaced.
-    writeFileSync(`${projectionPathIn(f.dataRoot)}-wal`, "stale wal");
+    writeFileSync(`${projectionPath(f.dataRoot)}-wal`, "stale wal");
 
     const result = restoreBackup({ artefact: backup.dir, dataRoot: f.dataRoot, force: true });
 
@@ -283,13 +285,13 @@ describe("restoreBackup", () => {
     // The stale sidecar is gone from the live root — it belonged to the
     // database being replaced, and SQLite would have replayed it over the
     // restored file. It is carried into the displaced copy, not destroyed.
-    expect(existsSync(`${projectionPathIn(f.dataRoot)}-wal`)).toBe(false);
+    expect(existsSync(`${projectionPath(f.dataRoot)}-wal`)).toBe(false);
     expect(
       readFileSync(path.join(result.displacedTo!, "state", "projection.sqlite-wal"), "utf8"),
     ).toBe("stale wal");
     expect(result.removedSidecars).toContain("projection.sqlite-wal");
 
-    const restored = new DatabaseSync(projectionPathIn(f.dataRoot), { readOnly: true });
+    const restored = new DatabaseSync(projectionPath(f.dataRoot), { readOnly: true });
     try {
       // SAFETY: the SELECT names one column, 0001_baseline declares
       // `users.email` TEXT NOT NULL, and the restored backup holds two users —
@@ -405,7 +407,7 @@ describe("the secrets an instance generated for itself (ruling 504)", () => {
     const result = restoreBackup({ artefact: backup.dir, dataRoot: target.dataRoot, force: true });
 
     expect(readInstanceSecrets(target.dataRoot)).toEqual(sourceSecrets);
-    expect(existsSync(projectionPathIn(result.displacedTo!))).toBe(true);
+    expect(existsSync(projectionPath(result.displacedTo!))).toBe(true);
     expect(readInstanceSecrets(result.displacedTo!)).toEqual(targetSecrets);
   });
 });
@@ -525,13 +527,11 @@ describe("createBackup — re-derivable git trees stay out of the artefact", () 
     ).toBe(false);
     expect(existsSync(path.join(stored, "tasks", "VIB-1", ".captures"))).toBe(false);
     expect(existsSync(path.join(stored, "tasks", "VIB-1", ".capture-input"))).toBe(false);
-    expect(readManifest(backup.dir).excludes.some((line) => line.includes(".captures/"))).toBe(true);
+    expect(backup.manifest.excludes.some((line) => line.includes(".captures/"))).toBe(true);
     // The canonical file beside them still is.
     expect(existsSync(path.join(stored, "tasks", "VIB-1", "task.md"))).toBe(true);
     // And the manifest says so instead of leaving an operator to guess.
-    expect(
-      readManifest(backup.dir).excludes.some((line) => line.includes("workspace/")),
-    ).toBe(true);
+    expect(backup.manifest.excludes.some((line) => line.includes("workspace/"))).toBe(true);
   });
 });
 
