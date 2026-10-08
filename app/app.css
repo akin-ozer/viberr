@@ -3174,10 +3174,12 @@ dialog[data-closing]::backdrop {
    beside it) shows it on the field itself; the focus wash still paints, so an
    invalid field that has focus reads as both. */
 .field input[aria-invalid="true"], .field textarea[aria-invalid="true"] { border-color: var(--coral-dark); }
-/* Ruling 108: a read-only field (the deployment-locked controller doctrine,
-   and the store browser's file name while its document saves) must READ
-   read-only — muted fill, resting border on focus, no blue ring, no resize
-   grip. */
+/* Ruling 108: a read-only field (the deployment-locked controller doctrine)
+   must READ read-only — muted fill, resting border on focus, no blue ring, no
+   resize grip. Any read-only `.field` control takes it, as the store browser's
+   file name does while its document saves; that document's text sits outside
+   `.field`, so the card keeps its resting edge and the text takes the muted
+   ink on its own (`.fm-doc`, `.doc-src[readonly]`). */
 .field textarea[readonly], .field input[readonly] {
   background: var(--tint-well); color: var(--muted); cursor: default; resize: none;
 }
@@ -9968,8 +9970,10 @@ a.pr-branch:hover { background: var(--tint-hover); }
 /* In Raw the card is the field, as the controller composer is (owner,
    2026-09-25: a square ring inside a rounded frame, and a resize grip, read
    as unfinished). The textarea draws no frame or ring of its own; the card
-   takes the field's blue edge and wash, and the ring on its own edge. */
-.fm-doc:has(.doc-src:focus) { border-color: var(--blue); box-shadow: 0 0 0 3px var(--focus-wash); }
+   takes the field's blue edge and wash, and the ring on its own edge. While a
+   save holds the text read-only the card keeps its resting edge, as a
+   read-only field keeps its resting border; the ring still paints (acce-4). */
+.fm-doc:has(.doc-src:focus:not([readonly])) { border-color: var(--blue); box-shadow: 0 0 0 3px var(--focus-wash); }
 .fm-doc:has(.doc-src:focus-visible) { outline: 2px solid var(--blue); outline-offset: -1px; }
 .doc-head {
   display: flex; align-items: center; flex-wrap: wrap; gap: .5rem .75rem;
@@ -10026,6 +10030,9 @@ a.pr-branch:hover { background: var(--tint-hover); }
   font-family: var(--font-mono); font-size: .75rem; line-height: 1.7;
   tab-size: 4;
 }
+/* Read-only while its save is in flight: the muted ink a read-only field
+   takes, so the locked text does not read as one that takes typing. */
+.doc-src[readonly] { color: var(--muted); }
 .doc-blank {
   display: flex; align-items: center; justify-content: center; gap: .5rem;
   min-height: 12rem; margin: 0; padding: 1.5rem;
