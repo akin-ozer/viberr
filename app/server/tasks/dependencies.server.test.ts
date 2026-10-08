@@ -525,7 +525,6 @@ describe("the release engine", () => {
       ),
     ).toEqual(new Set([`/projects/${store.slug}/tasks/VIB-10#event-${note.occurredAt}`]));
     const release = runOperator.mock.calls.find((c) => c[1].trigger === "dependencies-released");
-    expect(release).toBeDefined();
     expect(release![1].dependencyRelease).toEqual({ entries: ["VIB-2", "VIB-5", "VIB-1"], clearedBy: null });
     // VIB-4 (seeded waiting on VIB-5) was released by the same sweep; VIB-10's
     // own release is exactly one row, the engine's (nobody cleared it by hand).

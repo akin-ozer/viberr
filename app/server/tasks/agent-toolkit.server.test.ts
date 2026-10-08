@@ -58,7 +58,6 @@ describe("agent-toolkit audit attribution (P11-23)", () => {
     expect(row).toBeTruthy();
     // The actor label is the agent ref, not "operator".
     expect(row.actorLabel).toBe("agent:claude/security-reviewer (Security review)");
-    expect(row.actorLabel).not.toBe("operator");
   });
 
   /**
@@ -169,7 +168,6 @@ describe("agent-toolkit audit attribution (P11-23)", () => {
     // CANARY: drop the `notice.from` and this is { kind: "agent", name:
     // "Operator" } — the default every un-attributed notice falls back to.
     expect(note!.from).toMatchObject({ kind: "agent", name: "Security review" });
-    expect(note!.from).not.toMatchObject({ name: "Operator" });
   });
 
   /**
