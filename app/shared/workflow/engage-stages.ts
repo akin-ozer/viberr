@@ -1,4 +1,5 @@
 import type { StageDef, WorkflowBoundary } from "~/schemas/project-file.schema";
+import { reviewSubjectId, type WorkRevision } from "~/schemas/task-file.schema";
 import { stageEligible } from "./stage-eligibility";
 import { resolveStageRoles } from "./stage-roles";
 
@@ -6,7 +7,37 @@ import { resolveStageRoles } from "./stage-roles";
  *  its delivery there. */
 export interface EngageStage {
   stageId: string;
-  agents: string[];
+  agents: { id: string; name: string }[];
+}
+
+/** What the answer is read from: the task, as its file holds it. */
+export interface EngageTaskState {
+  stage: string;
+  engagements: readonly { profileId: string; delivers: boolean }[];
+  blockedBy: readonly unknown[];
+  workRevision: WorkRevision | null;
+  deliveredAt?: string | null;
+}
+
+/** A deployed agent, as `listDeployedSpecialists` describes it. */
+export interface EngageCandidate {
+  id: string;
+  name: string;
+  stages: readonly string[];
+  spanAll: boolean;
+  capabilities: { delivery: boolean; postsFiles: boolean };
+}
+
+/**
+ * True when the task has a delivering engagement that can still run: its
+ * profile is deployed on the board. An engagement whose profile was removed
+ * names an agent nobody can dispatch.
+ */
+export function hasDeliveringAgent(
+  fm: Pick<EngageTaskState, "engagements">,
+  deployed: readonly Pick<EngageCandidate, "id">[],
+): boolean {
+  return fm.engagements.some((e) => e.delivers && deployed.some((d) => d.id === e.profileId));
 }
 
 /**
@@ -18,39 +49,43 @@ export interface EngageStage {
  * stage with no deliverer (its files were taken from another task, a person
  * moved it, only supporting agents ran on it) has nobody the first half
  * covers. Live on BLOG-8 the writer was declared for Brief and Writing and the
- * task stood at Cover: the hand-off was refused for the stage, the backward
- * move was refused because no review was failing, and the refusal named a way
- * out ("the engaged deliverer runs at every stage") that did not exist. The
- * task waited on a person for a stage move.
+ * task stood at Cover: the hand-off was refused for the stage, and the list of
+ * backward moves the operator may make was empty because no review was
+ * failing. The task waited on a person for a stage move.
  *
- *  - A task with a delivering engagement: nothing. Its deliverer runs where
- *    the task stands.
- *  - A task at its first stage, at the terminal stage or at a stage this board
- *    does not have: nothing.
- *  - Otherwise every earlier stage at which some deployed agent that can be
- *    given a delivery, and cannot be engaged where the task stands, is
- *    eligible, with those agents' names.
+ * Nothing is offered:
+ *  - once the task has delivered anything (a revision or a files delivery):
+ *    from then on a review's verdict decides the way back (R7-4, ruling 163),
+ *    and a task waiting to be accepted is not walked away from its offer;
+ *  - while the task is held on other work: the hand-off would be refused;
+ *  - while a delivering agent that can run is engaged: it runs where the task
+ *    stands;
+ *  - at the first stage, at the terminal stage, or at a stage this board does
+ *    not have.
+ *
+ * Otherwise: every earlier stage at which some deployed agent is eligible
+ * that can be given a delivery (a repo-write grant or the grant to save
+ * files, ruling 535, and not one of the project's required reviewers, ruling
+ * 556) and that cannot be engaged where the task stands, with those agents.
  *
  * Three callers share this one answer, the way they share `verdictStageFor`:
  * what the operator's snapshot offers (`reworkStages`), what its move claims
  * (`operatorTransitionStage`) and what `transitionStage` re-vets.
  *
- * Pure: the caller supplies the deployed profiles.
+ * Pure: the caller supplies the deployed profiles and the project's rules.
  */
 export function engageStagesFor(
   board: {
     stages: readonly Pick<StageDef, "id">[];
     workflow: readonly Pick<WorkflowBoundary, "from" | "to">[];
   },
-  fm: { stage: string; engagements: readonly { delivers: boolean }[] },
-  deployed: readonly {
-    name: string;
-    stages: readonly string[];
-    spanAll: boolean;
-    capabilities: { delivery: boolean; postsFiles: boolean };
-  }[],
+  fm: EngageTaskState,
+  deployed: readonly EngageCandidate[],
+  requiredReviewers: readonly { profileId: string }[],
 ): EngageStage[] {
-  if (fm.engagements.some((e) => e.delivers)) return [];
+  if (reviewSubjectId(fm) !== null) return [];
+  if (fm.blockedBy.length > 0) return [];
+  if (hasDeliveringAgent(fm, deployed)) return [];
   const stages = board.stages;
   const currentIndex = stages.findIndex((s) => s.id === fm.stage);
   // The first stage has nothing before it: the scan below is empty there.
@@ -60,10 +95,15 @@ export function engageStagesFor(
     stageEligible(spec, stageId, stages, board.workflow);
   // An agent that can be engaged where the task stands needs no move.
   const elsewhere = deployed.filter(
-    (d) => (d.capabilities.delivery || d.capabilities.postsFiles) && !eligibleAt(d, fm.stage),
+    (d) =>
+      (d.capabilities.delivery || d.capabilities.postsFiles) &&
+      !requiredReviewers.some((rule) => rule.profileId === d.id) &&
+      !eligibleAt(d, fm.stage),
   );
   return stages.slice(0, currentIndex).flatMap((stage) => {
-    const agents = elsewhere.filter((d) => eligibleAt(d, stage.id)).map((d) => d.name);
+    const agents = elsewhere
+      .filter((d) => eligibleAt(d, stage.id))
+      .map((d) => ({ id: d.id, name: d.name }));
     return agents.length > 0 ? [{ stageId: stage.id, agents }] : [];
   });
 }

@@ -432,10 +432,13 @@ describe("ruling 703: the files delivery a reviewer judged last", () => {
   });
   const files = (deliveredAt: string, verdicts: ReviewVerdict[]) => ({ workRevision: null, deliveredAt, verdicts });
 
-  it("names the earlier delivery once the task's subject is a later one", () => {
-    // Canary: answer the current delivery's own stamp.
-    const fm = files(SECOND, [verdict("editor", `files:${FIRST}`, "2026-10-08T15:25:38.000Z")]);
-    expect(judgedFilesDelivery(fm, "editor")).toBe(FIRST);
+  it("names the delivery the verdict was on, a later one under review or the same one still", () => {
+    // The same delivery too: a file can change on the task without the
+    // delivery moving, so there is something to set against it.
+    // Canary: answer the task's current stamp.
+    const one = [verdict("editor", `files:${FIRST}`, "2026-10-08T15:25:38.000Z")];
+    expect(judgedFilesDelivery(files(SECOND, one), "editor")).toBe(FIRST);
+    expect(judgedFilesDelivery(files(FIRST, one), "editor")).toBe(FIRST);
   });
 
   it("reads the reviewer's NEWEST verdict, whatever order the file lists them in, and nobody else's", () => {
@@ -452,12 +455,17 @@ describe("ruling 703: the files delivery a reviewer judged last", () => {
       expect(judgedFilesDelivery(fm, "reader")).toBe(FIRST);
       expect(judgedFilesDelivery(fm, "nobody")).toBeNull();
     }
+    // Two verdicts stamped in the same instant: the one written last stands.
+    // Canary: keep the earlier entry on a tie.
+    const tie = files(THIRD, [
+      verdict("editor", `files:${FIRST}`, "2026-10-08T15:51:37.000Z"),
+      verdict("editor", `files:${SECOND}`, "2026-10-08T15:51:37.000Z"),
+    ]);
+    expect(judgedFilesDelivery(tie, "editor")).toBe(SECOND);
   });
 
-  it("answers null for the same delivery again, a verdict on a commit, and a task whose subject is a commit", () => {
-    // Canary: drop any of the three guards.
-    const again = files(FIRST, [verdict("editor", `files:${FIRST}`, "2026-10-08T15:25:38.000Z")]);
-    expect(judgedFilesDelivery(again, "editor")).toBeNull();
+  it("answers null for a verdict on a commit, and for a task whose subject is a commit", () => {
+    // Canary: drop either guard.
     const onCommit = files(SECOND, [verdict("editor", "rev_1", "2026-10-08T15:25:38.000Z")]);
     expect(judgedFilesDelivery(onCommit, "editor")).toBeNull();
     const commitNow = {
@@ -473,6 +481,8 @@ describe("ruling 703: the files delivery a reviewer judged last", () => {
       verdicts: [verdict("editor", `files:${FIRST}`, "2026-10-08T15:25:38.000Z")],
     };
     expect(judgedFilesDelivery(commitNow, "editor")).toBeNull();
+    // Nothing delivered at all: nothing is under review.
+    expect(judgedFilesDelivery({ workRevision: null, deliveredAt: null, verdicts: onCommit.verdicts }, "editor")).toBeNull();
   });
 });
 

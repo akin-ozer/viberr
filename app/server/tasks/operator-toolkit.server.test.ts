@@ -358,16 +358,29 @@ describe("buildOperatorToolkit ↔ operatorPlanToolsFor governed-action parity (
     expect(desc("update_branch_from_base")).toContain("the acceptance ceremony brings the branch up to date once and merges in the same step");
   });
 
-  it("ruling 702: transition_stage says the way back to a delivering agent is the operator's own move", () => {
+  it("ruling 702: transition_stage says the way back to a delivering agent is the operator's own move, and when to take it", () => {
     // Canary: restore the description from before ruling 702. The operator on
     // BLOG-8 read "populated only while validation is failing" and asked a
     // person for the move.
-    const defs = build(withPolicy(uniform("direct"))).tools;
-    const desc = defs.find((t) => t.name === "transition_stage")!.description;
-    expect(desc).toContain("Backwards is also allowed while the task has NO delivering agent and the one it needs cannot be engaged where the task stands");
-    expect(desc).toContain("each with `engage` naming the agents");
-    expect(desc).toContain("then hand delivery over with run_agent, and never ask a person for that move");
+    const tool = build(withPolicy(uniform("direct"))).tools.find((t) => t.name === "transition_stage")!;
+    const desc = tool.description;
+    expect(desc).toContain("Backwards is also allowed on a task that has NO delivering agent and has delivered nothing, when the agent its remaining work needs cannot be engaged where the task stands");
+    expect(desc).toContain("each with `engage` naming the agents (`id` and `name`)");
+    // An entry is on every such task past a scoped agent's stages, so the
+    // text has to say it is not an instruction. Canary: drop the sentence.
+    expect(desc).toContain("An `engage` entry is an offer and never a reason to move: use it only when work remains for an agent it names.");
+    // A run without the flag engages a supporting agent, and the task still
+    // has nobody delivering it. Canary: drop `delivers: true`.
+    expect(desc).toContain("hand delivery over with run_agent and `delivers: true`");
+    expect(desc).toContain("and never ask a person for that move");
     expect(desc).not.toContain("populated only while validation is failing");
+    expect(desc).not.toContain("to send failed work back");
+    // The parameter said "must be a declared next stage" beside a description
+    // that offers backward moves. Canary: restore it.
+    expect(z.toJSONSchema(tool.inputSchema).properties?.toStageId).toHaveProperty(
+      "description",
+      "The target stage id: one from `nextStages`, or one from `reworkStages` for a backward move.",
+    );
   });
 
   it("ruling 492 (review): accept_completion says it waits for the answer to the operator's own follow-up option", () => {

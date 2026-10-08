@@ -162,11 +162,13 @@ export interface OperatorTaskSnapshot {
    *  the operator reported "there is no Review → In Progress transition
    *  available to me" and parked the task on a human, while the move was
    *  legal all along. These are the earlier stages the operator MAY move the
-   *  task to directly, no human and no recommendation. Non-empty only while
-   *  the latest review is `failing` — the same gate `transitionStage` vets.
-   *  Ruling 702: and while the task has no delivering agent, the earlier
-   *  stages where one can be engaged, each with `engage` naming the agents. */
-  reworkStages: { id: string; name: string; engage?: string[] }[];
+   *  task to directly, no human and no recommendation: every earlier stage
+   *  while the latest review is `failing` (R7-4), the review stage after a
+   *  revision changed (ruling 163), and (ruling 702) on a task that has no
+   *  delivering agent and has delivered nothing, the earlier stages where one
+   *  can be engaged, each with `engage` naming the agents. The same answers
+   *  `transitionStage` vets. */
+  reworkStages: { id: string; name: string; engage?: { id: string; name: string }[] }[];
   /** All stage ids in workflow order (first → done). Lets a coordinator tell a
    *  pre-work stage from the implementation stage from the review stage. */
   stageIds: string[];
@@ -1052,15 +1054,20 @@ export function operatorSnapshot(
   const deployed = listDeployedSpecialists(projectSlug, ctx);
   const changedTarget =
     fm.validation === "changed" ? verdictStageFor({ stages, workflow }, fm, deployed) : null;
-  // Ruling 702: a task with no delivering agent may also go back to a stage
-  // where one can be engaged, and the entry says who, so the move and the
-  // hand-off that follows it are one decision. `failing` already licenses
-  // every earlier stage, so the names ride on those entries too.
+  // Ruling 702: a task that has no delivering agent and has delivered nothing
+  // may also go back to a stage where one can be engaged, and the entry says
+  // whom the move is for. It never meets the two licenses above: both need
+  // something delivered.
   const engageAt = new Map(
-    engageStagesFor({ stages, workflow }, fm, deployed).map((e) => [e.stageId, e.agents]),
+    engageStagesFor(
+      { stages, workflow },
+      fm,
+      deployed,
+      project.parsed.frontmatter.requiredReviewers,
+    ).map((e) => [e.stageId, e.agents]),
   );
-  const reworkStages = stages
-    .slice(0, Math.max(currentStageIndex, 0))
+  // A stage this board does not have is before nothing.
+  const reworkStages = (currentStageIndex < 0 ? [] : stages.slice(0, currentStageIndex))
     .filter((s) => fm.validation === "failing" || s.id === changedTarget || engageAt.has(s.id))
     .map((s) => {
       const engage = engageAt.get(s.id);

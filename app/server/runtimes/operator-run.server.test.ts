@@ -3783,6 +3783,22 @@ describe("turn doctrine: triage quality gate and scheduled re-runs", () => {
     }
   });
 
+  it("ruling 702: the doctrine for a task nobody delivers reaches BOTH builders", () => {
+    // The tool description is Claude's alone: a Codex operator plans from the
+    // prompt and the snapshot. Canary: drop the doctrine line, and the Codex
+    // operator meets `engage` in the snapshot with nothing saying what it is.
+    const atCover = snap({ stage: "cover", stageName: "Cover", goal: "Give the post its pictures." });
+    for (const prompt of [
+      operatorPrompts.buildOperatorTurnPrompt(atCover, "manual"),
+      operatorPrompts.buildCodexOperatorPrompt(atCover, "manual"),
+    ]) {
+      expect(prompt).toContain("Any stage where the task has no delivering agent, has delivered nothing, and the agent its remaining work needs cannot be engaged here");
+      expect(prompt).toContain("`reworkStages` carries the earlier stages where one can be engaged, each with `engage` (the agents' `id` and `name`)");
+      expect(prompt).toContain("Move the task there with `transition_stage`, then `run_agent` that profile id with `delivers: true`");
+      expect(prompt).toContain("An `engage` entry is an offer, never a reason to move: use it only when work remains for an agent it names, and never ask a person for that move.");
+    }
+  });
+
   it("ruling 130(c): the packet-resolved instruction bolds the decided title and claims no policy or credential fix", () => {
     // Live (JC-6): the old parenthetical "(a policy/credential fix means
     // re-check the work that was blocked)" plus a record saying "policy /

@@ -1674,6 +1674,10 @@ export function requiredReviewers(fm: { engagements: Engagement[] }): Engagement
   return fm.engagements.filter((e) => !e.delivers && e.verdictCapable);
 }
 
+/** What a review subject that is a files delivery starts with: `files:<deliveredAt>`
+ *  (ruling 388). */
+export const FILES_SUBJECT_PREFIX = "files:";
+
 /**
  * Ruling 388: what a review on this task binds to right now.
  *
@@ -1689,27 +1693,26 @@ export function reviewSubjectId(fm: {
 }): string | null {
   const rev = activeWorkRevision(fm.workRevision);
   if (rev) return rev.id;
-  return fm.deliveredAt ? `files:${fm.deliveredAt}` : null;
+  return fm.deliveredAt ? `${FILES_SUBJECT_PREFIX}${fm.deliveredAt}` : null;
 }
 
 /**
  * Ruling 703: the `deliveredAt` of the files delivery that `profileId`'s
- * newest verdict judged, when the task's review subject is now a DIFFERENT
- * files delivery. Null otherwise: no verdict from it, a verdict on a commit,
- * a subject that is a commit, or the same delivery again.
+ * newest verdict judged, while what the task has under review is a files
+ * delivery. Null otherwise: no verdict from it, a verdict on a commit, or a
+ * subject that is a commit. It may be the delivery still under review: a file
+ * can change on the task without the delivery moving.
  */
 export function judgedFilesDelivery(
   fm: { workRevision: WorkRevision | null; deliveredAt?: string | null; verdicts: ReviewVerdict[] },
   profileId: string,
 ): string | null {
-  const files = "files:";
-  const subject = reviewSubjectId(fm);
-  if (!subject?.startsWith(files)) return null;
+  if (!reviewSubjectId(fm)?.startsWith(FILES_SUBJECT_PREFIX)) return null;
   const newest = fm.verdicts
     .filter((v) => v.profileId === profileId)
     .reduce<ReviewVerdict | null>((last, v) => (last === null || v.at >= last.at ? v : last), null);
-  if (!newest?.revisionId.startsWith(files) || newest.revisionId === subject) return null;
-  return newest.revisionId.slice(files.length);
+  if (!newest?.revisionId.startsWith(FILES_SUBJECT_PREFIX)) return null;
+  return newest.revisionId.slice(FILES_SUBJECT_PREFIX.length);
 }
 
 /**

@@ -196,8 +196,11 @@ profile's stages.
    forward (ruling 412): a `changed` revision licenses only the move into the stage
    where its re-verdict can be given (or says the re-verdict is given where the task
    already stands), a task with neither a `failing` verdict nor a `changed` revision has
-   no rework move at all, and the engaged deliverer runs at every stage (ruling 133), so
-   it can be dispatched where the task stands.
+   no rework move, and the way out it names is one that exists (ruling 702): the engaged
+   deliverer, which runs at every stage (ruling 133), on a task that has one that can
+   run; for the operator, on a task that has none and has delivered nothing, the earlier
+   stages where one can be engaged, with their agents; and nothing where there is
+   neither.
 4. A **human moving a task into the terminal stage is accepting completion**: the call
    routes through `acceptCompletion` (real merge attempt, `completion` event, packet
    and recommendations cleared), never a bare move. The board drop and the keyboard
@@ -223,12 +226,11 @@ profile's stages.
    of them is eligible where the task stands, else the nearest earlier stage where one
    is; the acceptance-boundary stage when no verdict-capable profile is deployed), so a
    revision that moved after a verdict goes back for its re-verdict instead of waiting
-   at Merge. A third backward move is the operator's on a task with no delivering agent
-   (ruling 702): into an earlier stage where an agent that cannot be engaged where the
-   task stands can be (`engageStagesFor`), because ruling 133 lets only an ENGAGED
-   deliverer run past the stages its profile declares. A refused backward move says why
-   and names a way out that exists: the engaged deliverer on a task that has one, those
-   stages and their agents on a task that has none (rulings 412 and 702).
+   at Merge. A third backward move is the operator's on a task that has delivered
+   nothing, is not held and has no delivering agent that can run (ruling 702): into an
+   earlier stage where an agent that can be given a delivery, and cannot be engaged
+   where the task stands, can be (`engageStagesFor`), because ruling 133 lets only an
+   ENGAGED deliverer run past the stages its profile declares.
    The operator's move INTO the acceptance-boundary stage is refused with the
    acceptance gate's own sentence while the review PR conflicts with the base or lacks
    the delivered revision (`mergeReadinessRefusal`, ruling 162: Merge means mergeable).

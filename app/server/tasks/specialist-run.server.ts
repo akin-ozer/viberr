@@ -37,7 +37,6 @@ import {
   updateTaskFile,
 } from "~/server/files/task-writer.server";
 import { taskAttachmentsDir } from "~/server/files/file-store-root.server";
-import { keptDeliveryChanges } from "~/server/files/kept-deliveries.server";
 import {
   mountGrantedSkills,
   removeSkillPlugin,
@@ -1365,19 +1364,18 @@ async function dispatchAgentRun(
   ) {
     collabNotes.push(REREVIEW_RESTATES_NOTE);
     // Ruling 703: and, when what it judged was a files delivery Viberr kept,
-    // which of those files a later delivery changed.
+    // how the task's files stand against it now.
     const judged = judgedFilesDelivery(existing.parsed.frontmatter, engagement.profileId);
+    // Imported dynamically, like every reach from this module into the
+    // task-action modules (ruling 207(e)).
+    const { changesSinceJudged } = await import("./task-replies.server");
     const changes =
       judged === null
         ? null
-        : keptDeliveryChanges(
-            input.projectSlug,
-            input.taskKey,
-            judged,
-            existing.parsed.frontmatter.deliveredAt ?? "",
-            ctx.dataRoot,
-          );
-    if (judged !== null && changes !== null) collabNotes.push(rereviewChangesNote(judged, changes));
+        : changesSinceJudged(ctx, input.projectSlug, input.taskKey, judged, existing.parsed);
+    if (judged !== null && changes !== null) {
+      collabNotes.push(rereviewChangesNote(judged, changes, boardReader));
+    }
   }
   // Ruling 483 (F40-53): a knowledge-base line this run proves wrong has a
   // channel now, and the run is told which. Claude files it with the tool the

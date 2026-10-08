@@ -15,7 +15,16 @@
  * `attachments/`, so the attachments panel, the browser's output folder and
  * the working-file prune never see it, and it moves with the task directory.
  */
-import { constants, copyFileSync, mkdirSync, readdirSync, readFileSync, statSync } from "node:fs";
+import {
+  closeSync,
+  constants,
+  copyFileSync,
+  mkdirSync,
+  openSync,
+  readdirSync,
+  readSync,
+  statSync,
+} from "node:fs";
 import path from "node:path";
 import { pageCapturesAmong } from "~/shared/page-capture";
 import {
@@ -111,7 +120,7 @@ export function listKeptDeliveries(slug: string, key: string, dataRoot?: string)
   return kept.sort((a, b) => b.deliveredAt.localeCompare(a.deliveredAt));
 }
 
-/** What differs between two kept deliveries of one task, by file name. */
+/** What differs between a kept delivery and the task's files now, by name. */
 export interface KeptDeliveryChanges {
   changed: string[];
   added: string[];
@@ -119,54 +128,90 @@ export interface KeptDeliveryChanges {
   same: string[];
 }
 
+/** Two files are read side by side in pieces of this size, so a large
+ *  delivery is never held in memory twice. */
+const COMPARE_CHUNK_BYTES = 64 * 1024;
+
+/** True when two files hold the same bytes. A file that cannot be read, or
+ *  is not a regular file, is not the same as anything: it is told as changed,
+ *  which sends a reader to look. */
+function sameBytes(a: string, b: string): boolean {
+  let fa: number | null = null;
+  let fb: number | null = null;
+  try {
+    const sa = statSync(a);
+    const sb = statSync(b);
+    if (!sa.isFile() || !sb.isFile() || sa.size !== sb.size) return false;
+    fa = openSync(a, "r");
+    fb = openSync(b, "r");
+    const ba = Buffer.allocUnsafe(COMPARE_CHUNK_BYTES);
+    const bb = Buffer.allocUnsafe(COMPARE_CHUNK_BYTES);
+    for (;;) {
+      const na = readSync(fa, ba, 0, COMPARE_CHUNK_BYTES, null);
+      const nb = readSync(fb, bb, 0, COMPARE_CHUNK_BYTES, null);
+      if (na !== nb) return false;
+      if (na === 0) return true;
+      if (!ba.subarray(0, na).equals(bb.subarray(0, nb))) return false;
+    }
+  } catch {
+    return false;
+  } finally {
+    if (fa !== null) closeSync(fa);
+    if (fb !== null) closeSync(fb);
+  }
+}
+
 /**
- * Ruling 703: the files of the kept delivery `to` set against those of the
- * kept delivery `from`, byte for byte, or null when either was not kept.
+ * Ruling 703: the task's files as they stand now set against the kept
+ * delivery `judged`, byte for byte, or null when that delivery was not kept.
  *
- * The pictures Viberr makes of a delivered page (ruling 691) are left out:
- * they are remade at every delivery and say nothing the page they picture
- * does not.
+ * `now` is the names in the task's attachments folder that the caller counts
+ * as the task's files. It is the folder that is read, not the kept copy of
+ * the newest delivery: a reviewer opens the folder, and a file can change
+ * there without the delivery moving (a supporting agent's first save of a
+ * name, a person's upload or removal). `leftOut` is the caller's rule for a
+ * name of the kept delivery that is not one of the task's files either.
+ *
+ * The pictures Viberr makes of a delivered page (ruling 691) are left out of
+ * the kept side here as the caller leaves them out of `now`: they are remade
+ * at every delivery, and the note is about the files, not about Viberr's own
+ * pictures of them.
+ *
+ * One file stored under two Unicode forms of its name is one file (ruling
+ * 675), named as the folder has it now.
  */
-export function keptDeliveryChanges(
+export function changesSinceKeptDelivery(
   slug: string,
   key: string,
-  from: string,
-  to: string,
+  judged: string,
+  now: readonly string[],
+  leftOut: (name: string) => boolean,
   dataRoot?: string,
 ): KeptDeliveryChanges | null {
-  const filesOf = (stamp: string): { dir: string; names: Set<string> } | null => {
-    const dir = keptDeliveryDir(slug, key, stamp, dataRoot);
-    if (!dir) return null;
-    let listed: string[];
-    try {
-      listed = readdirSync(dir);
-    } catch {
-      return null;
-    }
-    const own = pageCapturesAmong(listed);
-    return { dir, names: new Set(listed.filter((name) => !own.has(name))) };
-  };
-  const before = filesOf(from);
-  const after = filesOf(to);
-  if (!before || !after) return null;
-  const sameBytes = (name: string): boolean => {
-    const a = path.join(before.dir, name);
-    const b = path.join(after.dir, name);
-    try {
-      if (statSync(a).size !== statSync(b).size) return false;
-      return readFileSync(a).equals(readFileSync(b));
-    } catch {
-      return false;
-    }
-  };
+  const dir = keptDeliveryDir(slug, key, judged, dataRoot);
+  if (!dir) return null;
+  let listed: string[];
+  try {
+    listed = readdirSync(dir);
+  } catch {
+    return null;
+  }
+  const own = pageCapturesAmong(listed);
+  const composed = (name: string) => name.normalize("NFC");
+  const before = new Map(
+    listed.filter((name) => !own.has(name) && !leftOut(name)).map((name) => [composed(name), name]),
+  );
+  const after = new Map(now.map((name) => [composed(name), name]));
+  const attachments = taskAttachmentsDir(slug, key, dataRoot);
   const changes: KeptDeliveryChanges = { changed: [], added: [], removed: [], same: [] };
-  for (const name of [...after.names].sort()) {
-    if (!before.names.has(name)) changes.added.push(name);
-    else if (sameBytes(name)) changes.same.push(name);
+  for (const [id, name] of [...after].sort(([a], [b]) => a.localeCompare(b))) {
+    const kept = before.get(id);
+    if (kept === undefined) changes.added.push(name);
+    else if (sameBytes(path.join(dir, kept), path.join(attachments, name))) changes.same.push(name);
     else changes.changed.push(name);
   }
-  for (const name of [...before.names].sort()) {
-    if (!after.names.has(name)) changes.removed.push(name);
+  for (const [id, name] of [...before].sort(([a], [b]) => a.localeCompare(b))) {
+    if (!after.has(id)) changes.removed.push(name);
   }
   return changes;
 }

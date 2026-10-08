@@ -1464,9 +1464,10 @@ survives is judged by the new-engagement rule, so the @mention resume door
 (`assertResumeEligible`) refuses with the dispatcher's own sentence and posts the
 comment as a partial success. That door first refuses a closed task (ruling 177) and a
 held one (ruling 186) with the same sentences as every other door. A task with NO
-delivering engagement that stands past the stages its agents declare has nobody either
-half reaches, so the operator may move it back to an earlier stage where one can be
-engaged (ruling 702; `reworkStages` in its snapshot names the stages and the agents).
+delivering engagement that can run, standing past the stages its agents declare, has
+nobody either half reaches, so while it has delivered nothing the operator may move it
+back to an earlier stage where one can be engaged (ruling 702; `reworkStages` in its
+snapshot names the stages and the agents).
 
 Before a delivering dispatch on a task with no recorded branch (ruling 122),
 `ensureTaskBranchBestEffort` prepares the task branch, for a deliverer that writes the
@@ -1516,14 +1517,20 @@ the verdict it records now replaces its earlier one for every later reader, beca
 board read and the task's outcome carry only a reviewer's newest verdict, so it restates
 what still stands (a score and each deduction, the findings, each knowledge-base
 correction it made on the task with its id), not only what changed. A first review gets
-no such note. When that earlier verdict was on a files delivery Viberr kept (ruling 597)
-and the task has delivered again since, a second note follows it (`rereviewChangesNote`,
-ruling 703): the delivery the reviewer judged, the files changed, new, gone and unchanged
-since it (`keptDeliveryChanges`, byte for byte, without the page pictures Viberr makes
-itself), that a check made on an unchanged file still holds and is restated without being
-made again, and that `read_task_attachment` with `delivery` returns a file as it was
-judged. The same delivery judged again, a commit on either side, or a delivery that was
-not kept adds nothing.
+no such note. When its newest verdict was on a files delivery Viberr kept (ruling 597), a
+second note follows it (`rereviewChangesNote`, ruling 703): the delivery the reviewer
+judged, and the task's files as they stand now set against it, byte for byte, as four
+lists (changed, new, gone, unchanged; `changesSinceJudged`). The lists read the task's
+folder, which is what the reviewer opens, and leave out Viberr's own page pictures and the
+files only reviewers saved; each name is printed as one bounded line with no backtick. The
+note then says what the lists are worth: a check a file passed, resting on that file
+alone, still holds and is restated without being made again; everything the reviewer sent
+back is checked again wherever its fix was made; and the changed and new files, what a
+change makes untrue elsewhere, and whatever its earlier report does not show are still
+owed. A run that holds the board readers (ruling 594) is also told that
+`read_task_attachment` with `delivery` returns a file as it was judged. A commit on either
+side, or a judged delivery that was not kept, adds nothing, and a review asked for again
+by a comment resumes the reviewer's session and carries neither note.
 
 The outcome is the first envelope a run reports. The already-staged check reads the
 in-process map and the persisted row, so an envelope staged before a restart still stands

@@ -6109,22 +6109,27 @@ describe("get_task exposes the rework license the operator was never told about"
  * agent, the agent that could take it was declared for earlier stages only,
  * `reworkStages` was empty because no review was failing, and the operator
  * parked the task on a person for a stage move. The snapshot now offers the
- * stages where a delivering agent can be engaged and says who, and the
- * operator's own move accepts exactly those.
+ * stages where a delivering agent can be engaged and says who, the operator's
+ * own move accepts exactly those, and the packet that asked a person for the
+ * move is refused. Which tasks are offered them is `engageStagesFor`'s to
+ * say, and its cases are in `engage-stages.test.ts`.
  */
 describe("ruling 702: get_task offers the way back to an agent the task can be delivered by", () => {
   const snapshot = () =>
     operatorSnapshot(store.db, { dataRoot: store.dataRoot }, store.slug, "VIB-1", authority("supervised"));
 
-  /** The developer is declared for the work stage only, as the writer was. */
+  /** The developer is declared for the work stage only, as the writer was.
+   *  So is the reviewer, which the project requires there: it is never an
+   *  agent to hand delivery to (ruling 556), so no entry may name it. */
   const scopeDeveloper = () => {
-    deployRoster(DEFAULT_POLICY);
+    deployRoster([...DEFAULT_POLICY, { capabilityId: "generate-packets", mode: "direct" }]);
     const file = readProjectFile({ projectSlug: store.slug, dataRoot: store.dataRoot })!;
     writeProject(store.dataRoot, {
       ...file.parsed.frontmatter,
       agents: file.parsed.frontmatter.agents.map((a) =>
-        a.profileId === "developer" ? { ...a, definition: { ...a.definition, stages: ["impl"] } } : a,
+        a.profileId === "operator" ? a : { ...a, definition: { ...a.definition, stages: ["impl"] } },
       ),
+      requiredReviewers: [{ stageId: "impl", profileId: "reviewer" }],
     });
     rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
   };
@@ -6151,39 +6156,85 @@ describe("ruling 702: get_task offers the way back to an agent the task can be d
       authority("supervised"),
     );
 
-  it("offers the stage and names the agent, and the operator makes the move with no person", async () => {
-    // Canary: drop the `engageAt` half of the snapshot's filter, or the
-    // `engageStagesFor` arm of the operator's `isReworkMove`.
+  const askForTheMove = (packetType: "blocked" | "input", recommended: boolean) =>
+    operatorOpenPacket(
+      store.db,
+      { dataRoot: store.dataRoot },
+      {
+        projectSlug: store.slug,
+        taskKey: "VIB-1",
+        packetType,
+        title: "Dev cannot be engaged at Review: move VIB-1 back to In Progress?",
+        body: "This task has no delivering agent, and Dev can be engaged only at In Progress.",
+        options: [
+          { kind: "move_stage", title: "Move VIB-1 back to In Progress", toStage: "impl", recommended },
+          { kind: "custom", title: "Tell me another way to go on", recommended: !recommended },
+        ],
+      },
+      authority("supervised"),
+    );
+
+  it("offers the stage and names the agent, the operator makes the move with no person, and the reply names the hand-off", async () => {
+    // Canary: drop the `engageAt` half of the snapshot's filter, the
+    // `engageStagesFor` arm of the operator's `reworkMoveOf`, or the reply's
+    // arm for an engage move (it then points forward: "continue in this turn
+    // when nothing at In Progress needs an agent"); or pass no required
+    // reviewers in any of the three, and Rev is named beside Dev.
     scopeDeveloper();
     seed();
-    expect(snapshot().reworkStages).toEqual([{ id: "impl", name: "In Progress", engage: ["Dev"] }]);
+    expect(snapshot().reworkStages).toEqual([
+      { id: "impl", name: "In Progress", engage: [{ id: "developer", name: "Dev" }] },
+    ]);
     const r = await move("impl");
     expect(r.outcome).toBe("done");
+    expect(r.message).toBe(
+      "Moved VIB-1 to In Progress. VIB-1 has no delivering agent: hand its delivery to Dev (`developer`) here (run_agent with `delivers: true`).",
+    );
     expect(task().frontmatter.stage).toBe("impl");
     expect(task().frontmatter.recommendations).toEqual([]);
     // Once there, nothing earlier is offered: the developer can be engaged.
     expect(snapshot().reworkStages).toEqual([]);
   });
 
-  it("offers nothing once a delivering agent is engaged: it runs where the task stands", () => {
+  it("a task that has delivered and waits to be accepted is offered nothing", () => {
+    // The verification-only shape (ruling 62): nobody delivered it, a reviewer
+    // approved it, and an acceptance offer stands. A move back would withdraw
+    // the offer. Canary: read `engagements` alone in `engageStagesFor`.
     scopeDeveloper();
+    const sha = "a".repeat(40);
     seed({
-      engagements: [
-        { profileId: "developer", backend: "claude", role: "Implementation", delivers: true, verdictCapable: false },
-      ],
+      validation: "healthy",
+      noChanges: true,
+      workRevision: { id: "rev_1", headSha: sha, treeSha: null, branch: null, createdAt: "2026-10-08T15:00:00.000Z", sourceProfileId: null, kind: "verified" },
+      engagements: [{ profileId: "reviewer", backend: "claude", role: "Code review", delivers: false, verdictCapable: true }],
+      verdicts: [{ profileId: "reviewer", revisionId: "rev_1", headSha: sha, result: "approve", reason: "verified on main", at: "2026-10-08T15:10:00.000Z", rounds: 1 }],
     });
+    expect(snapshot().validation).toBe("healthy");
     expect(snapshot().reworkStages).toEqual([]);
   });
 
-  it("a failing review keeps every earlier stage, and the names ride on the ones that have them", () => {
-    // Canary: build the `failing` entries without reading `engageAt`.
+  it("a failing review on a task whose stage the board no longer has offers nothing, not every stage but the last", () => {
+    // Canary: slice with the raw index (-1) in the snapshot.
     scopeDeveloper();
-    seed({ validation: "failing" });
-    expect(snapshot().reworkStages).toEqual([
-      { id: "triage", name: "Triage" },
-      { id: "ready", name: "Ready" },
-      { id: "impl", name: "In Progress", engage: ["Dev"] },
-    ]);
+    seed({ stage: "gone", validation: "failing" });
+    expect(snapshot().reworkStages).toEqual([]);
+  });
+
+  it("a blocked packet whose recommended way out is that move is refused, and the same move as one choice among others is not", async () => {
+    // The card BLOG-8's operator opened. Canary: drop the refusal in
+    // `operatorOpenPacket`, or widen it to every packet that offers the move.
+    scopeDeveloper();
+    seed();
+    const refused = await askForTheMove("blocked", true);
+    expect(refused.outcome).toBe("noop");
+    expect(refused.message).toBe(
+      'VIB-1 is not blocked on "Move VIB-1 back to In Progress": it has no delivering agent, and In Progress is where Dev can be engaged, so the move is yours. ' +
+        "Call transition_stage to In Progress, then run_agent with `delivers: true`. Nothing was written. Open a packet for a choice a person has to make.",
+    );
+    expect(task().packet).toBeNull();
+    // A person's choice between going back and something else stays askable.
+    expect((await askForTheMove("input", true)).outcome).toBe("done");
+    expect(task().packet?.title).toContain("move VIB-1 back to In Progress?");
   });
 });
 

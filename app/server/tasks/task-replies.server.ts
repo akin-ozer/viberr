@@ -10,7 +10,11 @@ import {
   isBrowserWorkingArtifact,
   listTaskAttachmentNames,
 } from "~/server/files/task-attachments.server";
-import { keepDelivery } from "~/server/files/kept-deliveries.server";
+import {
+  changesSinceKeptDelivery,
+  keepDelivery,
+  type KeptDeliveryChanges,
+} from "~/server/files/kept-deliveries.server";
 import { recordDeliverySources } from "~/server/files/task-sources.server";
 import { pageCapturesAmong, recordedPageCaptures } from "~/shared/page-capture";
 import type { FileLease } from "~/shared/file-leases";
@@ -570,6 +574,45 @@ export function deliveredFileNames(fm: TaskFrontmatter, timeline: readonly TaskF
   const deliverer = deliveringEngagement(fm);
   if (!fm.deliveredAt || !deliverer) return new Set();
   return filesClaimedBy(timeline, deliveryMakers(fm));
+}
+
+/**
+ * Ruling 703: the task's files as they stand now set against the kept delivery
+ * `judged`, the one a reviewer's newest verdict was on, or null when that
+ * delivery was not kept.
+ *
+ * "The task's files" are what a kept delivery holds (ruling 610: every file
+ * on the task, less the browser's working files and Viberr's own page
+ * pictures), less the files only reviewers saved: a reviewer keeps its
+ * evidence on the task AFTER the delivery it judged was kept, so at its next
+ * review its own notes and screenshots would be told back to it as "new",
+ * and as "changed" from the third review on. A name a maker's entries also
+ * claim stays in.
+ */
+export function changesSinceJudged(
+  ctx: TaskMutationContext,
+  projectSlug: string,
+  taskKey: string,
+  judged: string,
+  parsed: Pick<ParsedTaskFile, "frontmatter" | "timeline">,
+): KeptDeliveryChanges | null {
+  const fm = parsed.frontmatter;
+  const onTask = listTaskAttachmentNames(projectSlug, taskKey, ctx.dataRoot);
+  const pagePictures = pageCapturesAmong(onTask, recordedPageCaptures(fm.pageCaptures));
+  const reviewers = new Set(fm.engagements.filter((e) => !e.delivers && e.verdictCapable).map((e) => e.profileId));
+  const makers = new Set(fm.engagements.filter((e) => e.delivers || !e.verdictCapable).map((e) => e.profileId));
+  const reviewersOwn = filesClaimedBy(parsed.timeline, reviewers);
+  const made = filesClaimedBy(parsed.timeline, makers);
+  const leftOut = (name: string): boolean =>
+    isBrowserWorkingArtifact(name) || (reviewersOwn.has(name) && !made.has(name));
+  return changesSinceKeptDelivery(
+    projectSlug,
+    taskKey,
+    judged,
+    onTask.filter((name) => !pagePictures.has(name) && !leftOut(name)),
+    leftOut,
+    ctx.dataRoot,
+  );
 }
 
 /**

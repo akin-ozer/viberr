@@ -51,6 +51,8 @@ import {
 import { newId } from "~/shared/ids/new-id.server";
 import { backendDispatchHold } from "~/server/runtimes/backend-quota.server";
 import { readProjectFile } from "~/server/files/project-writer.server";
+import { engageStagesFor } from "~/shared/workflow/engage-stages";
+import { listDeployedSpecialists } from "./specialist-roster.server";
 import { readTaskFile, updateTaskFile } from "~/server/files/task-writer.server";
 import { logger } from "~/server/logging/logger.server";
 import {
@@ -1015,6 +1017,32 @@ export async function operatorOpenPacket(
       // above refuses — invisible to the person confirming it.
       const mismatch = moveStagePromiseMismatch(o, target.stage, projectStages, input.taskKey);
       if (mismatch) return { outcome: "noop", message: mismatch };
+      // Ruling 702, by ruling 655's rule (a move nobody confirms is never put
+      // to a person): a BLOCKED packet whose recommended way out is a move the
+      // operator makes itself is not blocked. On BLOG-8 that packet was the
+      // whole dead end: "Writer cannot be engaged at Cover: move BLOG-8 back
+      // to Writing?", with the move recommended and a person waited on.
+      if (input.packetType === "blocked" && o.recommended === true) {
+        const project = readProjectFile({ projectSlug: input.projectSlug, dataRoot: ctx.dataRoot });
+        const engage = project
+          ? engageStagesFor(
+              { stages: project.parsed.frontmatter.stages, workflow: project.parsed.frontmatter.workflow },
+              existing.parsed.frontmatter,
+              listDeployedSpecialists(input.projectSlug, ctx),
+              project.parsed.frontmatter.requiredReviewers,
+            ).find((e) => e.stageId === target.stage.id)
+          : undefined;
+        if (engage) {
+          return {
+            outcome: "noop",
+            message:
+              `${input.taskKey} is not blocked on "${o.title}": it has no delivering agent, and ` +
+              `${target.stage.name} is where ${engage.agents.map((a) => a.name).join(" or ")} can be engaged, ` +
+              `so the move is yours. Call transition_stage to ${target.stage.name}, then run_agent with ` +
+              "`delivers: true`. Nothing was written. Open a packet for a choice a person has to make.",
+          };
+        }
+      }
     }
     // `force_accept` is the admin override of a WEDGED gate. A pull request a
     // person closed unmerged is not wedged, it is decided (R16-3), and the

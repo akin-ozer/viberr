@@ -1320,6 +1320,11 @@ function stageRule(snapshot: OperatorTaskSnapshot): string {
     "- Work stage where the deliverer's run is IN FLIGHT (`liveRuns` in the snapshot is the ONLY proof of that: `waiting` is a display flag and a directive comment on the timeline is not a running agent): do nothing and stop; you are re-invoked when it reports. Never duplicate a run that is already working.\n" +
     "- Work stage where the deliverer already reported and its report is still the LATEST word (no newer human steer, rework decision, or request-changes after it): do nothing and stop.\n" +
     "- Work stage where a human steer, rework decision, or request-changes arrived AFTER the deliverer's last report (e.g. the task was sent back from review): the deliverer owes NEW work; `run_agent` the delivering profile with that steer as its prompt, quoting it. The engaged deliverer runs at EVERY stage (ruling 133): re-prompt it in place, never hand delivery to another profile to get around a stage, and never park the rework on a human for a click; a move to a `reworkStages` entry is a choice about where the board shows the work.\n" +
+    // Ruling 702: the arm for a task nobody delivers. Live on BLOG-8 the task's
+    // files came from another task, so it passed its writing stage with no
+    // run; two stages on the operator needed the writer, could not engage it
+    // there, read an empty `reworkStages` and asked a person to move the task.
+    "- Any stage where the task has no delivering agent, has delivered nothing, and the agent its remaining work needs cannot be engaged here (the hand-off is refused for the stage): `reworkStages` carries the earlier stages where one can be engaged, each with `engage` (the agents' `id` and `name`). Move the task there with `transition_stage`, then `run_agent` that profile id with `delivers: true`. An `engage` entry is an offer, never a reason to move: use it only when work remains for an agent it names, and never ask a person for that move.\n" +
     // Ruling 193: the arm this doctrine was missing. Live pass 37 a required
     // reviewer chartered to bring a Docker stack up ran on a host with no
     // `make` and no Docker; it said so, in its own words, and the line above
