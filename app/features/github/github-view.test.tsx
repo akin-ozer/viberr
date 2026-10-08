@@ -1213,6 +1213,11 @@ describe("ruling 368: the GitHub page's requests in flight", () => {
     await waitFor(() =>
       expect(button(container, "Updating…").getAttribute("aria-busy")).toBe("true"),
     );
+    // P11-14: the click says what it began before the action answers.
+    // CANARY: drop `push(RECONCILE_START_TOAST)` from `github-view.tsx`.
+    expect(container.querySelector(".toast")?.textContent).toBe(
+      "Updating branch and PR status from GitHub…",
+    );
     const update = button(container, "Updating…");
     expect(update.disabled).toBe(true);
     // Ruling 459: the loader is always drawn in the glyph's cell (GlyphSwap),

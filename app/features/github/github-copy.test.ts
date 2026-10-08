@@ -1,21 +1,12 @@
 import { describe, expect, it } from "vitest";
-import {
-  grantScopeToast,
-  reconcileToast,
-  RECONCILE_START_TOAST,
-} from "./github-copy";
+import { grantScopeToast, reconcileToast } from "./github-copy";
 
 // The inputs no action test reaches. Every string a real reconcile or re-check
 // produces is asserted through `runReconcile` / `runGrantScope` in
-// github-route.server.test.ts.
+// github-route.server.test.ts, and the start toast where the click shows it, in
+// github-view.test.tsx.
 
 describe("reconcile toast matrix", () => {
-  it("keeps the start string verbatim (P11-14: 'Update status' wording)", () => {
-    expect(RECONCILE_START_TOAST).toBe(
-      "Updating branch and PR status from GitHub…",
-    );
-  });
-
   it("no repo → honest configuration copy", () => {
     expect(
       reconcileToast({
