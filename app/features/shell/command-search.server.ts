@@ -3,6 +3,7 @@ import { listHomeProjectsForUser } from "~/features/home/home-query.server";
 import { EPIC_STATUS_LABEL, isEpicOpen, type EpicStatus } from "~/schemas/epic-file.schema";
 import { listDeployedSpecialists } from "~/server/tasks/specialist-roster.server";
 import { epicHref } from "~/shared/epic-href";
+import { parseTaskLabels } from "~/shared/mapping/task.server";
 
 /**
  * R15-5 — the ⌘K palette's ONE query.
@@ -221,21 +222,29 @@ export function searchWorkspace(
     const onKeyOrTitle =
       row.task_key.toLowerCase().includes(q) ||
       row.title.toLowerCase().includes(q);
-    if (onKeyOrTitle && taskHits.length < limit) {
-      taskHits.push({
-        kind: "task",
-        id: `task:${row.project_slug}/${row.task_key}`,
-        label: row.title,
-        key: row.task_key,
-        sub: archivedSub(project, row),
-        href,
-      });
+    // F26-12: a triage label is the task's own, so a row found by one is a
+    // TASK hit whose sub-line names the label it was found by. The SQL matched
+    // the stored JSON string, whose quotes and commas any query can match, so
+    // the parsed labels decide.
+    const byLabel = onKeyOrTitle
+      ? undefined
+      : parseTaskLabels(row.labels_json).find((l) => l.toLowerCase().includes(q));
+    if (onKeyOrTitle || byLabel !== undefined) {
+      if (taskHits.length < limit) {
+        taskHits.push({
+          kind: "task",
+          id: `task:${row.project_slug}/${row.task_key}`,
+          label: row.title,
+          key: row.task_key,
+          sub: archivedSub(byLabel === undefined ? project : `${project} · ${byLabel}`, row),
+          href,
+        });
+      }
       continue;
     }
     // A row that matched ONLY on its branch is filed as a branch hit, so the
     // group headings stay honest about why a row is here.
     if (
-      !onKeyOrTitle &&
       row.branch &&
       row.branch.toLowerCase().includes(q) &&
       branchHits.length < limit

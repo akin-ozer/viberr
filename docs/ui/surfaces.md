@@ -108,8 +108,11 @@ Intents behind `project.task.tsx` are explained in
   `/profile` and `/notifications`, so the shortcut works app-wide without
   double-registering. It finds projects, epics (by name or id, open ones first, a done or
   cancelled one saying so; ruling 503), tasks, branches and agents, in that order, over
-  the projects the viewer may open (`searchWorkspace`). A task row leads with an open-circle
-  glyph and its key as its own quiet span ahead of the title (`CommandHit.key`, ruling 625).
+  the projects the viewer may open (`searchWorkspace`). A task is found by its key, its
+  title or one of its triage labels, and a task found by a label alone names that label on
+  its sub-line (F26-12); a task found by its branch alone is a branch row. A task row leads
+  with an open-circle glyph and its key as its own quiet span ahead of the title
+  (`CommandHit.key`, ruling 625).
 - **Topbar**: project crumb, notifications bell (popover), and the account menu. The
   bell (one implementation for the topbar, Home and the standalone header, ruling 14)
   draws the badge from the page's `unread` count and the popover head from

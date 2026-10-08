@@ -37,6 +37,7 @@ function seed(): TestStore {
     frontmatter: baseTaskFrontmatter("VIB-9", {
       title: "Rotate the PAT",
       branch: "vib-9-rotate-pat",
+      labels: ["security-review"],
     }),
   });
   rebuildAll(store.db, { dataRoot: store.dataRoot });
@@ -207,6 +208,23 @@ describe("searchWorkspace", () => {
     expect(hit?.kind).toBe("branch");
     // A branch is still a jump to its task.
     expect(hit?.href).toContain("/tasks/VIB-9");
+  });
+
+  it("finds a task by a triage label alone, naming the label (F26-12)", () => {
+    // Pass 26 made labels searchable here, and the SQL matched them, but the
+    // row loop filed a hit only on the key, the title or the branch: a task
+    // found by its label alone was dropped. CANARY: drop the label arm and
+    // "security-review" finds nothing.
+    const store = seed();
+    const hits = searchWorkspace(store.db, asMember(store), "security-review", {
+      dataRoot: store.dataRoot,
+    });
+    expect(hits).toEqual([
+      expect.objectContaining({ kind: "task", key: "VIB-9", sub: "Viberr Core · security-review" }),
+    ]);
+    // The stored JSON's punctuation is not a label: a quote matches every
+    // labelled row's `labels_json` in SQL, and no label.
+    expect(searchWorkspace(store.db, asMember(store), '"', { dataRoot: store.dataRoot })).toEqual([]);
   });
 
   it("shows a NON-MEMBER nothing at all (R15-4 scoping)", () => {
