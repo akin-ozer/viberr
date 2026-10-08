@@ -8,7 +8,7 @@ import type { TimelineEventRender } from "~/shared/mapping/task-event.server";
 import type { LogLine, RunView } from "~/features/runtime/runtime-types";
 import { NO_RUN_CACHE } from "../../../test-support/run-view";
 import { ToastProvider } from "~/ui/toast";
-import { ContinuityRecoveryPanel, EXECUTION_PANEL_LABEL } from "./continuity-recovery";
+import { ContinuityRecoveryPanel } from "./continuity-recovery";
 import { deriveContinuityLoss } from "./continuity-loss";
 import { TaskDetailPage } from "./task-detail-page";
 import { taskDetail } from "../../../test-support/task-detail";
@@ -386,13 +386,13 @@ describe("ContinuityRecoveryPanel", () => {
     expect(hint.textContent).toContain("@mention");
     expect(hint.textContent).toContain("Dana");
     expect(hint.textContent).toContain("The lost conversation is not restored");
-    expect(hint.textContent).not.toContain(EXECUTION_PANEL_LABEL);
+    expect(hint.textContent).not.toContain("Execution profile");
     cleanup();
 
     const runner = renderPanel({ canRunAgents: true });
     expect(
       runner.container.querySelector(".continuity-panel .hint")!.textContent,
-    ).toContain(EXECUTION_PANEL_LABEL);
+    ).toContain("Execution profile");
   });
 
   it("offers no control the server cannot honour — there is no resume door", () => {
@@ -515,9 +515,9 @@ describe("task detail wiring", () => {
     // the hint and the heading it points at are read off the same page.
     const { container, getByRole } = renderPage();
     expect(container.querySelector(".continuity-panel .hint")!.textContent).toContain(
-      EXECUTION_PANEL_LABEL,
+      "Execution profile",
     );
-    expect(getByRole("heading", { level: 2, name: EXECUTION_PANEL_LABEL })).toBeTruthy();
+    expect(getByRole("heading", { level: 2, name: "Execution profile" })).toBeTruthy();
   });
 
   it("hands the panel the page's own console selector and Ask-operator signal", () => {

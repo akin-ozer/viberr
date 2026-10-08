@@ -79,12 +79,12 @@ import {
  */
 
 /**
- * The heading of the panel this one points a human at for a new run. Exported
- * so the co-located test can check, on the rendered task page, that the panel
- * it names really carries this heading — the UX19-4 rule: naming a control that
- * then cannot be found is worse than naming none.
+ * The heading of the panel this one points a human at for a new run. The
+ * co-located test checks, on the rendered task page, that the panel it names
+ * really carries this heading — the UX19-4 rule: naming a control that then
+ * cannot be found is worse than naming none.
  */
-export const EXECUTION_PANEL_LABEL = "Execution profile";
+const EXECUTION_PANEL_LABEL = "Execution profile";
 
 /** The panel's headline state, as the header pill renders it. */
 interface ContinuityStatus {
