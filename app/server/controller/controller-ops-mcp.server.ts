@@ -427,7 +427,7 @@ export function buildControllerOpsMcp(deps: ControllerOpsDeps): ControllerOpsMcp
   add(
     tool(
       "list_runs",
-      "Agent runs you can see, as run ids `read_run_log` takes. With no arguments: every run that is LIVE right now across every project visible to you (running, or queued behind the concurrency cap), newest first, the answer to \"which runs are those\" when instance_health reports a live count. With `projectSlug` and `taskKey` together: that task's runs instead, finished ones included, newest first, which is how you reach the log of a run that already failed. Read-only, membership gated; a run in a project you cannot see is simply absent.",
+      "Agent runs you can see, as run ids `read_run_log` takes. With no arguments: every run that is LIVE right now across every project visible to you (running, or queued: behind the concurrency cap, or for the summary of its session's last run), newest first, the answer to \"which runs are those\" when instance_health reports a live count. With `projectSlug` and `taskKey` together: that task's runs instead, finished ones included, newest first, which is how you reach the log of a run that already failed. Read-only, membership gated; a run in a project you cannot see is simply absent.",
       {
         projectSlug: z.string().optional(),
         taskKey: z

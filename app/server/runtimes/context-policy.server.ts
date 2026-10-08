@@ -99,6 +99,15 @@ export function codexCompactionConfig(kind: RunKind): Partial<CodexCompactionCon
 export const COMPACT_AT_COMPLETION_TOKENS = 100_000;
 
 /**
+ * Ruling 701: how long a completion compaction may take before the run service
+ * stops waiting for it. The session then stays as large as it was (ruling 372
+ * is its backstop), the compaction's process is stopped, and a run held for
+ * that session starts. Measured compactions took one to two and a half
+ * minutes; Codex's own exchange gives up at five.
+ */
+export const COMPLETION_COMPACT_DEADLINE_MS = 10 * 60 * 1000;
+
+/**
  * What the completion compaction asks the summarizer to keep — the same
  * facts `CODEX_COMPACT_PROMPT` names, as the argument of Claude's `/compact`.
  * Skills and knowledge bases need no instruction: the persona and the

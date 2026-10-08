@@ -124,7 +124,9 @@ export function logsFooter(cur: RunView, hydrated: boolean, offer: RetryOffer): 
     // UI-57: a QUEUED run is not an idle thread. The strip renders only for
     // `running`, so a queued run used to show a "queued" pill next to the
     // footer "thread alive — no run executing", which contradicted it.
-    return "queued: waiting for a runtime slot; output appears once it starts";
+    // Ruling 701: a queued run's step, when it has one, is what it waits for
+    // in place of a slot (the summary of its session's last run).
+    return `queued: ${cur.step ?? "waiting for a runtime slot"}; output appears once it starts`;
   }
   if (cur.lifecycle === "interrupted") return interruptedFooter(cur);
   if (cur.state === "done") return finishedFooter(cur, hydrated);

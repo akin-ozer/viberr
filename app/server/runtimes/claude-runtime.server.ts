@@ -1656,6 +1656,11 @@ export function createClaudeAdapter(deps: ClaudeAdapterDeps = {}): RuntimeAdapte
       const queryFn = deps.queryFn ?? (await realQuery());
       const { native: nativeSkills, dropped: droppedSkills } = nativeSkillsOutcome(spec);
       const phase = (name: string, step: string | null) => cb.onPhase?.(name, step);
+      // Ruling 701: the request has no timeout of its own, so the run service
+      // gives it one and says so here; the SDK stops its CLI on the abort.
+      const compactionAbort = new AbortController();
+      if (cb.signal?.aborted) compactionAbort.abort();
+      cb.signal?.addEventListener("abort", () => compactionAbort.abort(), { once: true });
       const { options } = assembleClaudeOptions(spec, deps, {
         resolvedModel: resolveClaudeModel(spec.model),
         nativeSkills,
@@ -1666,7 +1671,7 @@ export function createClaudeAdapter(deps: ClaudeAdapterDeps = {}): RuntimeAdapte
         phase,
         emitPolicyDenied: () => {},
         steering: null,
-        abortController: new AbortController(),
+        abortController: compactionAbort,
       });
       options.resume = sessionId;
       options.maxTurns = 1;

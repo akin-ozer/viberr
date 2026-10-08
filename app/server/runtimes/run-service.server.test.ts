@@ -1,7 +1,7 @@
-import { chmodSync, existsSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { setMaxRunSpendUsd } from "~/server/settings/instance-settings.server";
+import { setMaxConcurrentRuns, setMaxRunSpendUsd } from "~/server/settings/instance-settings.server";
 import { AGENT_UID_FLOOR, resetAgentIsolationForTests } from "./agent-isolation.server";
 import { rebuildAll } from "~/server/projections/rebuilder.server";
 import { closeDb, shutdownDatabase } from "~/server/db/sqlite.server";
@@ -23,6 +23,7 @@ import {
   repoWriteWithheldFromDenylist,
   reserveRun,
   resumeRun,
+  runConcurrencySnapshot,
   startRun,
 } from "./run-service.server";
 import * as runServiceModule from "./run-service.server";
@@ -36,7 +37,8 @@ import {
 } from "./run-store.server";
 import { defaultModelFor } from "./model-catalog.server";
 import { claudeReportedTotals } from "./wire-format.server";
-import { RUN_PHASE } from "./adapter.server";
+import { COMPACTING_AFTER_RUN_STEP, RUN_PHASE, SESSION_SETTLING_STEP } from "./adapter.server";
+import { COMPLETION_COMPACT_DEADLINE_MS } from "./context-policy.server";
 import type { LogLine } from "~/features/runtime/runtime-types";
 import { emptyRunFailureFacts } from "~/shared/run-failure";
 import type { McpSdkServerConfigWithInstance } from "@anthropic-ai/claude-agent-sdk";
@@ -54,6 +56,7 @@ import {
   lastRunSpec,
   queueFakeCompaction,
   queueFakeRun,
+  startedRunSpecs,
   type FakeRun,
 } from "../../../test-support/fake-runtime";
 import { settle } from "../../../test-support/polling";
@@ -2621,7 +2624,15 @@ describe("compaction at completion (ruling 376)", () => {
     expect(audit[0]?.details).toMatchObject({ trigger: "completion", preTokens: 120_000, postTokens: 18_000 });
   });
 
-  it("U39-30: tells a caller the answer is written before it compacts, and only then", async () => {
+  /** A controller turn, the one kind whose settle still waits for the
+   *  compaction (ruling 701): its next turn resumes the same session. */
+  const controllerTurn = (thread: string) => ({
+    projectSlug: "", taskKey: thread, threadId: thread, role: "Controller", kind: "controller" as const,
+    backend: "claude" as const, model: "claude-sonnet-4-5", prompt: "go", dataRoot: store.dataRoot,
+    workdir: store.dataRoot, agentProfileId: "controller",
+  });
+
+  it("U39-30: tells a controller turn's caller the answer is written before it compacts, and only then", async () => {
     // Live on ax-clone a controller reply sat behind a 27-second completion
     // compaction. CANARY: drop the `answered()` call and nothing fires.
     const before = compactedRunSpecs().length;
@@ -2631,8 +2642,7 @@ describe("compaction at completion (ruling 376)", () => {
     const order: string[] = [];
     let linesWhenAnswered = "";
     const { runId } = await startTestRun(store.db, {
-      projectSlug: store.slug, taskKey: "VIB-1", role: "Primary specialist", kind: "primary",
-      backend: "claude", model: "claude-sonnet-4-5", prompt: "go", dataRoot: store.dataRoot,
+      ...controllerTurn("cnv_answered"),
       onAnswered: (answeredRunId) => {
         order.push(`answered:${compactedRunSpecs().length - before}`);
         // Read here, asserted below: the service logs a throw from this
@@ -2654,8 +2664,7 @@ describe("compaction at completion (ruling 376)", () => {
     queueFakeRun({ ...finished("sess-small-answer", 60_000), gate: new Promise<void>((r) => (open = r)) });
     const order: string[] = [];
     const { runId } = await startTestRun(store.db, {
-      projectSlug: store.slug, taskKey: "VIB-1", role: "Primary specialist", kind: "primary",
-      backend: "claude", model: "claude-sonnet-4-5", prompt: "go", dataRoot: store.dataRoot,
+      ...controllerTurn("cnv_small_answer"),
       onAnswered: () => order.push("answered"),
     });
     registerRunCompletion(runId, () => order.push("completed"));
@@ -2663,6 +2672,576 @@ describe("compaction at completion (ruling 376)", () => {
     await settle();
     await settle();
     expect(order).toEqual(["completed"]);
+  });
+
+  /**
+   * Ruling 701. Live on BLOG-5 a Diagrammer's report, and the hand-off to the
+   * next agent, waited 143 seconds for a summary of the session it had left.
+   * On that instance 121 specialist runs waited two minutes each on average
+   * for sessions of which a quarter were ever resumed. A specialist's run now
+   * ends when its answer is written; the compaction follows as the session's
+   * own housekeeping, and only a run that resumes that session waits for it.
+   */
+  const specialist = (threadId = "primary") => ({
+    projectSlug: store.slug, taskKey: "VIB-1", threadId, role: "Primary specialist", kind: "primary" as const,
+    backend: "claude" as const, model: "claude-sonnet-4-5", prompt: "go", dataRoot: store.dataRoot,
+  });
+  /** A compaction that answers only when the test says so. */
+  const heldCompaction = () => {
+    const hold = { answer: () => {} };
+    queueFakeCompaction(
+      "claude",
+      { compacted: true, preTokens: 120_000, postTokens: 18_000 },
+      () => new Promise<void>((resolve) => (hold.answer = resolve)),
+    );
+    return hold;
+  };
+  const arda = () => ({ userId: store.users.arda.id, label: store.users.arda.email });
+
+  /** A supporting agent's run on the same task: 86 of the 121 compacted
+   *  specialist runs the ruling counts were of this kind. */
+  const supporting = (threadId = "r0") => ({
+    ...specialist(threadId), role: "Reviewer", kind: "reviewer" as const,
+  });
+
+  it.each([
+    ["delivering", "primary"],
+    ["supporting", "reviewer"],
+  ] as const)("ruling 701: a %s agent's run is over, and its completion fires, before its session is compacted", async (_name, kind) => {
+    // CANARY: await the compaction before the finalize (ruling 376's order),
+    // for either kind, and the completion fires after the compaction was
+    // asked for; drop the mark and the finished row says nothing of a
+    // compaction a restart would have to finish.
+    const before = compactedRunSpecs().length;
+    let open!: () => void;
+    queueFakeRun({ ...finished(`sess-ends-first-${kind}`, 120_000), gate: new Promise<void>((r) => (open = r)) });
+    const compaction = heldCompaction();
+    const { runId } = await startTestRun(store.db, kind === "primary" ? specialist() : supporting());
+    const completed: string[] = [];
+    registerRunCompletion(runId, (row) =>
+      completed.push(`${row.state}, ${compactedRunSpecs().length - before} compactions asked for`),
+    );
+    open();
+    await settle();
+    await settle();
+    expect(completed).toEqual(["finished, 0 compactions asked for"]);
+    // The compaction is in flight on a run whose record is closed, and the
+    // row says so for a restart to read.
+    expect(compactedRunSpecs().slice(before)).toHaveLength(1);
+    const during = getRun(store.db, runId)!;
+    expect(during).toMatchObject({
+      state: "finished", phase: RUN_PHASE.compacting, step: COMPACTING_AFTER_RUN_STEP,
+      compactions: 0, last_prompt_tokens: 120_000,
+    });
+    expect(during.finished_at).not.toBeNull();
+    expect(during.total_cost_usd).toBeCloseTo(4, 5);
+    compaction.answer();
+    await settle();
+    await settle();
+    // What the compaction learned still lands on that run (ruling 376).
+    const after = getRun(store.db, runId)!;
+    expect(after).toMatchObject({ state: "finished", phase: null, step: null, compactions: 1, last_prompt_tokens: 18_000 });
+    expect(after.finished_at).toBe(during.finished_at);
+    expect(after.total_cost_usd).toBeCloseTo(4.5, 5);
+  });
+
+  it.each([
+    ["delivering", "primary"],
+    ["supporting", "reviewer"],
+  ] as const)("ruling 701: a run that resumes a %s agent's session waits, queued, until the compaction is over", async (_name, kind) => {
+    // CANARY: drop the hold in `admitRun`, for either kind, and the resumed
+    // run starts a second process on a transcript the compaction is still
+    // rewriting; never remove the entry and the last start below is queued.
+    const session = `sess-held-${kind}`;
+    queueFakeRun(finished(session, 120_000));
+    const compaction = heldCompaction();
+    const first = kind === "primary" ? specialist() : supporting();
+    const { runId } = await startTestRun(store.db, first);
+    await settle();
+    await settle();
+    const startedBefore = startedRunSpecs().length;
+    const resumed = await resumeRun(store.db, {
+      runId, prompt: "and the cover?", credentialUserId: store.users.arda.id, dataRoot: store.dataRoot,
+    });
+    await settle();
+    expect(getRun(store.db, resumed.runId)).toMatchObject({ state: "queued", step: SESSION_SETTLING_STEP });
+    expect(startedRunSpecs()).toHaveLength(startedBefore);
+    compaction.answer();
+    await settle();
+    await settle();
+    expect(startedRunSpecs()).toHaveLength(startedBefore + 1);
+    expect(startedRunSpecs().at(-1)).toMatchObject({ runId: resumed.runId, resumeSessionId: session });
+    expect(getRun(store.db, resumed.runId)).toMatchObject({ state: "finished", step: null });
+    // The task's timeline says what the run waited for, and not "a slot".
+    const notes = readTaskFile({ dataRoot: store.dataRoot, projectSlug: store.slug, taskKey: "VIB-1" })!
+      .parsed.timeline.filter((event) => event.title === "Run started");
+    expect(notes.map((event) => event.text)).toEqual([
+      expect.stringContaining("waited for the summary of its session's last run and has started"),
+    ]);
+    // The session is nobody's now: the next run on it starts at once.
+    const again = await startTestRun(store.db, { ...first, threadId: `${first.threadId}-again`, resumeSessionId: session });
+    expect(again.outcome).toBe("started");
+    await settle();
+  });
+
+  it("ruling 701: a held run that is stopped while it waits never starts", async () => {
+    // CANARY: admit the held run without reading its row and it springs to
+    // life after the person stopped it.
+    queueFakeRun(finished("sess-held-stopped", 120_000));
+    const compaction = heldCompaction();
+    const { runId } = await startTestRun(store.db, specialist());
+    await settle();
+    await settle();
+    const startedBefore = startedRunSpecs().length;
+    void runId;
+    // The door is told the run is queued, never that it started (ruling 263).
+    const resumed = await startTestRun(store.db, {
+      ...specialist("primary-held"), prompt: "and the cover?", resumeSessionId: "sess-held-stopped",
+    });
+    expect(resumed.outcome).toBe("queued");
+    await interruptRun(
+      store.db,
+      { projectSlug: store.slug, taskKey: "VIB-1", dataRoot: store.dataRoot, runId: resumed.runId },
+      arda(),
+    );
+    compaction.answer();
+    await settle();
+    await settle();
+    expect(startedRunSpecs()).toHaveLength(startedBefore);
+    expect(getRun(store.db, resumed.runId)!.state).toBe("interrupted");
+  });
+
+  it("ruling 701: a resume started from the run's own completion is held too", async () => {
+    // A mention that arrived while the agent worked is delivered at its
+    // completion and resumes this very session. CANARY: register the hold
+    // after the completion has fired and that run starts under the compaction.
+    let open!: () => void;
+    queueFakeRun({ ...finished("sess-from-completion", 120_000), gate: new Promise<void>((r) => (open = r)) });
+    const compaction = heldCompaction();
+    const { runId } = await startTestRun(store.db, specialist());
+    let resumedId = "";
+    registerRunCompletion(runId, () => {
+      void resumeRun(store.db, {
+        runId, prompt: "the comment that waited", credentialUserId: store.users.arda.id, dataRoot: store.dataRoot,
+      }).then((resumed) => (resumedId = resumed.runId));
+    });
+    open();
+    await settle();
+    await settle();
+    expect(getRun(store.db, resumedId)).toMatchObject({ state: "queued", step: SESSION_SETTLING_STEP });
+    compaction.answer();
+    await settle();
+    await settle();
+    expect(getRun(store.db, resumedId)!.state).toBe("finished");
+  });
+
+  it("ruling 701: once the compaction is over, a held run takes its turn under the cap like any other", async () => {
+    // CANARY: launch the held run without admitting it and it starts past a
+    // full cap; leave its step and a run parked behind the cap still says it
+    // waits for a summary.
+    setMaxConcurrentRuns(store.db, 1);
+    queueFakeRun(finished("sess-then-the-cap", 120_000));
+    const compaction = heldCompaction();
+    const { runId } = await startTestRun(store.db, specialist());
+    await settle();
+    await settle();
+    const resumed = await resumeRun(store.db, {
+      runId, prompt: "and the cover?", credentialUserId: store.users.arda.id, dataRoot: store.dataRoot,
+    });
+    // Another agent takes the one slot while the first one's session settles.
+    queueFakeRun({ lines: [{ t: "1", ev: "text", tag: "assistant", text: "working" }], keepRunning: true });
+    const other = await startTestRun(store.db, {
+      ...specialist("r-editor"), role: "Editor", kind: "reviewer", agentProfileId: "editor",
+    });
+    await settle();
+    const startedBefore = startedRunSpecs().length;
+    compaction.answer();
+    await settle();
+    await settle();
+    expect(getRun(store.db, resumed.runId)).toMatchObject({ state: "queued", step: null });
+    expect(startedRunSpecs()).toHaveLength(startedBefore);
+    await interruptRun(
+      store.db,
+      { projectSlug: store.slug, taskKey: "VIB-1", dataRoot: store.dataRoot, runId: other.runId },
+      arda(),
+    );
+    await settle();
+    await settle();
+    expect(getRun(store.db, resumed.runId)!.state).toBe("finished");
+  });
+
+  it("ruling 701: nothing else waits: the queue is drained and the next agent runs while the session settles", async () => {
+    // CANARY: keep the run's slot, or drain the queue only once the
+    // compaction is over, and at a cap of one the next agent stays parked
+    // behind a run that has finished.
+    setMaxConcurrentRuns(store.db, 1);
+    let open!: () => void;
+    queueFakeRun({ ...finished("sess-slot", 120_000), gate: new Promise<void>((r) => (open = r)) });
+    const compaction = heldCompaction();
+    await startTestRun(store.db, specialist());
+    await settle();
+    const next = await startTestRun(store.db, { ...supporting("r-editor"), role: "Editor", agentProfileId: "editor" });
+    expect(next.outcome).toBe("queued");
+    open();
+    await settle();
+    await settle();
+    expect(getRun(store.db, next.runId)!.state).toBe("finished");
+    compaction.answer();
+    await settle();
+  });
+
+  it("ruling 701: a run parked behind the cap that resumes the session is passed over until the compaction is over", async () => {
+    // CANARY: register the session after the queue is drained, or promote
+    // the oldest parked run whatever its session, and it starts under the
+    // compaction.
+    setMaxConcurrentRuns(store.db, 1);
+    let open!: () => void;
+    queueFakeRun({ ...finished("sess-parked", 120_000), gate: new Promise<void>((r) => (open = r)) });
+    const compaction = heldCompaction();
+    await startTestRun(store.db, specialist());
+    await settle();
+    const parked = await startTestRun(store.db, {
+      ...supporting("r-parked"), agentProfileId: "editor", resumeSessionId: "sess-parked",
+    });
+    // A run on another session, parked behind it, is not held up by it.
+    const other = await startTestRun(store.db, { ...supporting("r-other"), agentProfileId: "diagrammer" });
+    expect([parked.outcome, other.outcome]).toEqual(["queued", "queued"]);
+    open();
+    await settle();
+    await settle();
+    expect(getRun(store.db, parked.runId)!.state).toBe("queued");
+    expect(getRun(store.db, other.runId)!.state).toBe("finished");
+    compaction.answer();
+    await settle();
+    await settle();
+    expect(getRun(store.db, parked.runId)!.state).toBe("finished");
+  });
+
+  it("ruling 701: a run parked for a summary is not a build waiting for a slot: a coordination turn still borrows one", async () => {
+    // Ruling 152's borrow rule lets an operator or controller turn past the
+    // lane take a cap slot only when no build is parked for one. CANARY: count
+    // the run held for its session as such a build and the turn below waits
+    // for a compaction it has nothing to do with.
+    setMaxConcurrentRuns(store.db, 4);
+    queueFakeRun(finished("sess-borrow", 120_000));
+    const compaction = heldCompaction();
+    const { runId } = await startTestRun(store.db, specialist());
+    await settle();
+    await settle();
+    const held = await resumeRun(store.db, {
+      runId, prompt: "and the cover?", credentialUserId: store.users.arda.id, dataRoot: store.dataRoot,
+    });
+    expect(getRun(store.db, held.runId)!.state).toBe("queued");
+    // The lane's one turn is taken; the next one has to borrow.
+    queueFakeRun({ lines: [{ t: "1", ev: "text", tag: "assistant", text: "coordinating" }], keepRunning: true });
+    const first = await startTestRun(store.db, {
+      projectSlug: store.slug, taskKey: "VIB-1", threadId: "op", role: "Operator", kind: "operator",
+      backend: "claude", model: "claude-sonnet-4-5", prompt: "go", dataRoot: store.dataRoot,
+    });
+    const second = await startTestRun(store.db, controllerTurn("cnv_borrows"));
+    expect([first.outcome, second.outcome]).toEqual(["started", "started"]);
+    await interruptRun(
+      store.db,
+      { projectSlug: store.slug, taskKey: "VIB-1", dataRoot: store.dataRoot, runId: first.runId },
+      arda(),
+    );
+    compaction.answer();
+    await settle();
+    await settle();
+  });
+
+  it("ruling 701: a held run that is stopped leaves the queue at once", async () => {
+    // CANARY: leave its entry for the release and the instance counts a run
+    // as queued, for as long as the compaction takes, that will never start.
+    queueFakeRun(finished("sess-stopped-leaves", 120_000));
+    const compaction = heldCompaction();
+    const { runId } = await startTestRun(store.db, specialist());
+    await settle();
+    await settle();
+    const held = await resumeRun(store.db, {
+      runId, prompt: "and the cover?", credentialUserId: store.users.arda.id, dataRoot: store.dataRoot,
+    });
+    expect(runConcurrencySnapshot(store.db).queued).toBe(1);
+    await interruptRun(
+      store.db,
+      { projectSlug: store.slug, taskKey: "VIB-1", dataRoot: store.dataRoot, runId: held.runId },
+      arda(),
+    );
+    expect(runConcurrencySnapshot(store.db).queued).toBe(0);
+    compaction.answer();
+    await settle();
+  });
+
+  it("ruling 701: a held run whose step cannot be written is still parked, and still starts", async () => {
+    // The step is the sentence on the row; the queue entry is what starts the
+    // run. CANARY: write the step before the run is in the queue and a write
+    // that fails leaves a `queued` row that nothing will ever start.
+    const logged = vi.spyOn(logger, "error").mockImplementation(() => {});
+    try {
+      queueFakeRun(finished("sess-step-unwritten", 120_000));
+      const compaction = heldCompaction();
+      const { runId } = await startTestRun(store.db, specialist());
+      await settle();
+      await settle();
+      store.db.exec(
+        `CREATE TRIGGER fail_step_write BEFORE UPDATE OF step ON agent_runs
+           WHEN NEW.step = '${SESSION_SETTLING_STEP}' BEGIN SELECT RAISE(ABORT, 'the step cannot be written'); END`,
+      );
+      const held = await resumeRun(store.db, {
+        runId, prompt: "and the cover?", credentialUserId: store.users.arda.id, dataRoot: store.dataRoot,
+      });
+      expect(getRun(store.db, held.runId)).toMatchObject({ state: "queued", step: null });
+      compaction.answer();
+      await settle();
+      await settle();
+      expect(getRun(store.db, held.runId)!.state).toBe("finished");
+      expect(logged.mock.calls.map((call) => call[0])).toEqual(["a held run's step could not be written"]);
+    } finally {
+      logged.mockRestore();
+    }
+  });
+
+  it("ruling 701: a step that cannot be cleared does not keep the parked run from starting", async () => {
+    // CANARY: clear the steps and drain the queue under one `try`, and with
+    // no cap the run stays parked on a session that is free.
+    const logged = vi.spyOn(logger, "error").mockImplementation(() => {});
+    try {
+      queueFakeRun(finished("sess-step-uncleared", 120_000));
+      const compaction = heldCompaction();
+      const { runId } = await startTestRun(store.db, specialist());
+      await settle();
+      await settle();
+      const held = await resumeRun(store.db, {
+        runId, prompt: "and the cover?", credentialUserId: store.users.arda.id, dataRoot: store.dataRoot,
+      });
+      store.db.exec(
+        `CREATE TRIGGER fail_step_clear BEFORE UPDATE OF step ON agent_runs
+           WHEN NEW.step IS NULL AND OLD.state = 'queued' BEGIN SELECT RAISE(ABORT, 'the step cannot be cleared'); END`,
+      );
+      compaction.answer();
+      await settle();
+      await settle();
+      expect(getRun(store.db, held.runId)!.state).toBe("finished");
+      expect(logged.mock.calls.map((call) => call[0])).toEqual(["a held run's step could not be cleared"]);
+    } finally {
+      logged.mockRestore();
+    }
+  });
+
+  it("ruling 701: what a compaction says after its deadline is dropped, and its request is told to stop", async () => {
+    // By then the console has said it did not happen and a run parked for
+    // the session may be on it. CANARY: keep the late lines and the run
+    // reads as compacted, with a summary's size, under a line that says the
+    // compaction did not happen.
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"], shouldAdvanceTime: true });
+    const warned = vi.spyOn(logger, "warn").mockImplementation(() => {});
+    try {
+      const before = compactedRunSpecs().length;
+      queueFakeRun(finished("sess-late-answer", 120_000));
+      const compaction = heldCompaction();
+      const { runId } = await startTestRun(store.db, specialist());
+      await settle();
+      await settle();
+      expect(compactedRunSpecs().at(-1)?.signal?.aborted).toBe(false);
+      await vi.advanceTimersByTimeAsync(COMPLETION_COMPACT_DEADLINE_MS);
+      await vi.waitFor(() => expect(getRun(store.db, runId)!.phase).toBeNull(), { timeout: 5_000 });
+      expect(compactedRunSpecs().slice(before)).toHaveLength(1);
+      expect(compactedRunSpecs().at(-1)?.signal?.aborted).toBe(true);
+      compaction.answer();
+      await settle();
+      await settle();
+      const run = getRun(store.db, runId)!;
+      expect(run).toMatchObject({ state: "finished", compactions: 0, last_prompt_tokens: 120_000 });
+      expect(run.total_cost_usd).toBeCloseTo(4, 5);
+      const lines = JSON.stringify(listRunLines(store.db, runId));
+      expect(lines).toContain("no answer within 10 minutes");
+      expect(lines).not.toContain("run·compacted·completion");
+    } finally {
+      warned.mockRestore();
+      vi.useRealTimers();
+    }
+  });
+
+  it("ruling 701: a controller turn whose compaction never answers is finalized at the deadline", async () => {
+    // CANARY: bound a specialist's compaction alone and the turn stays
+    // `running`, and its conversation closed to the next message, for good.
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"], shouldAdvanceTime: true });
+    const warned = vi.spyOn(logger, "warn").mockImplementation(() => {});
+    try {
+      queueFakeRun(finished("sess-controller-hangs", 120_000));
+      queueFakeCompaction(
+        "claude",
+        { compacted: true, preTokens: 120_000, postTokens: 18_000 },
+        () => new Promise<void>(() => {}),
+      );
+      const { runId } = await startTestRun(store.db, controllerTurn("cnv_hangs"));
+      await settle();
+      await settle();
+      expect(getRun(store.db, runId)!.state).toBe("running");
+      await vi.advanceTimersByTimeAsync(COMPLETION_COMPACT_DEADLINE_MS);
+      await vi.waitFor(() => expect(getRun(store.db, runId)!.state).toBe("finished"), { timeout: 5_000 });
+    } finally {
+      warned.mockRestore();
+      vi.useRealTimers();
+    }
+  });
+
+  it("ruling 701: a compaction that never answers stops being waited for at its deadline", async () => {
+    // Claude's compaction request has no timeout of its own. CANARY: drop the
+    // deadline and the run held for the session waits for good, with nothing
+    // a person can stop: the run it waits on has finished.
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"], shouldAdvanceTime: true });
+    const warned = vi.spyOn(logger, "warn").mockImplementation(() => {});
+    try {
+      queueFakeRun(finished("sess-hangs", 120_000));
+      queueFakeCompaction(
+        "claude",
+        { compacted: true, preTokens: 120_000, postTokens: 18_000 },
+        () => new Promise<void>(() => {}),
+      );
+      const { runId } = await startTestRun(store.db, specialist());
+      await settle();
+      await settle();
+      const resumed = await resumeRun(store.db, {
+        runId, prompt: "and the cover?", credentialUserId: store.users.arda.id, dataRoot: store.dataRoot,
+      });
+      await settle();
+      expect(getRun(store.db, resumed.runId)!.state).toBe("queued");
+      await vi.advanceTimersByTimeAsync(COMPLETION_COMPACT_DEADLINE_MS);
+      await vi.waitFor(() => expect(getRun(store.db, resumed.runId)!.state).toBe("finished"), { timeout: 5_000 });
+      expect(getRun(store.db, runId)).toMatchObject({ state: "finished", phase: null, step: null, compactions: 0 });
+      expect(JSON.stringify(listRunLines(store.db, runId))).toContain(
+        "compaction at the end of the run did not happen: no answer within 10 minutes",
+      );
+      expect(warned.mock.calls.map((call) => call[0])).toContain(
+        "run compaction at completion gave no answer by its deadline",
+      );
+    } finally {
+      warned.mockRestore();
+      vi.useRealTimers();
+    }
+  });
+
+  it("ruling 701: the run's temporary directory outlives the compaction that still writes it (ruling 636)", async () => {
+    // CANARY: tidy when the run ends and the directory goes under the
+    // compaction's own process.
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"], shouldAdvanceTime: true });
+    try {
+      queueFakeRun(finished("sess-tmp", 120_000));
+      const compaction = heldCompaction();
+      const { runId } = await startTestRun(store.db, specialist());
+      await settle();
+      await settle();
+      const dir = runTmpDir(runId);
+      expect(getRun(store.db, runId)!.state).toBe("finished");
+      await vi.advanceTimersByTimeAsync(RUN_TMP_REMOVE_DELAY_MS * 2);
+      // A removal, had one been scheduled, has had its time to finish.
+      const until = performance.now() + 150;
+      while (performance.now() < until) await new Promise((resolve) => setImmediate(resolve));
+      expect(existsSync(dir)).toBe(true);
+      compaction.answer();
+      await settle();
+      await settle();
+      await vi.advanceTimersByTimeAsync(RUN_TMP_REMOVE_DELAY_MS);
+      await vi.waitFor(() => expect(existsSync(dir)).toBe(false), { timeout: 5_000 });
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("ruling 701: a resume during the compaction is never set aside as stale and large (ruling 372)", async () => {
+    // The row's finish and last prompt are the run's own, from before the
+    // summary. CANARY: read ruling 372's verdict while the session settles
+    // and a comment that lands past the TTL starts a fresh, memory-less
+    // session moments before the summary it should have replayed is written.
+    queueFakeRun(finished("sess-not-stale", 200_000));
+    const compaction = heldCompaction();
+    const { runId } = await startTestRun(store.db, specialist());
+    await settle();
+    await settle();
+    // The transcript is in the principal's store, so the verdict has a
+    // session to judge: two hours idle by the clock handed in, and 200k.
+    const { userBackendHome } = await import("./user-homes.server");
+    const transcripts = path.join(userBackendHome(store.users.arda.id, "claude", store.dataRoot), "projects", "-w-x");
+    mkdirSync(transcripts, { recursive: true });
+    writeFileSync(path.join(transcripts, "sess-not-stale.jsonl"), "\n");
+    const resumed = await resumeRun(store.db, {
+      runId, prompt: "and the cover?", credentialUserId: store.users.arda.id, dataRoot: store.dataRoot,
+      nowIso: new Date(Date.now() + 2 * 60 * 60_000).toISOString(),
+    });
+    expect(resumed.continuityReset).toBeUndefined();
+    expect(getRun(store.db, resumed.runId)).toMatchObject({ state: "queued", step: SESSION_SETTLING_STEP });
+    compaction.answer();
+    await settle();
+    await settle();
+    expect(startedRunSpecs().at(-1)).toMatchObject({ runId: resumed.runId, resumeSessionId: "sess-not-stale" });
+  });
+
+  it("ruling 701: a controller turn whose compaction throws is still finalized", async () => {
+    // Before, the throw skipped the finalize: the turn stayed `running` and
+    // its completion was handed a row that said so. CANARY: let the
+    // compaction's throw reach the settle.
+    const logged = vi.spyOn(logger, "error").mockImplementation(() => {});
+    try {
+      let open!: () => void;
+      queueFakeRun({ ...finished("sess-controller-throws", 120_000), gate: new Promise<void>((r) => (open = r)) });
+      queueFakeCompaction("claude", { compacted: true, preTokens: 120_000, postTokens: 18_000 }, () => {
+        throw new Error("the provider hung up");
+      });
+      const { runId } = await startTestRun(store.db, controllerTurn("cnv_throws"));
+      const completed: string[] = [];
+      registerRunCompletion(runId, (row) => completed.push(row.state));
+      open();
+      await settle();
+      await settle();
+      expect(completed).toEqual(["finished"]);
+      expect(getRun(store.db, runId)).toMatchObject({ state: "finished", phase: null });
+      expect(logged.mock.calls.map((call) => call[0])).toEqual(["run compaction at completion failed"]);
+    } finally {
+      logged.mockRestore();
+    }
+  });
+
+  it("ruling 701: a compaction that throws leaves the run finished and its session resumable", async () => {
+    // CANARY: release the hold only after a compaction that answered, and the
+    // resume below waits for good.
+    const logged = vi.spyOn(logger, "error").mockImplementation(() => {});
+    try {
+      queueFakeRun(finished("sess-compaction-throws", 120_000));
+      queueFakeCompaction("claude", { compacted: true, preTokens: 120_000, postTokens: 18_000 }, () => {
+        throw new Error("the provider hung up");
+      });
+      const { runId } = await startTestRun(store.db, specialist());
+      await settle();
+      await settle();
+      expect(getRun(store.db, runId)).toMatchObject({ state: "finished", compactions: 0 });
+      expect(logged.mock.calls.map((call) => call[0])).toEqual(["run compaction at completion failed"]);
+      const resumed = await resumeRun(store.db, {
+        runId, prompt: "and the cover?", credentialUserId: store.users.arda.id, dataRoot: store.dataRoot,
+      });
+      await settle();
+      await settle();
+      expect(getRun(store.db, resumed.runId)!.state).toBe("finished");
+    } finally {
+      logged.mockRestore();
+    }
+  });
+
+  it("ruling 701: an operator's session is never compacted, whatever its size", async () => {
+    // Every operator turn starts a fresh session and nothing resumes one, so
+    // the summary had no reader. CANARY: drop the kind from the condition and
+    // a compaction is asked for.
+    const before = compactedRunSpecs().length;
+    queueFakeRun(finished("sess-operator", 150_000));
+    queueFakeCompaction("claude", { compacted: true, preTokens: 150_000, postTokens: 20_000 });
+    const { runId } = await startTestRun(store.db, {
+      projectSlug: store.slug, taskKey: "VIB-1", threadId: "op", role: "Operator", kind: "operator",
+      backend: "claude", model: "claude-sonnet-4-5", prompt: "go", dataRoot: store.dataRoot,
+    });
+    await settle();
+    await settle();
+    expect(compactedRunSpecs()).toHaveLength(before);
+    expect(getRun(store.db, runId)).toMatchObject({ state: "finished", compactions: 0, last_prompt_tokens: 150_000 });
   });
 
   it("leaves a run under the threshold alone", async () => {
@@ -2774,6 +3353,7 @@ describe("compaction at completion (ruling 376)", () => {
     expect(codexRolloutRunStats(store.users.arda.id, sid, null, store.dataRoot)).toMatchObject({ calls: 2, compactions: 0 });
     const { appendFileSync } = await import("node:fs");
     const before = compactedRunSpecs().length;
+    let open!: () => void;
     queueFakeRun({
       ...finished(sid, 123_508),
       backend: "codex",
@@ -2782,6 +3362,7 @@ describe("compaction at completion (ruling 376)", () => {
         { t: "2", ev: "result", tag: "turn.completed", text: "done", stats: { dur: 100, api: 90, turns: 1, cost: 0, in: 123_508, cached: 0, out: 200 } },
       ],
       extraFacts: [undefined, undefined],
+      gate: new Promise<void>((r) => (open = r)),
     });
     // The "app-server" compacts the thread — the rollout gains the line and
     // the post-size call — but its reply never reaches the client in time.
@@ -2802,12 +3383,19 @@ describe("compaction at completion (ruling 376)", () => {
       projectSlug: store.slug, taskKey: "VIB-1", role: "Primary specialist", kind: "primary",
       backend: "codex", model: "gpt-5.6-terra", prompt: "go", dataRoot: store.dataRoot,
     });
+    // Ruling 701 on Codex: the run's completion fires before the app-server
+    // is asked. CANARY: keep ruling 376's order for this backend.
+    const askedWhenCompleted: number[] = [];
+    registerRunCompletion(runId, () => askedWhenCompleted.push(compactedRunSpecs().length - before));
+    open();
     await settle();
     await settle();
     await settle();
+    expect(askedWhenCompleted).toEqual([0]);
     expect(compactedRunSpecs().length).toBe(before + 1);
     const run = getRun(store.db, runId)!;
     expect(run.state).toBe("finished");
+    expect(run.phase).toBeNull();
     expect(run.compactions).toBe(1);
     expect(run.last_prompt_tokens).toBe(6_914);
     expect(run.peak_prompt_tokens).toBe(123_508);

@@ -165,7 +165,9 @@ make).
   operator is re-invoked, its sign-in handed back to the account `credential_account_id`
   names (to nobody when that account has been removed since), together with its completion
   compaction's own fork when the restart cut that. The completion compaction (ruling 376)
-  runs in a fork of its own, `runs/<runId>-compaction`, seeded and settled the same way. **The settle also re-points the CLI's thread index** (ruling 199,
+  runs in a fork of its own, `runs/<runId>-compaction`, seeded and settled the same way;
+  a specialist's run has finished by then, so boot finds a fork the restart cut by the
+  mark on that finished row (ruling 701, §8). **The settle also re-points the CLI's thread index** (ruling 199,
   F37-20): the CLI finds a rollout by `threads.rollout_path` in its own state database,
   and what it records there is the path it SAW through the link,
   `…/runs/<runId>/sessions/…`. Deleting the run directory would leave the file intact at
@@ -377,22 +379,34 @@ card until one of the person's runs has made a model call (ruling 604). A readin
   `context-policy.server.ts` if an entry were non-null). Instead, a run that finishes or
   errors with a session whose last prompt is above `COMPACT_AT_COMPLETION_TOKENS` (100k)
   is compacted at the END of the run, while its cache is warm. Not an interrupted run,
-  and not one its provider refused (ruling 599: `classifyRunEndOf` reads it as
+  not one its provider refused (ruling 599: `classifyRunEndOf` reads it as
   `failedBackendUnavailable`, and the compaction would be one more request to that
-  provider on that account). The compaction's lines are never the run's failure
+  provider on that account), and never an operator's session, which nothing resumes
+  (ruling 701). The compaction's lines are never the run's failure
   (`runFailureReason` skips `run·compaction…` and `run·compacted…`): the adapter's `compact()`
   sends `/compact <COMPLETION_COMPACT_INSTRUCTIONS>` as a one-turn query that resumes the
   session, built by the same options builder as the run so it reads the run's cached
-  prefix; the exit is asynchronous (`settleRun`) so the finalize and the completion contract
-  wait for it, except the run's answered callback, which fires first on a finished run so
-  the reply is not held behind the housekeeping (U39-30); the boundary is the run's
+  prefix. For a `primary` or `reviewer` run it comes after the run has ended (ruling 701):
+  `settleRun` finalizes the row, frees the slot and fires the completion first, so the
+  report and the operator's next turn do not wait for the summary, and only a run that
+  resumes that session is parked until it is written (§3.4). A controller turn's settle
+  still waits for it, after the run's answered callback has put the reply on the page
+  (U39-30), because the conversation's next turn resumes the same session. Either way the
+  wait is bounded: after `COMPLETION_COMPACT_DEADLINE_MS` (10 minutes; Claude's request
+  has no timeout of its own) the console says the compaction did not happen, its process
+  is swept and the session keeps its size. Either way the
+  boundary is the run's
   compaction fact with trigger `completion`, the request's cost and tokens add to the run's
   totals (`costAddUsd`, `usageAdd`) and `last_prompt_tokens` becomes the post size. The
   console reads
   `run·compacted·completion` ("context compacted at the end of the run · 111k → 9k
   tokens"), `run·compaction·request` (its cost and tokens) or `run·compaction·failed`;
-  "Not enough messages to compact." is an outcome, never a failure. The phase is
-  "Compacting context", step "at the end of the run". The compaction's child carries its
+  "Not enough messages to compact." is an outcome, never a failure. On a controller turn
+  the phase is "Compacting context", step "at the end of the run". A specialist's row is
+  terminal by then: the run service writes the same phase on it with the step "after the
+  run ended" (`COMPACTING_AFTER_RUN_STEP`) and clears both when the compaction is over,
+  which is how a restart and the workspace reclaim know of it (§3.4, §8). The
+  compaction's child carries its
   own process marker (`compactionMarkerEnv`, `<runId>:compaction`) so the run's settle
   sweep does not kill it; the run service reaps it afterwards. An interrupted run is left
   alone. A run with a `compactAnchor` (every specialist and
@@ -986,9 +1000,24 @@ session exists, and otherwise that there is no thread to resume and a re-run sta
 runs through `interruptRunOnClosure` under the system actor, audited with `reason:
 "task-closed"` (ruling 177).
 
-When the adapter exits, `launch`'s `settleRun` runs the completion compaction when it is
-due (§2.4, ruling 376), then the sink's `finalize`, then releases the slot, drains the
-pending queue and fires the registered completion callback. `finalize` lets the first
+When the adapter exits, `launch`'s `settleRun` runs the sink's `finalize`, releases the
+slot, drains the pending queue and fires the registered completion callback. A completion
+compaction that is due (§2.4, ruling 376) runs after all of that for a `primary` or
+`reviewer` run (ruling 701), as the session's housekeeping. The session id is kept in the
+run service's `settling` map from before the queue is drained until the compaction is
+over, whatever it answered, and the finished row carries the phase "Compacting context"
+with the step "after the run ended" for the same stretch. A run that resumes that session
+meanwhile (a comment or an answer to that agent) is parked by `admitRun` in its lane's
+queue, whatever the cap says: its row is `queued` with the step "waiting for the summary
+of its last run" (`SESSION_SETTLING_STEP`, which the console's footer prints), the drain
+passes it over, and when the compaction is over it takes its turn under the cap like any
+other, unless it was stopped while it waited. Its start is noted on the task as a wait for
+the summary, not for a slot. `resumeRun` does not read ruling 372's verdict for a session
+that is settling. The run's gateway token, skill plugin and temporary directory go when
+the compaction is over. The compaction itself holds no slot, and the workspace reclaim
+counts its run as still holding the folder (`activeRunCount`). On a controller turn the
+compaction still runs before the finalize, and an operator's session is never compacted.
+`finalize` lets the first
 terminal writer win (only that writer stamps `finishedAt`) and, on `finished`, clears the
 backend's quota-exhaustion and credential-refusal records. A callback that throws goes
 through `noteCompletionEffectsLost`: waiting flips to human, a `continuity` timeline event
@@ -1151,9 +1180,10 @@ updated" (ruling 130(c)). A reason clause is terminated exactly once.
   controller follows the same rule; its fresh turn's preamble points at the
   recent-conversation digest every controller prompt carries, and it notes nothing on a
   task. The size is the LAST call's prompt, not the run's peak, on purpose: a run that
-  compacted and finished at 20k replays 20k, which is what every run that ended above
-  100k leaves behind (ruling 376), so this rule is the backstop for a session that never
-  got compacted (an interrupted run, a refused compaction).
+  compacted and finished at 20k replays 20k, which is what every specialist run and
+  controller turn that ended above 100k leaves behind (ruling 376), so this rule is the
+  backstop for a session that never got compacted (an interrupted run, a refused
+  compaction).
 - Transcripts: Claude
   `runtimes/users/<principal>/claude-home/projects/<cwd-dashes>/<sid>.jsonl`; Codex
   `runtimes/users/<principal>/codex-home/sessions/YYYY/MM/DD/rollout-<ts>-<sid>.jsonl`
@@ -1876,7 +1906,8 @@ runtime's answer for a missing grant.
   and revokes it once a completion compaction, which lists the same servers to keep the
   cached prefix, is done — an interrupt with or without a live handle,
   a queued run the drain drops, a launch that throws) and dies with the process, and the
-  gateway also refuses it once the run's row is no longer running or queued. An unknown,
+  gateway also refuses it once the run's row is no longer running or queued and no
+  compaction of its session is in flight (ruling 701). An unknown,
   revoked or wrong-server token gets a 401 with a JSON-RPC error and nothing is
   forwarded. A run that sends one call and gets one answer (an error included) 100 times
   within 60 seconds is stopped (ruling 598, `repeatedCallStop`): the hundredth call is
@@ -2193,7 +2224,12 @@ thread still indexed under a removed per-run home is re-pointed at the file in t
 `sessions/` tree. Then `reconcileRestartedWork` (fire-and-forget after the watchers start;
 `app/server/boot.server.ts`, `run-recovery.server.ts`):
 
-0. `finalizeOrphanedRuns`: `running|queued` rows → `interrupted` with
+0. `finalizeOrphanedRuns`: first, the completion compactions a restart cut on runs that
+   had already finished (ruling 701): a terminal row that still carries the phase
+   "Compacting context" with the step "after the run ended" has its compaction's process
+   swept, a Codex compaction's private home finished against the account the run billed,
+   and the mark cleared; the session keeps its size. Then `running|queued` rows →
+   `interrupted` with
    `interrupted_reason: "restart"` (`interrupted_by` untouched: a person or null; the
    pill and footer say "interrupted by a restart", Insights counts the run as stopped and
    leaves a never-started one out of the completion rate). An orphaned Codex run's
@@ -2321,12 +2357,19 @@ among the task's files, renders it at the size it names with `capture_page` (rul
 looks at the picture the tool returns (a cover also at a quarter of its size, as a feed
 shows it, a diagram at half, about a phone's width), fixes what it sees, makes the picture it keeps with one last call (scale 2 for a diagram,
 1.5 for a cover, within 2,000 px a side so it is still shown), looks at that one too, and
-copies that PNG onto the task. Neither asks the person
+copies that PNG onto the task. The picture is what the reviewer judges: each manual says
+what the agent does not prove (nothing about a file it did not change, by checksum, kept
+copy, diff or a count of lines; no check of its own work written up or kept as a source,
+though every finding is reported), that a render is for looking, that the drawing is
+finished before the picture is kept, and that only its own drawing and the piece are
+pictured, every other file on the task being text. Neither asks the person
 anything: `ask-human` is withheld by name, because an absent grant resolves to granted, and
 what only the person can supply is a line of the report. The Editor's manual has it open
 every picture the piece carries and judge a diagram against the kept sources and a cover
 against the piece, naming the file with each finding so the fix goes to whoever made it;
-the Writer's leaves the diagrams and the cover to a board's drawing agent where it has one.
+the Writer's leaves the diagrams and the cover to a board's drawing agent where it has one,
+and keeps out of its own note what those later pictures would make untrue (a count of the
+whole file, a line number of the piece, that the piece has no pictures).
 
 The shipped operator doctrine (`operator.definition.md`, upgraded in place through
 `PRIOR_SHIPPED_HASHES`) tells the operator that a wait on other work is a fact with its

@@ -255,7 +255,8 @@ Each Codex run works in a private copy of its principal's home,
 linked back to the shared home, `CODEX_SQLITE_HOME` pointed at the shared home. When the
 run settles, an `auth.json` the CLI refreshed is copied back to that account's home and the
 directory is deleted; boot recovery does the same for a run a restart orphaned, and the
-end-of-run compaction works in a copy of its own (`runs/<runId>-compaction/`).
+end-of-run compaction works in a copy of its own (`runs/<runId>-compaction/`), which boot
+also finishes when a restart cut the compaction after its run had ended (ruling 701).
 
 **First run, as the first admin.** After `docker compose up -d`, sign in as the bootstrap
 admin, open **Profile → Agent accounts**, and connect at least one backend for yourself.
@@ -750,7 +751,12 @@ your shell if it is set there, otherwise `PORT` from `.env`, and `3000` when nei
 it or the value is empty. It exits 1, naming that URL, if nothing answers, and exits 1 if
 the reported `build.revision` is not the first 12 characters of the sha it stamped.
 
-Note that `up -d` kills every run in flight, so check the board before deploying.
+Note that `up -d` kills every run in flight, so check the board before deploying. It
+also cuts a completion compaction that is still running after a specialist's run has
+finished, which is on no board: nothing is lost but that summary, and boot finishes what
+the compaction left (ruling 701). Such a run reads `finished` with the phase "Compacting
+context" when the ops toolkit's `list_runs` is asked for its task (with no arguments that
+tool lists live runs only).
 
 Verify what is running from `/resources/health` → `build`: `version` comes from
 `VIBERR_BUILD_VERSION` or `package.json`; `revision` from `VIBERR_BUILD_SHA`, or from the
