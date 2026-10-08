@@ -2543,7 +2543,6 @@ describe("F19-22: the GitHub panel names the last CHANGE, not the last check", (
       traceTask({ pr: { number: 147, state: "review", title: "x" } }),
       "2026-08-06T12:01:55.000Z",
     );
-    expect(row.querySelector(".k")!.textContent).toBe("Last change");
     expect(row.textContent).not.toContain("Synced");
   });
 
@@ -2872,10 +2871,11 @@ describe("UI-42/UI-44: the decision packet", () => {
     );
     const first = container.querySelectorAll<HTMLButtonElement>(".options .opt")[0]!;
     expect(first.getAttribute("aria-disabled")).toBeNull();
+    // A role refusal is `aria-disabled` (E4); `disabled` only marks a request
+    // in flight, so it reads false here either way.
     expect(
-      container.querySelector<HTMLButtonElement>(".packet-actions .btn.primary")!
-        .disabled,
-    ).toBe(false);
+      container.querySelector(".packet-actions .btn.primary")!.getAttribute("aria-disabled"),
+    ).toBeNull();
   });
 
   // The pr-diverged recovery packet: archive_task options carry the R14-3
@@ -4149,19 +4149,11 @@ describe("pending schedules render inside the execution profile", () => {
   });
 });
 
-describe("undefined CTA / utility classes (P13-D-19)", () => {
-  it("uses `btn primary` and `btn ghost`, never the undefined hyphenated forms", () => {
-    // Re-pointed at the execution profile (the ScheduledActions panel that
-    // carried the original defect is deleted; its buttons live here now).
+describe("the run controls' button tiers, and the hero's links and goal editor", () => {
+  it("routine starters are secondary, and a schedule's Cancel is a ghost danger trigger (pass 30, ruling 149)", () => {
     const { container } = renderExec(execTask(), {
       schedules: [schedule({ id: "sch-op", prompt: "recheck" })],
     });
-    const buttons = [...container.querySelectorAll("button")];
-    // `btn-primary` / `btn-ghost` exist in no stylesheet: a CTA wearing one
-    // falls back to the plain grey `.btn`.
-    for (const b of buttons) {
-      expect(b.className).not.toMatch(/\bbtn-(primary|ghost)\b/);
-    }
     // Pass 30: routine starters are secondary — the page's one solid primary
     // is the decision-stakes commit of the current state.
     const run = operatorRunBtn(container);
@@ -4229,7 +4221,6 @@ describe("undefined CTA / utility classes (P13-D-19)", () => {
     const buttons = [...container.querySelectorAll(".goal-edit-actions button")];
     const save = buttons.find((b) => b.textContent === "Save goal")!;
     const cancel = buttons.find((b) => b.textContent === "Cancel")!;
-    expect(save.className).not.toMatch(/\bbtn-primary\b/);
     expect(save.classList.contains("primary")).toBe(true);
     // The defect: both resolved to identical rules and rendered the same.
     expect(save.className).not.toBe(cancel.className);

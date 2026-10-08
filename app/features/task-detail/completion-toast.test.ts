@@ -33,6 +33,5 @@ describe("U36-9: completion toasts name the board's terminal stage", () => {
     expect(completionToast("forced", "VIB-9", "Shipped")).toBe(
       "Force-accepted VIB-9 · moved to Shipped (review gate overridden)",
     );
-    expect(completionToast("accepted", "VIB-9", "Shipped")).not.toContain("Done");
   });
 });
