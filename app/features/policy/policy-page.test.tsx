@@ -6,7 +6,7 @@ import type { TransitionView } from "./policy-query.server";
 import { AgentCapability, Guardrails, HumanAccess, RequiredReviewers, WorkflowRules, type PcapProfile } from "./policy-page";
 import type { GuardrailView } from "./policy-query.server";
 import type { RequiredReviewerView } from "~/server/tasks/required-reviewers.server";
-import { operatorAutonomyState } from "./policy-data";
+import { operatorAutonomyState, type OperatorAutonomyState } from "./policy-data";
 import { PROJECT_ROLES, RBAC_DEFINITIONS } from "~/shared/rbac";
 
 afterEach(cleanup);
@@ -32,6 +32,10 @@ const TRANSITIONS: TransitionView[] = [
   { from: "impl", to: "review", by: "Operator transition request, with evidence attached", boundary: "approval", locked: false },
   { from: "review", to: "done", by: "Human acceptance of the completion report", boundary: "human", locked: true },
 ];
+
+/** A board with no operator deployed: what `operatorAutonomyState` derives
+ *  from such a roster, for the panels whose case is not the operator clause. */
+const NO_OPERATOR: OperatorAutonomyState = { present: false, autonomy: null, directDoneLive: false };
 
 // D-2 (pass 24): the policy counts now sum only GOVERNED capability labels (the
 // same partition the profile detail uses), so these fixtures carry REAL governed
@@ -377,6 +381,7 @@ describe("WorkflowRules", () => {
         canManage
         busy={false}
         onSetBoundary={onSetBoundary}
+        operator={NO_OPERATOR}
       />,
     );
     expect(getByText("5 stages · 4 transition rules")).toBeTruthy();
@@ -425,6 +430,7 @@ describe("WorkflowRules", () => {
         canManage={false}
         busy={false}
         onSetBoundary={() => {}}
+        operator={NO_OPERATOR}
       />,
     );
     expect(
@@ -446,6 +452,7 @@ describe("WorkflowRules", () => {
         canManage={false}
         busy={false}
         onSetBoundary={() => {}}
+        operator={NO_OPERATOR}
       />,
     );
     expect(getByText("6 stages · 4 transition rules")).toBeTruthy();
@@ -476,6 +483,7 @@ describe("WorkflowRules", () => {
         canManage={false}
         busy={false}
         onSetBoundary={() => {}}
+        operator={NO_OPERATOR}
       />,
     );
     // Falls back to rendering the raw id instead of crashing.
@@ -496,6 +504,7 @@ describe("WorkflowRules — the not-permitted case says why", () => {
         canManage={canManage}
         busy={false}
         onSetBoundary={() => {}}
+        operator={NO_OPERATOR}
       />,
     );
 
@@ -580,21 +589,13 @@ describe("WorkflowRules — states the project's operator autonomy (F20-19)", ()
   // Direct-grant operator crosses the approval and human boundaries itself. The
   // engine refuses that now, so the note has to say the shipped rule.
   it("says the boundaries bind the operator too (ruling 151)", () => {
-    const { container } = renderWith(undefined);
+    const { container } = renderWith(NO_OPERATOR);
     const note = container.querySelector(".pol-note.after")!;
     expect(note.textContent).toContain("bind every actor, the operator included");
     expect(note.textContent).toContain("crosses Auto-advance boundaries only");
     expect(note.textContent).toContain("is refused to the operator");
     expect(note.textContent).not.toContain("crosses them itself");
     expect(note.textContent).not.toContain("the rule for people");
-  });
-
-  it("keeps the generic invariant (no per-project clause) when no roster is supplied", () => {
-    const { container } = renderWith(undefined);
-    const note = container.querySelector(".pol-note.after")!;
-    expect(note.textContent).not.toContain("On this project:");
-    // The canonical exception sentence still renders.
-    expect(note.textContent).toContain("full autonomy");
   });
 });
 
@@ -691,6 +692,7 @@ describe("policy panel heads take their count styling from the sheet (F19-33)", 
         canManage
         busy={false}
         onSetBoundary={() => {}}
+        operator={NO_OPERATOR}
       />,
     );
     expectSheetStyledCount(container);

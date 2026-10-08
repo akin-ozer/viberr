@@ -503,9 +503,8 @@ export function WorkflowRules({
   busy: boolean;
   onSetBoundary: (t: TransitionView, boundary: "auto" | "approval" | "human") => void;
   /** F20-19: the project's configured operator autonomy, so the human-accepts
-   *  note below can be read as live or configured-off. Optional so the panel
-   *  still renders the generic invariant when no roster is supplied. */
-  operator?: OperatorAutonomyState;
+   *  note below can be read as live or configured-off. */
+  operator: OperatorAutonomyState;
 }) {
   // Defensive stage lookup (policy spec §4.4 — a renamed/removed stage id
   // must never crash the panel).
@@ -651,33 +650,29 @@ export function WorkflowRules({
               project, so the conditional above reads as configured or not — the
               autonomy value was previously visible only on the operator's
               Agents card, leaving this page identical either way. */}
-          {operator && (
+          <strong>On this project:</strong>{" "}
+          {operator.directDoneLive ? (
             <>
-              <strong>On this project:</strong>{" "}
-              {operator.directDoneLive ? (
-                <>
-                  the operator runs at <strong>full autonomy</strong> with that
-                  grant set to{" "}
-                  <em>Direct</em>, so the exception is{" "}
-                  <strong>active</strong>: it can close a passing task itself.{" "}
-                </>
-              ) : operator.present ? (
-                <>
-                  the operator runs{" "}
-                  <strong>
-                    {operator.autonomy === "full"
-                      ? "at full autonomy without the Direct accept grant"
-                      : "supervised"}
-                  </strong>
-                  , so the exception is <strong>not active</strong>: every task
-                  still needs a human to accept completion into Done.{" "}
-                </>
-              ) : (
-                <>
-                  no operator is deployed, so completion stays human-authorized
-                  throughout.{" "}
-                </>
-              )}
+              the operator runs at <strong>full autonomy</strong> with that
+              grant set to{" "}
+              <em>Direct</em>, so the exception is{" "}
+              <strong>active</strong>: it can close a passing task itself.{" "}
+            </>
+          ) : operator.present ? (
+            <>
+              the operator runs{" "}
+              <strong>
+                {operator.autonomy === "full"
+                  ? "at full autonomy without the Direct accept grant"
+                  : "supervised"}
+              </strong>
+              , so the exception is <strong>not active</strong>: every task
+              still needs a human to accept completion into Done.{" "}
+            </>
+          ) : (
+            <>
+              no operator is deployed, so completion stays human-authorized
+              throughout.{" "}
             </>
           )}
           {/* Ruling 151 (pass 35, F35-2): the boundary below is the contract
