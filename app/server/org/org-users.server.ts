@@ -647,7 +647,7 @@ export function listDomains(db: DatabaseSync): DomainRecord[] {
 }
 
 /** "@viberr.dev" from "@viberr.dev" or "someone@viberr.dev". */
-export function normalizeDomain(input: string): string | null {
+function normalizeDomain(input: string): string | null {
   const raw = input.trim().toLowerCase();
   const domainPart = raw.startsWith("@")
     ? raw.slice(1)

@@ -18,7 +18,6 @@ import {
   findDomainAllowlistRole,
   listDomains,
   listOrgUsers,
-  normalizeDomain,
   removeDomain,
   resetLocalPassword,
   setOrgUserRole,
@@ -500,11 +499,12 @@ describe("ruling 154: an org admin links a GitHub handle", () => {
 describe("google domain allowlist", () => {
   it("normalizes, dedupes and removes", () => {
     const db = makeDb();
-    expect(normalizeDomain("someone@Company.DEV")).toBe("@company.dev");
-    expect(normalizeDomain("@company.dev")).toBe("@company.dev");
-    expect(normalizeDomain("nonsense")).toBeNull();
+    expect(addDomain(db, { domain: "nonsense", role: "member" }, ACTOR)).toEqual({
+      status: "invalid",
+      message: "Enter a domain like @company.dev.",
+    });
 
-    const added = addDomain(db, { domain: "elif@viberr.dev", role: "member" }, ACTOR);
+    const added = addDomain(db, { domain: "Elif@Viberr.DEV", role: "member" }, ACTOR);
     expect(added.status).toBe("added");
     if (added.status === "added") {
       expect(added.domain.domain).toBe("@viberr.dev");
