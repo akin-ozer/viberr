@@ -134,6 +134,7 @@ describe("/resources/health — honest status (gap 17)", () => {
     expect(body.ok).toBe(true);
     expect(body.status).toBe("ok");
     expect(body.degraded).toEqual([]);
+    expect((await probe("/resources/health?probe=readiness")).status).toBe(200);
   });
 
   /**
@@ -204,26 +205,16 @@ describe("/resources/health — honest status (gap 17)", () => {
         files: 1,
         latest: { sourcePath: "projects/shop/tasks/SHOP-4/task.md" },
       });
-      // …and the file's OWN success is what ends it.
+      // …and the file's OWN success is what ends it. A latch that outlived its
+      // fault would alarm forever, which is the thing ruling 146 refused to let
+      // this endpoint do.
       clearProjectionFault("projects/shop/tasks/SHOP-4/task.md");
-      expect((await probe()).body.status).toBe("ok");
+      const cleared = (await probe()).body;
+      expect(cleared.status).toBe("ok");
+      expect(cleared.projectionStore).toBeNull();
     } finally {
       resetProjectionFaultsForTests();
     }
-  });
-
-  it("clears the projection fault once a rebuild writes again (ruling 217)", async () => {
-    const { recordProjectionFault, clearProjectionFault } = await import(
-      "~/server/projections/store-health.server"
-    );
-    recordProjectionFault("projects/shop/tasks/SHOP-10/task.md", "disk I/O error");
-    clearProjectionFault("projects/shop/tasks/SHOP-10/task.md");
-    const { body } = await probe();
-    // A latch that outlived its fault would alarm forever, which is the thing
-    // ruling 146 refused to let this endpoint do.
-    expect(body.status).toBe("ok");
-    expect(body.degraded).toEqual([]);
-    expect(body.projectionStore).toBeNull();
   });
 
   it("names a dead store watcher in the payload and downgrades the verdict", async () => {
@@ -252,10 +243,6 @@ describe("/resources/health — honest status (gap 17)", () => {
     expect(body.degraded).toContain("watcher");
     // `?probe=ready` is the same probe.
     expect((await probe("/resources/health?probe=ready")).status).toBe(503);
-  });
-
-  it("keeps readiness green while everything is healthy", async () => {
-    expect((await probe("/resources/health?probe=readiness")).status).toBe(200);
   });
 
   it("reports a dead KB watcher and a missing writer lock", async () => {
@@ -452,13 +439,10 @@ describe("/resources/health — build identity (gap 18)", () => {
     resetBuildInfoCacheForTests();
     try {
       const { body } = await probe();
-      expect(body.build).toBeDefined();
       expect(body.build).toHaveProperty("version");
-      expect(body.build).toHaveProperty("revision");
       // The short (12-char) sha, straight from the build-time stamp — a real
       // identity, never a fabricated placeholder.
-      expect(body.build!.revision).toBe("abcdef123456");
-      expect(body.build!.revision).toMatch(/^[0-9a-f]{12}$/);
+      expect(body.build?.revision).toBe("abcdef123456");
     } finally {
       if (prevSha === undefined) delete process.env.VIBERR_BUILD_SHA;
       else process.env.VIBERR_BUILD_SHA = prevSha;

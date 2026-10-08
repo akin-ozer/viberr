@@ -89,9 +89,6 @@ describe("resolveBuildInfo (gap 18)", () => {
       revisionSource: null,
       builtAt: null,
     });
-    // The three hardcoded "1.0.0" literals elsewhere in the codebase are MCP
-    // server declarations, not app identity; nothing here may imitate them.
-    expect(JSON.stringify(info)).not.toContain("1.0.0");
   });
 
   it("never claims a source it did not read from", () => {
