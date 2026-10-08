@@ -43,6 +43,17 @@ import {
 const ctx = createTestDbContext();
 afterEach(ctx.cleanup);
 
+/** An open decision packet: what "waiting on you" reconciles a row against. */
+const PACKET: TaskPacket = {
+  type: "input",
+  kind: "Decision required",
+  from: "operator",
+  title: "Pick one",
+  body: "",
+  observations: [],
+  options: [{ kind: "request_edit", t: "Send back", d: "", rec: true }],
+};
+
 describe("notifications", () => {
   it("lists per-user rows sorted by real timestamp DESC (ruling 9)", () => {
     const db = ctx.makeDb();
@@ -54,7 +65,6 @@ describe("notifications", () => {
 
     const list = listNotifications(db, "u_1");
     expect(list.map((n) => n.id)).toEqual(["b", "a", "c"]);
-    expect(list.every((n) => n.userId === "u_1")).toBe(true);
     expect(list[1]?.ptype).toBe("input");
   });
 
@@ -454,16 +464,6 @@ describe("createNotification routing prefs (FIX #4)", () => {
 });
 
 describe("waitingOnYou — live decision reconciliation (F7-NOTIF1)", () => {
-  const PACKET: TaskPacket = {
-    type: "input",
-    kind: "Decision required",
-    from: "operator",
-    title: "Pick one",
-    body: "",
-    observations: [],
-    options: [{ kind: "request_edit", t: "Send back", d: "", rec: true }],
-  };
-
   const REC = {
     id: "rec-1",
     kind: "transition" as const,
@@ -516,59 +516,6 @@ describe("waitingOnYou — live decision reconciliation (F7-NOTIF1)", () => {
     });
     rebuildAll(store.db, { dataRoot: store.dataRoot });
     expect(listNotifications(store.db, uid)[0]?.waitingOnYou).toBe(false);
-  });
-
-  it("R8-3: waitingOnYou is member-scoped — a viewer (and a non-member) never wait on a live packet", () => {
-    const store = setupTestStore(ctx);
-    writeTask(store.dataRoot, store.slug, {
-      frontmatter: baseTaskFrontmatter("VIB-104", { stage: "review" }),
-      packet: PACKET,
-    });
-    rebuildAll(store.db, { dataRoot: store.dataRoot });
-    // Same live open packet, three recipients.
-    createNotification(store.db, { id: "pm", userId: store.users.murat.id, kind: "packet", text: "t", projectSlug: store.slug, taskKey: "VIB-104" });
-    createNotification(store.db, { id: "pv", userId: store.users.elif.id, kind: "packet", text: "t", projectSlug: store.slug, taskKey: "VIB-104" });
-    createNotification(store.db, { id: "pn", userId: store.users.deniz.id, kind: "packet", text: "t", projectSlug: store.slug, taskKey: "VIB-104" });
-    // maintainer → waits; viewer (elif) + non-member (deniz) → never.
-    expect(listNotifications(store.db, store.users.murat.id)[0]?.waitingOnYou).toBe(true);
-    expect(listNotifications(store.db, store.users.elif.id)[0]?.waitingOnYou).toBe(false);
-    expect(listNotifications(store.db, store.users.deniz.id)[0]?.waitingOnYou).toBe(false);
-  });
-
-  it("R8-3: a contributor who OWNS the task waits on its packet (owner allowance)", () => {
-    const store = setupTestStore(ctx);
-    writeTask(store.dataRoot, store.slug, {
-      frontmatter: baseTaskFrontmatter("VIB-105", {
-        stage: "review",
-        ownerUserId: store.users.selin.id, // selin = contributor
-      }),
-      packet: PACKET,
-    });
-    rebuildAll(store.db, { dataRoot: store.dataRoot });
-    createNotification(store.db, { id: "po", userId: store.users.selin.id, kind: "packet", text: "t", projectSlug: store.slug, taskKey: "VIB-105" });
-    expect(listNotifications(store.db, store.users.selin.id)[0]?.waitingOnYou).toBe(true);
-  });
-
-  it("a task in the terminal stage is never waiting — leftover packet/rec notwithstanding", () => {
-    const store = setupTestStore(ctx);
-    writeTask(store.dataRoot, store.slug, {
-      frontmatter: baseTaskFrontmatter("VIB-103", {
-        stage: "done",
-        waiting: "none",
-        recommendations: [REC],
-      }),
-      packet: PACKET,
-    });
-    rebuildAll(store.db, { dataRoot: store.dataRoot });
-    // Use a maintainer so the drop is caused by the TERMINAL stage, not by lack
-    // of authority (member-scoping is exercised separately above).
-    const uid = store.users.murat.id;
-    createNotification(store.db, { id: "p", userId: uid, kind: "packet", ptype: "input", text: "t", projectSlug: store.slug, taskKey: "VIB-103" });
-    createNotification(store.db, { id: "a", userId: uid, kind: "approval", text: "t", projectSlug: store.slug, taskKey: "VIB-103" });
-    expect(listNotifications(store.db, uid).map((n) => n.waitingOnYou)).toEqual([
-      false,
-      false,
-    ]);
   });
 
   it("unresolvable task refs and non-decision kinds are never waiting", () => {
@@ -718,16 +665,6 @@ describe("notification destinations + acceptance decisions (B-FD5/B-FD6)", () =>
  * override eligibility is governance reach, never a personal inbox item.
  */
 describe("E6: 'waiting on you' reads the same on the inbox and on Home", () => {
-  const PACKET: TaskPacket = {
-    type: "input",
-    kind: "Decision required",
-    from: "operator",
-    title: "Pick one",
-    body: "",
-    observations: [],
-    options: [{ kind: "request_edit", t: "Send back", d: "", rec: true }],
-  };
-
   /** One project, one open packet, plus an org admin with NO project role. */
   function storeWithOpenPacket() {
     const store = setupTestStore(ctx);

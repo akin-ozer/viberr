@@ -475,7 +475,7 @@ export function countUnreadNotifications(
 /** How many of the newest unread decisions a snapshot carries. A tab reads it
  *  about once a minute at most, so more than this arriving between two reads
  *  is a burst the bell and the title count still show. */
-export const ATTENTION_ITEM_CAP = 10;
+const ATTENTION_ITEM_CAP = 10;
 
 /** A desktop notification body is a line or two on every platform. */
 const ATTENTION_BODY_MAX = 180;
