@@ -49,7 +49,7 @@ import { useRefusalShake } from "~/ui/use-refusal-shake";
  * grants outside the modal catalog + display-only extras are preserved
  * server-side and never touched here.
  *
- * Ruling 696(e) split the modal on the task page's recipe: its fields, grant
+ * Ruling 700(e) split the modal on the task page's recipe: its fields, grant
  * pickers and save gate are hooks in `create-profile-modal-form.ts`, whose
  * state initialisers seed the fields and the resource grants from the profile
  * (a new profile starts from `{ skills: [], mcps: [], kb: [] }` in

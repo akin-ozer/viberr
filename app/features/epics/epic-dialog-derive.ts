@@ -3,7 +3,7 @@ import type { EpicSummary } from "~/server/projections/epic-query.server";
 import type { EpicActionResult } from "./epic-parts";
 
 /**
- * What the epic dialog reads off its draft (ruling 696(e), the large-component
+ * What the epic dialog reads off its draft (ruling 700(e), the large-component
  * split of `EpicDialog` in `epic-parts.tsx`): the fields a create or an edit
  * posts, whether its dates run backwards, the server's refusal, and the
  * sentence its foot says. Pure functions, no React; the dialog calls each at

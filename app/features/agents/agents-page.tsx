@@ -67,7 +67,7 @@ import { effortLabel } from "./effort-label";
  * Presentational pieces (ProfileDetail, LiveRoster, …) take props +
  * callbacks so jsdom tests render them without a router.
  *
- * Ruling 696(e) split the two large bodies along the task-page recipe:
+ * Ruling 700(e) split the two large bodies along the task-page recipe:
  * ProfileDetail and AgentsPage keep their hooks and hand hook-free regions
  * (ProfileHero, CapabilityPolicyPanel, ContextRuntimePanel with its
  * RuntimeRow; AgentsHead, ProfilesTab) one slot of their markup each; what the
@@ -844,7 +844,7 @@ export function LibraryPicker({
 // ------------------------------------------------------------------ detail
 
 /**
- * The open profile's hero (ruling 696(e), the split of `ProfileDetail` along
+ * The open profile's hero (ruling 700(e), the split of `ProfileDetail` along
  * the task-page recipe): its glyph, name and role, whether it is running,
  * engaged or idle, where its copy came from, and its Delete and Edit buttons.
  * Hook-free: the detail owns the delete confirm and hands in its setter.
@@ -956,7 +956,7 @@ function ProfileHero({
 }
 
 /**
- * "Capability policy" (ruling 696(e), the split of `ProfileDetail`): the three
+ * "Capability policy" (ruling 700(e), the split of `ProfileDetail`): the three
  * governed columns, the operator's two qualifying notes, and the advisory
  * lines collapsed under them. Hook-free; all of it is read off the profile.
  */
@@ -1098,7 +1098,7 @@ function CapabilityPolicyPanel({ a }: { a: AgentProfileView }) {
 }
 
 /**
- * "Context resources & runtime" (ruling 696(e), the split of
+ * "Context resources & runtime" (ruling 700(e), the split of
  * `ProfileDetail`): the template-grants button, the granted resources, what a
  * run starts on, and the viewer's connection note. Hook-free: the detail owns
  * the grants confirm and hands in its setter.
@@ -1226,7 +1226,7 @@ function ContextRuntimePanel({
 }
 
 /** What a run on this profile starts on: its backend, model and effort, the
- *  operator's autonomy, and its continuity (ruling 696(e), the split of
+ *  operator's autonomy, and its continuity (ruling 700(e), the split of
  *  `ProfileDetail`; hook-free). */
 function RuntimeRow({
   a,
@@ -1746,7 +1746,7 @@ type ProfileSubmitFields = {
 };
 
 /**
- * The page head (ruling 696(e), the split of `AgentsPage` along the task-page
+ * The page head (ruling 700(e), the split of `AgentsPage` along the task-page
  * recipe): the title and its sentence, the Profiles/Live switch, and the
  * matrix, library and new-profile buttons. Hook-free: the page owns the tab
  * and every modal's state and hands in their setters.
@@ -1848,7 +1848,7 @@ function AgentsHead({
 }
 
 /**
- * The Profiles tab (ruling 696(e), the split of `AgentsPage` along the
+ * The Profiles tab (ruling 700(e), the split of `AgentsPage` along the
  * task-page recipe): the roster, operator first, and the open profile's
  * detail. Hook-free: the page owns the selection, the fetcher and every
  * modal, and hands in what the roster and the detail call.

@@ -945,7 +945,7 @@ describe("changeProjectRepo — the one door that changes a project's repository
     );
     expect(noop.changed).toBe(false);
 
-    // Ruling 696(a): `owner/..` is a name GitHub does not allow, and a
+    // Ruling 700(a): `owner/..` is a name GitHub does not allow, and a
     // checkout path built from it is the task directory itself. CANARY: go
     // back to `normalizeRepoInput`'s own `[A-Za-z0-9._-]+` name and it reaches
     // the probe, refused there only for want of a connection.

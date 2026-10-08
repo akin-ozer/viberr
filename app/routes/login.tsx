@@ -207,7 +207,7 @@ function refusalKey(refusal: Refusal | null | undefined): string | undefined {
 }
 
 /**
- * The error the card shows (ruling 696(e), read once per render by `Login`):
+ * The error the card shows (ruling 700(e), read once per render by `Login`):
  * the client's own refusal, else the action's unless the person dismissed
  * it. A dismissal stores WHICH result was dismissed (see SetNewPassword), so
  * a second refusal un-hides itself.
@@ -226,7 +226,7 @@ function shownError(
   );
 }
 
-/** Which of the card's posts is in flight (ruling 696(e), read once per render
+/** Which of the card's posts is in flight (ruling 700(e), read once per render
  *  by `Login`): a provider's sign-in, the local form's submission, or none. */
 function signInBusy(
   providerBusy: "github" | "google" | null,
@@ -428,7 +428,7 @@ function ProviderButtons({
   );
 }
 
-/** The SSO-first head of the sign-in card (ruling 696(e), the split of
+/** The SSO-first head of the sign-in card (ruling 700(e), the split of
  *  `Login`: hook-free, in the slot its `ssoConfigured &&` held): the provider
  *  buttons, the note for the one that is missing, the info box and the
  *  divider above the local form. `Login` renders it only while at least one
@@ -473,7 +473,7 @@ function SsoProviders({
   );
 }
 
-/** The local credentials form (ruling 696(e), the split of `Login`:
+/** The local credentials form (ruling 700(e), the split of `Login`:
  *  hook-free; `Login` keeps the fields' state, refs and handlers). */
 function LocalSignInForm({
   returnTo,

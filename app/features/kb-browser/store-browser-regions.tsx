@@ -4,7 +4,7 @@ import type { RefusalShake } from "~/ui/use-refusal-shake";
 import { lineCount, type DocDraft } from "./store-browser-derive";
 
 /**
- * The open document card's regions (ruling 696(e), the split of
+ * The open document card's regions (ruling 700(e), the split of
  * `store-browser.tsx`): its body (the loading or failed read, the rendered
  * document, or the raw text), the notes slot a refused or failed save speaks
  * in, and the foot. Each takes the slot its markup held in `DocumentCard` and

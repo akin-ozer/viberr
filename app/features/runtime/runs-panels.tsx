@@ -468,7 +468,7 @@ export const LiveRunPanel = memo(function LiveRunPanel({
 });
 
 /**
- * The strip's actions: the console's trigger and Interrupt. Ruling 696(e):
+ * The strip's actions: the console's trigger and Interrupt. Ruling 700(e):
  * LiveRunPanel's `.run-actions` slot as a component of its own, with no hook,
  * so the strip around it keeps its markup.
  */
@@ -655,7 +655,7 @@ function missLabel(reason: string): string {
 
 /**
  * Ruling 369: the facts row's first chip, the run's first model call: warm or
- * cold and its figure, or why there is none to show. Ruling 696(e): the row's
+ * cold and its figure, or why there is none to show. Ruling 700(e): the row's
  * first slot as a component of its own, with no hook.
  */
 function FirstCallChip({ first, reported }: { first: RunCacheView["firstCall"]; reported: boolean }) {
@@ -1235,7 +1235,7 @@ function LineRow({
 
 /**
  * P19-G11: the run-inputs line, summarised on one row and opened on demand
- * into the rows of what the run was given. Ruling 696(e): LineRow's branch
+ * into the rows of what the run was given. Ruling 700(e): LineRow's branch
  * for it, which LineRow CALLS rather than renders. As a component it was a
  * different element type from the fragment the other branch returns, so a raw
  * toggle tore the row down and mounted it again (a reader's selection in its
@@ -1297,7 +1297,7 @@ function runInputsRow({
 
 /**
  * P19-RC1: a tool call as a chip, marked by whose tool it is (ruling 366),
- * with what it was pointed at. Ruling 696(e): LineRow's chip, as a component
+ * with what it was pointed at. Ruling 700(e): LineRow's chip, as a component
  * of its own with no hook.
  */
 function ToolCallChip({
@@ -1359,7 +1359,7 @@ function ToolCallChip({
 /**
  * What a console line draws below its words (P19-RC1, ruling 499): an edit's
  * diff, a to-do list, the files a change touched, multi-line output. Ruling
- * 696(e): LineRow's blocks, as a component of its own with no hook, drawn only
+ * 700(e): LineRow's blocks, as a component of its own with no hook, drawn only
  * for a line that has one.
  */
 function LineBlocks({

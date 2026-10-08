@@ -114,7 +114,7 @@ export interface AcceptConfirmTask {
   prChecks: PrChecksRender | null;
 }
 
-/** Ruling 696(e): the two list defaults, each the same array on every render.
+/** Ruling 700(e): the two list defaults, each the same array on every render.
  *  The rows that read them live in accept-confirm-regions.tsx now; none of
  *  them is memoised, but from here a `[]` built per render would read as one
  *  that defeats a memo (react-doctor's rerender-memo-with-default-value). */
@@ -122,7 +122,7 @@ const NO_BLOCKED_GATES: readonly string[] = [];
 const NO_MERGE_COLLISIONS: readonly PrOverlap[] = [];
 
 /**
- * Ruling 696(e): the ceremony's props, declared apart from the destructuring
+ * Ruling 700(e): the ceremony's props, declared apart from the destructuring
  * that gives them their defaults, so the component body is the ceremony.
  */
 interface AcceptConfirmProps {

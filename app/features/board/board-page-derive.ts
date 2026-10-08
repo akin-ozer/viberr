@@ -14,7 +14,7 @@ import type { BoardColumnData, BoardTask } from "./board-page";
 
 /**
  * What the board page reads off its props and its URL before it draws (ruling
- * 696(e), the task-page recipe rolled out to `board-page.tsx`): the view the
+ * 700(e), the task-page recipe rolled out to `board-page.tsx`): the view the
  * URL asks for, which tasks that view shows, the label vocabulary, the empty
  * copy, whether the filter bar stands, and where a new task starts. Pure
  * functions of the loader data and the search params, no React.

@@ -4,7 +4,7 @@ import type { CompletionDiff, CompletionResult } from "./completion-packet";
 
 /**
  * What the completion packet reads off its props before it draws (ruling
- * 696(e), the split of `completion-packet.tsx` along the task-page recipe):
+ * 700(e), the split of `completion-packet.tsx` along the task-page recipe):
  * the revision it speaks of, the attachments it may link, the verdicts and
  * notes it lists, and which of its sections stand. A pure function of the
  * props, no React; `CompletionPacket` calls it once per render.

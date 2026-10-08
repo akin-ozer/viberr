@@ -3,7 +3,7 @@ import { timelineEventTime } from "~/shared/page-anchors";
 import type { TimelineFilterId } from "./timeline";
 
 /**
- * What the timeline reads off its rows and its tab (ruling 696(e), the split
+ * What the timeline reads off its rows and its tab (ruling 700(e), the split
  * of `timeline.tsx` along the task page's recipe): which events a filter tab
  * shows, whether a hash names an event, and what the list says when it shows
  * none. Pure functions, no React; `Timeline` and its hooks in

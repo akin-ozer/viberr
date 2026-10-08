@@ -18,7 +18,7 @@ import {
 } from "./decision-packet-derive";
 
 /**
- * The decision packet card's choice (ruling 696(e), the split of
+ * The decision packet card's choice (ruling 700(e), the split of
  * `decision-packet.tsx` along the task-page recipe): what the person chose and
  * typed, the refusals a Confirm meets, the ask-first ceremony it opens, and
  * the re-seed when the packet is replaced. `DecisionPacket` calls the one hook

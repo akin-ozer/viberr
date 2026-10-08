@@ -41,7 +41,7 @@ import { useFetcherResult } from "~/ui/use-fetcher-result";
  * click merged an unreviewed head into main) moved the apply path up into
  * `task-detail-page.tsx`, because the click has to reach the page's confirm
  * state — a section that owns its own fetcher structurally CANNOT ask first.
- * The page owns the fetcher (`useRecommendationActions`, ruling 696(d)) and
+ * The page owns the fetcher (`useRecommendationActions`, ruling 700(d)) and
  * the ceremony, and routes Apply through `AcceptConfirm` (mode
  * `apply-recommendation`); `TaskMainColumn` renders `OperatorRecommendations`
  * with the page's handlers and owns nothing. Do not re-add a local wrapper
@@ -246,7 +246,7 @@ export function TaskHero({
 }
 
 /*
- * Ruling 696(e): the hero's parts, each the markup of one slot of `TaskHero`.
+ * Ruling 700(e): the hero's parts, each the markup of one slot of `TaskHero`.
  * The hero keeps every hook and every state change; these draw. Plain
  * functions rather than components, as the side column's panel parts are:
  * none calls a hook, and a component each would add a render per part to

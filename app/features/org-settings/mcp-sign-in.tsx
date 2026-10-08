@@ -9,7 +9,7 @@ import { useOrgAction, type OrgAction } from "./use-org-action";
 
 /**
  * The MCP-server editor's OAuth sign-in (ruling 469) and what it was granted
- * (ruling 486). Split out of `resource-modals.tsx` by ruling 696(e), along
+ * (ruling 486). Split out of `resource-modals.tsx` by ruling 700(e), along
  * the task-page recipe: McpSignIn keeps the two posts it always owned, and
  * its controls take their slot of its markup without a hook of their own.
  */

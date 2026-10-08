@@ -119,7 +119,7 @@ export function CredentialCard({
   );
 }
 
-/** What a PAT card's scope chips prove (ruling 696(e), the split of
+/** What a PAT card's scope chips prove (ruling 700(e), the split of
  *  `CredentialCard`): the first refused scope, the chips that are evidence,
  *  the ones that are not, and whether nothing at all is proven. */
 function readScopes(scopes: ScopeChip[]) {
@@ -147,7 +147,7 @@ function readScopes(scopes: ScopeChip[]) {
 }
 
 /**
- * A PAT card's footer (ruling 696(e), the split of `CredentialCard`): the one
+ * A PAT card's footer (ruling 700(e), the split of `CredentialCard`): the one
  * warning that outranks the others (a dead token, then a refused scope, then
  * no proof at all), or the all-clear. Hook-free, in the slot the card's
  * ternary held.

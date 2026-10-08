@@ -7,7 +7,7 @@ import type { AcceptCeremony, AcceptCeremonyMode, AcceptConfirmTask } from "./ac
 
 /**
  * What the acceptance ceremony reads off its props before it draws (ruling
- * 696(e), the split of `accept-confirm.tsx` along the task-page recipe): which
+ * 700(e), the split of `accept-confirm.tsx` along the task-page recipe): which
  * writer is asking, what the click jumps, what merges, what it refreshes, and
  * the sentences its heading, footer and confirm say. Pure functions of the
  * props, no React; `AcceptConfirm` calls each once per render.

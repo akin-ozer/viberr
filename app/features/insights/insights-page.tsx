@@ -552,7 +552,7 @@ function UsageLimits({ runs }: { runs: RunAnalytics }) {
   );
 }
 
-/* Ruling 696(e), the split of `UsageLimits`: the card's three kinds of row,
+/* Ruling 700(e), the split of `UsageLimits`: the card's three kinds of row,
    each hook-free in the list slot the card's branches filled (the card keeps
    `useHydrated` and hands its answer down), and what a window row reads off
    the reading, as pure functions. */

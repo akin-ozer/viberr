@@ -6,7 +6,7 @@ import type { EpicDraft, SetEpicDraft } from "./epic-dialog-derive";
 import type { EpicMemberView } from "./epics-query.server";
 
 /**
- * The epic dialog's fields after its name, and its foot (ruling 696(e), the
+ * The epic dialog's fields after its name, and its foot (ruling 700(e), the
  * large-component split of `EpicDialog` in `epic-parts.tsx`). Neither calls a
  * hook: the dialog holds the draft, the request and the close, and hands them
  * in, so the markup is what it was. The name stays in the dialog: it takes

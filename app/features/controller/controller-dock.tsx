@@ -70,7 +70,7 @@ import { CONTROLLER_UPDATED_EVENT, sseScopes } from "~/features/live-updates/eve
  * `controller-dock-panel.tsx`, loaded on the first open and preloaded when a
  * pointer or focus reaches the button.
  *
- * Ruling 696(e) (the large-component split, on the task page's recipe):
+ * Ruling 700(e) (the large-component split, on the task page's recipe):
  * `DockShell` is composition. Its state and effects are hooks, called so that
  * every fetcher keeps its key and every effect its turn: the panel's frame and
  * its per-tab restore (`useDockFrame`), the selection and the view, the small
@@ -184,7 +184,7 @@ type DockSendFetcher = ReturnType<typeof useFetcher<SendResult>>;
 type DockStatusFetcher = ReturnType<typeof useFetcher<DockStatus | null>>;
 
 /**
- * The panel's frame (ruling 696(e)): whether it is open or on its way out,
+ * The panel's frame (ruling 700(e)): whether it is open or on its way out,
  * whether the tab's restore reopened it, whether the person opened it, and the
  * elements the close, the pull and focus move between. `useDockFrame` owns it
  * and the per-tab memory of whether it is open; the close and the focus rules
@@ -802,7 +802,7 @@ function fullPageHref(current: ControllerDockView | null, context: DockContext):
 function DockShell({ context }: { context: DockContext }) {
   const csrf = useCsrfToken();
   // Ruling 457: a failed load answers null (the route's `clientLoader`), read
-  // like the time before the first answer. Ruling 696(e): the two fetchers
+  // like the time before the first answer. Ruling 700(e): the two fetchers
   // come first, so their effects keep running ahead of the restore's.
   const view = useFetcher<DockPayload | null>({ key: "controller-dock" });
   const send = useFetcher<SendResult>({ key: "controller-dock-send" });

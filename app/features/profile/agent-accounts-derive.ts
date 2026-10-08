@@ -9,7 +9,7 @@ import type { ProfileBackend, ProfileBackendAccount } from "./profile-query.serv
 
 /**
  * What Profile → Agent accounts reads off its props and its fetcher before it
- * draws (ruling 696(e), the split of `agent-accounts-panel.tsx` along the task
+ * draws (ruling 700(e), the split of `agent-accounts-panel.tsx` along the task
  * page's recipe): the vendors' own words for their flows, a running sign-in's
  * status line, an account's kind, the usage pill, the badge, and which request
  * in flight is this card's. Pure functions of the loader data and the fetcher,

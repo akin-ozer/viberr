@@ -17,7 +17,7 @@ import { EPIC_STATUS_PILL, epicDonePercent } from "./epic-helpers";
 import type { EpicPageView, EpicStageView, EpicTaskView } from "./epics-query.server";
 
 /**
- * The epic page's regions (ruling 696(e), the large-component split of
+ * The epic page's regions (ruling 700(e), the large-component split of
  * `epic-page.tsx`): the head, About, Tasks, History and Details, with the
  * task row and the history feed they draw, moved here unchanged. Each region
  * takes the slot its markup held in the page and calls no hook (the feed

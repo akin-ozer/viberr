@@ -958,7 +958,7 @@ function Composer({
 }
 
 /**
- * The composer's foot (ruling 696(e), split out of `Composer` on the task
+ * The composer's foot (ruling 700(e), split out of `Composer` on the task
  * page's recipe; it calls no hook): attach, the key hint, and Queue beside
  * Steer or Send, each naming the send it made while that send is out.
  */

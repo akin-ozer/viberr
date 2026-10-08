@@ -9,7 +9,7 @@ import { useFetcherResult } from "~/ui/use-fetcher-result";
 import type { ProfileBackend } from "./profile-query.server";
 
 /**
- * An agent account card's poll of its running sign-in (ruling 696(e), the
+ * An agent account card's poll of its running sign-in (ruling 700(e), the
  * split of `agent-accounts-panel.tsx` along the task page's recipe). The card
  * calls it where its poll fetcher always registered, so the fetcher keeps its
  * key. No component lives here, so the module is not a Fast Refresh boundary.

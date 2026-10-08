@@ -26,7 +26,7 @@ import { useRefusalShake } from "~/ui/use-refusal-shake";
  * workflow, policy preset, footer. Split out of `home-page.tsx` (pass 16, pure structural refactor — no
  * behaviour or copy change); the name ↔ repo autocomplete and the create
  * submit stay together here in `NewProjectModal`, which owns all of the
- * dialog's state. Ruling 696(e): what the fields resolve to (the key, the
+ * dialog's state. Ruling 700(e): what the fields resolve to (the key, the
  * repository, the first unmet requirement) is `resolveNewProject` in
  * `new-project-modal-derive.ts`, and a made project's landing is
  * `useLandInNewProject` below.

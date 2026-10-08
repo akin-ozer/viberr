@@ -18,7 +18,7 @@ import { typedKind } from "./event-meta";
 import { EvidenceList, VerdictCard } from "./evidence-list";
 
 /**
- * The parts of one timeline entry (ruling 696(e), the split of `timeline.tsx`
+ * The parts of one timeline entry (ruling 700(e), the split of `timeline.tsx`
  * along the task page's recipe): its meta row, its body (a comment's card, a
  * gate run's table, a verdict's card or a typed event's text and evidence)
  * and the strip of files its run saved. `TimelineItem` keeps the entry's

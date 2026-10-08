@@ -62,7 +62,7 @@ import { TaskMainColumn } from "./task-main-column";
  * the action (verbatim spec §5 strings).
  *
  * Pass 16 split this file (1811 lines) along that same contract, and ruling
- * 696(d) piloted the split of the large components on it; both are pure
+ * 700(d) piloted the split of the large components on it; both are pure
  * structural refactors, no behaviour or copy change. What stays here is the
  * composition: the page's props and defaults, its hooks in the order its 10
  * fetchers register, and the regions of `.detail` in source order. The posts,
@@ -248,7 +248,7 @@ interface TaskDetailPageProps {
  * which U7 found re-splits what the eye and the focus ring see (WCAG
  * 2.2 SC 1.3.2 / 2.4.3).
  *
- * Ruling 696(d): each region that is a component of its own (the decision
+ * Ruling 700(d): each region that is a component of its own (the decision
  * region, the main column, the acceptance ceremony) takes the one slot its
  * markup held here and calls no hook, so `.detail` keeps its ten children and
  * the ids React derives from the tree do not move; the other confirms are

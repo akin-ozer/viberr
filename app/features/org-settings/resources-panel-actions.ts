@@ -6,7 +6,7 @@ import type { ResourceConfirm } from "./resources-panel-derive";
 import { useOrgAction } from "./use-org-action";
 
 /**
- * The Agent resources tab's state and posts (ruling 696(e), the split of
+ * The Agent resources tab's state and posts (ruling 700(e), the split of
  * `resources-panel.tsx`): which store folder's browser is open and the
  * creates waiting to open one, the row posts (removal, re-scan, connection
  * test) with their busy rows, and the re-read while a server installs. The

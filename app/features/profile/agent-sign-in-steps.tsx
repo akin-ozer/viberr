@@ -8,7 +8,7 @@ import { hostOf, statusLine, VENDOR } from "./agent-accounts-derive";
 import type { ProfileBackend } from "./profile-query.server";
 
 /**
- * Profile → Agent accounts: a running sign-in (ruling 696(e), the split of
+ * Profile → Agent accounts: a running sign-in (ruling 700(e), the split of
  * `agent-accounts-panel.tsx` along the task page's recipe). `SignInSteps`
  * keeps every hook it always owned; its two steps and its footer are
  * hook-free pieces it hands what they show.

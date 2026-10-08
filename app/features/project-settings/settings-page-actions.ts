@@ -9,7 +9,7 @@ import { useRefusalShake } from "~/ui/use-refusal-shake";
 import type { MembershipView } from "./membership.server";
 
 /**
- * The project settings page's posts (ruling 696(e), the split of
+ * The project settings page's posts (ruling 700(e), the split of
  * `settings-page.tsx` along the task-page recipe), each with its fetcher and
  * its toast: the identity, the stage editor, the members, the repository, the
  * credential, the danger zone and the three whole-list saves. The page calls

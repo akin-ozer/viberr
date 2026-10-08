@@ -94,7 +94,7 @@ function OverlapChip({ overlaps }: { overlaps: PrOverlap[] }) {
 }
 
 /**
- * A row's PR chip (ruling 696(e), the split of `RQRow`: hook-free, in the slot
+ * A row's PR chip (ruling 700(e), the split of `RQRow`: hook-free, in the slot
  * the row's `t.pr &&` held). Nothing without a PR.
  *
  * UXA-2: this queue carried its OWN pr-state colour map, so a closed-unmerged
@@ -133,7 +133,7 @@ function RQPrPill({ pr }: { pr: ReviewRowView["pr"] }) {
 }
 
 /**
- * A row's wait tag (ruling 696(e), the split of `RQRow`: hook-free, in the
+ * A row's wait tag (ruling 700(e), the split of `RQRow`: hook-free, in the
  * slot the row's ternary held).
  *
  * writ-3: the board's test (card-status.ts): human-waiting AND `waitingOnMe`.

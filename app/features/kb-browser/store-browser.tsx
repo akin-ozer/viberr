@@ -933,7 +933,7 @@ function useDocEditor(
 }
 
 /**
- * The tree's own state (ruling 696(e), split out of `StoreBrowser`, which calls
+ * The tree's own state (ruling 700(e), split out of `StoreBrowser`, which calls
  * it before any other hook, as these states always stood): which folders are
  * open (the top-level ones at first), where the inline new-folder row stands,
  * the folder every toolbar action writes into, and the entry whose delete is
@@ -982,7 +982,7 @@ function useStoreTree(tree: StoreNode[]) {
 }
 
 /**
- * The GitHub import's answer (ruling 696(e), split out of `StoreBrowser`, which
+ * The GitHub import's answer (ruling 700(e), split out of `StoreBrowser`, which
  * calls it where its effect always ran): a success toasts, opens the folder the
  * snapshot landed in and closes the import bar; a failure lands in the bar's
  * error line.
@@ -1086,7 +1086,7 @@ function DocumentCard({
   onCancel: () => void;
   onSave: () => void;
 }) {
-  // Ruling 696(e): what the card reads off the draft is `documentCardState`'s,
+  // Ruling 700(e): what the card reads off the draft is `documentCardState`'s,
   // and its body, notes and foot are regions (`store-browser-regions.tsx`).
   const { unread, changed, fileName, markdown, view, meta } = documentCardState(doc, sizeBytes);
 

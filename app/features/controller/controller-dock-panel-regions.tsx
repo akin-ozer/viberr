@@ -21,7 +21,7 @@ import { addPickedFiles, filesFromPaste } from "~/ui/picked-files";
 import { MESSAGE_BATCH } from "~/shared/attachment-kinds";
 
 /**
- * The OPEN controller dock's regions (ruling 696(e), the large-component split
+ * The OPEN controller dock's regions (ruling 700(e), the large-component split
  * on the task page's recipe, applied to `controller-dock-panel.tsx`): the
  * replies waiting elsewhere, the body's one box (the note where the controller
  * cannot work, the thread list or the transcript) and the composer. Each takes
@@ -117,7 +117,7 @@ export function DockUnseenLine({
  * a view that turns unavailable, updates that element in place, so its node,
  * its scroll offset and the transcript's ref carry over. A component per box
  * would put three types in the slot and mount a fresh box on every toggle
- * (review of the ruling 696(e) split). The first child each box draws straight
+ * (review of the ruling 700(e) split). The first child each box draws straight
  * into it stays inline for the same reason: the loading, no-threads and
  * unavailable notes are one `<p>` React keeps across those changes.
  */

@@ -174,7 +174,7 @@ export function ArchiveEpicTasksConfirm({
  * page and the board. The server checks everything again (`manage-epics`,
  * the dates' order, the lead's membership) and a refusal keeps the dialog
  * open beside its sentence. An edit's answer is the dialog's own: it toasts
- * and closes. A create's is the page's (ruling 696(c)).
+ * and closes. A create's is the page's (ruling 700(c)).
  */
 export function EpicDialog({
   epic,
@@ -187,7 +187,7 @@ export function EpicDialog({
   epic: EpicSummary | null;
   members: EpicMemberView[];
   onClose: () => void;
-  /** Ruling 696(c): a create's fetcher, held by the page that acts on its
+  /** Ruling 700(c): a create's fetcher, held by the page that acts on its
    *  answer, so the new epic's id never goes up through an effect. */
   fetcher?: ReturnType<typeof useFetcher<EpicActionResult>>;
   /** The dialog's animated close, for the page to play once it has acted. */

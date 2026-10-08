@@ -100,7 +100,7 @@ interface HeldChild {
 }
 
 /**
- * Ruling 696(b): children that hold their handshake until the test ends it, so
+ * Ruling 700(b): children that hold their handshake until the test ends it, so
  * a test decides which probe finishes when. `aliveAtSpawn` records, at each
  * spawn, how many children were alive (spawned and not yet killed by the
  * probe) counting the new one.
@@ -654,7 +654,7 @@ describe("resolveSpecialistMcpServersDetailed — marked write tools (ruling 176
 });
 
 /**
- * Ruling 696(b): the run-start stdio pre-flight runs two handshakes at a time
+ * Ruling 700(b): the run-start stdio pre-flight runs two handshakes at a time
  * instead of one after another, starts them in mount order and applies their
  * verdicts in mount order, so the mounted set, the registry rows, the warn
  * lines and `unresolved` are what the serial check left for the same verdicts.
@@ -663,7 +663,7 @@ describe("resolveSpecialistMcpServersDetailed — marked write tools (ruling 176
  * probing, can overwrite a Retest pressed meanwhile, and a failed credential
  * re-seal is logged before the verdicts rather than among them.
  */
-describe("verifyStdioMcpMountsForRun: the bounded pre-flight (ruling 696(b))", () => {
+describe("verifyStdioMcpMountsForRun: the bounded pre-flight (ruling 700(b))", () => {
   /** A probe clock no test here reaches: each handshake ends when the test ends it. */
   const timeoutMs = 10_000;
   /**

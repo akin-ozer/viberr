@@ -10,7 +10,7 @@ import type { PrOverlap } from "~/shared/pr-overlaps";
 import type { BoardStage, BoardTask } from "./board-page";
 
 /**
- * The board's acceptance ceremony (ruling 696(e), the split of
+ * The board's acceptance ceremony (ruling 700(e), the split of
  * `board-page.tsx`): the ONE shared `AcceptConfirm` a board move into the final
  * stage opens, and the refusals a board summary can answer. Its own module so
  * the page's move hooks (`useMoveConfirms`, board-page-actions.tsx) can place

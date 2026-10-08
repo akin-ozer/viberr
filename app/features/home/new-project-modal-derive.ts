@@ -4,7 +4,7 @@ import type { BlockedField } from "./project-fields";
 import { keyFromName } from "./project-name";
 
 /**
- * What the New project dialog's fields resolve to (ruling 696(e), the
+ * What the New project dialog's fields resolve to (ruling 700(e), the
  * large-component split of `NewProjectModal` in `new-project-modal.tsx`): the
  * task key, repository and owner a create posts, whether the board takes a
  * repository, whether the key is another project's, and the first requirement
