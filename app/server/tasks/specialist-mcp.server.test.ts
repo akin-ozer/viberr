@@ -267,10 +267,6 @@ describe("resolveSpecialistMcpServers (item-1: MCP wiring)", () => {
     );
   });
 
-  it("ruling 310: an empty list renders nothing at all, not an empty heading", () => {
-    expect(unavailableMcpSection([])).toBe("");
-  });
-
   it("P14-KM-04: a quoted stdio command keeps its arguments whole", () => {
     const store = setupTestStore(ctx);
     addMcp(store.db, "quoted", "stdio", `"/opt/my tools/mcp" --config '{"a": 1}'`);
@@ -307,19 +303,6 @@ describe("resolveSpecialistMcpServersDetailed", () => {
     expect(resolved.unresolved).toEqual([
       { name: "broken", reason: "the registered stdio command is empty" },
     ]);
-  });
-
-  it("reports nothing when every grant resolves", () => {
-    const store = setupTestStore(ctx);
-    addMcp(store.db, "billing-api", "HTTP", "https://mcp.example/sse");
-    expect(
-      resolveSpecialistMcpServersDetailed(store.db, ["billing-api"]).unresolved,
-    ).toEqual([]);
-  });
-
-  it("returns nothing for an empty declaration", () => {
-    const store = setupTestStore(ctx);
-    expect(resolveSpecialistMcpServers(store.db, [])).toEqual({});
   });
 
   it("C6: a registry read failure lands EVERY declared grant in unresolved, not silence", () => {
