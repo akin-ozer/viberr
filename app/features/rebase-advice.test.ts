@@ -43,7 +43,10 @@ describe("ruling 291: no surface tells a person to rebase", () => {
     const suggests =
       /(?:rebase (?:it|the branch|onto)|needs? a rebase|need a rebase|is rebased|be rebased|rebase first|rebase and)/i;
     const offenders: string[] = [];
-    for (const file of sources(appDir)) {
+    const files = sources(appDir);
+    // A scan that reads nothing passes everything.
+    expect(files.length).toBeGreaterThan(100);
+    for (const file of files) {
       const lines = readFileSync(file, "utf8").split("\n");
       lines.forEach((line, i) => {
         if (!suggests.test(line)) return;

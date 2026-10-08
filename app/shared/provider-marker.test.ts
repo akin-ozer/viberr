@@ -11,6 +11,7 @@ describe("provider marker (P07-C, pass 32)", () => {
     // here, naming the file.
     const root = path.resolve(path.dirname(new URL(import.meta.url).pathname), "..");
     const offenders: string[] = [];
+    let scanned = 0;
     const walk = (dir: string) => {
       for (const entry of readdirSync(dir)) {
         const full = path.join(dir, entry);
@@ -20,6 +21,7 @@ describe("provider marker (P07-C, pass 32)", () => {
         }
         if (!/\.(ts|tsx)$/.test(entry) || /\.test\.tsx?$/.test(entry)) continue;
         if (full.endsWith(path.join("shared", "provider-marker.ts"))) continue;
+        scanned += 1;
         const text = readFileSync(full, "utf8");
         // The marker's own escape sequence (`\n\nThe provider reported:`) is
         // what a copied literal or template carries; a comment merely naming
@@ -30,6 +32,8 @@ describe("provider marker (P07-C, pass 32)", () => {
       }
     };
     walk(root);
+    // A scan that reads nothing passes everything.
+    expect(scanned).toBeGreaterThan(100);
     expect(offenders).toEqual([]);
   });
 

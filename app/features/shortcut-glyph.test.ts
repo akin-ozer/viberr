@@ -41,7 +41,10 @@ function stripComments(source: string): string {
 describe("ruling 419(d): shortcut hints name the viewer's own modifier", () => {
   it("finds no literal ⌘ in any component's code or JSX text", () => {
     const offenders: string[] = [];
-    for (const file of components(APP)) {
+    const files = components(APP);
+    // A scan that reads nothing passes everything.
+    expect(files.length).toBeGreaterThan(100);
+    for (const file of files) {
       stripComments(readFileSync(file, "utf8"))
         .split("\n")
         .forEach((line, i) => {
