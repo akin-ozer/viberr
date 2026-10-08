@@ -109,6 +109,10 @@ describe("publishRunLogAppended", () => {
         seq: 17,
       },
     });
+    // The projection path parses every event before publishing; this path does
+    // not, so this parse is the validator it skips (the client union mirrors
+    // the schema).
+    sseEventSchema.parse(payload);
   });
 
   it("routes by project AND task — a sibling task's page never sees the run", () => {
@@ -372,38 +376,5 @@ describe("a controller run's frames route to the conversation owner", () => {
     const payload = sseEventSchema.parse(JSON.parse(dataLines(owner.writes).at(-1)!));
     expect(payload.type).toBe("controller.updated");
     expect(payload.data).toEqual({ conversationId: route.conversationId, userId: "u_owner" });
-  });
-});
-
-describe("wire contract", () => {
-  it("both events satisfy the SSE schema — nothing downstream checks them", () => {
-    const page = connect([{ kind: "task", slug: "viberr-core", key: "VIB-42" }]);
-
-    publishRunLogAppended({
-      projectSlug: "viberr-core",
-      taskKey: "VIB-42",
-      runId: "run_9",
-      threadId: "thr_3",
-      seq: 2,
-    });
-    publishRunStateChanged({
-      projectSlug: "viberr-core",
-      taskKey: "VIB-42",
-      runId: "run_9",
-      threadId: "thr_3",
-      state: "finished",
-    });
-
-    // The projection path parses every event before publishing; this path does
-    // not, so an event shaped wrong here reaches browsers as-is and the client
-    // union (`event-types.ts` mirrors this schema) mis-handles it. Parsing here
-    // is the substitute for the validator this path skips — and it is also what
-    // makes the ruling-99 guard necessary rather than merely tidy: the same
-    // parse of a `projectSlug: ""` payload fails on `min(1)`.
-    const events = dataLines(page.writes).slice(1);
-    expect(events).toHaveLength(2);
-    for (const line of events) {
-      expect(() => sseEventSchema.parse(JSON.parse(line))).not.toThrow();
-    }
   });
 });
