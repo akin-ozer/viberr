@@ -3174,9 +3174,10 @@ dialog[data-closing]::backdrop {
    beside it) shows it on the field itself; the focus wash still paints, so an
    invalid field that has focus reads as both. */
 .field input[aria-invalid="true"], .field textarea[aria-invalid="true"] { border-color: var(--coral-dark); }
-/* Ruling 108: a read-only field (the deployment-locked controller doctrine)
-   must READ read-only — muted fill, resting border on focus, no blue ring, no
-   resize grip. The only read-only field in the app, so this rule is its. */
+/* Ruling 108: a read-only field (the deployment-locked controller doctrine,
+   and the store browser's file name while its document saves) must READ
+   read-only — muted fill, resting border on focus, no blue ring, no resize
+   grip. */
 .field textarea[readonly], .field input[readonly] {
   background: var(--tint-well); color: var(--muted); cursor: default; resize: none;
 }

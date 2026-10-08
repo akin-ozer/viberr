@@ -20,6 +20,7 @@ export function DocumentBody({
   view,
   unread,
   fileName,
+  saving,
   onEdit,
 }: {
   doc: DocDraft;
@@ -27,6 +28,8 @@ export function DocumentBody({
   /** An existing document whose read has not answered, or failed. */
   unread: boolean;
   fileName: string;
+  /** A save is in flight: the text takes no typing until it answers. */
+  saving: boolean;
   onEdit: (next: DocDraft) => void;
 }) {
   if (unread) {
@@ -75,6 +78,7 @@ export function DocumentBody({
         // caps both at the preview's height.
         rows={Math.min(24, Math.max(8, lineCount(doc.body) + 1))}
         value={doc.body}
+        readOnly={saving}
         placeholder={"# Title\n\nWhat your agents must know."}
         onChange={(e) => onEdit({ ...doc, body: e.target.value, err: null })}
       />

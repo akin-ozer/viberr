@@ -774,11 +774,11 @@ type DocSaveFields = {
  * says what went wrong.
  *
  * A save's answer settles the draft it saved, not whatever the card holds when
- * it arrives, and a read fills only the draft it was opened for. A refused
- * draft the card no longer holds comes back with the reason when that loses
- * nothing: the card is empty, or holds a draft nothing was typed into. A
- * refusal that arrives while a draft with typing of its own is open is an
- * error toast instead, since bringing the refused draft back would close it.
+ * it arrives, and a read fills only the draft it was opened for. While a save
+ * is in flight the card takes no typing (`saving` makes its name and text
+ * read-only), so a success closes exactly the text it wrote, and a refused
+ * draft the card no longer holds comes back with the reason over whatever was
+ * opened since, which nothing was typed into.
  *
  * `onSaved` gets the toast and the folder the save was posted to.
  */
@@ -787,7 +787,6 @@ function useDocEditor(
   onSaved: (toast: string, dir: string[]) => void,
 ) {
   const csrf = useCsrfToken();
-  const push = useToast();
   const readFetcher = useFetcher<StoreActionReply>();
   const saveFetcher = useFetcher<StoreActionReply>();
   const [doc, setDoc] = useState<DocDraft | null>(null);
@@ -850,28 +849,13 @@ function useDocEditor(
       return;
     }
     // Closed or replaced while saving: the posted text is now the only copy.
-    // Taking the card back loses nothing if it is empty or holds an opened
-    // document as read (or still reading), or a new one with no name or text.
-    const free =
-      doc === null ||
-      (doc.existing ? doc.saved === null || doc.body === doc.saved : !doc.name && !doc.body);
-    if (free) {
-      // Back with the reason, as an open draft keeps it (UI-60), and as a new
-      // opening, so a read still in flight for the draft it replaces is not
-      // its to fill.
-      opened.current += 1;
-      setDoc({ ...sent.draft, err });
-    } else {
-      // The open draft has typing of its own, and bringing this one back
-      // would close it. The server's sentence is not repeated: it can say
-      // the text is still here, which is now untrue.
-      const file = sent.draft.existing ? sent.draft.name : draftFileName(sent.draft.name);
-      push(
-        `${[...sent.draft.dir, file].join("/")} was not saved, and its text could not ` +
-          "be kept: another draft with changes was open.",
-        "error",
-      );
-    }
+    // Taking the card back loses nothing, since it took no typing while the
+    // save was in flight: it is empty, or holds a new document with no name or
+    // text, or an opened one as read (or still reading). Back with the reason,
+    // as an open draft keeps it (UI-60), and as a new opening, so a read still
+    // in flight for the draft it replaces is not its to fill.
+    opened.current += 1;
+    setDoc({ ...sent.draft, err });
   });
 
   const openNew = (dir: string[]) => {
@@ -1088,6 +1072,10 @@ function DocumentCard({
   doc: DocDraft;
   /** The file's size as the tree lists it; null for a new document. */
   sizeBytes: number | null;
+  /** A save is in flight, whichever draft the card holds. Save reads
+   *  "Saving…", and the name and text take no typing until it answers: its
+   *  success closes the draft it posted, and its refusal takes the card back
+   *  from a draft opened since (`useDocEditor`). */
   saving: boolean;
   nameRef: RefObject<HTMLInputElement | null>;
   /** Ruling 147: a refused save of a nameless draft marks the name field. */
@@ -1141,6 +1129,7 @@ function DocumentCard({
             type="text"
             className="mono"
             value={doc.name}
+            readOnly={saving}
             placeholder="file-name.md"
             aria-invalid={nameInvalid || undefined}
             aria-describedby={nameInvalid ? "fm-doc-err" : undefined}
@@ -1158,7 +1147,14 @@ function DocumentCard({
           </div>
         </div>
       )}
-      <DocumentBody doc={doc} view={view} unread={unread} fileName={fileName} onEdit={onEdit} />
+      <DocumentBody
+        doc={doc}
+        view={view}
+        unread={unread}
+        fileName={fileName}
+        saving={saving}
+        onEdit={onEdit}
+      />
       {/* One box, never two (`DocumentNotes`, ruling 147). A read that failed
           says so in the body instead. */}
       {(nameInvalid || (doc.err && !unread)) && (

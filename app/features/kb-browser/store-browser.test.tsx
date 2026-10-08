@@ -574,26 +574,34 @@ describe("StoreBrowser document editor", () => {
   // A save's answer settles the draft it saved, not whatever the card holds
   // when it arrives (P14-UI-60: the typed body is the only copy). The stub
   // holds the save, and a document read, open while the person keeps the
-  // draft, closes it, or opens another. CANARY: leave a refusal off the draft
-  // it saved and the first row says nothing; settle the answer against the
-  // open draft (drop the opening `openNew` or `openExisting` counts) and the
-  // newer draft is closed under the person or wears the old save's error;
-  // bring a refused draft back only into an empty card and a glance at another
-  // document drops the only copy; drop the read's opening check, or the count
-  // a draft brought back takes, and a read still in flight overwrites it;
-  // toast the server's sentence, which can say "your text is still here", and
-  // the last row repeats it over text that is gone.
+  // draft, closes it, or opens another. While the save is in flight the card's
+  // name and text are read-only, whichever draft it holds, so nothing typed
+  // then is lost to the answer: a success closing its draft, or a refusal
+  // taking the card back. A browser refuses typing into a read-only field and
+  // `fireEvent` does not, so the rows read the lock itself. CANARY: drop the
+  // lock and the draft a success closes takes typing (the second row), as does
+  // a New document a refusal then replaces; keep it past the answer and the
+  // refused draft cannot be fixed; leave a refusal off the draft it saved and
+  // the first row says nothing; settle the answer against the open draft (drop
+  // the opening `openNew` or `openExisting` counts) and the newer draft is
+  // closed under the person or wears the old save's error; bring a refused
+  // draft back only into an empty card and a glance at another document drops
+  // the only copy; drop the read's opening check, or the count a draft brought
+  // back takes, and a read still in flight overwrites it.
   const REFUSED = "facts.md already exists. Open it to edit, or pick another name.";
   type View = ReturnType<typeof renderBrowser>;
   type HeldRead = PromiseWithResolvers<StubActionReply>;
   const typed = (view: View) =>
     control(view.getByLabelText("Document contents"), HTMLTextAreaElement).value;
-  const startAnother = (text: string) => (view: View) => {
+  /** Whether a new document's name and text are read-only, in that order. */
+  const locked = (view: View) => [
+    control(view.getByPlaceholderText("file-name.md"), HTMLInputElement).readOnly,
+    control(view.getByLabelText("Document contents"), HTMLTextAreaElement).readOnly,
+  ];
+  const startAnother = (view: View) => {
     // The open card is titled "New document" too: the toolbar's is the button.
     fireEvent.click(view.getByRole("button", { name: "New document" }));
-    if (text) {
-      fireEvent.change(view.getByLabelText("Document contents"), { target: { value: text } });
-    }
+    expect(locked(view)).toEqual([true, true]);
   };
   const openOverview = async (view: View, read: HeldRead) => {
     fireEvent.click(view.getByLabelText("Open overview.md"));
@@ -606,6 +614,7 @@ describe("StoreBrowser document editor", () => {
     expect(control(view.getByPlaceholderText("file-name.md"), HTMLInputElement).value).toBe(
       "facts.md",
     );
+    expect(locked(view)).toEqual([false, false]);
   };
   it.each([
     {
@@ -616,13 +625,26 @@ describe("StoreBrowser document editor", () => {
       after: keptWithReason,
     },
     {
-      answer: "a save that lands after New document",
-      settles: "leaves that draft open",
-      meanwhile: startAnother("SECOND DRAFT"),
+      answer: "a save that lands while its draft is still open",
+      settles: "closes it, and nothing could be typed into it meanwhile",
+      meanwhile: (view: View) => {
+        expect(locked(view)).toEqual([true, true]);
+      },
       reply: { ok: true, toast: "facts.md saved · 13 bytes" },
       after: async (view: View) => {
         await view.findByText("facts.md saved · 13 bytes");
-        expect(typed(view)).toBe("SECOND DRAFT");
+        expect(view.queryByLabelText("Document contents")).toBeNull();
+      },
+    },
+    {
+      answer: "a save that lands after New document",
+      settles: "leaves that draft open, and it takes typing again",
+      meanwhile: startAnother,
+      reply: { ok: true, toast: "facts.md saved · 13 bytes" },
+      after: async (view: View) => {
+        await view.findByText("facts.md saved · 13 bytes");
+        expect(control(view.getByPlaceholderText("file-name.md"), HTMLInputElement).value).toBe("");
+        expect(locked(view)).toEqual([false, false]);
       },
     },
     {
@@ -649,14 +671,14 @@ describe("StoreBrowser document editor", () => {
       after: keptWithReason,
     },
     {
-      answer: "a save refused after an untouched New document",
+      answer: "a save refused after New document",
       settles: "brings the draft back over it",
-      meanwhile: startAnother(""),
+      meanwhile: startAnother,
       reply: { ok: false, error: REFUSED },
       after: keptWithReason,
     },
     {
-      answer: "a save refused after another document opened untouched",
+      answer: "a save refused after another document opened",
       settles: "brings the draft back over it",
       meanwhile: openOverview,
       reply: { ok: false, error: REFUSED },
@@ -681,20 +703,6 @@ describe("StoreBrowser document editor", () => {
           expect(lastForm?.intent).toBe("store-write-doc");
         });
         expect(lastForm).toMatchObject({ name: "facts.md", body: "THE ONLY COPY" });
-      },
-    },
-    {
-      answer: "a save refused while a draft with typing is open",
-      settles: "says so in a toast, not on that draft, and claims no text was kept",
-      meanwhile: startAnother("SECOND DRAFT"),
-      reply: { ok: false, error: REFUSED },
-      after: async (view: View) => {
-        const told = await view.findByText(
-          "facts.md was not saved, and its text could not be kept: another draft with changes was open.",
-        );
-        expect(told.closest(".toast")?.getAttribute("data-kind")).toBe("error");
-        expect(document.body.textContent).not.toContain(REFUSED);
-        expect(typed(view)).toBe("SECOND DRAFT");
       },
     },
   ])("$answer $settles", async ({ meanwhile, reply, after }) => {
