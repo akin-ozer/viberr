@@ -17,6 +17,7 @@ import { listAuditEvents } from "../../../test-support/audit-log";
 import { writeBoardHolding } from "../../../test-support/resource-boards";
 import { ENV_KEYS } from "~/server/config/env.server";
 import { kbDirPath, skillDirPath } from "~/server/files/file-store-root.server";
+import { RESERVED_MCP_NAMES } from "~/shared/mcp-reserved";
 import {
   deleteKnowledgeBase,
   deleteMcpServer,
@@ -729,18 +730,10 @@ describe("mcp servers", () => {
     // P13-KM-12 / ruling 107: a row under one of these names is unusable (every
     // resolver skips it) AND shadows the mount key of a server the product
     // attaches itself, so it is refused at save rather than accepted dead. The
-    // hyphen spellings are what a Codex run would see.
-    for (const name of [
-      "viberr",
-      "viberr_agent",
-      "viberr-agent",
-      "viberr_browser",
-      "viberr-browser",
-      "viberr_controller",
-      "viberr-controller",
-      "viberr_ops",
-      "viberr-ops",
-    ]) {
+    // hyphen spellings are what a Codex run would see. CANARY: refuse from a
+    // private copy of the list and the names reserved since (rulings 585 and
+    // 589) save as dead rows.
+    for (const name of RESERVED_MCP_NAMES) {
       await expect(
         saveMcpServer(
           db,
