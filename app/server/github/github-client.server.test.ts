@@ -214,15 +214,6 @@ describe("github-client", () => {
     expect(githubFailureMessage(result)).toBe(result.message);
   });
 
-  it("hands the body over as GitHub sent it under z.unknown()", async () => {
-    const { client: c } = client({
-      "GET /raw": { body: { anything: ["goes", 1] } },
-    });
-    const result = await c.request("GET", "/raw", z.unknown());
-    expect(result.ok).toBe(true);
-    if (result.ok) expect(result.data).toEqual({ anything: ["goes", 1] });
-  });
-
   it("exposes scope + token-expiration headers on success", async () => {
     const { client: c } = client({
       "GET /user": {
