@@ -1781,14 +1781,13 @@ export function MembersPanel({
       push(`You can't remove yourself from ${projectName}`, "error");
       return;
     }
-    if (
-      m.role === "admin" &&
-      // UI-29: mirror the server's live-account guard. Counting file entries
-      // let a ghost admin satisfy it client-side too.
-      members.filter((x) => x.role === "admin" && !x.missing && !x.disabled)
-        .length <= 1 &&
-      !m.missing
-    ) {
+    // UI-29: mirror the server's live-account guard (`isLastLiveAdmin`).
+    // Counting file entries let a ghost admin satisfy it client-side too. Only
+    // the last admin who can sign in is kept: a removed or disabled admin's
+    // seat is never that one, so its removal goes (F18-6, ruling 705).
+    const liveAdmin = (x: MembershipView) =>
+      x.role === "admin" && !x.missing && !x.disabled;
+    if (liveAdmin(m) && members.filter(liveAdmin).length <= 1) {
       // D5: a refusal must not render the success tick.
       push(
         `${m.name} is the only admin. Assign another admin in Policy first`,

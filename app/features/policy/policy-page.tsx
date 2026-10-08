@@ -99,8 +99,17 @@ export function HumanAccess({
 
   const setRole = (m: MembershipView, r: ProjectRole) => {
     if (m.role === r) return;
-    if (m.role === "admin" && r !== "admin" && counts.admin <= 1) {
-      // Client mirror of the server guard (UX sugar — the action re-checks).
+    // Client mirror of the server guard (`isLastLiveAdmin`; UX sugar — the
+    // action re-checks): `counts.admin` is the admins who can sign in, and only
+    // the last of them is kept. A removed or disabled admin is not one of them,
+    // so its demotion goes, as on the server (ruling 705).
+    if (
+      m.role === "admin" &&
+      r !== "admin" &&
+      !m.missing &&
+      !m.disabled &&
+      counts.admin <= 1
+    ) {
       // D5: a refusal must not render the success tick.
       push(
         `${projectName} needs at least one admin. Promote someone else first`,

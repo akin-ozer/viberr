@@ -706,24 +706,46 @@ describe("MembersPanel", () => {
     expect(getByText("Policy → Human access")).toBeTruthy();
   });
 
-  it("guards self-removal and last-admin client-side, dispatches otherwise", () => {
+  // D5 and UI-29: the browser refuses, in the server's words, the removals the
+  // server refuses, yourself and the last admin who can sign in, and confirms
+  // every other one before it dispatches (D6). Ruling 705: a disabled admin is
+  // never the last admin, so its removal confirms (`isLastLiveAdmin`).
+  // CANARY: exempt only a removed account from the last-admin check again and
+  // Elif's disabled seat is refused "Elif Demir is the only admin…".
+  it.each([
+    {
+      who: "yourself",
+      members: MEMBERS,
+      name: "Arda Kaya",
+      said: "You can't remove yourself from Viberr Core",
+    },
+    {
+      who: "the last admin who can sign in",
+      members: MEMBERS.map((m) => (m.userId === "u_arda" ? { ...m, role: "viewer" as const } : m)),
+      name: "Elif Demir",
+      said: "Elif Demir is the only admin. Assign another admin in Policy first",
+    },
+    {
+      who: "a disabled admin, beside the last one who can sign in",
+      members: MEMBERS.map((m) => (m.userId === "u_elif" ? { ...m, disabled: true } : m)),
+      name: "Elif Demir",
+      said: null,
+    },
+    { who: "a viewer", members: MEMBERS, name: "Yeni Kişi", said: null },
+  ])("removing $who", ({ members, name, said }) => {
     const onRemove = vi.fn();
-    const oneAdmin = MEMBERS.map((m) =>
-      m.userId === "u_elif" ? { ...m, role: "viewer" as const } : m,
+    const { container, getByLabelText } = render(
+      <ToastProvider>
+        <MembersPanel {...base} members={members} onInvite={() => {}} onRemove={onRemove} />
+      </ToastProvider>,
     );
-    const { container } = render(
-      <MembersPanel {...base} members={oneAdmin} onInvite={() => {}} onRemove={onRemove} />,
-    );
-    const removeButtons = container.querySelectorAll(".stg-x");
-    fireEvent.click(removeButtons[0]!); // self
-    expect(onRemove).not.toHaveBeenCalled();
-    fireEvent.click(removeButtons[1]!); // elif, now a viewer → opens confirm
-    // D6: removing a member confirms before it dispatches.
-    expect(onRemove).not.toHaveBeenCalled();
-    const confirm = container.querySelector("dialog.confirm-card")!;
-    expect(confirm.textContent).toContain("Remove");
-    fireEvent.click(confirm.querySelector("button.btn.danger")!);
-    expect(onRemove).toHaveBeenCalledTimes(1);
+    fireEvent.click(getByLabelText(`Remove ${name}`));
+    const confirm = container.querySelector("dialog.confirm-card button.btn.danger");
+    if (confirm) fireEvent.click(confirm);
+    expect({
+      said: container.querySelector('.toast[data-kind="error"]')?.textContent ?? null,
+      removed: onRemove.mock.calls.map(([m]) => m.name),
+    }).toEqual({ said, removed: said === null ? [name] : [] });
   });
 
   it("only the row whose removal is in flight reads busy; the others wait (ruling 368 over 459)", () => {
