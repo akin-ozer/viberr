@@ -15,6 +15,7 @@ import {
   stopMcpGateway,
 } from "~/server/mcp-proxy/gateway.server";
 import { logger } from "~/server/logging/logger.server";
+import { sealSecret } from "~/server/secrets/secret-box.server";
 import { RESERVED_MCP_NAMES } from "~/shared/mcp-reserved";
 import {
   resolveSpecialistMcpServers,
@@ -157,9 +158,6 @@ function heldSpawn() {
   return { spawnImpl, held, aliveAtSpawn };
 }
 
-process.env.VIBERR_SESSION_SECRET ??= "test-session-secret-0123456789abcdef";
-process.env.VIBERR_SECRET_ENCRYPTION_KEY ??= randomBytes(32).toString("base64");
-
 const ctx = createTestDbContext();
 afterEach(ctx.cleanup);
 
@@ -190,18 +188,32 @@ function markWriteTools(
 }
 
 describe("resolveSpecialistMcpServers (item-1: MCP wiring)", () => {
-  it("builds an HTTP mcpServer config from an org MCP row", () => {
+  it.each([
+    {
+      row: "an HTTP row",
+      name: "billing-api",
+      transport: "HTTP",
+      target: "https://mcp.example/sse",
+      config: { type: "http", url: "https://mcp.example/sse" },
+    },
+    {
+      row: "a stdio row (command + args)",
+      name: "pg-ro",
+      transport: "stdio",
+      target: "npx -y @mcp/server-postgres",
+      config: { command: "npx", args: ["-y", "@mcp/server-postgres"] },
+    },
+    {
+      row: "a quoted stdio command, its arguments whole (P14-KM-04)",
+      name: "quoted",
+      transport: "stdio",
+      target: `"/opt/my tools/mcp" --config '{"a": 1}'`,
+      config: { command: "/opt/my tools/mcp", args: ["--config", '{"a": 1}'] },
+    },
+  ] as const)("builds the mcpServer config from $row", ({ name, transport, target, config }) => {
     const store = setupTestStore(ctx);
-    addMcp(store.db, "billing-api", "HTTP", "https://mcp.example/sse");
-    const servers = resolveSpecialistMcpServers(store.db, ["billing-api"]);
-    expect(servers["billing-api"]).toEqual({ type: "http", url: "https://mcp.example/sse" });
-  });
-
-  it("builds a stdio mcpServer config (command + args) from a stdio row", () => {
-    const store = setupTestStore(ctx);
-    addMcp(store.db, "pg-ro", "stdio", "npx -y @mcp/server-postgres");
-    const servers = resolveSpecialistMcpServers(store.db, ["pg-ro"]);
-    expect(servers["pg-ro"]).toEqual({ command: "npx", args: ["-y", "@mcp/server-postgres"] });
+    addMcp(store.db, name, transport, target);
+    expect(resolveSpecialistMcpServers(store.db, [name])).toEqual({ [name]: config });
   });
 
   it("ruling 107: every name on the ONE reserved list resolves to nothing, even as a registry row", () => {
@@ -265,14 +277,6 @@ describe("resolveSpecialistMcpServers (item-1: MCP wiring)", () => {
     expect(section).toContain(
       "do not assume the grant or the registration is missing unless the reason says so",
     );
-  });
-
-  it("P14-KM-04: a quoted stdio command keeps its arguments whole", () => {
-    const store = setupTestStore(ctx);
-    addMcp(store.db, "quoted", "stdio", `"/opt/my tools/mcp" --config '{"a": 1}'`);
-    expect(resolveSpecialistMcpServers(store.db, ["quoted"])).toEqual({
-      quoted: { command: "/opt/my tools/mcp", args: ["--config", '{"a": 1}'] },
-    });
   });
 });
 
@@ -339,8 +343,7 @@ describe("resolveSpecialistMcpServersDetailed", () => {
       await stopMcpGateway();
     });
 
-    it("an HTTP server resolves to the gateway URL, and no part of the config is the credential", async () => {
-      const { sealSecret } = await import("~/server/secrets/secret-box.server");
+    it("an HTTP server resolves to the gateway URL, and no part of the config is the credential", () => {
       const store = setupTestStore(ctx);
       addMcp(store.db, "billing-api", "HTTP", "https://mcp.example/sse", sealSecret("tok_live_123"));
       const resolved = resolveSpecialistMcpServersDetailed(store.db, ["billing-api"]);
@@ -355,8 +358,7 @@ describe("resolveSpecialistMcpServersDetailed", () => {
       expect(resolved.unresolved).toEqual([]);
     });
 
-    it("a stdio server resolves to the gateway URL too — the server spawns it, the CLI never does", async () => {
-      const { sealSecret } = await import("~/server/secrets/secret-box.server");
+    it("a stdio server resolves to the gateway URL too — the server spawns it, the CLI never does", () => {
       const store = setupTestStore(ctx);
       addMcp(store.db, "pg-ro", "stdio", "npx -y @mcp/server-postgres", sealSecret("pg_secret"));
       const resolved = resolveSpecialistMcpServersDetailed(store.db, ["pg-ro"]);
@@ -370,8 +372,7 @@ describe("resolveSpecialistMcpServersDetailed", () => {
       expect(resolved.proxied).toEqual(["pg-ro"]);
     });
 
-    it("an uncredentialed server beside them still mounts directly", async () => {
-      const { sealSecret } = await import("~/server/secrets/secret-box.server");
+    it("an uncredentialed server beside them still mounts directly", () => {
       const store = setupTestStore(ctx);
       addMcp(store.db, "billing-api", "HTTP", "https://mcp.example/sse", sealSecret("tok_live_123"));
       addMcp(store.db, "docs", "HTTP", "https://docs.example/mcp");
@@ -385,8 +386,7 @@ describe("resolveSpecialistMcpServersDetailed", () => {
       expect(resolved.proxied).toEqual(["billing-api"]);
     });
 
-    it("a marked write tool keeps its per-tool deny on a gateway mount", async () => {
-      const { sealSecret } = await import("~/server/secrets/secret-box.server");
+    it("a marked write tool keeps its per-tool deny on a gateway mount", () => {
       const store = setupTestStore(ctx);
       addMcp(store.db, "cloudflare", "HTTP", "https://mcp.example/cf", sealSecret("cf_token"));
       markWriteTools(store.db, "cloudflare", ["delete_zone"]);
@@ -424,8 +424,7 @@ describe("resolveSpecialistMcpServersDetailed", () => {
     expect(unresolved[0]!.mounted).toBeUndefined();
   });
 
-  it("A9: a credential sealed under a RETIRED key is refused, not downgraded to anonymous", async () => {
-    const { sealSecret } = await import("~/server/secrets/secret-box.server");
+  it("A9: a credential sealed under a RETIRED key is refused, not downgraded to anonymous", () => {
     const otherKey = randomBytes(32);
     const store = setupTestStore(ctx);
     addMcp(
@@ -532,7 +531,6 @@ describe("resolveSpecialistMcpServersDetailed", () => {
   });
 
   it("A9: rotation WORKS — a retired key in the env opens the box and re-seals it", async () => {
-    const { sealSecret } = await import("~/server/secrets/secret-box.server");
     const oldKey = randomBytes(32);
     const store = setupTestStore(ctx);
     addMcp(
