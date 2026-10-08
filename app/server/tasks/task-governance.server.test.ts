@@ -1444,16 +1444,7 @@ describe("resolvePacket kind matrix", () => {
   it("resolve_remote_collision: closes the unowned PR, deletes the stale remote branch, clears the R15-15 record, and reports the redelivery outcome", async () => {
     const store = setupProjectedStore(ctx);
     const { fakeGithubFetch } = await import("../../../test-support/fake-github");
-    const { createPat, setProjectCredential } = await import(
-      "~/server/secrets/pat-store.server"
-    );
-    const patActor = { userId: store.users.arda.id, label: "arda@viberr.dev" };
-    const pat = createPat(
-      store.db,
-      { userId: store.users.arda.id, label: "bot", token: "ghp_collision00000000000000000000001" },
-      patActor,
-    );
-    setProjectCredential(store.db, { projectSlug: store.slug, patId: pat.id }, patActor);
+    await collisionCredential(store);
     const github = fakeGithubFetch({
       "PATCH /repos/akin-ozer/viberr/pulls/232": { status: 200, body: { state: "closed" } },
       "DELETE /repos/akin-ozer/viberr/git/refs/heads/vib-1-work": { status: 204, body: "" },
@@ -2455,16 +2446,7 @@ describe("resolvePacket kind matrix", () => {
     // write `sha` instead of `localSha`/`remoteSha` on the archive row.
     const store = setupProjectedStore(ctx);
     const { fakeGithubFetch } = await import("../../../test-support/fake-github");
-    const { createPat, setProjectCredential } = await import(
-      "~/server/secrets/pat-store.server"
-    );
-    const patActor = { userId: store.users.arda.id, label: "arda@viberr.dev" };
-    const pat = createPat(
-      store.db,
-      { userId: store.users.arda.id, label: "bot", token: "ghp_foreignhead000000000000000000001" },
-      patActor,
-    );
-    setProjectCredential(store.db, { projectSlug: store.slug, patId: pat.id }, patActor);
+    await collisionCredential(store);
     const remoteSha = "d5f23aa".padEnd(40, "1");
     const github = fakeGithubFetch({
       "GET /repos/akin-ozer/viberr/git/ref/heads/vib-1-work": {

@@ -161,6 +161,17 @@ function dataCtx(): TaskActionContext {
   return callCtx;
 }
 
+/** The project's GitHub credential: a PAT of arda's, set on the project. */
+function withCredential(): void {
+  const patActor = actorOf(store.users.arda);
+  const pat = createPat(
+    store.db,
+    { userId: store.users.arda.id, label: "bot", token: "ghp_headgate0001" },
+    patActor,
+  );
+  setProjectCredential(store.db, { projectSlug: store.slug, patId: pat.id }, patActor);
+}
+
 describe("R15-2: transitionStage no longer auto-delivers on review entry", () => {
   it("entering the review stage opens NO PR and instead writes the typed 'Review reached with no PR yet' event", async () => {
     // Fails on main twice over: openTaskPr fired on the review transition, and
@@ -467,13 +478,7 @@ describe("F15-15/B-GH1: performDelivery refuses a PR over a conflicted or failed
     // event blames a credential. Delete the `openPr` guard on a conflicted push
     // in performDelivery and the openPrMock assertion fails.
     seed({ stage: "review", branch: "vib-1" });
-    const patActor = actorOf(store.users.arda);
-    const pat = createPat(
-      store.db,
-      { userId: store.users.arda.id, label: "bot", token: "ghp_realpush0001" },
-      patActor,
-    );
-    setProjectCredential(store.db, { projectSlug: store.slug, patId: pat.id }, patActor);
+    withCredential();
 
     // The workspace clone the delivery pushes from. `akin-ozer/viberr` → viberr.
     const repoDir = path.join(
@@ -678,13 +683,7 @@ describe("F15-15/B-GH1: performDelivery refuses a PR over a conflicted or failed
     // nothing in the delivery path writes readiness. Without the explicit lift
     // the task stayed in the board's Blocked filter forever, packet-less, even
     // after the PR opened.
-    const patActor = { userId: store.users.arda.id, label: "arda@viberr.dev" };
-    const pat = createPat(
-      store.db,
-      { userId: store.users.arda.id, label: "bot", token: "ghp_v11collision0000000000000000000001" },
-      patActor,
-    );
-    setProjectCredential(store.db, { projectSlug: store.slug, patId: pat.id }, patActor);
+    withCredential();
     github = fakeGithubFetch({
       // Ruling 128: the delivery reads the base ref before pushing.
       "GET /repos/akin-ozer/viberr/git/ref/heads/main": { body: { object: { sha: "c".repeat(40) } } },
@@ -1180,17 +1179,7 @@ describe("R15-1 gate 2 (F15-15): the PR head must contain the delivered revision
    *  the `/compare/` verdict below, 404 (unknown, never a refusal) for
    *  anything else. */
   function githubReportsHead(headSha: string, compareStatus = "diverged") {
-    const patActor = actorOf(store.users.arda);
-    const pat = createPat(
-      store.db,
-      { userId: store.users.arda.id, label: "bot", token: "ghp_headgate0001" },
-      patActor,
-    );
-    setProjectCredential(
-      store.db,
-      { projectSlug: store.slug, patId: pat.id },
-      patActor,
-    );
+    withCredential();
     github = fakeGithubFetch({
       "GET /repos/akin-ozer/viberr/pulls/114": { body: { head: { sha: headSha } } },
       [`GET /repos/akin-ozer/viberr/compare/${"a".repeat(40)}...${headSha}`]: {
@@ -1289,9 +1278,7 @@ describe("R15-1 gate 2 (F15-15): the PR head must contain the delivered revision
     // The status below is what `gh api repos/<repo>/commits/<unknown-sha>`
     // actually answers.
     healthySeed();
-    const patActor = actorOf(store.users.arda);
-    const pat = createPat(store.db, { userId: store.users.arda.id, label: "bot", token: "ghp_headgate0135" }, patActor);
-    setProjectCredential(store.db, { projectSlug: store.slug, patId: pat.id }, patActor);
+    withCredential();
     const head = "f".repeat(40);
     github = fakeGithubFetch({
       "GET /repos/akin-ozer/viberr/pulls/114": { body: { head: { sha: head } } },
@@ -1464,13 +1451,7 @@ describe("R15-1 gate 2 (F15-15): the PR head must contain the delivered revision
     // The case where GitHub ANSWERS the pull and refuses only the comparison is
     // ruling 226's, and is tested as a refusal above.
     healthySeed();
-    const patActor = actorOf(store.users.arda);
-    const pat = createPat(
-      store.db,
-      { userId: store.users.arda.id, label: "bot", token: "ghp_headgate0009" },
-      patActor,
-    );
-    setProjectCredential(store.db, { projectSlug: store.slug, patId: pat.id }, patActor);
+    withCredential();
     github = fakeGithubFetch({
       "GET /repos/akin-ozer/viberr/pulls/114": { status: 500, body: { message: "boom" } },
     });
@@ -1517,15 +1498,6 @@ describe("R15-1 gate 2 (F15-15): the PR head must contain the delivered revision
           body: { message: `No commit found for SHA: ${delivered}` },
         },
       });
-    const withCredential = () => {
-      const patActor = actorOf(store.users.arda);
-      const pat = createPat(
-        store.db,
-        { userId: store.users.arda.id, label: "bot", token: "ghp_headgate0235" },
-        patActor,
-      );
-      setProjectCredential(store.db, { projectSlug: store.slug, patId: pat.id }, patActor);
-    };
     const accept = () =>
       transitionStage(
         store.db,
@@ -1612,15 +1584,6 @@ describe("R15-1 gate 2 (F15-15): the PR head must contain the delivered revision
           body: { message: "boom" },
         },
       });
-    const withCredential = () => {
-      const patActor = actorOf(store.users.arda);
-      const pat = createPat(
-        store.db,
-        { userId: store.users.arda.id, label: "bot", token: "ghp_headgate0226" },
-        patActor,
-      );
-      setProjectCredential(store.db, { projectSlug: store.slug, patId: pat.id }, patActor);
-    };
     const accept = () =>
       transitionStage(
         store.db,
@@ -1907,17 +1870,7 @@ describe("gap 1: resolvePacket's accept_completion is the THIRD Done writer and 
     // operator's own acceptance packet.
     // As in githubReportsHead: a real credential + canned transport, answering
     // this packet's PR #7 with a junk head and the compare with "diverged".
-    const patActor = actorOf(store.users.arda);
-    const pat = createPat(
-      store.db,
-      { userId: store.users.arda.id, label: "bot", token: "ghp_headgate0002" },
-      patActor,
-    );
-    setProjectCredential(
-      store.db,
-      { projectSlug: store.slug, patId: pat.id },
-      patActor,
-    );
+    withCredential();
     github = fakeGithubFetch({
       "GET /repos/akin-ozer/viberr/pulls/7": {
         body: { head: { sha: "f".repeat(40) } },
@@ -1976,13 +1929,7 @@ describe("gap 1: resolvePacket's accept_completion is the THIRD Done writer and 
     // The option made the same head check as the button and wrote a record
     // that read like a verified accept: "…and the review PR was merged."
     // CANARY: drop `unverifiedHeadNote` from the packet arm's write.
-    const patActor = actorOf(store.users.arda);
-    const pat = createPat(
-      store.db,
-      { userId: store.users.arda.id, label: "bot", token: "ghp_headgate0010" },
-      patActor,
-    );
-    setProjectCredential(store.db, { projectSlug: store.slug, patId: pat.id }, patActor);
+    withCredential();
     // GitHub cannot be read for the pull, so the containment check cannot run.
     github = fakeGithubFetch({
       "GET /repos/akin-ozer/viberr/pulls/7": { status: 500, body: { message: "boom" } },
