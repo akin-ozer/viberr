@@ -1,7 +1,7 @@
 import { existsSync } from "node:fs";
 import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
-import { resetEnvCacheForTests } from "~/server/config/env.server";
+import { withEnv } from "../../../test-support/env";
 import { createTempDirs } from "../../../test-support/temp-dirs";
 import { BROWSER_CALL_DEADLINE_MS } from "./browser-deadline.server";
 import {
@@ -26,11 +26,6 @@ afterEach(temp.cleanup);
 function tmpAttachments(): string {
   return path.join(temp.make("viberr-battach-"), "attachments");
 }
-
-afterEach(() => {
-  process.env.VIBERR_BROWSER_EXECUTABLE = "";
-  resetEnvCacheForTests();
-});
 
 describe("R19-19 resolveBrowserMcp", () => {
   it("mounts NOTHING without an explicit direct grant — absence, off, and recommend are all withheld", () => {
@@ -120,18 +115,18 @@ describe("R19-19 resolveBrowserMcp", () => {
     expect(codex.args[codex.args.indexOf("--image-responses") + 1]).toBe("omit");
   });
 
-  it("drives the deployment's chromium when VIBERR_BROWSER_EXECUTABLE is set — and only then drops the sandbox", () => {
+  it("drives the deployment's chromium when VIBERR_BROWSER_EXECUTABLE is set — and only then drops the sandbox", async () => {
     const dir = tmpAttachments();
     // A REAL executable on disk: the resolver now pre-flights the pinned binary
     // (a missing one is a refusal, below), so the passthrough test can only use
     // a path that actually exists. process.execPath is the portable stand-in.
-    process.env.VIBERR_BROWSER_EXECUTABLE = process.execPath;
-    resetEnvCacheForTests();
-    const server = resolveBrowserMcp({
-      grants: [g("use-browser", "direct")],
-      attachmentsDir: dir,
-      backend: "claude",
-    }).server!;
+    const server = await withEnv({ VIBERR_BROWSER_EXECUTABLE: process.execPath }, () =>
+      resolveBrowserMcp({
+        grants: [g("use-browser", "direct")],
+        attachmentsDir: dir,
+        backend: "claude",
+      }).server!,
+    );
     expect(server.args[server.args.indexOf("--executable-path") + 1]).toBe(
       process.execPath,
     );
@@ -140,16 +135,15 @@ describe("R19-19 resolveBrowserMcp", () => {
     expect(server.args).toContain("--no-sandbox");
   });
 
-  it("REFUSES the mount when the pinned browser executable is not on disk — a clean refusal, not a deep runtime failure", () => {
+  it("REFUSES the mount when the pinned browser executable is not on disk — a clean refusal, not a deep runtime failure", async () => {
     const dir = tmpAttachments();
-    process.env.VIBERR_BROWSER_EXECUTABLE =
-      "/nonexistent/chromium-not-installed";
-    resetEnvCacheForTests();
-    const r = resolveBrowserMcp({
-      grants: [g("use-browser", "direct")],
-      attachmentsDir: dir,
-      backend: "claude",
-    });
+    const r = await withEnv({ VIBERR_BROWSER_EXECUTABLE: "/nonexistent/chromium-not-installed" }, () =>
+      resolveBrowserMcp({
+        grants: [g("use-browser", "direct")],
+        attachmentsDir: dir,
+        backend: "claude",
+      }),
+    );
     expect(r.server).toBeNull();
     expect(r.refused).not.toBeNull();
     expect(r.refused!.name).toContain(BROWSER_MCP_NAME);
@@ -167,11 +161,11 @@ describe("browserRuntimeStatus — the same gates as the mount, before a run is 
     expect(browserRuntimeStatus()).toEqual({ available: true });
   });
 
-  it("is unavailable, with a reason, when the pinned executable is missing", () => {
-    process.env.VIBERR_BROWSER_EXECUTABLE =
-      "/nonexistent/chromium-not-installed";
-    resetEnvCacheForTests();
-    const s = browserRuntimeStatus();
+  it("is unavailable, with a reason, when the pinned executable is missing", async () => {
+    const s = await withEnv(
+      { VIBERR_BROWSER_EXECUTABLE: "/nonexistent/chromium-not-installed" },
+      browserRuntimeStatus,
+    );
     expect(s.available).toBe(false);
     expect(s.reason).toContain("VIBERR_BROWSER_EXECUTABLE");
     // C05-A (pass 32): the reason is served unauthenticated on the health
