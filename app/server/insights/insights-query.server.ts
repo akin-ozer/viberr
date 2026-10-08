@@ -929,7 +929,7 @@ export function oversightSummary(
  * card into a wall. Past it the card says how many more there are, so the
  * number is never quietly smaller than the truth.
  */
-export const INSIGHTS_NAMED_EXCEPTIONS = 8;
+const INSIGHTS_NAMED_EXCEPTIONS = 8;
 
 /** `PROJ/KEY` for each row, capped, newest-looking order preserved. */
 function namedKeys(rows: readonly { project_slug: string; task_key: string }[]): string[] {
