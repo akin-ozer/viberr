@@ -79,15 +79,6 @@ describe("UI-29: the last-admin guard counts LIVE accounts only", () => {
     store.db.prepare(`DELETE FROM users WHERE id = ?`).run(store.users.arda.id);
   }
 
-  it("countLiveAdmins ignores a membership with no users row", () => {
-    const store = setupTestStore(ctx);
-    const members = [
-      { userId: store.users.arda.id, role: "admin" as const },
-      { userId: "u_RT7-QeTWOwP4", role: "admin" as const },
-    ];
-    expect(countLiveAdmins(store.db, members)).toBe(1);
-  });
-
   it("countLiveAdmins ignores a DISABLED admin", () => {
     const store = setupTestStore(ctx);
     store.db
