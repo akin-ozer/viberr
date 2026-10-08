@@ -628,7 +628,7 @@ describe("reconcileWorkspaceDelivery", () => {
     expect(ev?.text).not.toContain("opened from the specialist workspace");
   });
 
-  it("accepted PR closed externally → downgraded to closed + typed policy event explaining why (B9)", async () => {
+  it("accepted PR closed externally → downgraded to closed with a note explaining why (B9, P13-LV-03)", async () => {
     const store = setupTask("ATL-3", {
       branch: BRANCH,
       pr: { number: 9, state: "accepted", title: "[ATL-3] Add feature" },
@@ -647,8 +647,8 @@ describe("reconcileWorkspaceDelivery", () => {
     const parsed = readFm(store);
     expect(parsed.frontmatter.pr).toMatchObject({ number: 9, state: "closed" });
     // P13-LV-03: a neutral divergence note, not a policy VIOLATION.
-    const policy = parsed.timeline.find((e) => e.type === "note");
-    expect(policy?.text).toContain(
+    const note = parsed.timeline.find((e) => e.type === "note");
+    expect(note?.text).toContain(
       "accepted PR #9 was closed on GitHub without merging",
     );
   });
