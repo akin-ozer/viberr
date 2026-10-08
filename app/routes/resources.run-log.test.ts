@@ -20,6 +20,8 @@ let ardaId: string;
 
 const RUN_ID = "run_pagefixture";
 const LINES = 12;
+/** A run one line past the route's 500-line page. */
+const LONG_RUN = "run_longfixture";
 
 beforeAll(async () => {
   app = await setupAppTest();
@@ -30,28 +32,34 @@ beforeAll(async () => {
   const { insertRunLine, upsertRun } = await import(
     "~/server/runtimes/run-store.server"
   );
-  upsertRun(app.db, {
-    id: RUN_ID,
-    projectSlug: "viberr-core",
-    taskKey: "VIB-142",
-    threadId: "thread_pagefixture",
-    role: "developer",
-    kind: "primary",
-    agentProfileId: "developer",
-    backend: "claude",
-    model: "claude-opus-4-8",
-    sdk: "claude-agent-sdk",
-    state: "finished",
-  });
-  for (let i = 0; i < LINES; i++) {
-    insertRunLine(app.db, {
-      runId: RUN_ID,
-      seq: i,
-      occurredAt: "2026-07-24T00:00:00.000Z",
-      raw: JSON.stringify({ i }),
-      display: { t: "00:00:00", ev: "text", tag: "assistant", text: `l${i}` },
+  /** A finished developer run on `taskKey` holding `lines` lines, seq 0 up. */
+  const plant = (id: string, taskKey: string, lines: number) => {
+    upsertRun(app.db, {
+      id,
+      projectSlug: "viberr-core",
+      taskKey,
+      threadId: `thread_${id}`,
+      role: "developer",
+      kind: "primary",
+      agentProfileId: "developer",
+      backend: "claude",
+      model: "claude-opus-4-8",
+      sdk: "claude-agent-sdk",
+      state: "finished",
     });
-  }
+    for (let i = 0; i < lines; i++) {
+      insertRunLine(app.db, {
+        runId: id,
+        seq: i,
+        occurredAt: "2026-07-24T00:00:00.000Z",
+        raw: JSON.stringify({ i }),
+        display: { t: "00:00:00", ev: "text", tag: "assistant", text: `l${i}` },
+      });
+    }
+  };
+  plant(RUN_ID, "VIB-142", LINES);
+  // On a task of its own, so it joins no console group of the run above.
+  plant(LONG_RUN, "VIB-139", 501);
 });
 afterAll(() => app.cleanup());
 
@@ -60,11 +68,12 @@ interface RunLogBody {
   data: RunLog;
 }
 
-/** One read of the fixture run, signed in with `cookie` or with no session. */
-async function load(query: string, cookie?: string): Promise<Response> {
+/** One read of a fixture run (the 12-line one unless `runId` names another),
+ *  signed in with `cookie` or with no session. */
+async function load(query: string, cookie?: string, runId = RUN_ID): Promise<Response> {
   const { loader } = await import("~/routes/resources.run-log");
   const request = app.request(
-    `/resources/run-log?runId=${RUN_ID}&${query}`,
+    `/resources/run-log?runId=${runId}&${query}`,
     cookie ? { cookie } : {},
   );
   return loader({
@@ -116,8 +125,12 @@ describe("GET /resources/run-log paging (P13-D-11)", () => {
   });
 
   it("clamps a hostile `limit` instead of serving the payload it exists to page", async () => {
-    const data = await get("limit=99999");
-    expect(data.lines.length).toBe(LINES); // clamped to 500, capped by reality
+    // CANARY: drop the route's 500 cap and this page carries all 501 lines.
+    const res = await load("limit=99999", (await app.cookieFor(ardaId)).cookie, LONG_RUN);
+    expect(res.status).toBe(200);
+    const capped: RunLogBody = await res.json();
+    expect(capped.data.lines.map((l) => l.seq)).toEqual(Array.from({ length: 500 }, (_, i) => i + 1));
+    expect(capped.data.hasMore).toBe(true);
     // A garbage limit falls back to the forward tail, never to "everything".
     const bad = await get("limit=abc");
     expect(bad.lines.length).toBe(LINES);
