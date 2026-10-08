@@ -1,5 +1,3 @@
-import { writeFileSync } from "node:fs";
-import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { z } from "zod";
 import { rebuildAll } from "~/server/projections/rebuilder.server";
@@ -146,26 +144,6 @@ function rawSchedule(over: Partial<TaskSchedule> = {}): TaskSchedule {
   };
 }
 
-/**
- * Hermetic git for this file. R19-1 made `runOperator` provision a read-only
- * repository checkout before it starts a drive, and the fixture project has a
- * `repo` — so every scheduled re-run here started a REAL `git clone` against
- * github.com from a unit test. It failed (no credential), but only after a
- * network round trip, which is what made this file's two poll-based
- * assertions flap: `waitForSchedule` allows 4s and the clone regularly ate
- * more, so the occurrence was still `claimed` when the poll gave up, and the
- * drive that was still holding the operator lease made the NEXT test's run
- * queue instead of start.
- *
- * Point `https://github.com/` at a directory that does not exist and forbid
- * every protocol but `file`, so the clone fails instantly and OFFLINE. The
- * drive then takes `ensureOperatorRepoCheckout`'s `unavailable` arm — which is
- * the honest answer for a fixture project with no credential anyway — and the
- * schedule lifecycle, which is what this file is about, is what gets timed.
- */
-const GIT_ENV_KEYS = ["GIT_CONFIG_GLOBAL", "GIT_CONFIG_SYSTEM", "GIT_ALLOW_PROTOCOL"] as const;
-let savedGitEnv: Partial<Record<(typeof GIT_ENV_KEYS)[number], string | undefined>> = {};
-
 beforeEach(async () => {
   ctx = createTestDbContext();
   store = setupTestStore(ctx);
@@ -178,26 +156,8 @@ beforeEach(async () => {
   // ordinary state of somebody using the product.
   await connectFakeBackend(store.db, store.users.arda.id, "claude");
   await connectFakeBackend(store.db, store.users.arda.id, "codex");
-
-  const gitRoot = ctx.makeTempDir();
-  const configPath = path.join(gitRoot, "gitconfig");
-  writeFileSync(
-    configPath,
-    `[url "${path.join(gitRoot, "no-such-origin")}${path.sep}"]\n\tinsteadOf = https://github.com/\n`,
-  );
-  savedGitEnv = Object.fromEntries(GIT_ENV_KEYS.map((k) => [k, process.env[k]]));
-  process.env.GIT_CONFIG_GLOBAL = configPath;
-  process.env.GIT_CONFIG_SYSTEM = "/dev/null";
-  // Belt and braces: if the rewrite ever stopped applying, git must FAIL rather
-  // than quietly reach github.com from a unit test.
-  process.env.GIT_ALLOW_PROTOCOL = "file";
 });
 afterEach(async () => {
-  for (const key of GIT_ENV_KEYS) {
-    const value = savedGitEnv[key];
-    if (value === undefined) delete process.env[key];
-    else process.env[key] = value;
-  }
   // The operator lease is module state: a test that leaves a drive in flight
   // (below) must not hand the next one a held lease.
   resetOperatorLeasesForTests();
