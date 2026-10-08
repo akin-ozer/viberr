@@ -561,6 +561,8 @@ describe("viberr_controller.get_github_state", () => {
       expect(branch.branch.length).toBeGreaterThan(0);
       expect(branch.sync.length).toBeGreaterThan(0);
     }
+    // It has pull requests too, so the canary below runs on real rows.
+    expect(state.prs.length).toBeGreaterThan(0);
     for (const pr of state.prs) {
       expect(pr.task).toMatch(/^VIB-\d+$/);
       expect(Number.isInteger(pr.number)).toBe(true);
