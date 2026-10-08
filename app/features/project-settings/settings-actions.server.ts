@@ -75,7 +75,7 @@ import {
   rejoinChainAroundStage,
   spliceStageIntoChain,
 } from "~/shared/workflow/transitions";
-import { countLiveAdmins, removedAccountLabel } from "./membership.server";
+import { isLastLiveAdmin, removedAccountLabel } from "./membership.server";
 import { releaseTasksOwnedBy } from "~/server/tasks/task-ownership.server";
 import { listDeployedSpecialists } from "~/server/tasks/specialist-roster.server";
 import {
@@ -122,11 +122,10 @@ const repoProbeSchema = z
  *  with exactly one row carrying the single integer column `n`. */
 const countRow = z.object({ n: z.number() });
 
-/** The two `users` reads this file makes. Both columns are NOT NULL in
- *  0001_baseline.sql, so a row that does not decode is no row at all — which is
- *  exactly how a deleted account has to read here (see removeMember). */
+/** The `users` read this file makes. `name` is NOT NULL in 0001_baseline.sql,
+ *  so a row that does not decode is no row at all — which is exactly how a
+ *  deleted account has to read here (see removeMember). */
 const memberNameRow = z.object({ name: z.string() });
-const disabledFlagRow = z.object({ disabled: z.number() });
 
 /** Boundary → the label the Policy page uses (policy-data.ts BOUNDARIES). */
 const BOUNDARY_LABEL = {
@@ -1779,19 +1778,15 @@ export async function removeMember(
       throw AppError.notFound("That user is not a member of this project.");
     }
     if (member.role === "admin") {
-      // UI-29: only LIVE, enabled accounts count — see countLiveAdmins.
+      // UI-29: only LIVE, enabled accounts count — see isLastLiveAdmin.
       // F18-6: guard the LAST LIVE admin only. A GHOST admin (its org account was
       // deleted, so it's not counted live) removal never reduces the live-admin
       // count — blocking it deadlocked the one recovery path (Members refused the
-      // removal, Policy pointed back to Members to do it). `targetLive` is false
-      // for a deleted/disabled account, so a ghost admin is always removable; a
-      // real last live admin is still protected.
-      const targetRow = disabledFlagRow.safeParse(
-        db.prepare(`SELECT disabled FROM users WHERE id = ?`).get(input.targetUserId),
-      );
-      const targetLive = targetRow.success && targetRow.data.disabled !== 1;
-      const admins = countLiveAdmins(db, parsed.frontmatter.members);
-      if (targetLive && admins <= 1) {
+      // removal, Policy pointed back to Members to do it). A deleted or disabled
+      // account is never the last live admin, so a ghost admin is always
+      // removable; a real last live admin is still protected, by the predicate
+      // `setMemberRole`'s demotion guard reads too (ruling 705).
+      if (isLastLiveAdmin(db, parsed.frontmatter.members, input.targetUserId)) {
         throw AppError.conflict(
           `${displayName} is the only admin. Assign another admin in Policy first`,
         );

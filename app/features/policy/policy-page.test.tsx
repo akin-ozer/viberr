@@ -184,7 +184,7 @@ describe("HumanAccess", () => {
     },
     {
       // A disabled account cannot sign in, so the server's guard
-      // (`countLiveAdmins`) does not count it, and neither do the headers.
+      // (`isLastLiveAdmin`) does not count it, and neither do the headers.
       // CANARY: count every non-missing member again and Elif's disabled
       // account reads "Admin 2" and lets Arda's demotion through to the 409.
       who: "the last admin who can sign in, beside a disabled one",
