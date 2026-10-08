@@ -18,7 +18,11 @@ import PaletteShell from "./palette-shell";
 
 afterEach(cleanup);
 
-const HEADER = {
+/** The header as the layout's loader answers it, so the fixture cannot drift
+ *  from what a page route is handed (ruling 457 took the bell's list out). */
+type ShellHeader = NonNullable<Parameters<typeof PaletteShell>[0]["loaderData"]["header"]>;
+
+const HEADER: ShellHeader = {
   user: {
     id: "u",
     name: "Arda Kaya",
@@ -26,13 +30,13 @@ const HEADER = {
     role: "admin",
     avatarTone: "",
   },
-  notifications: [],
   unread: 0,
+  orphanUnread: 0,
 };
 
 function renderShell(
   path: string,
-  header: typeof HEADER | null,
+  header: ShellHeader | null,
 ) {
   // SAFETY: the layout reads `loaderData` and nothing else. React Router's
   // generated ComponentProps also carries `params`, `actionData` and `matches`,

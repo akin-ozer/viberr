@@ -47,7 +47,7 @@ describe("useCommandPaletteShortcut", () => {
     expect(opened).toBe(0);
   });
 
-  it("re-reads the callback without re-subscribing", () => {
+  it("calls the callback from the latest render", () => {
     const seen: string[] = [];
     function Host() {
       const [label, setLabel] = useState("first");
@@ -62,8 +62,7 @@ describe("useCommandPaletteShortcut", () => {
     fireEvent.keyDown(window, { key: "k", metaKey: true });
     fireEvent.click(getByText("relabel"));
     fireEvent.keyDown(window, { key: "k", metaKey: true });
-    // A stale closure would push "first" twice; a re-subscribing effect would
-    // leave two listeners and push three entries.
+    // A stale closure would push "first" twice.
     expect(seen).toEqual(["first", "second"]);
   });
 
