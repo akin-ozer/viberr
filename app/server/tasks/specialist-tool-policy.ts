@@ -158,7 +158,7 @@ export function grantsWriteRepository(grants: readonly CapabilityGrant[]): boole
   );
 }
 
-export function isWithheld(
+function isWithheld(
   modeById: Map<string, string>,
   capabilityId: string,
 ): boolean {

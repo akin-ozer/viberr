@@ -189,8 +189,7 @@ async function freshRunAnchor(
 
 // Ruling 344: the run-input disclosure moved to `~/server/runtimes/run-inputs.server`,
 // where the operator and controller can reach it without importing this runtime.
-// Re-exported because this module is still where the specialist paths use it and
-// where the tests for the specialist half live.
+// Re-exported because this module is still where the specialist paths use it.
 import {
   recordRunInputs,
   resolvedResourceInputs,
@@ -245,11 +244,7 @@ import {
 } from "./specialist-prompt.server";
 import { assignReviewer, assignSpecialist } from "./specialist-assignment.server";
 
-export {
-  recordRunInputs,
-  resolvedResourceInputs,
-  type ResolvedResourceInputs,
-};
+export { recordRunInputs };
 
 // -------------------------------------------------------------- startAgentRun
 
