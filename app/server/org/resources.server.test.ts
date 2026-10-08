@@ -15,6 +15,7 @@ import { startHttpUpstream, startSseUpstream } from "../../../test-support/mcp-u
 import { waitFor } from "../../../test-support/polling";
 import { createTestDbContext } from "../../../test-support/test-db";
 import { listAuditEvents } from "../../../test-support/audit-log";
+import { withEnv } from "../../../test-support/env";
 import { writeBoardHolding } from "../../../test-support/resource-boards";
 import { ENV_KEYS } from "~/server/config/env.server";
 import { kbDirPath, skillDirPath } from "~/server/files/file-store-root.server";
@@ -1824,28 +1825,14 @@ describe("mcpSpawnEnv (third-party command isolation)", () => {
 
   it("withholds credential-shaped variables and passes ordinary ones through", async () => {
     const { mcpSpawnEnv } = await import("./resources.server");
-    const saved: Record<string, string | undefined> = {};
-    for (const [k, v] of Object.entries(SECRETS)) {
-      saved[k] = process.env[k];
-      process.env[k] = v;
-    }
-    const savedPath = process.env.PATH;
-    process.env.PATH ??= "/usr/bin";
-    try {
+    await withEnv({ ...SECRETS, PATH: process.env.PATH || "/usr/bin" }, () => {
       const env = mcpSpawnEnv(null);
       for (const key of Object.keys(SECRETS)) {
         expect(env[key], `${key} must not reach a third-party command`).toBeUndefined();
       }
       // Not a lockout: an MCP command still needs an ordinary environment.
       expect(env.PATH).toBeTruthy();
-    } finally {
-      for (const [k, v] of Object.entries(saved)) {
-        if (v === undefined) delete process.env[k];
-        else process.env[k] = v;
-      }
-      if (savedPath === undefined) delete process.env.PATH;
-      else process.env.PATH = savedPath;
-    }
+    });
   });
 
   it("ruling 142: withholds Viberr's own configuration, which a third-party command has no business reading", async () => {
@@ -1864,14 +1851,7 @@ describe("mcpSpawnEnv (third-party command isolation)", () => {
       GITHUB_OAUTH_CLIENT_ID: "iv1.example-client-id",
       VIBERR_UNLOCK_CONTROLLER_MCPS: "enabled",
     };
-    const saved: Record<string, string | undefined> = {};
-    for (const [k, v] of Object.entries(APP_CONFIG)) {
-      saved[k] = process.env[k];
-      process.env[k] = v;
-    }
-    const savedPath = process.env.PATH;
-    process.env.PATH ??= "/usr/bin";
-    try {
+    await withEnv({ ...APP_CONFIG, PATH: process.env.PATH || "/usr/bin" }, () => {
       const env = mcpSpawnEnv("mcp-token-value");
       for (const key of Object.keys(APP_CONFIG)) {
         expect(env[key], `${key} must not reach a third-party command`).toBeUndefined();
@@ -1881,14 +1861,7 @@ describe("mcpSpawnEnv (third-party command isolation)", () => {
       // The child still gets its one secret and an ordinary environment.
       expect(env.MCP_CREDENTIAL).toBe("mcp-token-value");
       expect(env.PATH).toBeTruthy();
-    } finally {
-      for (const [k, v] of Object.entries(saved)) {
-        if (v === undefined) delete process.env[k];
-        else process.env[k] = v;
-      }
-      if (savedPath === undefined) delete process.env.PATH;
-      else process.env.PATH = savedPath;
-    }
+    });
   });
 });
 
