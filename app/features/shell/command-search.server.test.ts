@@ -284,15 +284,6 @@ describe("searchWorkspace", () => {
     expect(hit?.label).toBe("Reviewer Bot");
     expect(hit?.href).toBe("/projects/viberr-core/agents?profile=reviewer-bot");
   });
-
-  it("treats % and _ as literals, not LIKE wildcards", () => {
-    const store = seed();
-    expect(
-      searchWorkspace(store.db, asMember(store), "%", {
-        dataRoot: store.dataRoot,
-      }).filter((h) => h.kind === "task"),
-    ).toEqual([]);
-  });
 });
 
 /**
@@ -373,6 +364,20 @@ describe("searchWorkspace: epics (ruling 503)", () => {
     expect(kinds.indexOf("project")).toBe(0);
     expect(kinds.lastIndexOf("epic")).toBeLessThan(firstTask);
     expect(kinds.includes("epic")).toBe(true);
+  });
+
+  it("treats % and _ as literals, not LIKE wildcards", async () => {
+    // Epics are the hits the SQL filter alone decides (project, task, branch
+    // and agent hits are re-checked by substring), so a wildcard that reached
+    // LIKE would list every epic. No seeded name, id, key, title or branch
+    // holds either character. CANARY: drop `_` or `%` from `escapeLike`.
+    const store = await seedEpics();
+    for (const wildcard of ["%", "_"]) {
+      expect(
+        searchWorkspace(store.db, asMember(store), wildcard, { dataRoot: store.dataRoot }),
+        wildcard,
+      ).toEqual([]);
+    }
   });
 
   it("shows a NON-MEMBER no epic (R15-4 scoping)", async () => {
