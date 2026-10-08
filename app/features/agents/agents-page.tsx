@@ -713,7 +713,7 @@ const META_DOT = "\u00a0· ";
  * under the description, the name sat in the faint key voice beside a bold
  * paragraph, and the stage pill wrapped under one row and sat beside the next.
  */
-export function LibraryPicker({
+function LibraryPicker({
   library,
   stages,
   workflow,
