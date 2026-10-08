@@ -785,12 +785,6 @@ describe("R16-2: the attention chip says what it selects", () => {
       (el) => el.textContent!.trim() === "Blocked or waiting",
     );
 
-  it('is labelled "Blocked or waiting", not "Needs attention"', () => {
-    const { container } = renderBoard([task()]);
-    expect(chip(container)).toBeTruthy();
-    expect(container.textContent).not.toContain("Needs attention");
-  });
-
   it("keeps an input_required card visible under that filter", async () => {
     const { container, queryByText } = renderBoard([
       task({

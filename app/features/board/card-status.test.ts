@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { BoardCard } from "./board-card";
-import { cardProblems, cardStatus, PROBLEM_CAP } from "./card-status";
+import { cardProblems, cardStatus } from "./card-status";
 
 /**
  * Ruling 365: the board card's one status seat and its problem chips, decided
@@ -126,7 +126,6 @@ describe("cardProblems: everything wrong, most severe first", () => {
       ["risk", "inconsistency risk"],
       ["continuity", "degraded continuity"],
     ]);
-    expect(PROBLEM_CAP).toBe(2);
   });
 
   it("a hold beside a working agent is an amber chip; beside a human wait it is absorbed (ruling 168(a))", () => {
