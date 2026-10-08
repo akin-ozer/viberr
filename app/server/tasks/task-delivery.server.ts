@@ -238,7 +238,7 @@ export type DeliveryOutcome =
  * the recovery packet: the operator's tool result, the task page's Deliver
  * control and the timeline note all read it.
  */
-export function closedByHumanDeliveryText(
+function closedByHumanDeliveryText(
   taskKey: string,
   prNumber: number,
   closedBy: string | null,
