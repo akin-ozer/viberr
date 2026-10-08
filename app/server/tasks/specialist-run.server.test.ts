@@ -47,9 +47,13 @@ import {
   RUN_INPUTS_TAG,
   type RunInputs,
 } from "~/features/runtime/runtime-types";
-import { resolveDeliveryPermissions } from "./specialist-tool-policy";
+import {
+  resolveDeliveryPermissions,
+  resolveSpecialistDisallowedTools,
+  resolveUndeployedDisallowedTools,
+} from "./specialist-tool-policy";
 import { SKILL_INJECTION_BUDGET } from "~/server/files/skill-body.server";
-import { appendTimelineEvent, readTaskFile } from "~/server/files/task-writer.server";
+import { appendTimelineEvent, readTaskFile, updateTaskFile } from "~/server/files/task-writer.server";
 import { readProjectFile } from "~/server/files/project-writer.server";
 import { rebuildAll } from "~/server/projections/rebuilder.server";
 import { upsertRun } from "~/server/runtimes/run-store.server";
@@ -78,7 +82,7 @@ import {
   connectFakeBackend,
   disconnectFakeBackend,
 } from "../../../test-support/backend-credentials";
-import { MODEL_SUBSTITUTED_TAG } from "~/server/runtimes/run-service.server";
+import { interruptRun, MODEL_SUBSTITUTED_TAG } from "~/server/runtimes/run-service.server";
 import { startMcpGateway, stopMcpGateway } from "~/server/mcp-proxy/gateway.server";
 import { defaultModelFor } from "~/server/runtimes/model-catalog.server";
 import { assignReviewer, assignSpecialist, removeReviewer } from "./specialist-assignment.server";
@@ -121,20 +125,13 @@ import { promisify } from "node:util";
 let ctx: TestDbContext;
 let store: TestStore;
 
-/** Poll until a run has streamed at least `n` log lines. */
-async function waitForLines(
-  runId: string,
-  n = 1,
-  timeoutMs = 5_000,
-): Promise<number> {
-  const start = Date.now();
-  for (;;) {
-    const count = listRunLines(store.db, runId).length;
-    if (count >= n) return count;
-    if (Date.now() - start > timeoutMs) return count;
-    await new Promise((r) => setTimeout(r, 25));
-  }
-}
+/** End a run on VIB-1 the way a person's Stop does. */
+const stopRun = (runId: string) =>
+  interruptRun(
+    store.db,
+    { projectSlug: store.slug, taskKey: "VIB-1", runId, dataRoot: store.dataRoot },
+    actorOf(store.users.arda),
+  );
 
 /** Re-write the store's project.md with a deployed `dev` specialist (claude
  *  by default; pass ["codex"] to simulate editing the profile to the other
@@ -306,7 +303,7 @@ describe("AP-06 — an empty grant list is WITHHELD, not unlimited", () => {
   // "everything unspecified" = Edit/Write/`git commit` granted and
   // canBranch/canCommitPush/canOpenPr all true — full repo-write power nobody
   // chose, invisible in every UI. It now resolves to an explicit withheld set.
-  it("resolveDeployedSpecialist materializes explicit withheld grants", async () => {
+  it("resolveDeployedSpecialist materializes explicit withheld grants", () => {
     const resolved = resolveDeployedSpecialist(
       { dataRoot: store.dataRoot },
       store.slug,
@@ -320,8 +317,6 @@ describe("AP-06 — an empty grant list is WITHHELD, not unlimited", () => {
     // Structural always-human ids stay `human`, not `off`.
     expect(modeOf("merge-pull-request")).toBe("human");
 
-    const { resolveDeliveryPermissions, resolveSpecialistDisallowedTools } =
-      await import("./specialist-tool-policy");
     expect(resolveDeliveryPermissions(resolved.capabilities)).toEqual({
       canBranch: false,
       canCommitPush: false,
@@ -496,7 +491,6 @@ describe("engagement uniqueness (adversarial-review)", () => {
     await assignSpecialist(store.db, { projectSlug: store.slug, taskKey: "VIB-1", profileId: "dev" }, actorOf(store.users.arda), { dataRoot: store.dataRoot });
     await assignReviewer(store.db, { projectSlug: store.slug, taskKey: "VIB-1", profileId: "style" }, actorOf(store.users.arda), { dataRoot: store.dataRoot });
 
-    const { updateTaskFile } = await import("~/server/files/task-writer.server");
     await updateTaskFile(
       { projectSlug: store.slug, taskKey: "VIB-1", dataRoot: store.dataRoot },
       (parsed) => {
@@ -538,7 +532,6 @@ describe("startAgentRun — delivering (specialist) dispatch, and ruling 133's s
 
   it("F7-OP1: refuses a second PRIMARY run while one is already in flight (server single-flight)", async () => {
     await assign();
-    const { upsertRun } = await import("~/server/runtimes/run-store.server");
     // A primary run is already live on this task (e.g. a prior operator turn
     // started it). A second startAgentRun must not spawn a rival agent in
     // the same workspace clone.
@@ -724,13 +717,6 @@ describe("startAgentRun — delivering (specialist) dispatch, and ruling 133's s
     };
     const fm = () =>
       readTaskFile({ projectSlug: store.slug, taskKey: "VIB-1", dataRoot: store.dataRoot })!.parsed;
-    const { interruptRun } = await import("~/server/runtimes/run-service.server");
-    const stop = (runId: string) =>
-      interruptRun(
-        store.db,
-        { projectSlug: store.slug, taskKey: "VIB-1", runId, dataRoot: store.dataRoot },
-        actorOf(store.users.arda),
-      );
     seedHeld();
     const first = await startAgentRun(
       store.db,
@@ -746,7 +732,7 @@ describe("startAgentRun — delivering (specialist) dispatch, and ruling 133's s
     const rows = listAuditEvents(store.db, { action: "task.hold.lifted" });
     expect(rows).toHaveLength(1);
     expect(rows[0]!.details).toMatchObject({ cause: "dispatch", profileId: "dev" });
-    await stop(first.runId);
+    await stopRun(first.runId);
 
     // An open `blocked` packet keeps the success-time withdrawal as the lift.
     seedHeld(
@@ -772,7 +758,7 @@ describe("startAgentRun — delivering (specialist) dispatch, and ruling 133's s
     // re-seed emptied the timeline, so any note here would be a new one).
     expect(fm().timeline.filter((e) => e.title === "Hold lifted")).toHaveLength(0);
     expect(listAuditEvents(store.db, { action: "task.hold.lifted" })).toHaveLength(1);
-    await stop(second.runId);
+    await stopRun(second.runId);
   });
 
   it("ruling 355: a refusal names an entry that can never complete instead of promising a release", async () => {
@@ -928,15 +914,9 @@ describe("startAgentRun — delivering (specialist) dispatch, and ruling 133's s
     expect(run.kind).toBe("primary");
     // Run rows carry the engagement's live role snapshot, not a kind literal.
     expect(run.role).toBe("developer");
-    const lineCount = await waitForLines(result.runId, 1);
-    expect(lineCount).toBeGreaterThan(0);
+    expect(await pollUntil(() => listRunLines(store.db, result.runId).length > 0)).toBe(true);
 
-    const { interruptRun } = await import("~/server/runtimes/run-service.server");
-    await interruptRun(
-      store.db,
-      { projectSlug: store.slug, taskKey: "VIB-1", runId: result.runId, dataRoot: store.dataRoot },
-      actorOf(store.users.arda),
-    );
+    await stopRun(result.runId);
 
     // Typed agent event + task-level audit (runtime.run.started is separate).
     const file = readTaskFile({
@@ -964,12 +944,7 @@ describe("startAgentRun — delivering (specialist) dispatch, and ruling 133's s
     // The run follows the live deployment, not the assign-time snapshot …
     expect(result.backend).toBe("codex");
 
-    const { interruptRun } = await import("~/server/runtimes/run-service.server");
-    await interruptRun(
-      store.db,
-      { projectSlug: store.slug, taskKey: "VIB-1", runId: result.runId, dataRoot: store.dataRoot },
-      actorOf(store.users.arda),
-    );
+    await stopRun(result.runId);
 
     // … and the snapshot is refreshed so every later resolution (operator
     // prompt, @mention, exec-profile label) follows the switch too.
@@ -984,7 +959,6 @@ describe("startAgentRun — delivering (specialist) dispatch, and ruling 133's s
 
   it("F27-B1: a D4 backendOverride pins the engagement so the switch STICKS on later runs", async () => {
     await assign(); // deployed profile + engagement snapshot: claude
-    const { interruptRun } = await import("~/server/runtimes/run-service.server");
     const runOnce = async (over?: "codex" | "claude") => {
       const r = await startAgentRun(
         store.db,
@@ -992,11 +966,7 @@ describe("startAgentRun — delivering (specialist) dispatch, and ruling 133's s
         actorOf(store.users.arda),
         { dataRoot: store.dataRoot },
       );
-      await interruptRun(
-        store.db,
-        { projectSlug: store.slug, taskKey: "VIB-1", runId: r.runId, dataRoot: store.dataRoot },
-        actorOf(store.users.arda),
-      );
+      await stopRun(r.runId);
       return r;
     };
     const read = () =>
@@ -1044,13 +1014,8 @@ describe("startAgentRun — delivering (specialist) dispatch, and ruling 133's s
       actorOf(store.users.arda),
       { dataRoot: store.dataRoot },
     );
-    await waitForLines(retry.runId, 1);
-    const { interruptRun } = await import("~/server/runtimes/run-service.server");
-    await interruptRun(
-      store.db,
-      { projectSlug: store.slug, taskKey: "VIB-1", runId: retry.runId, dataRoot: store.dataRoot },
-      actorOf(store.users.arda),
-    );
+    await pollUntil(() => listRunLines(store.db, retry.runId).length > 0);
+    await stopRun(retry.runId);
 
     // The row names what actually ran …
     expect(retry.backend).toBe("claude");
@@ -1085,7 +1050,6 @@ describe("startAgentRun — delivering (specialist) dispatch, and ruling 133's s
     // Canary: reorder the resolver to `engagement.pinnedBackend ??
     // input.backendOverride ?? …` and this run comes back on codex.
     await assign(); // live profile + snapshot: claude
-    const { updateTaskFile } = await import("~/server/files/task-writer.server");
     await updateTaskFile(
       { projectSlug: store.slug, taskKey: "VIB-1", dataRoot: store.dataRoot },
       (parsed) => {
@@ -1094,18 +1058,13 @@ describe("startAgentRun — delivering (specialist) dispatch, and ruling 133's s
       },
     );
 
-    const { interruptRun } = await import("~/server/runtimes/run-service.server");
     const run = await startAgentRun(
       store.db,
       { projectSlug: store.slug, taskKey: "VIB-1", backendOverride: "claude" },
       actorOf(store.users.arda),
       { dataRoot: store.dataRoot },
     );
-    await interruptRun(
-      store.db,
-      { projectSlug: store.slug, taskKey: "VIB-1", runId: run.runId, dataRoot: store.dataRoot },
-      actorOf(store.users.arda),
-    );
+    await stopRun(run.runId);
 
     // The override won over the pin …
     expect(run.backend).toBe("claude");
@@ -1127,7 +1086,6 @@ describe("startAgentRun — delivering (specialist) dispatch, and ruling 133's s
     // Canary: replace the `(engagement.backend === "codex" ? "codex" : "claude")`
     // tail with a bare `"claude"` default and this run comes back on claude.
     await assign(); // snapshot: claude
-    const { updateTaskFile } = await import("~/server/files/task-writer.server");
     await updateTaskFile(
       { projectSlug: store.slug, taskKey: "VIB-1", dataRoot: store.dataRoot },
       (parsed) => {
@@ -1145,18 +1103,13 @@ describe("startAgentRun — delivering (specialist) dispatch, and ruling 133's s
     });
     rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
 
-    const { interruptRun } = await import("~/server/runtimes/run-service.server");
     const run = await startAgentRun(
       store.db,
       { projectSlug: store.slug, taskKey: "VIB-1" },
       actorOf(store.users.arda),
       { dataRoot: store.dataRoot },
     );
-    await interruptRun(
-      store.db,
-      { projectSlug: store.slug, taskKey: "VIB-1", runId: run.runId, dataRoot: store.dataRoot },
-      actorOf(store.users.arda),
-    );
+    await stopRun(run.runId);
     expect(run.backend).toBe("codex");
   });
 
@@ -1679,7 +1632,6 @@ describe("startAgentRun — no credential principal (ruling 127)", () => {
   });
 
   it("an UNOWNED task: a null principal, and the sentence names the task", async () => {
-    const { updateTaskFile } = await import("~/server/files/task-writer.server");
     await updateTaskFile(
       { projectSlug: store.slug, taskKey: "VIB-1", dataRoot: store.dataRoot },
       (parsed) => {
@@ -1755,12 +1707,7 @@ describe("startAgentRun — supporting (reviewer) dispatch", () => {
       listAuditEvents(store.db, { action: "task.engagement.added" })[0]?.taskKey,
     ).toBe("VIB-1");
 
-    const { interruptRun } = await import("~/server/runtimes/run-service.server");
-    await interruptRun(
-      store.db,
-      { projectSlug: store.slug, taskKey: "VIB-1", runId: result.runId, dataRoot: store.dataRoot },
-      actorOf(store.users.arda),
-    );
+    await stopRun(result.runId);
   });
 
   it("ruling 556: runs the project's required reviewer to review, even when it could deliver", async () => {
@@ -1799,12 +1746,7 @@ describe("startAgentRun — supporting (reviewer) dispatch", () => {
       { profileId: "dev", backend: "claude", role: "developer", delivers: false, verdictCapable: true },
     ]);
     expect(getRun(store.db, result.runId)!.kind).toBe("reviewer");
-    const { interruptRun } = await import("~/server/runtimes/run-service.server");
-    await interruptRun(
-      store.db,
-      { projectSlug: store.slug, taskKey: "VIB-1", runId: result.runId, dataRoot: store.dataRoot },
-      actorOf(store.users.arda),
-    );
+    await stopRun(result.runId);
   });
 
   it("still REFUSES an undeployed profileId (validation, not auto-engage)", async () => {
@@ -1842,15 +1784,9 @@ describe("startAgentRun — supporting (reviewer) dispatch", () => {
     expect(run.role).toBe("developer");
     expect(run.thread_id.startsWith("r0-")).toBe(true);
     expect(run.agent_profile_id).toBe("dev");
-    const lineCount = await waitForLines(result.runId, 1);
-    expect(lineCount).toBeGreaterThan(0);
+    expect(await pollUntil(() => listRunLines(store.db, result.runId).length > 0)).toBe(true);
 
-    const { interruptRun } = await import("~/server/runtimes/run-service.server");
-    await interruptRun(
-      store.db,
-      { projectSlug: store.slug, taskKey: "VIB-1", runId: result.runId, dataRoot: store.dataRoot },
-      actorOf(store.users.arda),
-    );
+    await stopRun(result.runId);
     expect(
       listAuditEvents(store.db, { action: "task.agent.run_started" })[0]?.taskKey,
     ).toBe("VIB-1");
@@ -1868,13 +1804,8 @@ describe("startAgentRun — supporting (reviewer) dispatch", () => {
     // startAgentRun itself, not an operator/@mention) posts the reviewer's
     // reply as an agent-authored comment. This is the "reviewer didn't comment
     // after a run" fix: the UI "Run" button path now reports back.
-    await waitForLines(result.runId, 2);
-    const { interruptRun } = await import("~/server/runtimes/run-service.server");
-    await interruptRun(
-      store.db,
-      { projectSlug: store.slug, taskKey: "VIB-1", runId: result.runId, dataRoot: store.dataRoot },
-      actorOf(store.users.arda),
-    );
+    await pollUntil(() => listRunLines(store.db, result.runId).length >= 2);
+    await stopRun(result.runId);
     const replied = () =>
       !!readTaskFile({ projectSlug: store.slug, taskKey: "VIB-1", dataRoot: store.dataRoot })?.parsed.timeline.some(
         (e) => e.type === "comment" && e.actor.kind === "agent",
@@ -1949,9 +1880,6 @@ describe("P14-RT-01 — a FRESH run of an UNDEPLOYED profile is confined like a 
     );
 
     const spec = specs.at(-1)!;
-    const { resolveUndeployedDisallowedTools } = await import(
-      "./specialist-tool-policy"
-    );
     expect(new Set(spec.disallowedTools)).toEqual(
       new Set(resolveUndeployedDisallowedTools()),
     );
@@ -2091,7 +2019,6 @@ describe("P14-RT-01 — a FRESH run of an UNDEPLOYED profile is confined like a 
     // passages as not fixed that the Estimate Judge's first verdict on AWSC-29
     // said it had corrected: the re-review that stands did not say so.
     // CANARY: drop the note, or give it to a first review.
-    const { updateTaskFile } = await import("~/server/files/task-writer.server");
     const ref = { projectSlug: store.slug, taskKey: "VIB-1", dataRoot: store.dataRoot };
     const review = async () => {
       await startAgentRun(
@@ -3869,10 +3796,7 @@ describe("R18-1 — a reviewer inherits the delivering engagement's KBs", () => 
       { projectSlug: store.slug, taskKey: "VIB-1", profileId: "critic" },
       actorOf(store.users.arda), { dataRoot: store.dataRoot });
     expect(result.role).toBe("reviewer");
-    const { interruptRun } = await import("~/server/runtimes/run-service.server");
-    await interruptRun(store.db,
-      { projectSlug: store.slug, taskKey: "VIB-1", runId: result.runId, dataRoot: store.dataRoot },
-      actorOf(store.users.arda));
+    await stopRun(result.runId);
     return joinedPrompt(lastRunSpec()?.systemPrompt ?? "");
   }
 
@@ -3898,10 +3822,7 @@ describe("R18-1 — a reviewer inherits the delivering engagement's KBs", () => 
     const devRun = await startAgentRun(store.db,
       { projectSlug: store.slug, taskKey: "VIB-1", profileId: "dev" },
       actorOf(store.users.arda), { dataRoot: store.dataRoot });
-    const { interruptRun } = await import("~/server/runtimes/run-service.server");
-    await interruptRun(store.db,
-      { projectSlug: store.slug, taskKey: "VIB-1", runId: devRun.runId, dataRoot: store.dataRoot },
-      actorOf(store.users.arda));
+    await stopRun(devRun.runId);
     const sys = joinedPrompt(lastRunSpec()?.systemPrompt ?? "");
     expect(sys).not.toContain("SENTINEL-REVIEWER-ONLY-KB");
     expect(sys).not.toContain("bar (knowledge base)");
@@ -4006,10 +3927,7 @@ describe("granted skills reach a Claude run NATIVELY (pass-18)", () => {
     expect(sys).toContain("`viberr:<name>`");
     expect(sys).toContain("conventional-commits");
 
-    const { interruptRun } = await import("~/server/runtimes/run-service.server");
-    await interruptRun(store.db,
-      { projectSlug: store.slug, taskKey: "VIB-1", runId: run.runId, dataRoot: store.dataRoot },
-      actorOf(store.users.arda));
+    await stopRun(run.runId);
     expect(existsSync(plugin)).toBe(false);
   });
 
@@ -4255,10 +4173,7 @@ describe("granted skills reach a Claude run NATIVELY (pass-18)", () => {
     const run = await startAgentRun(store.db,
       { projectSlug: store.slug, taskKey: "VIB-1", profileId: "dev", delivers: false },
       actorOf(store.users.arda), { dataRoot: store.dataRoot });
-    const { interruptRun } = await import("~/server/runtimes/run-service.server");
-    await interruptRun(store.db,
-      { projectSlug: store.slug, taskKey: "VIB-1", runId: run.runId, dataRoot: store.dataRoot },
-      actorOf(store.users.arda));
+    await stopRun(run.runId);
     const support = path.join(
       store.dataRoot, "projects", store.slug, "tasks", "VIB-1", "workspace", "support", "dev", "widgets",
     );
@@ -4335,10 +4250,7 @@ describe("granted skills reach a Claude run NATIVELY (pass-18)", () => {
         readFileSync(path.join(plugin, "skills", "developer-expertise", "SKILL.md"), "utf8"),
       ).toContain("SENTINEL-DEVELOPER-EXPERTISE");
       expect(existsSync(path.join(ws, ".claude"))).toBe(false);
-      const { interruptRun } = await import("~/server/runtimes/run-service.server");
-      await interruptRun(store.db,
-        { projectSlug: store.slug, taskKey: "VIB-1", runId: run.runId, dataRoot: store.dataRoot },
-        actorOf(store.users.arda));
+      await stopRun(run.runId);
       // (3) NOTHING the run is handed names the decoy or carries its body —
       // system prompt, turn prompt, tool policy, env, MCP config, all of it.
       const assembled = JSON.stringify(spec);
@@ -4633,10 +4545,7 @@ describe("granted skills reach a Claude run NATIVELY (pass-18)", () => {
     const run = await startAgentRun(store.db,
       { projectSlug: store.slug, taskKey: "VIB-1", profileId },
       actorOf(store.users.arda), { dataRoot: store.dataRoot });
-    const { interruptRun } = await import("~/server/runtimes/run-service.server");
-    await interruptRun(store.db,
-      { projectSlug: store.slug, taskKey: "VIB-1", runId: run.runId, dataRoot: store.dataRoot },
-      actorOf(store.users.arda));
+    await stopRun(run.runId);
     return run.runId;
   }
 
@@ -4742,7 +4651,6 @@ describe("granted skills reach a Claude run NATIVELY (pass-18)", () => {
       // Ruling 248 CANARY: drop `noCheckout: !!cloneFailure` from the
       // completion contract and this is 0 — the verdict path stays open for a
       // run that read nothing.
-      const { getRun } = await import("~/server/runtimes/run-store.server");
       expect(getRun(store.db, runId)!.no_checkout).toBe(1);
     });
 
@@ -4775,7 +4683,6 @@ describe("granted skills reach a Claude run NATIVELY (pass-18)", () => {
       // CANARY: put `--local` back on the supporting clone and this checkout is
       // gone and the run is marked checkout-less.
       expect(existsSync(path.join(criticWs, "README.md"))).toBe(true);
-      const { getRun } = await import("~/server/runtimes/run-store.server");
       expect(getRun(store.db, runId)!.no_checkout).toBe(0);
     });
 
@@ -4787,7 +4694,6 @@ describe("granted skills reach a Claude run NATIVELY (pass-18)", () => {
       await assignReviewer(store.db,
         { projectSlug: store.slug, taskKey: "VIB-1", profileId: "critic" },
         actorOf(store.users.arda), { dataRoot: store.dataRoot });
-      const { upsertRun } = await import("~/server/runtimes/run-store.server");
       upsertRun(store.db, {
         id: "run_inflight_critic",
         projectSlug: store.slug, taskKey: "VIB-1",
@@ -5162,12 +5068,7 @@ describe("P19-G0 — a FRESH run re-anchors on the canonical task artifact", () 
     // And it must claim precedence over the model's own memory.
     expect(prompt).toMatch(/not the source of truth/i);
 
-    const { interruptRun } = await import("~/server/runtimes/run-service.server");
-    await interruptRun(
-      store.db,
-      { projectSlug: store.slug, taskKey: "VIB-1", runId: run.runId, dataRoot: store.dataRoot },
-      actorOf(store.users.arda),
-    );
+    await stopRun(run.runId);
   });
 
   it("covers a FIRST @mention, which has no session to resume and falls through to a fresh run", async () => {
@@ -5253,12 +5154,7 @@ describe("P19-G11 — the run records what it was given", () => {
       actorOf(store.users.arda),
       { dataRoot: store.dataRoot },
     );
-    const { interruptRun } = await import("~/server/runtimes/run-service.server");
-    await interruptRun(
-      store.db,
-      { projectSlug: store.slug, taskKey: "VIB-1", runId: run.runId, dataRoot: store.dataRoot },
-      actorOf(store.users.arda),
-    );
+    await stopRun(run.runId);
     return run.runId;
   }
 
@@ -5698,8 +5594,7 @@ describe("P19-G11 — the run records what it was given", () => {
           : mounts.viberr_board
             ? await boardTools(mounts.viberr_board)
             : null;
-      const { interruptRun } = await import("~/server/runtimes/run-service.server");
-      await interruptRun(store.db, { projectSlug: store.slug, taskKey: "VIB-1", runId: run.runId, dataRoot: store.dataRoot }, actorOf(store.users.arda));
+      await stopRun(run.runId);
       return { prompt: spec.prompt, offered, keep: offered?.find((tool) => tool.name === "keep_source") ?? null };
     };
     /** The same profile's resumed turn. */
@@ -6160,12 +6055,7 @@ describe("R21-4 — the run row exists while the workspace is prepared", () => {
       await new Promise((r) => setTimeout(r, 5));
     }
     const run = await pending;
-    const { interruptRun } = await import("~/server/runtimes/run-service.server");
-    await interruptRun(
-      store.db,
-      { projectSlug: store.slug, taskKey: "VIB-1", runId: run.runId, dataRoot: store.dataRoot },
-      actorOf(store.users.arda),
-    );
+    await stopRun(run.runId);
 
     expect(observed).toHaveLength(1);
     // Named: a spinner over a blank line is what the human already had. D1: this
@@ -6274,12 +6164,7 @@ describe("startAgentRun: a known-exhausted backend holds the dispatch (ruling 15
     expect(result.backend).toBe("claude");
     expect(listRunsForTaskRows(store.db, store.slug, "VIB-1")).toHaveLength(1);
     expect(listAuditEvents(store.db, { action: "task.agent.run_held" })).toHaveLength(0);
-    const { interruptRun } = await import("~/server/runtimes/run-service.server");
-    await interruptRun(
-      store.db,
-      { projectSlug: store.slug, taskKey: "VIB-1", runId: result.runId, dataRoot: store.dataRoot },
-      actorOf(store.users.arda),
-    );
+    await stopRun(result.runId);
   });
 
   it("a record with no reset instant holds for thirty minutes and says the reopen time is unknown", async () => {
@@ -6321,12 +6206,7 @@ describe("startAgentRun: a known-exhausted backend holds the dispatch (ruling 15
       { dataRoot: store.dataRoot },
     );
     expect(result.backend).toBe("codex");
-    const { interruptRun } = await import("~/server/runtimes/run-service.server");
-    await interruptRun(
-      store.db,
-      { projectSlug: store.slug, taskKey: "VIB-1", runId: result.runId, dataRoot: store.dataRoot },
-      actorOf(store.users.arda),
-    );
+    await stopRun(result.runId);
   });
 
   it("an operator prompt into a held backend leaves the hold note alone: no 'needs to be re-sent' note, one pending schedule", async () => {
@@ -6677,10 +6557,7 @@ describe("ruling 422: a dispatched run's contract names the knowledge-base folde
     const run = await startAgentRun(store.db,
       { projectSlug: store.slug, taskKey: "VIB-1", profileId: "critic" },
       actorOf(store.users.arda), { dataRoot: store.dataRoot });
-    const { interruptRun } = await import("~/server/runtimes/run-service.server");
-    await interruptRun(store.db,
-      { projectSlug: store.slug, taskKey: "VIB-1", runId: run.runId, dataRoot: store.dataRoot },
-      actorOf(store.users.arda));
+    await stopRun(run.runId);
     const prompt = lastRunSpec()?.prompt ?? "";
     const house = path.join(store.dataRoot, "kb", "house-rules");
     const rulings = path.join(store.dataRoot, "kb", "project-rulings");
