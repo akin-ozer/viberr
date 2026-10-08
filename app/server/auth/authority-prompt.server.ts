@@ -55,7 +55,7 @@ const ASCENDING: readonly ProjectRole[] = [...PROJECT_ROLES].sort(
  * checked here rather than assumed: an edit that breaks it would otherwise
  * generate a table that quietly under-reports someone's authority.
  */
-export function authorityTiers(): AuthorityTier[] {
+function authorityTiers(): AuthorityTier[] {
   return tiersFrom(RBAC_DEFINITIONS);
 }
 
