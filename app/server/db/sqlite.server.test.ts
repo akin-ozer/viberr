@@ -437,6 +437,8 @@ describe("ensureBaselineColumns (pass 32 C02-R11; ruling 121 controller tables)"
     const dir = mkdtempSync(path.join(tmpdir(), "viberr-ctlreply-"));
     try {
       const db = openDatabase(path.join(dir, "old.sqlite"));
+      // Every root has agent_runs (0001 creates it); this one records no run
+      // start, so the walk holds no reply against one.
       db.exec(
         `CREATE TABLE controller_conversations (
            id TEXT PRIMARY KEY, user_id TEXT NOT NULL, user_label TEXT NOT NULL,
@@ -447,6 +449,7 @@ describe("ensureBaselineColumns (pass 32 C02-R11; ruling 121 controller tables)"
            id TEXT PRIMARY KEY, conversation_id TEXT NOT NULL, seq INTEGER NOT NULL,
            author TEXT NOT NULL, user_id TEXT, text TEXT NOT NULL, run_id TEXT,
            surface TEXT, created_at TEXT NOT NULL, UNIQUE (conversation_id, seq));
+         CREATE TABLE agent_runs (id TEXT PRIMARY KEY, kind TEXT, created_at TEXT);
          INSERT INTO controller_conversations (id, user_id, user_label, created_at, updated_at)
            VALUES ('c1', 'u1', 'a@b.dev', '2026-09-24', '2026-09-24'),
                   ('c2', 'u1', 'a@b.dev', '2026-09-24', '2026-09-24');
@@ -514,6 +517,8 @@ describe("ensureBaselineColumns (pass 32 C02-R11; ruling 121 controller tables)"
     const dir = mkdtempSync(path.join(tmpdir(), "viberr-ctlrelink-"));
     try {
       const db = openDatabase(path.join(dir, "old.sqlite"));
+      // Every root has agent_runs (0001 creates it); this one records no run
+      // start, so the walk holds no reply against one.
       db.exec(
         `CREATE TABLE controller_conversations (
            id TEXT PRIMARY KEY, user_id TEXT NOT NULL, user_label TEXT NOT NULL,
@@ -524,6 +529,7 @@ describe("ensureBaselineColumns (pass 32 C02-R11; ruling 121 controller tables)"
            id TEXT PRIMARY KEY, conversation_id TEXT NOT NULL, seq INTEGER NOT NULL,
            author TEXT NOT NULL, user_id TEXT, text TEXT NOT NULL, run_id TEXT,
            surface TEXT, created_at TEXT NOT NULL, reply_to TEXT, UNIQUE (conversation_id, seq));
+         CREATE TABLE agent_runs (id TEXT PRIMARY KEY, kind TEXT, created_at TEXT);
          INSERT INTO controller_conversations (id, user_id, user_label, created_at, updated_at)
            VALUES ('c1', 'u1', 'a@b.dev', '2026-09-20', '2026-09-20');
          INSERT INTO controller_messages (id, conversation_id, seq, author, user_id, text, run_id, reply_to, created_at) VALUES

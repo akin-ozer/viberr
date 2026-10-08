@@ -151,12 +151,6 @@ function bootBetween(boots: number[], from: number | null, to: number | null): b
 
 function controllerRunStarts(db: DatabaseSync): Map<string, number> {
   const starts = new Map<string, number>();
-  // A root always has agent_runs; a hand-built fixture may not, and then no
-  // start is known and no reply is held against one.
-  const table = db
-    .prepare(`SELECT 1 AS present FROM sqlite_master WHERE type = 'table' AND name = 'agent_runs'`)
-    .get();
-  if (!table) return starts;
   const rows = runRows.parse(
     db.prepare(`SELECT id, created_at FROM agent_runs WHERE kind = 'controller'`).all(),
   );
