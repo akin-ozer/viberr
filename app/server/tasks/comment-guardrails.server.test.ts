@@ -5,7 +5,6 @@ import {
   isMeaninglessComment,
   separateEvidence,
   repairDoubledNewlines,
-  EVIDENCE_MAX_FENCE_LINES,
 } from "./comment-guardrails.server";
 
 describe("meaningful-comment guardrail", () => {
@@ -33,10 +32,7 @@ describe("evidence-separation guardrail", () => {
     expect(separateEvidence(text)).toBe(text);
   });
   it("replaces long dumps with a head + truthful reference", () => {
-    const body = Array.from(
-      { length: EVIDENCE_MAX_FENCE_LINES + 20 },
-      (_, i) => `log line ${i}`,
-    ).join("\n");
+    const body = Array.from({ length: 32 }, (_, i) => `log line ${i}`).join("\n");
     const text = `Here is the output:\n\`\`\`\n${body}\n\`\`\`\nEnd.`;
     const out = separateEvidence(text);
     expect(out).toContain("evidence-separation guardrail");
@@ -68,7 +64,7 @@ describe("evidence-separation guardrail", () => {
  * comment that was dropped goes on to reason about narration nobody can read.
  */
 describe("applyCommentGuardrails + commentOutcomeMessage (B-FD8)", () => {
-  const on = { meaningful: true, evidence: true, noDuplicate: true };
+  const on = { meaningful: true, evidence: true };
 
   it("reports a meaningful-comment DROP instead of a post", () => {
     const result = applyCommentGuardrails({ text: "ok", ...on });
@@ -77,25 +73,6 @@ describe("applyCommentGuardrails + commentOutcomeMessage (B-FD8)", () => {
     expect(message).toContain("NOT posted");
     expect(message).toContain("meaningful-comment");
     expect(message).not.toContain("Comment posted to the timeline.");
-  });
-
-  it("reports a no-duplicate-summary DROP — the path that used to leave no trace at all", () => {
-    const text = "Reviewer approved the current revision; moving to acceptance.";
-    const result = applyCommentGuardrails({ text, previousText: text, ...on });
-    expect(result.dropped).toBe("duplicate");
-    expect(result.text).toBeNull();
-    expect(commentOutcomeMessage(result)).toContain("identical to your previous comment");
-  });
-
-  it("compares the duplicate check against the POST-trim text", () => {
-    const dump = ["```", ...Array.from({ length: 40 }, (_, i) => `line ${i}`), "```"].join("\n");
-    const text = `Report:\n${dump}`;
-    const trimmed = separateEvidence(text);
-    // The stored previous comment is the evidence-separated form, so re-posting
-    // the same raw dump is still a duplicate.
-    expect(applyCommentGuardrails({ text, previousText: trimmed, ...on }).dropped).toBe(
-      "duplicate",
-    );
   });
 
   it("names the guardrails that TRIMMED a posted comment", () => {
@@ -116,8 +93,8 @@ describe("applyCommentGuardrails + commentOutcomeMessage (B-FD8)", () => {
       trimmedBy: [],
     });
     expect(commentOutcomeMessage(plain)).toBe("Comment posted to the timeline.");
-    // Every guardrail off: chatter and an exact repeat both go through.
-    expect(applyCommentGuardrails({ text: "ok", previousText: "ok" })).toEqual({
+    // Every guardrail off: chatter goes through.
+    expect(applyCommentGuardrails({ text: "ok" })).toEqual({
       text: "ok",
       dropped: null,
       trimmedBy: [],

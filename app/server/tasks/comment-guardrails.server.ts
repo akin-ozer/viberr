@@ -66,17 +66,14 @@ export function repairDoubledNewlines(text: string): string {
 }
 
 /** A fenced block longer than this many lines is an evidence dump, not prose. */
-export const EVIDENCE_MAX_FENCE_LINES = 12;
+const EVIDENCE_MAX_FENCE_LINES = 12;
 
 /**
  * Replace long fenced code blocks with their head + a truthful reference. The
  * canonical record keeps enough to identify the evidence; the full output stays
  * in the run transcript (agent logs).
  */
-export function separateEvidence(
-  text: string,
-  maxLines: number = EVIDENCE_MAX_FENCE_LINES,
-): string {
+export function separateEvidence(text: string): string {
   // Anchor BOTH fences to line starts (adversarial-review #12) so an inline
   // ``` inside the body (e.g. prose about backticks) isn't mistaken for the
   // closing fence, which would truncate at the wrong place and corrupt the doc.
@@ -84,7 +81,7 @@ export function separateEvidence(
     /^```([^\n]*)\n([\s\S]*?)^```/gm,
     (whole, lang: string, body: string) => {
       const lines = body.replace(/\n$/, "").split("\n");
-      if (lines.length <= maxLines) return whole;
+      if (lines.length <= EVIDENCE_MAX_FENCE_LINES) return whole;
       const head = lines.slice(0, 3).join("\n");
       const omitted = lines.length - 3;
       return `\`\`\`${lang}\n${head}\n\`\`\`\n_(evidence trimmed by the evidence-separation guardrail; ${omitted} more lines in the agent logs)_`;
@@ -116,8 +113,7 @@ export interface CommentGuardrailResult {
  * existed that no human would ever see, and the no-duplicate drop left no log
  * line, no audit row and no notification at all. The order is the one the
  * operator path has always used: a meaningless comment is dropped before
- * anything is spent on it, the surviving text is trimmed, and the duplicate
- * check compares what would actually be written.
+ * anything is spent on it, and the surviving text is trimmed.
  *
  * `text` is the POST-trim text to persist; callers keep the caller's original
  * for the @mention fan-out, which must run on the PRE-trim text so a handle
@@ -127,11 +123,8 @@ export interface CommentGuardrailResult {
  */
 export function applyCommentGuardrails(input: {
   text: string;
-  /** The previous comment by the same author, for the no-duplicate check. */
-  previousText?: string | null;
   meaningful?: boolean;
   evidence?: boolean;
-  noDuplicate?: boolean;
 }): CommentGuardrailResult {
   if (input.meaningful && isMeaninglessComment(input.text)) {
     return { text: null, dropped: "meaningless", trimmedBy: [] };
@@ -145,14 +138,6 @@ export function applyCommentGuardrails(input: {
     const separated = separateEvidence(text);
     if (separated !== text) trimmedBy.push("evidence-separation");
     text = separated;
-  }
-
-  if (
-    input.noDuplicate &&
-    input.previousText != null &&
-    input.previousText.trim() === text.trim()
-  ) {
-    return { text: null, dropped: "duplicate", trimmedBy };
   }
   return { text, dropped: null, trimmedBy };
 }
@@ -202,7 +187,7 @@ export function guardrailOn(
 }
 
 /** The guardrail's configured numeric value (e.g. compression threshold). */
-export function guardrailValue(
+function guardrailValue(
   ctx: TaskMutationContext,
   projectSlug: string,
   id: string,
