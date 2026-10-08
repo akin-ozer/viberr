@@ -456,7 +456,8 @@ describe("the release engine", () => {
   it("completing the LAST dependency releases the dependent through the transition hook: list cleared, note, readiness lifted, hold cleared, waiting back on a person, watchers notified, operator re-invoked with the payload; a partial completion releases nothing", async () => {
     // Canaries: delete the `autoInvokeOperator` call in `announceRelease`
     // (no re-invoke); treat `failed` as satisfied in `dependenciesSatisfied`
-    // (the archived case below releases).
+    // (the archived dependency in "a done dependency releases; an archived
+    // dependency is noted ONCE…" below then releases).
     const store = setupTestStore(ctx);
     await seed(store);
     writeTask(store.dataRoot, store.slug, {

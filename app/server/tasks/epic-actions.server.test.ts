@@ -987,9 +987,9 @@ describe("ruling 503(d): when every task of an open epic is done", () => {
   });
 
   it("does not say it again when a task that was already done is archived afterwards", async () => {
-    // CANARY: red today (the reported bug): setTaskArchived fires the
-    // all-done hook for a task that was already done, and the new count
-    // defeats noteEpicCompleteIfDone's same-line check.
+    // CANARY: let setTaskArchived fire the all-done hook for a task that was
+    // already done (the reported bug): the new count defeats
+    // noteEpicCompleteIfDone's same-line check.
     const { id, done, open } = await epicWithOneTaskLeft("Tidied up");
     await accept(open);
     await waitFor(() => allDoneNotices(id).length === 1, "the lead's all-done notice");
@@ -1005,9 +1005,9 @@ describe("ruling 503(d): when every task of an open epic is done", () => {
   });
 
   it("does not say it again when a task that was already done is taken out afterwards", async () => {
-    // CANARY: red today (the reported bug): setTasksEpic runs
-    // noteEpicCompleteIfDone for every epic a task left, done or not, and its
-    // own "removed" line defeats the same-line check.
+    // CANARY: let setTasksEpic run noteEpicCompleteIfDone for every epic a
+    // task left, done or not (the reported bug): its own "removed" line
+    // defeats the same-line check.
     const { id, done, open } = await epicWithOneTaskLeft("Pruned");
     await accept(open);
     await waitFor(() => allDoneNotices(id).length === 1, "the lead's all-done notice");
