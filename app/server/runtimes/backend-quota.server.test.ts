@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it } from "vitest";
+import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest";
 import { createTestDbContext } from "../../../test-support/test-db";
 import {
   backendDispatchHold,
@@ -23,57 +23,56 @@ import {
  * PROCESS that ran it (18:18Z in a UTC container), so the time is resolved
  * with the process's own local setters, never `Date.UTC`.
  *
+ * The time-only cases pin the zone to New York (EDT, four hours behind UTC in
+ * September) and expect literal instants: CI runs in UTC, where a local and a
+ * UTC resolution agree and an expectation derived from the local clock could
+ * not tell them apart.
+ *
  * Canaries: delete the time-only arm and every parse below answers null;
+ * resolve it with `Date.UTC` and the New York instants miss by four hours;
  * drop the `resetsAt * 1000 > nowMs` comparison and the passed hold stands.
  */
 const ctx = createTestDbContext();
 afterEach(ctx.cleanup);
 
-/** The instant the process's local clock names for `h:mm` at or after `observed`. */
-function nextLocal(observedIso: string, hour: number, minute: number): number {
-  const base = new Date(Date.parse(observedIso));
-  const d = new Date(base.getTime());
-  d.setHours(hour, minute, 0, 0);
-  if (d.getTime() < base.getTime()) d.setDate(d.getDate() + 1);
-  return Math.round(d.getTime() / 1000);
-}
-
 const CODEX_TIME_ONLY =
   "You've hit your usage limit. To continue using Codex, start a free trial of Plus today, or try again at 6:18 PM.";
 
 describe("parseQuotaResetAt: a time-only Codex refusal (G35-4)", () => {
+  const originalTz = process.env.TZ;
+  beforeAll(() => {
+    process.env.TZ = "America/New_York";
+  });
+  afterAll(() => {
+    if (originalTz === undefined) delete process.env.TZ;
+    else process.env.TZ = originalTz;
+  });
+
   it("resolves 'try again at 6:18 PM' in the process zone, at or after the observation, precision clock", () => {
-    const observed = "2026-09-06T14:03:00Z";
-    const reset = parseQuotaResetAt(CODEX_TIME_ONLY, observed);
-    expect(reset).toEqual({ at: nextLocal(observed, 18, 18), precision: "clock" });
-    // Never UTC by construction: the same wall clock resolved in UTC is a
-    // different instant in every non-UTC zone this test could run in.
-    const utc = Math.round(Date.UTC(2026, 8, 6, 18, 18) / 1000);
-    const offsetMin = new Date(Date.parse(observed)).getTimezoneOffset();
-    if (offsetMin !== 0) expect(reset!.at).not.toBe(utc);
+    // 10:03 in New York: 6:18 PM there is 22:18Z, never the 18:18Z of UTC.
+    expect(parseQuotaResetAt(CODEX_TIME_ONLY, "2026-09-06T14:03:00Z")).toEqual({
+      at: Date.UTC(2026, 8, 6, 22, 18) / 1000,
+      precision: "clock",
+    });
   });
 
   it("an observation after the named time rolls to the next day", () => {
-    // Pick an observation instant that is after 18:18 LOCAL wherever this runs.
-    const base = new Date("2026-09-06T12:00:00Z");
-    base.setHours(20, 0, 0, 0);
-    const observed = base.toISOString();
-    const reset = parseQuotaResetAt(CODEX_TIME_ONLY, observed)!;
-    expect(reset.precision).toBe("clock");
-    expect(reset.at).toBe(nextLocal(observed, 18, 18));
-    expect(reset.at * 1000).toBeGreaterThan(base.getTime());
-    const day = new Date(reset.at * 1000);
-    expect(day.getDate()).toBe(new Date(base.getTime() + 24 * 60 * 60 * 1000).getDate());
+    // 20:00 on the 6th in New York, after 6:18 PM there.
+    expect(parseQuotaResetAt(CODEX_TIME_ONLY, "2026-09-07T00:00:00.000Z")).toEqual({
+      at: Date.UTC(2026, 8, 7, 22, 18) / 1000,
+      precision: "clock",
+    });
   });
 
   it("accepts a 24-hour clock and a bare hour with a meridiem; refuses an impossible one", () => {
+    // 21:00 on the 5th in New York.
     const observed = "2026-09-06T01:00:00Z";
     expect(parseQuotaResetAt("try again at 18:18", observed)).toEqual({
-      at: nextLocal(observed, 18, 18),
+      at: Date.UTC(2026, 8, 6, 22, 18) / 1000,
       precision: "clock",
     });
     expect(parseQuotaResetAt("try again at 6 PM.", observed)).toEqual({
-      at: nextLocal(observed, 18, 0),
+      at: Date.UTC(2026, 8, 6, 22, 0) / 1000,
       precision: "clock",
     });
     expect(parseQuotaResetAt("try again at 13 PM", observed)).toBeNull();
