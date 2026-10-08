@@ -18,7 +18,11 @@ import { listAuditEvents } from "../../../test-support/audit-log";
 import { withEnv } from "../../../test-support/env";
 import { writeBoardHolding } from "../../../test-support/resource-boards";
 import { ENV_KEYS } from "~/server/config/env.server";
+import { CONTROLLER_OPS_MCP_NAME } from "~/server/controller/controller-ops-mcp.server";
 import { kbDirPath, skillDirPath } from "~/server/files/file-store-root.server";
+import { BOARD_MCP_NAME } from "~/server/mcp-proxy/board-tool.server";
+import { KNOWLEDGE_MCP_NAME } from "~/server/mcp-proxy/knowledge-tool.server";
+import { BROWSER_MCP_NAME } from "~/server/tasks/browser-deadline.server";
 import { RESERVED_MCP_NAMES } from "~/shared/mcp-reserved";
 import {
   deleteKnowledgeBase,
@@ -746,6 +750,14 @@ describe("mcp servers", () => {
     }
     // The refusal is the whole story: nothing was written on the way out.
     expect(listMcpServers(db)).toEqual([]);
+    // The list holds the mount keys the product attaches, in both spellings.
+    // CANARY: drop a spelling from RESERVED_MCP_NAMES and a registry row can
+    // take that server's key.
+    for (const key of [BROWSER_MCP_NAME, BOARD_MCP_NAME, KNOWLEDGE_MCP_NAME, CONTROLLER_OPS_MCP_NAME]) {
+      for (const name of [key, key.replaceAll("_", "-")]) {
+        expect(RESERVED_MCP_NAMES.has(name), name).toBe(true);
+      }
+    }
   });
 
   it("save runs a REAL MCP handshake on HTTP targets and never fabricates counts", async () => {

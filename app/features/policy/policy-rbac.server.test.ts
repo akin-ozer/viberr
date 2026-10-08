@@ -855,6 +855,21 @@ describe("R6-2: task-owner authority is scoped to THAT task", () => {
       ),
     ).rejects.toMatchObject({ status: 403 });
   });
+
+  it("a maintainer still accepts a task someone else owns: the exception adds authority, never takes the tier's", async () => {
+    // CANARY: refuse a non-owner whenever the task has an owner.
+    resetTaskOwner(store.users.selin.id);
+    expect(
+      await guardAllowed(() =>
+        completeTaskMerge(
+          store.db,
+          { projectSlug: store.slug, taskKey: "VIB-1" },
+          actorOf(store.users.murat),
+          { dataRoot: store.dataRoot },
+        ),
+      ),
+    ).toBe(true);
+  });
 });
 
 /**

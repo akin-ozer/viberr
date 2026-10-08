@@ -596,6 +596,8 @@ describe("WorkflowRules — states the project's operator autonomy (F20-19)", ()
     expect(note.textContent).toContain("is refused to the operator");
     expect(note.textContent).not.toContain("crosses them itself");
     expect(note.textContent).not.toContain("the rule for people");
+    // The default rule and its one exception, whatever the roster.
+    expect(note.textContent).toContain("The one exception is an operator running at full autonomy");
   });
 });
 

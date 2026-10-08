@@ -3550,6 +3550,9 @@ describe("buildSpecialistPromptPrefix — attached resources", () => {
     expect(persona).toContain("Attached resources that did NOT fully reach this run");
     expect(persona).toContain("typo-expertise");
     expect(persona).toContain("no skill folder by that name in the store");
+    // No trusted section: nothing resolved, so nothing is vouched for.
+    // CANARY: let readSkillBodies keep an empty part for a missing skill.
+    expect(persona).not.toContain("Attached resources (trusted");
   });
 
   it("resolvable resources produce NO 'did not reach' section", () => {
