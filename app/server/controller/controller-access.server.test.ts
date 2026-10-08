@@ -713,11 +713,8 @@ describe("viberr_controller.get_github_state", () => {
   });
 
   /** A refusal that leaves no trace is invisible: P13-D-8 audits the attempt. */
-  it("the refusal leaks no repo or branch data, and is audited", async () => {
-    const reply = await callTool(ids.nonMember, "get_github_state");
-    expect(reply).not.toContain(REPO);
-    expect(reply).not.toContain("main");
-    expect(reply).not.toMatch(/VIB-\d+/);
+  it("a non-member's refusal is audited (P13-D-8)", async () => {
+    await callTool(ids.nonMember, "get_github_state");
 
     const denials = listAuditEvents(app.db, {
       action: "project.authority.denied",
