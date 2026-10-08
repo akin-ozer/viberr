@@ -1040,6 +1040,10 @@ describe("schedule_task_action and cancel_task_schedule (ruling 153)", () => {
   });
 
   it("keeps the task page's bounds and schedules a deployed agent by name", async () => {
+    // Ruling 153: the controller schedules under the task page's bounds, through `scheduleDueMs`.
+    expect(
+      await call(ids.maintainer, "schedule_task_action", { taskKey: "VIB-142", agent: "operator" }),
+    ).toBe("[error] Schedule between 1 minute and 28 days out.");
     expect(
       await call(ids.maintainer, "schedule_task_action", {
         taskKey: "VIB-142",
@@ -1192,9 +1196,14 @@ describe("instance scope: org-role gate on every management tool", () => {
 
   for (const probe of adminOnly) {
     it(`${probe.tool}: an org MEMBER is refused with the reason; an org ADMIN passes the gate`, async () => {
+      const deniedBefore = listAuditEvents(app.db, { action: "controller.authority.denied", limit: 1 })[0]?.id;
       const denied = await call(ids.contributor, probe.tool, probe.args ?? {});
       expect(denied).toContain("[denied]");
       expect(denied).toContain("org admin");
+      // Ruling 99(b), P13-D-8 parity: the instance denial is audited under the asker.
+      const audit = listAuditEvents(app.db, { action: "controller.authority.denied", limit: 1 })[0];
+      expect(audit?.id).not.toBe(deniedBefore);
+      expect(audit).toMatchObject({ actorUserId: ids.contributor, details: { scope: "instance" } });
       const granted = await call(ids.orgAdmin, probe.tool, probe.args ?? {});
       // The admin may still hit a VALIDATION on probe args ("No such user") —
       // what must never appear is the org-role refusal.

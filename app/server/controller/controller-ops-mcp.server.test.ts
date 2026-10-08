@@ -1031,6 +1031,8 @@ describe("read_store_doc: org admins only, like the store browser", () => {
     });
     expect(missing).toContain("has no `gone.md`");
     expect(missing).toContain("not a git repository");
+    // Ruling 246: and the two doors that do read a repo file.
+    expect(missing).toContain("Open it on GitHub, or ask an agent on a task with a checkout.");
     expect(missing).not.toContain("no longer exists");
   });
 });

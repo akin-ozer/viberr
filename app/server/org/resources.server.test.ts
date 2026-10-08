@@ -499,9 +499,12 @@ describe("skills", () => {
     it("refuses an empty body on a write: a create with nothing in it lands no folder", async () => {
       // Canary: let `writeFileSync(SKILL.md, "")` through.
       const { db, dataRoot, ctx } = setup();
-      await expect(
-        saveSkill(db, { name: "hollow", summary: "Nothing inside.", body: "   \n" }, ACTOR, ctx),
-      ).rejects.toThrowError(/empty/);
+      // "" is what the controller's save_skill sends for an omitted body.
+      for (const body of ["", "   \n"]) {
+        await expect(
+          saveSkill(db, { name: "hollow", summary: "Nothing inside.", body }, ACTOR, ctx),
+        ).rejects.toThrowError(/empty/);
+      }
       expect(existsSync(skillDirPath("hollow", dataRoot))).toBe(false);
     });
   });
