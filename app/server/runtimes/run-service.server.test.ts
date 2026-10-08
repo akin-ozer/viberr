@@ -2187,6 +2187,15 @@ describe("C4: noteCompletionEffectsLost (a lost completion callback)", () => {
    */
   it("F37-67: does not promise a replay the recovery sweep will never run", async () => {
     seedLostRun("VIB-3", "run_replied_then_lost");
+    // A readable reply, so the reply row below is the one thing that keeps the
+    // sweep away: a run with no reply text is dropped for that alone.
+    insertRunLine(store.db, {
+      runId: "run_replied_then_lost",
+      seq: 0,
+      occurredAt: new Date().toISOString(),
+      raw: "{}",
+      display: { t: "1", ev: "text", tag: "assistant", text: "Implemented the parser." },
+    });
     // Step 1 happened: the reply is on the record, and its idempotency row with
     // it. This is the exact row `recoverUnreactedAgentRuns` excludes on.
     const { recordAudit } = await import("~/server/audit/audit-recorder.server");
