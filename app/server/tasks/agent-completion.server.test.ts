@@ -5181,10 +5181,10 @@ describe("reviewer verdict on the UI Run-button path (H2/A1 regression)", () => 
     const changed = await pollUntil(() => {
       const fm = taskFile().parsed.frontmatter;
       return fm.validation === "healthy";
-    }, 25_000);
+    });
     expect(changed).toBe(true);
     expect(result.runId).toBeTruthy();
-  }, 30_000);
+  });
 });
 
 describe("superseded stuck-packet withdrawal (owner ruling 2026-07-18)", () => {

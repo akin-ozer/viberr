@@ -1706,15 +1706,13 @@ describe("commentToAgent", () => {
     );
     expect(result.triggered).toBe("started");
 
-    // The reply lands as an agent-authored comment once the run finishes. The
-    // fresh fallback reuses startAgentRun's realistic-cadence analyze
-    // stream (~7 lines at 1–3.2s each), so allow generous headroom.
+    // The reply lands as an agent-authored comment once the run finishes.
     const posted = await pollUntil(() => {
       const file = readTaskFile({ projectSlug: store.slug, taskKey: "VIB-1", dataRoot: store.dataRoot })!;
       return file.parsed.timeline.some(
         (e) => e.type === "comment" && e.actor.kind === "agent",
       );
-    }, 25_000);
+    });
     expect(posted).toBe(true);
 
     const file = readTaskFile({ projectSlug: store.slug, taskKey: "VIB-1", dataRoot: store.dataRoot })!;
@@ -1730,7 +1728,7 @@ describe("commentToAgent", () => {
 
     const audit = listAuditEvents(store.db, { action: "task.agent.replied" });
     expect(audit[0]?.taskKey).toBe("VIB-1");
-  }, 30_000);
+  });
 
   /**
    * Ruling 203 (F37-23, live on SHOP-6). A8's refusal used to end with a
@@ -1809,7 +1807,7 @@ describe("commentToAgent", () => {
     expect(
       file.parsed.timeline.filter((e) => e.text.includes("fix the class")),
     ).toHaveLength(1);
-  }, 30_000);
+  });
 
   it("ruling 203, end to end: a real run's completion delivers the mention it was too busy to take", async () => {
     deployDevSpecialist();
@@ -1854,7 +1852,7 @@ describe("commentToAgent", () => {
     );
     const started = startedRunSpecs().at(-1)!;
     expect(started.prompt).toContain("one more thing before you finish");
-  }, 30_000);
+  });
 
   /**
    * Ruling 203's own claim, tested: "Oldest first, one per completion, which
@@ -1926,7 +1924,7 @@ describe("commentToAgent", () => {
         (r) => r.agent_profile_id === "dev" && r.id !== "run_live_primary",
       ),
     ).toHaveLength(1);
-  }, 30_000);
+  });
 
   /**
    * Ruling 211(h): this test's first two versions never reached the guard they
@@ -2166,7 +2164,7 @@ describe("commentToAgent", () => {
     expect(relayed!.text).toContain("staging only, production needs sign-off");
     expect(relayed!.text).toContain("do not re-open the same question");
     expect(spec?.prompt).toContain("Target the staging config");
-  }, 30_000);
+  });
 
   /**
    * Ruling 447 (O39-a), live on ax-clone three of three: an answer that routed
@@ -3056,5 +3054,5 @@ describe("F37-66 — the undelivered-mention withdrawal survives the early retur
     const note = timeline().find((e) => e.title === "Mention still not delivered")!;
     expect(note.text).toContain("a comment");
     expect(note.text).toContain("@dev");
-  }, 30_000);
+  });
 });
