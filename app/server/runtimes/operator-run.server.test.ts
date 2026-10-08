@@ -2450,6 +2450,7 @@ describe("stranded auto-stage resume", () => {
       packet: null,
       recommendations: [],
       blockedBy: [],
+      schedules: [],
     };
     const { operatorLeftTaskStranded } = operatorRunModule;
     expect(operatorLeftTaskStranded(base, wf)).toBe(true);

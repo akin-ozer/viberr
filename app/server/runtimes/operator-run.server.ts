@@ -964,9 +964,8 @@ export function operatorLeftTaskStranded(
     recommendations: readonly unknown[];
     /** Ruling 131(d): a non-empty `blockedBy` is a RECORDED hold. */
     blockedBy: readonly unknown[];
-    /** Ruling 487: a pending schedule is a RECORDED wait with its time on it.
-     *  Optional so the stage-only call sites in tests stay readable. */
-    schedules?: readonly { status: string }[];
+    /** Ruling 487: a pending schedule is a RECORDED wait with its time on it. */
+    schedules: readonly { status: string }[];
   },
   workflow: readonly { from: string; to: string; boundary: string }[],
   /** The finished drive's OWN last transition landed the task on this stage. */
@@ -998,7 +997,7 @@ export function operatorLeftTaskStranded(
   // stranded sweep already honours (ruling 330). Nudging it anyway asked the
   // operator to "record the hold", and live on WEB-9 it did so with a packet
   // whose own body said it existed only so the stage was not left idle.
-  if ((task.schedules ?? []).some((s) => s.status === "pending")) return false;
+  if (task.schedules.some((s) => s.status === "pending")) return false;
   if (ownMoveLandedHere) return true;
   if (planWhollyRefused) return true;
   if (refreshedAndStopped) return true;
