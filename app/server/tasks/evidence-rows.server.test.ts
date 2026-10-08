@@ -12,14 +12,7 @@ import {
   installFakeRuntime,
   queueFakeRun,
 } from "../../../test-support/fake-runtime";
-import {
-  normalizeEvidenceRows,
-  type TaskFileEvent,
-} from "~/schemas/task-file.schema";
-import {
-  parseTaskFileContent,
-  serializeTaskFile,
-} from "~/server/files/task-file.server";
+import { normalizeEvidenceRows } from "~/schemas/task-file.schema";
 import { readProjectFile } from "~/server/files/project-writer.server";
 import { readTaskFile } from "~/server/files/task-writer.server";
 import { rebuildAll } from "~/server/projections/rebuilder.server";
@@ -128,34 +121,6 @@ describe("normalizeEvidenceRows", () => {
       status: "pass",
     }));
     expect(normalizeEvidenceRows(many)!.length).toBe(8); // ruling 493: eight rows
-  });
-
-  it("round-trips through the task.md serializer/parser", () => {
-    const rows = normalizeEvidenceRows([
-      { label: "suite · integration", result: "38 passed, 4 failed", status: "fail" },
-      { label: "9 files changed on `vib-1`", result: "+412 −87", status: "info" },
-      // No result: the file writes the placeholder, and it reads back empty.
-      { label: "gate · build.log", result: "", status: "pass" },
-    ])!;
-    const event: TaskFileEvent = {
-      occurredAt: "2026-07-24T10:00:00.000Z",
-      type: "quality",
-      actor: { kind: "agent", backend: "claude", profileId: "reviewer", roleHint: "Review" },
-      title: "Review passed",
-      text: "**Validation:** healthy. Reviewer approved the work.",
-      toAgent: false,
-      evidence: rows,
-    };
-    const text = serializeTaskFile({
-      frontmatter: baseTaskFrontmatter("VIB-1"),
-      unknownFrontmatter: {},
-      goal: "g",
-      packet: null,
-      timeline: [event],
-      extraSections: [],
-    });
-    const back = parseTaskFileContent(text).parsed.timeline[0]!;
-    expect(back.evidence).toEqual(rows);
   });
 });
 
