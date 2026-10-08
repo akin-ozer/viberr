@@ -47,7 +47,7 @@ import type { clientLoader as bellListLoader } from "~/routes/resources.notifica
 export const BELL_LIST_CAP = 100;
 
 /** The list's resource route (`routes/resources.notifications.ts`). */
-export const BELL_LIST_URL = "/resources/notifications";
+const BELL_LIST_URL = "/resources/notifications";
 
 /** The routes whose loaders read the bell's counts (`REVALIDATION_RULES`):
  *  the workspace layout, Home, the standalone header and /notifications. */
