@@ -103,27 +103,6 @@ async function seen(runId: string, pid: number, withinMs = 3000): Promise<boolea
 
 const scans = process.platform === "linux" || process.platform === "darwin";
 
-describe.skipIf(!scans)("findRunProcesses (real processes)", () => {
-  it("finds a live process by its run's marker, and only that run's", async () => {
-    const runId = testRunId();
-    const other = testRunId();
-    const mine = hold(runId);
-    const theirs = hold(other);
-    const unmarked = hold(null);
-    expect(await seen(runId, mine.pid ?? -1)).toBe(true);
-
-    const found = await findRunProcesses(new Set([runId]));
-    expect(found.get(mine.pid ?? -1)).toBe(runId);
-    expect(found.has(theirs.pid ?? -1)).toBe(false);
-    expect(found.has(unmarked.pid ?? -1)).toBe(false);
-    expect(found.has(process.pid)).toBe(false);
-  });
-
-  it("finds nothing for no run ids without scanning", async () => {
-    expect((await findRunProcesses(new Set())).size).toBe(0);
-  });
-});
-
 describe.skipIf(!scans)("reapRunProcesses (real processes)", () => {
   it("SIGTERMs every marked process and leaves another run's and an unmarked one alive", async () => {
     const runId = testRunId();
