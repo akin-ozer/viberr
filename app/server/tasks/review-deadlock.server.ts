@@ -72,7 +72,7 @@ import {
  * decision a person should actually be given, instead of the one the operator
  * could have taken.
  */
-export const REVIEW_DEADLOCK_ROUNDS = 3;
+const REVIEW_DEADLOCK_ROUNDS = 3;
 
 /**
  * The question the `question_reviewer` resolution puts to the reviewer.
