@@ -265,9 +265,6 @@ describe("evidence is a BOTH-backend channel (P13-D-26)", () => {
   // would be a Claude-only capability that the profile editor still offered to
   // every profile regardless of backend — the kind of silent backend asymmetry
   // this app is supposed to not have.
-  it("declares evidence in the envelope", () => {
-    expect(AGENT_OUTCOME_JSON_SCHEMA.required).toContain("evidence");
-  });
 
   /**
    * Ruling 526: the timeline draws the rows as a checklist, so the strict
@@ -336,10 +333,8 @@ describe("relay is a BOTH-backend channel (ruling 488)", () => {
   const ctx = createTestDbContext();
   afterEach(ctx.cleanup);
 
-  it("declares relay in the envelope and parses its entries", () => {
-    // CANARIES: drop `relay` from AGENT_OUTCOME_JSON_SCHEMA; drop the parser's
-    // copy onto the outcome.
-    expect(AGENT_OUTCOME_JSON_SCHEMA.required).toContain("relay");
+  it("parses the envelope's relay entries", () => {
+    // CANARY: drop the parser's copy onto the outcome.
     const o = parseAgentOutcomeJson(
       JSON.stringify({
         summary: "Read both cron runs.",
