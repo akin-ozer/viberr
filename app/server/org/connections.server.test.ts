@@ -17,7 +17,7 @@ import {
   markWriteScopeProven,
   setProjectCredential,
 } from "~/server/secrets/pat-store.server";
-import { validatePat } from "~/server/secrets/pat-validator.server";
+import { revalidateProjectCredential } from "~/server/secrets/pat-validator.server";
 import { readRepoHealth, recordRepoAccess } from "~/server/github/repo-health.server";
 import { setupProjectedStore } from "../../../test-support/projected-store";
 import { writeProject } from "../../../test-support/test-store";
@@ -741,7 +741,7 @@ describe("ruling 480: a connection Re-check never unproves a repository", () => 
     setProjectCredential(db, { projectSlug: "akinozer-com", patId }, ACTOR);
     // The attach probe (`proveAttachedCredential` → `validatePat` with the
     // project's repository).
-    await validatePat(db, patId, { repo: REPO, fetchImpl: transport().fetchImpl });
+    await revalidateProjectCredential(db, "akinozer-com", ACTOR, { fetchImpl: transport().fetchImpl });
     const repoChip = () =>
       getProjectCredentialHealth(db, "akinozer-com").scopes.find((s) => s.id === "repo");
     expect(repoChip()).toEqual({ id: "repo", ok: true, source: "probe" });

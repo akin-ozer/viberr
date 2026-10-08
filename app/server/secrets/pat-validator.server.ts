@@ -515,7 +515,7 @@ export async function validatePatToken(
  * Validates a STORED PAT and caches the result on its row. Returns null
  * when the PAT id is unknown.
  */
-export async function validatePat(
+async function validatePat(
   db: DatabaseSync,
   patId: string,
   options: ValidatePatTokenOptions = {},
@@ -558,7 +558,7 @@ export interface RevalidateContext {
  * something on GitHub's side, and a `network_error` never evaluated anything —
  * both must always re-probe, or the button becomes a lie.
  */
-export const REVALIDATE_COOLDOWN_MS = 60_000;
+const REVALIDATE_COOLDOWN_MS = 60_000;
 
 /**
  * The real "Re-check scopes" backend (settings spec §5.4):

@@ -16,13 +16,16 @@ import {
 import { rebuildAll } from "~/server/projections/rebuilder.server";
 import { setupProjectedStore } from "../../../test-support/projected-store";
 import { listAuditEvents } from "../../../test-support/audit-log";
-import { createPat, getPatMetadata, setProjectCredential } from "./pat-store.server";
 import {
-  REVALIDATE_COOLDOWN_MS,
+  createPat,
+  getPatMetadata,
+  recordPatValidation,
+  setProjectCredential,
+} from "./pat-store.server";
+import {
   repoPermissionsSchema,
   repoWritable,
   revalidateProjectCredential,
-  validatePat,
   validatePatToken,
 } from "./pat-validator.server";
 
@@ -462,26 +465,28 @@ describe("pat-validator diagnostic matrix (canned responses)", () => {
 describe("validatePat / revalidateProjectCredential (stored PAT + grant flow)", () => {
   it("caches the result on the PAT row", async () => {
     const store = setupTestStore(ctx);
+    const actor = { userId: store.users.arda.id, label: "arda" };
     const pat = createPat(
       store.db,
       { userId: store.users.arda.id, label: "bot", token: CLASSIC },
-      { userId: store.users.arda.id, label: "arda" },
+      actor,
     );
+    setProjectCredential(store.db, { projectSlug: store.slug, patId: pat.id }, actor);
     const gh = fakeGithubFetch({
       "GET /user": {
         body: { login: "viberr-bot" },
         headers: { "x-oauth-scopes": "repo, workflow, read:org" },
       },
     });
-    const result = await validatePat(store.db, pat.id, {
-      requiredScopes: SCOPES,
+    const result = await revalidateProjectCredential(store.db, store.slug, actor, {
       fetchImpl: gh.fetchImpl,
     });
-    expect(result?.status).toBe("valid");
+    expect(result.status).toBe("revalidated");
     const cached = getPatMetadata(store.db, pat.id);
     expect(cached?.validation?.status).toBe("valid");
-    expect(cached?.lastValidatedAt).toBe(result?.checkedAt);
-    expect(await validatePat(store.db, "pat_missing", {})).toBeNull();
+    if (result.status === "revalidated") {
+      expect(cached?.lastValidatedAt).toBe(result.validation.checkedAt);
+    }
   });
 
   it("B-GH8: a WRITE violation survives read-only evidence — 'assumed' never clears it", async () => {
@@ -782,7 +787,11 @@ describe("PAT revalidation cooldown (P13-D-33)", () => {
       "GET /user": { body: { login: "viberr-bot" } },
       "GET /user/orgs": { body: [] },
     });
-    await validatePat(store.db, pat.id, { repo: null, fetchImpl: orgLevel.fetchImpl });
+    recordPatValidation(
+      store.db,
+      pat.id,
+      await validatePatToken(FINE, { repo: null, fetchImpl: orgLevel.fetchImpl }),
+    );
 
     const projectScoped = healthyGithub();
     const result = await revalidateProjectCredential(store.db, store.slug, actor, {
@@ -814,7 +823,7 @@ describe("PAT revalidation cooldown (P13-D-33)", () => {
     await revalidateProjectCredential(store.db, store.slug, actor, {
       dataRoot: store.dataRoot,
       fetchImpl: later.fetchImpl,
-      now: () => Date.now() + REVALIDATE_COOLDOWN_MS + 1,
+      now: () => Date.now() + 60_001,
     });
     expect(later.calls.length).toBeGreaterThan(0);
   });
