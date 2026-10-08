@@ -23,7 +23,7 @@ export interface FakeCall {
 
 export interface FakeResponseSpec {
   status?: number;
-  /** JSON-serialized unless a string is given. Ignored for 204/304. */
+  /** JSON-serialized unless a string is given. Ignored for 204. */
   body?: unknown;
   headers?: Record<string, string>;
 }
@@ -95,7 +95,7 @@ export function fakeGithubFetch(
 
     const status = spec.status ?? 200;
     const responseHeaders = new Headers(spec.headers ?? {});
-    if (status === 204 || status === 304) {
+    if (status === 204) {
       return new Response(null, { status, headers: responseHeaders });
     }
     const verbatim = verbatimResponseBody.safeParse(spec.body);

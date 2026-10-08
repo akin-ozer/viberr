@@ -27,8 +27,6 @@ import { fixtureServer, listen } from "./mcp-upstream";
 export interface OAuthServerOptions {
   /** `expires_in` of the next access token issued. */
   accessTokenTtlSec: number;
-  /** Whether the token endpoint issues refresh tokens. */
-  issueRefreshToken: boolean;
   /** How the next refresh grant is answered. */
   refresh: "ok" | "invalid_grant" | "server_error";
   /** The consent screen's answer: approve, or the user said no. */
@@ -98,7 +96,6 @@ export interface OAuthMcpServerHandle {
 
 const DEFAULTS: OAuthServerOptions = {
   accessTokenTtlSec: 3600,
-  issueRefreshToken: true,
   refresh: "ok",
   consent: "approve",
   registration: true,
@@ -236,19 +233,16 @@ export async function startOAuthMcpServer(
 
   const issueTokens = (clientId: string): TokenReply => {
     const access = token("at");
+    const refresh = token("rt");
     accessTokens.set(access, clientId);
-    issued.push(access);
+    refreshTokens.set(refresh, clientId);
+    issued.push(access, refresh);
     const body: TokenReply = {
       access_token: access,
       token_type: "Bearer",
       expires_in: options.accessTokenTtlSec,
+      refresh_token: refresh,
     };
-    if (options.issueRefreshToken) {
-      const refresh = token("rt");
-      refreshTokens.set(refresh, clientId);
-      issued.push(refresh);
-      body.refresh_token = refresh;
-    }
     if (options.grantedScope !== null) body.scope = options.grantedScope;
     return body;
   };

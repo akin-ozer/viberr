@@ -394,7 +394,7 @@ describe("startBackendLogin (claude)", () => {
   });
 
   it("refuses to record a sign-in the vendor does not confirm", async () => {
-    setFakeVendorLoggedOut(true);
+    setFakeVendorLoggedOut();
     start("claude", "claudeai");
     await waitForLogin("claude", (view) => view.needsCode, "the code prompt");
     submitBackendLoginCode(db, ACTOR, "claude", "abc");

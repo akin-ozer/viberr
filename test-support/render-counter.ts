@@ -67,8 +67,6 @@ export interface RenderCounter {
   total: () => number;
   /** Commits seen since `attach` or `reset`. */
   commits: () => number;
-  /** Renders per component name since `attach` or `reset`, for messages. */
-  breakdown: () => Record<string, number>;
   reset: () => void;
 }
 
@@ -116,7 +114,6 @@ export function createRenderCounter(): RenderCounter {
     renders: (name) => counts.get(name) ?? 0,
     total: () => [...counts.values()].reduce((sum, n) => sum + n, 0),
     commits: () => commits,
-    breakdown: () => Object.fromEntries([...counts].sort(([a], [b]) => a.localeCompare(b))),
     reset: () => {
       counts = new Map();
       commits = 0;
@@ -165,6 +162,5 @@ export function observeMutations(target: Node) {
       const out = [...delivered.splice(0), ...observer.takeRecords()];
       return out;
     },
-    disconnect: () => observer.disconnect(),
   };
 }

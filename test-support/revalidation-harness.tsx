@@ -15,7 +15,6 @@ import {
   type DataStrategyResult,
   type LoaderFunctionArgs,
   type RouteObject,
-  type ShouldRevalidateFunction,
 } from "react-router";
 import type { SseEvent } from "~/schemas/sse-event.schema";
 import {
@@ -84,8 +83,6 @@ export class BrokerEventSource {
   onerror: (() => void) | null = null;
   private readonly listeners = new Map<string, ((event: MessageEvent<string>) => void)[]>();
   private handle: SseConnectionHandle | null = null;
-  /** What the browser sends as `Last-Event-ID` when it retries this source. */
-  private lastSeenId: number | null = null;
 
   constructor(url: string) {
     this.url = url;
@@ -112,8 +109,7 @@ export class BrokerEventSource {
       .map(parseSseScope)
       .filter((s): s is SseScope => s !== null);
     const query = url.searchParams.get("lastEventId");
-    const lastEventId =
-      this.lastSeenId ?? (query !== null && /^\d+$/.test(query) ? Number(query) : null);
+    const lastEventId = query !== null && /^\d+$/.test(query) ? Number(query) : null;
     this.readyState = BrokerEventSource.OPEN;
     this.onopen?.();
     this.handle = connectSseClient({
@@ -122,15 +118,6 @@ export class BrokerEventSource {
       lastEventId,
       write: (chunk) => this.receive(chunk),
     });
-  }
-
-  /** A transient drop: the response ends and the browser retries on its own
-   *  (readyState CONNECTING), sending the last id it saw. */
-  drop(): void {
-    this.handle?.close();
-    this.handle = null;
-    this.readyState = BrokerEventSource.CONNECTING;
-    this.onerror?.();
   }
 
   /** A non-200 answer: the connection FAILS and the browser never retries. */
@@ -152,7 +139,6 @@ export class BrokerEventSource {
         else if (line.startsWith("data: ")) data = line.slice(6);
       }
       if (!data) continue;
-      if (id) this.lastSeenId = Number(id);
       const event = new MessageEvent<string>(name, { data, lastEventId: id });
       for (const listener of this.listeners.get(name) ?? []) listener(event);
     }
@@ -290,12 +276,6 @@ async function taskLoader({ request, params }: LoaderFunctionArgs) {
 export interface HarnessOptions {
   /** Where the tab starts. */
   path: string;
-  /**
-   * Replaces a route's `shouldRevalidate` (each defaults to the one its route
-   * module exports: `revalidateWhen(<id>)`, ruling 457). `null` leaves the
-   * route on React Router's default, as it was before ruling 457.
-   */
-  shouldRevalidate?: Partial<Record<HarnessRouteId, ShouldRevalidateFunction | null>>;
   /** Runs inside the task action, before it answers (its writes' events). */
   onTaskAction?: () => void;
   /** The status the task action answers with (a refusal is a 4xx). */
@@ -446,17 +426,13 @@ export function mountHarness(options: HarnessOptions): Harness {
     version += 1;
     return { id, n, version };
   };
-  const rule = (id: HarnessRouteId) => {
-    const override = options.shouldRevalidate?.[id];
-    if (override === null) return undefined;
-    return override ?? revalidateWhen(id);
-  };
+  // Each route revalidates as its module's `shouldRevalidate` says (ruling 457).
   const routes: RouteObject[] = [
     {
       id: "root",
       path: "/",
       loader: counted("root"),
-      shouldRevalidate: rule("root"),
+      shouldRevalidate: revalidateWhen("root"),
       element: (
         <RootShell>
           <Outlet />
@@ -483,14 +459,14 @@ export function mountHarness(options: HarnessOptions): Harness {
           id: "routes/project",
           path: "projects/:slug",
           loader: counted("routes/project"),
-          shouldRevalidate: rule("routes/project"),
+          shouldRevalidate: revalidateWhen("routes/project"),
           element: <Layout />,
           children: [
             {
               id: "routes/project.board",
               path: "board",
               loader: counted("routes/project.board"),
-              shouldRevalidate: rule("routes/project.board"),
+              shouldRevalidate: revalidateWhen("routes/project.board"),
               action: () => {
                 tally.actions += 1;
                 options.onBoardAction?.();
@@ -502,7 +478,7 @@ export function mountHarness(options: HarnessOptions): Harness {
               id: "routes/project.task",
               path: "tasks/:key",
               loader: taskLoader,
-              shouldRevalidate: rule("routes/project.task"),
+              shouldRevalidate: revalidateWhen("routes/project.task"),
               action: ({ request }) => {
                 tally.actions += 1;
                 const answer = (text: string) => {

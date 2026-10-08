@@ -55,7 +55,6 @@ export const FAKE_CODEX_URL = "https://auth.openai.com/codex/device";
 
 export interface FakeVendorBinaries {
   binaries: BackendBinaries;
-  dir: string;
   cleanup(): void;
 }
 
@@ -236,7 +235,6 @@ export function writeFakeVendorBinaries(): FakeVendorBinaries {
   chmodSync(codex, 0o755);
   return {
     binaries: { claude, codex },
-    dir,
     cleanup: () => rmSync(dir, { recursive: true, force: true }),
   };
 }
@@ -247,24 +245,21 @@ export function setFakeVendorMode(mode: FakeVendorMode): void {
 }
 
 /** Make the vendors' status commands report a session that never landed. */
-export function setFakeVendorLoggedOut(loggedOut: boolean): void {
-  if (loggedOut) process.env[FAKE_VENDOR_STATUS_ENV] = "logged-out";
-  else delete process.env[FAKE_VENDOR_STATUS_ENV];
+export function setFakeVendorLoggedOut(): void {
+  process.env[FAKE_VENDOR_STATUS_ENV] = "logged-out";
 }
 
 /** Make the vendors' logout commands fail, the way a revoke that could not
  *  reach the provider does. The disconnect must survive it: the local half —
  *  the credential file and the row — is what makes the account unusable here. */
-export function setFakeVendorLogoutExit(code: number | null): void {
-  if (code === null) delete process.env[FAKE_VENDOR_LOGOUT_EXIT_ENV];
-  else process.env[FAKE_VENDOR_LOGOUT_EXIT_ENV] = String(code);
+export function setFakeVendorLogoutExit(code: number): void {
+  process.env[FAKE_VENDOR_LOGOUT_EXIT_ENV] = String(code);
 }
 
 /** Ruling 507: also record every logout in `dir`, which outlives the home the
  *  logout ran in (see `FAKE_VENDOR_EVIDENCE_ENV`). */
-export function setFakeVendorEvidenceDir(dir: string | null): void {
-  if (dir === null) delete process.env[FAKE_VENDOR_EVIDENCE_ENV];
-  else process.env[FAKE_VENDOR_EVIDENCE_ENV] = dir;
+export function setFakeVendorEvidenceDir(dir: string): void {
+  process.env[FAKE_VENDOR_EVIDENCE_ENV] = dir;
 }
 
 /** Clear every knob. Call it in `afterEach`: these live on the worker's own
