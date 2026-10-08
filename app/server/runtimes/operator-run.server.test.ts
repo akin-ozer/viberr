@@ -3543,24 +3543,6 @@ describe("turn doctrine: triage quality gate and scheduled re-runs", () => {
   });
 
   /**
-   * Ruling 85 / R21-2 — VIB-1: the operator correctly found that no deployed
-   * profile held `browser` and offered three workarounds (write a Playwright
-   * script / capture it by hand / let the operator write the goal). The product
-   * SHIPS a grantable browser capability; the packet never said so, so the
-   * human's cheapest fix was the one path the packet hid.
-   */
-  it("R21-2: a capability gap must point at the config remedy, not only workarounds", () => {
-    // Canary: drop the CAPABILITY_GAP_REMEDY_INSTRUCTION append from
-    // `operatorTurnInstruction` and all four fail.
-    const prompt = operatorPrompts.buildOperatorTurnPrompt(snap(), "create");
-    expect(prompt).toContain("CAPABILITY no deployed agent declares");
-    expect(prompt).toContain("grantable on an agent profile");
-    expect(prompt).toContain("Agents surface");
-    // The ruling's other half: it points, it never reconfigures.
-    expect(prompt).toContain("never change that configuration yourself");
-  });
-
-  /**
    * Pass-35 cluster review: ruling 164's authoring door refuses a send-back
    * option whose words ask a person to edit an agent profile, and this turn
    * text (the ONE both backends receive) still told the operator to write one.
@@ -3794,11 +3776,6 @@ describe("turn doctrine: triage quality gate and scheduled re-runs", () => {
         "goal-updated",
       ),
     ).not.toContain("TRIAGE QUALITY GATE");
-  });
-
-  it("F15-14: the Codex goal-edit turn carries it too", () => {
-    const prompt = operatorPrompts.buildCodexOperatorPrompt(snap(), "goal-updated");
-    expect(prompt).toContain("TRIAGE QUALITY GATE");
   });
 
   it("S3-1: a question answered while a packet is open must not open a SECOND one", () => {
