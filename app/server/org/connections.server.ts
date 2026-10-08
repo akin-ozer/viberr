@@ -313,9 +313,9 @@ export function getDefaultConnection(
 
 /**
  * Decrypted token of the default connection ONLY when its last validation
- * passed — the StoreBrowser GitHub import uses this. SERVER-INTERNAL.
+ * passed — the core of `getDefaultConnectionTokenFresh`.
  */
-export function getDefaultConnectionToken(
+function getDefaultConnectionToken(
   db: DatabaseSync,
 ): { connection: ConnectionRecord; token: string } | null {
   const connection = getDefaultConnection(db);

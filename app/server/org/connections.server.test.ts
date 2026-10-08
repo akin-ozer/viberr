@@ -27,7 +27,6 @@ import {
   createConnection,
   ensureConnectionFresh,
   getDefaultConnection,
-  getDefaultConnectionToken,
   getDefaultConnectionTokenFresh,
   listConnections,
   recheckConnection,
@@ -290,12 +289,12 @@ describe("default + remove", () => {
   it("default token is only handed out after a passing validation", async () => {
     const db = makeDbWithUser();
     await twoConnections(db);
-    const info = getDefaultConnectionToken(db);
+    const info = await getDefaultConnectionTokenFresh(db);
     expect(info).not.toBeNull();
     expect(info!.token).toBe("ghp_valid_token_42af");
     // Wipe the cached validation → honest null.
     db.prepare(`UPDATE github_pats SET validation_json = NULL`).run();
-    expect(getDefaultConnectionToken(db)).toBeNull();
+    expect(await getDefaultConnectionTokenFresh(db)).toBeNull();
   });
 });
 
