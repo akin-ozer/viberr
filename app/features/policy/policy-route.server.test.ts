@@ -155,12 +155,14 @@ describe("loader", () => {
 });
 
 describe("set-guardrail (E32-6, pass 32)", () => {
-  it("rejects a contributor (Edit workflow & policy is admin-only)", async () => {
-    // SAFETY: selin is a contributor; the admin-only capability check raises
+  it("rejects a maintainer (Edit workflow & policy is admin-only)", async () => {
+    // A maintainer, the tier just below the grant: a contributor would be
+    // refused by a maintainer-level gate too.
+    // SAFETY: murat is a maintainer; the admin-only capability check raises
     // an AppError the action answers through `appErrorResponse`.
     // SAFETY: this call is refused (a capability or validation AppError the
     // action answers through `appErrorResponse`), so the data is the refusal shape.
-    const result = (await postAction(ids.selin, {
+    const result = (await postAction(ids.murat, {
       intent: "set-guardrail",
       id: "meaningful-comment",
       op: "off",
@@ -463,10 +465,10 @@ describe("set-role", () => {
 });
 
 describe("set-boundary", () => {
-  it("rejects a reviewer (Edit workflow & policy is admin-only)", async () => {
-    // SAFETY: a contributor fails the admin-only capability check, which raises
+  it("rejects a maintainer (Edit workflow & policy is admin-only)", async () => {
+    // SAFETY: a maintainer fails the admin-only capability check, which raises
     // an AppError the action answers through `appErrorResponse`.
-    const result = (await postAction(ids.selin, {
+    const result = (await postAction(ids.murat, {
       intent: "set-boundary",
       from: "impl",
       to: "review",
