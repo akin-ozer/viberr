@@ -18,7 +18,6 @@ import {
   writeTask,
   type TestStore,
 } from "../../../test-support/test-store";
-import { COMPACTION_TITLE } from "./timeline-compaction.server";
 import { listAuditEvents } from "../../../test-support/audit-log";
 import { deriveValidation } from "~/schemas/task-file.schema";
 import type {
@@ -804,7 +803,7 @@ describe("appendComment", () => {
       dataRoot: store.dataRoot,
     })!.parsed.timeline;
     // The older routine comments folded into a compaction marker.
-    expect(timeline.some((e) => e.title === COMPACTION_TITLE)).toBe(true);
+    expect(timeline.some((e) => e.title === "Compacted")).toBe(true);
     expect(timeline.length).toBeLessThan(flood.length + 1);
   });
 
@@ -873,7 +872,7 @@ describe("appendComment", () => {
       taskKey: "VIB-1",
       dataRoot: store.dataRoot,
     })!.parsed.timeline;
-    expect(timeline.some((e) => e.title === COMPACTION_TITLE)).toBe(true);
+    expect(timeline.some((e) => e.title === "Compacted")).toBe(true);
     // 15 events + this comment, folded well below the configured threshold of
     // 10 — proof the guardrail's VALUE drives the pass (it used to be a
     // hardcoded 60, which this timeline never reaches).
@@ -908,7 +907,7 @@ describe("appendComment", () => {
       taskKey: "VIB-1",
       dataRoot: store.dataRoot,
     })!.parsed.timeline;
-    expect(timeline.some((e) => e.title === COMPACTION_TITLE)).toBe(false);
+    expect(timeline.some((e) => e.title === "Compacted")).toBe(false);
     expect(timeline).toHaveLength(flood.length + 1);
   });
 

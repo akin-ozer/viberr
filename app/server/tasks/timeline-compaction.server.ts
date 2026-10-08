@@ -50,7 +50,7 @@ import {
  */
 
 /** A compaction marker is a plain comment whose title is exactly this. */
-export const COMPACTION_TITLE = "Compacted";
+const COMPACTION_TITLE = "Compacted";
 
 export interface CompactionOptions {
   /** Compact only when the timeline has more than this many events. */

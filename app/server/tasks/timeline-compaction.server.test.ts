@@ -3,10 +3,11 @@ import {
   VERDICT_REPORT_TITLE,
   type TaskFileEvent,
 } from "~/schemas/task-file.schema";
-import {
-  COMPACTION_TITLE,
-  compactTimelineEvents,
-} from "./timeline-compaction.server";
+import { compactTimelineEvents } from "./timeline-compaction.server";
+
+/** The title a compaction marker carries in canonical `task.md`
+ *  (file-formats.md): what a later pass recognises one by. */
+const MARKER = "Compacted";
 
 function comment(i: number, opts: Partial<TaskFileEvent> = {}): TaskFileEvent {
   return {
@@ -49,7 +50,7 @@ describe("compactTimelineEvents", () => {
     // The 10 recent survive verbatim.
     expect(out.slice(0, 10)).toEqual(events.slice(0, 10));
     // The 20 old routine comments collapse to a single marker.
-    const markers = out.filter((e) => e.title === COMPACTION_TITLE);
+    const markers = out.filter((e) => e.title === MARKER);
     expect(markers).toHaveLength(1);
     expect(markers[0]!.text).toContain("20 earlier routine comments");
     expect(markers[0]!.text).toContain("human comments are never compacted");
@@ -83,7 +84,7 @@ describe("compactTimelineEvents", () => {
     // marker is folded into the second, its count of 12 gone.
     const later = [...Array.from({ length: 3 }, (_, i) => comment(200 + i)), ...once];
     const twice = compactTimelineEvents(later, { threshold: 12, keepRecent: 10 });
-    expect(twice.filter((e) => e.title === COMPACTION_TITLE).map((e) => e.text)).toEqual([
+    expect(twice.filter((e) => e.title === MARKER).map((e) => e.text)).toEqual([
       "_3 earlier routine comments compacted to keep the task readable; human comments are never compacted._",
       "_12 earlier routine comments compacted to keep the task readable; human comments are never compacted._",
     ]);
@@ -146,7 +147,7 @@ describe("compactTimelineEvents — who may be compacted (B-FD9)", () => {
     expect(out.length).toBeLessThan(events.length); // machine prose still folds
     expect(out.some((e) => e.text.startsWith("pnpm-lock.yaml is leased"))).toBe(true);
     // And the marker's promise is now true of everything it covers.
-    const marker = out.find((e) => e.title === COMPACTION_TITLE)!;
+    const marker = out.find((e) => e.title === MARKER)!;
     expect(marker.text).toContain("human comments are never compacted");
     expect(
       out.filter((e) => e.actor.kind === "controller" || e.actor.kind === "human"),
@@ -214,7 +215,7 @@ describe("compactTimelineEvents — who may be compacted (B-FD9)", () => {
     const replies = out.filter((e) => e.actor.kind === "agent");
     expect(replies).toHaveLength(1);
     expect(replies[0]!.text).toBe("routine comment 60");
-    const markers = out.filter((e) => e.title === COMPACTION_TITLE);
+    const markers = out.filter((e) => e.title === MARKER);
     expect(markers).toHaveLength(1);
     expect(markers[0]!.text).toContain("7 earlier routine comments");
 
@@ -319,7 +320,7 @@ describe("compactTimelineEvents — who may be compacted (B-FD9)", () => {
       ...Array.from({ length: 4 }, (_, i) => comment(50 - i)),
     ];
     const out = compactTimelineEvents(events, { threshold: 12, keepRecent: 10 });
-    expect(out.find((e) => e.occurredAt === comment(55).occurredAt && e.title !== COMPACTION_TITLE)).toBeUndefined();
+    expect(out.find((e) => e.occurredAt === comment(55).occurredAt && e.title !== MARKER)).toBeUndefined();
   });
 
   /**
