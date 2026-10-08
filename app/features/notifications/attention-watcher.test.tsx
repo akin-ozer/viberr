@@ -3,7 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { act, cleanup, render, waitFor } from "@testing-library/react";
 import { createMemoryRouter, Outlet, RouterProvider } from "react-router";
 import { MemoryStorage } from "../../../test-support/memory-storage";
-import { ATTENTION_POLL_MS, AttentionWatcher } from "./attention-watcher";
+import { AttentionWatcher } from "./attention-watcher";
 import type { AttentionItem, AttentionSnapshot } from "./desktop-alerts";
 
 /**
@@ -85,10 +85,15 @@ function renderWatcher() {
   return router;
 }
 
+/** Ruling 481(c): a tab without the person's attention reads every 60 s.
+ *  CANARY: read on any other interval and a hidden tab below reads twice in
+ *  one poll, or not at all. */
+const POLL_MS = 60_000;
+
 /** One poll: the watcher's timer fires and its read lands. */
 async function poll() {
   await act(async () => {
-    await vi.advanceTimersByTimeAsync(ATTENTION_POLL_MS);
+    await vi.advanceTimersByTimeAsync(POLL_MS);
   });
 }
 
