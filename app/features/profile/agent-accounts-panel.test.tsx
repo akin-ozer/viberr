@@ -1380,12 +1380,13 @@ describe("rulings 507 and 616: several accounts on one backend", () => {
   // left, or a sign-in from another tab in the card's place, the dialog went
   // with the accounts but the card's state kept it, and the next load that
   // showed an account opened it again with nobody asking.
-  // CANARY: drop the reset of `confirmDisconnect` in `AgentAccountCard`
-  // (agent-accounts-panel.tsx) and the sign-in row ends with the dialog open;
-  // render the dialog from the account the Disconnect was pressed on instead
-  // of finding it in the load (agent-account-in-use.tsx) and the other rows
-  // do too; hold the account itself and find it by identity instead of id,
-  // and the load that changed nothing closes it under the person reading it.
+  // CANARY: drop `setConfirmDisconnect(null)` from the region reset in
+  // `AgentAccountCard` (agent-accounts-panel.tsx) and the sign-in row ends
+  // with the dialog open; render the dialog from the account the Disconnect
+  // was pressed on instead of finding it in the load (agent-account-in-use.tsx)
+  // and the other rows do too; hold the account itself and find it by
+  // identity instead of id, and the load that changed nothing closes it under
+  // the person reading it.
   it.each<[string, ClaudeOnServer[], string]>([
     [
       "another tab disconnects it and other accounts remain",
@@ -1487,12 +1488,11 @@ describe("rulings 507 and 616: several accounts on one backend", () => {
   // account a sign-in in another tab had just added. The add section goes as
   // its Cancel closes it, key form and all, so opening it again later starts
   // from the ways to connect.
-  // CANARY: drop the reset of `adding` in `AgentAccountCard`
-  // (agent-accounts-panel.tsx) and every row ends with the add section open
-  // (drop only its `running` and the sign-in rows do; drop only its
-  // `setPaste(null)` and every row opens it again on the key form); drop the
-  // `running` from the reset of `managing` and the sign-in rows end with the
-  // management open.
+  // CANARY: drop `setAdding(false)` from the region reset in
+  // `AgentAccountCard` (agent-accounts-panel.tsx) and every row ends with the
+  // add section open; drop its `setPaste(null)` and every row opens it again
+  // on the key form; drop its `setManaging(false)` and the sign-in rows end
+  // with the management open.
   it.each<[string, ClaudeOnServer[], string]>([
     [
       "another tab disconnects every account, then connects a new one",
@@ -1552,6 +1552,131 @@ describe("rulings 507 and 616: several accounts on one backend", () => {
     // and the add section opens again on the ways to connect.
     chooseAction(view, inUse, "Add another Claude account");
     expect(keyField(), "the key form, opened again").toBeNull();
+  });
+
+  // A rename form sits under the account it renames: under the health line
+  // while that account is in use, in the management while it is another. It
+  // goes when its place does, as the management's Done closes it: a sign-in
+  // under way takes that place while the account is still listed. It stayed
+  // open in the card's state instead, and the load that showed its place
+  // again, or the person opening the management later, showed it again with
+  // nobody asking (under the account in use, its field took the focus as it
+  // mounted).
+  // CANARY: drop `setRenaming(null)` from the region reset in
+  // `AgentAccountCard` (agent-accounts-panel.tsx) and every row ends with the
+  // form open.
+  it.each<[string, string, ClaudeOnServer[], string | null]>([
+    [
+      "a sign-in takes the place of the account in use it renames, then is cancelled",
+      "ubc_work",
+      [
+        { accounts: [WORK, PERSONAL, KEY], login: runningLogin("claude") },
+        { accounts: [WORK, PERSONAL, KEY], login: runningLogin("claude", { state: "cancelled" }) },
+      ],
+      null,
+    ],
+    [
+      "a sign-in takes the place of the management it is in, then is cancelled",
+      "ubc_personal",
+      [
+        { accounts: [WORK, PERSONAL, KEY], login: runningLogin("claude") },
+        { accounts: [WORK, PERSONAL, KEY], login: runningLogin("claude", { state: "cancelled" }) },
+      ],
+      "Work",
+    ],
+    [
+      "a sign-in takes the place of the management it is in, then adds an account",
+      "ubc_personal",
+      [
+        { accounts: [WORK, PERSONAL, KEY], login: runningLogin("claude") },
+        {
+          accounts: [
+            account("ubc_new", "new@example.com", { active: true }),
+            { ...WORK, active: false },
+            PERSONAL,
+            KEY,
+          ],
+          login: runningLogin("claude", { state: "succeeded" }),
+        },
+      ],
+      "new@example.com",
+    ],
+  ])("a rename form closes, and stays closed, when %s", async (_label, id, loads, manageOver) => {
+    const server: ClaudeOnServer = { accounts: [WORK, PERSONAL, KEY], login: null };
+    const { view, reload } = await renderLoaded(server);
+    const field = () => view.container.querySelector(`#agentacc-${id}-name`);
+    // The account in use is renamed under its health line; another one in
+    // the management.
+    if (id !== WORK.id) chooseAction(view, "Work", "Manage other accounts");
+    const scope =
+      id === WORK.id
+        ? view.container.querySelector<HTMLElement>(".cred-card .cred-manage")!
+        : rowOf(view.container, id);
+    fireEvent.click(buttonIn(scope, "Rename"));
+    // A load that changes nothing leaves the form where the person is typing.
+    await reload();
+    expect(field()).toBeTruthy();
+
+    for (const load of loads) {
+      Object.assign(server, load);
+      await reload();
+    }
+    // Where the form would be again: under the account in use, or in the
+    // management the person opens from the picker.
+    if (manageOver) chooseAction(view, manageOver, "Manage other accounts");
+    expect(field(), "the rename form, after the loads").toBeNull();
+  });
+
+  // The key form of a card with no account sits with the ways to connect, so
+  // it goes when they do: an account connected in another tab, or a sign-in
+  // under way in their place. It stayed open in the card's state instead, so
+  // the card that came back with no account showed it again, and the first
+  // "Add another account" on a card that came back with one opened on the key
+  // form rather than on the ways to connect.
+  // CANARY: drop `setPaste(null)` from the region reset in `AgentAccountCard`
+  // (agent-accounts-panel.tsx) and every row ends with the key form open.
+  it.each<[string, ClaudeOnServer[], string | null]>([
+    [
+      "another tab connects an API key",
+      [{ accounts: [{ ...KEY, active: true }], login: null }],
+      "API key ending in abcd",
+    ],
+    [
+      "another tab's sign-in connects an account",
+      [
+        { accounts: [], login: runningLogin("claude") },
+        {
+          accounts: [account("ubc_new", "new@example.com", { active: true })],
+          login: runningLogin("claude", { state: "succeeded" }),
+        },
+      ],
+      "new@example.com",
+    ],
+    [
+      "another tab's sign-in is cancelled",
+      [
+        { accounts: [], login: runningLogin("claude") },
+        { accounts: [], login: runningLogin("claude", { state: "cancelled" }) },
+      ],
+      null,
+    ],
+  ])("the key form of a card with no account closes, and stays closed, when %s", async (_label, loads, inUse) => {
+    const server: ClaudeOnServer = { accounts: [], login: null };
+    const { view, reload } = await renderLoaded(server);
+    const keyField = () => view.container.querySelector("#agentacc-claude-api_key");
+    fireEvent.click(buttonIn(view.container.querySelector<HTMLElement>(".cred-card")!, "Use an API key"));
+    // A load that changes nothing leaves the form where the person is typing.
+    await reload();
+    expect(keyField()).toBeTruthy();
+
+    for (const load of loads) {
+      Object.assign(server, load);
+      await reload();
+    }
+    // Where the form would be again: on the card with no account, or in the
+    // first "Add another account" over the account connected.
+    if (inUse) chooseAction(view, inUse, "Add another Claude account");
+    expect(keyField(), "the key form, after the loads").toBeNull();
   });
 
   it("renames in place, and refuses a name too long in the store's own words (ruling 147)", () => {

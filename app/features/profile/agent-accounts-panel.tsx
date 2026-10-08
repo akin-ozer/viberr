@@ -140,33 +140,37 @@ function AgentAccountCard({
     void revalidator.revalidate();
   });
 
-  // The confirm asks about an account on screen, so it goes when that account
-  // does, or when a sign-in under way takes the card's accounts off it. A
-  // confirmed Disconnect closes it itself (ruling 459). It is held by id and
-  // found in each load (AccountInUse), so an account disconnected in another
-  // tab takes the dialog with it, and its id, never listed again, opens
-  // nothing later. A sign-in under way takes the accounts off the card while
-  // they are still listed, so that closes it here, or the load that showed
-  // them again would open it with nobody asking. Adjusted during render,
-  // React's pattern for state a prop invalidates, not in an effect.
-  if (confirmDisconnect && running) setConfirmDisconnect(null);
-  // "Add another account" sits beside the confirm, under the account in use,
-  // so it closes when that region goes: no account left, or a sign-in under
-  // way in its place. A sign-in that ends here connected closes it too (the
-  // poll's `onConnected`), but one ended in another tab, or seen first by a
-  // revalidation, left this state open, and the load that brought an account
-  // in use back opened the section with nobody asking. It closes as its Cancel
-  // does, key form and all, so opening it again starts from the ways to
-  // connect. Adjusted during render, as the confirm is.
-  if (adding && (running || !active)) {
+  // What the card has open belongs to the region it was opened in (the
+  // account in use and what sits under it, or the ways to connect on a card
+  // with no account) and goes when that region does, closed as its own Cancel
+  // or Done closes it: a sign-in under way takes the region's place while the
+  // accounts are still listed, the last account going takes the account in
+  // use's, and an account connected takes the ways to connect's. Kept open,
+  // it came back with the region, opened with nobody asking: the Disconnect
+  // confirm, a rename form, "Add another account" and the management under
+  // the account in use, and the key form, on the card with no account or in
+  // the next "Add another account". A sign-in this tab starts closes them
+  // too, so one that is cancelled or fails comes back to the resting card.
+  // Adjusted during render from the region last seen, React's pattern for
+  // state a prop invalidates, not in an effect.
+  const region = running ? "signing-in" : active ? "in-use" : "none";
+  const [seenRegion, setSeenRegion] = useState(region);
+  if (region !== seenRegion) {
+    setSeenRegion(region);
+    setConfirmDisconnect(null);
+    setRenaming(null);
     setAdding(false);
+    setManaging(false);
     setPaste(null);
   }
-  // The management closes with the last account it listed, so an account
-  // added later does not open it again on its own, and with its region when a
-  // sign-in under way takes it, as the add section does. Adjusted during
-  // render, so no frame paints it open and empty.
-  if (managing && (running || others.length === 0)) setManaging(false);
+  // Within the account in use's region, the confirm is held by id and found in
+  // each load (AccountInUse), so an account disconnected in another tab takes
+  // the dialog with it, and its id, never listed again, opens nothing later; a
+  // confirmed Disconnect closes it itself (ruling 459). The management closes
+  // with the last account it listed, so an account added later does not open
+  // it again on its own, and during render, so no frame paints it open and
+  // empty.
+  if (managing && others.length === 0) setManaging(false);
 
   // A completed rename or saved key closes what the person had open for it.
   // Settled on the RESULT, so a refusal leaves the field as it was. Not the
