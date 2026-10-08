@@ -853,7 +853,7 @@ describe("ruling 293: the coordinators can read the evidence", () => {
       ctx: { dataRoot: app.dataRoot },
       projectSlug: "viberr-core",
       taskKey: "VIB-1",
-      authority: operatorAuthority({}, { configuredAutonomy: "supervised", deployed: false, model: "" }),
+      authority: operatorAuthority({}, { deployed: false, model: "" }),
       orgMcpServers: {},
     });
     expect(operator.allowedTools).toContain("mcp__viberr__read_task_attachment");

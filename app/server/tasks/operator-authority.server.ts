@@ -35,24 +35,23 @@ export interface OperatorAuthority {
   /** Ruling 286: which of `kb` is the project's RULINGS knowledge base (ruling
    *  239), so its index can say it BINDS. A label; ruling 283 removed the
    *  budget this used to feed. On the authority because that is where `kb`
-   *  already lives, and hand-built test literals may omit it. */
-  rulingsKb?: string | null;
+   *  already lives; null when `kb` holds none. */
+  rulingsKb: string | null;
   /** The autonomy this run ACTUALLY holds — already clamped to
    *  {@link OperatorAuthority.configuredAutonomy}. Never above it (R19-A). */
   autonomy: OperatorAutonomy;
   /**
    * R19-A — the project deployment's CONFIGURED autonomy: the ceiling for any
-   * run. Optional on the interface only so the handful of hand-built authority
-   * literals in tests keep compiling; `resolveOperatorAuthority` always sets it.
+   * run (`supervised` when no operator is deployed).
    */
-  configuredAutonomy?: OperatorAutonomy;
+  configuredAutonomy: OperatorAutonomy;
   /**
    * R19-A — non-null when THIS run asked for more autonomy than the project
    * allows and was reduced to the ceiling. Carries what was asked for, so the
    * reduction can be named (audit row, run disclosure) instead of silently
    * happening.
    */
-  autonomyClampedFrom?: OperatorAutonomy | null;
+  autonomyClampedFrom: OperatorAutonomy | null;
   backend: RealBackend;
   model: string;
   effort: string;
@@ -87,11 +86,11 @@ export interface OperatorAuthority {
   /**
    * Ruling 672: whether this run may ask a person to connect a repository.
    * `open` on a project with none, `declined` once a person decided the board
-   * keeps none, null (or absent, on a hand-built literal) for a project that
-   * has one. It offers `ask_for_repository` on both backends and words the
-   * run's workspace section, so the tool and the sentence cannot disagree.
+   * keeps none, null for a project that has one. It offers
+   * `ask_for_repository` on both backends and words the run's workspace
+   * section, so the tool and the sentence cannot disagree.
    */
-  repositoryAsk?: RepositoryAskState | null;
+  repositoryAsk: RepositoryAskState | null;
 }
 
 /** How a gated capability resolves for the current authority. */
@@ -378,6 +377,7 @@ export function resolveOperatorAuthority(
       name: "Operator",
       skills: [],
       kb: [],
+      rulingsKb: null,
       persona: null,
       mcps: [],
       deployed: false,

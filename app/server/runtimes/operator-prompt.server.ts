@@ -456,7 +456,7 @@ export function buildOperatorSystemPrompt(
   // the alphabetically-first document inside the KB it protected. An index has
   // no budget to lose, so the operator now sees every document of every KB it
   // holds and reads the ones the work needs.
-  const rulingsKb = authority.rulingsKb ?? null;
+  const { rulingsKb } = authority;
   const kbSet = readKbIndexes(sortedNames(authority.kb), dataRoot, { rulingsKb });
   // R19-2: the SAME block, and so the same precedence rule, the specialist
   // runtime injects — one assembly, so the operator and the agents it
@@ -591,7 +591,7 @@ export function buildOperatorSystemPrompt(
   const repositoryAsk =
     authority.repositoryAsk === "open" && !toolkit.includes("ask_for_repository")
       ? null
-      : (authority.repositoryAsk ?? null);
+      : authority.repositoryAsk;
   dynamic.push(workspaceSection(workspace, isolatedWritableRoot, repositoryAsk));
   // Ruling 176: a server whose write tools an admin marked has them removed
   // from every operator run, on both backends, so it leaves the paragraph
