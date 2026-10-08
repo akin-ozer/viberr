@@ -18,6 +18,7 @@ import type { CapabilityMode } from "~/schemas/project-file.schema";
 import { readProjectFile } from "~/server/files/project-writer.server";
 import { readTaskFile } from "~/server/files/task-writer.server";
 import { rebuildAll } from "~/server/projections/rebuilder.server";
+import { upsertRun } from "~/server/runtimes/run-store.server";
 import { forceAcceptCompletion, acceptanceStanding } from "./task-acceptance.server";
 import { resolvePacket } from "./packet-resolution.server";
 import { transitionStage } from "./task-transitions.server";
@@ -392,14 +393,19 @@ describe("path 3 — operatorAcceptCompletion", () => {
     );
     expect(empty.liveRuns).toEqual([]);
 
-    store.db
-      .prepare(
-        `INSERT INTO agent_runs (id, task_key, project_slug, thread_id, role, kind,
-           backend, model, state, created_at, updated_at, agent_profile_id)
-         VALUES ('run_live1', 'VIB-1', ?, 't1', 'Implementation', 'primary',
-           'codex', 'gpt-test', 'running', ?, ?, 'blog-writer')`,
-      )
-      .run(store.slug, new Date().toISOString(), new Date().toISOString());
+    upsertRun(store.db, {
+      id: "run_live1",
+      taskKey: "VIB-1",
+      projectSlug: store.slug,
+      threadId: "t1",
+      role: "Implementation",
+      kind: "primary",
+      backend: "codex",
+      model: "gpt-test",
+      sdk: "codex-sdk",
+      agentProfileId: "blog-writer",
+      state: "running",
+    });
     const withRun = operatorSnapshot(
       store.db,
       { dataRoot: store.dataRoot },
