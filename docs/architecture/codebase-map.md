@@ -192,7 +192,8 @@ an agent's question, a stage move and the declined-recommendation title, importe
 their writers and by the reader),
 `workflow/` (templates, transitions chain maintenance, stage roles, stage eligibility,
 stage colour presets (ruling 364), packet option kinds (ruling 164), the re-verdict stage
-(ruling 163), guardrail labels),
+(ruling 163), the stages a task nobody delivers may go back to (ruling 702), guardrail
+labels),
 `mapping/` (`*.server.ts` row → render shapes for users, projects, tasks, task events,
 actors, notifications; `deriveDisplayReadiness` and the live-backend overlay live in
 `task.server.ts`), `dates/` (`format.ts`, the one timestamp formatter; `time-zone.ts`,

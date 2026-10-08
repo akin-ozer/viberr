@@ -46,6 +46,7 @@ import { logger } from "~/server/logging/logger.server";
 import { toError } from "~/shared/errors";
 import {
   autoInvokeOperator,
+  engageStagesOf,
   humanActorRef,
   nextTransitionChainDepth,
   OPERATOR_TRANSITION_CHAIN_CAP,
@@ -189,12 +190,24 @@ export async function transitionStage(
     existing.parsed.frontmatter.validation === "changed"
       ? await verdictStageOf(ctx, input.projectSlug, project, existing.parsed.frontmatter)
       : null;
+  // Ruling 702: a task that has no delivering agent and has delivered nothing
+  // may go back to a stage where one can be engaged: ruling 133 judges an
+  // unengaged profile by its declared stages, so the agent the task needs may
+  // not be one that can be engaged where it stands. Read for every backward
+  // move that is not a person's own, because the refusal below says whether a
+  // deliverer can run; the stages are the operator's alone, as the move is.
+  const engage =
+    backward && input.manual !== true
+      ? await engageStagesOf(ctx, input.projectSlug, project, existing.parsed.frontmatter)
+      : null;
+  const engageStages = ctx.operatorAuthorized === true ? (engage?.stages ?? []) : [];
   const isReworkMove =
     input.rework === true &&
     ctx.operatorAuthorized === true &&
     backward &&
     (existing.parsed.frontmatter.validation === "failing" ||
-      (changedReworkTarget !== null && input.toStageId === changedReworkTarget));
+      (changedReworkTarget !== null && input.toStageId === changedReworkTarget) ||
+      engageStages.some((e) => e.stageId === input.toStageId));
   const movingBack = input.manual === true && backward && !ctx.operatorAuthorized;
   if (!boundary && !input.manual && !isReworkMove) {
     // F19-39: this string is RENDERED to a human (an `AppError` message becomes
@@ -231,9 +244,20 @@ export async function transitionStage(
           ? ""
           : " A backward move is rework, and rework needs a failing verdict or a revision that changed after one; this task has neither."
       : "";
-    const wayOut = backward
-      ? " The engaged deliverer runs at every stage (ruling 133), so dispatch it here instead of moving the task."
-      : "";
+    // Ruling 702: the way out is named only where it exists. The sentence
+    // about the engaged deliverer used to close every refused backward move,
+    // on a task with no deliverer too, and on one whose deliverer is no
+    // longer deployed. A task the operator may take back to engage one is
+    // told where, and who.
+    const wayOut = !backward
+      ? ""
+      : engage?.deliverer === true
+        ? " The engaged deliverer runs at every stage (ruling 133), so dispatch it here instead of moving the task."
+        : engageStages.length > 0
+          ? ` It has no delivering agent and has delivered nothing, so the backward moves open to the operator are into a stage where one can be engaged: ${engageStages
+              .map((e) => `${stageName(project, e.stageId)} (${e.agents.map((a) => a.name).join(", ")})`)
+              .join(", ")}. Move it there, then hand delivery to that agent.`
+          : "";
     throw AppError.validation(
       `No allowed transition from ${stageName(project, fromStageId)} to ${stageName(project, input.toStageId)}.${why}${wayOut}`,
     );

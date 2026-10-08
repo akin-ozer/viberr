@@ -171,7 +171,10 @@ software to do the agents' work.
   diagrams first, because each saves the piece and two at once would lose one's line. The
   rulings say that the board's diagrams and cover are theirs, so its writer draws none, and
   hold what only this board knows: the size and format its destination takes pictures in,
-  and where the person's earlier covers are.
+  and where the person's earlier covers are. Deploy both at `high` effort, whatever the
+  writer runs at: on the first board that ran them a picture took 17 and 20 minutes at
+  `max` and a little over two at `high`. The reviewer passed both pictures made at `max`
+  and sent one label back at `high`, which its maker fixed in under a minute.
 - **Whose name, whose voice.** The name on a person's account is not always the name they
   sign with: take the byline from their own published work or ask, and never write the
   account's name into the rulings as the author. Their voice comes from their own writing,
