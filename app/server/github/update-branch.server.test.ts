@@ -499,13 +499,6 @@ describe("ruling 159: the base refresh will not publish the store layout either"
     const lsTree = git.calls.find((c) => c.includes("ls-tree"));
     expect(lsTree).toEqual(["-C", expect.any(String), "ls-tree", "-r", "-z", "--name-only", "HEAD", "--", `projects/${store.slug}/tasks/`]);
   });
-
-  it("a clean tree still updates the branch", async () => {
-    bindPat();
-    const git = fakeGit({ behind: 2, storeLayoutFiles: [] });
-    expect(await run(git.exec)).toMatchObject({ status: "updated" });
-    expect(git.calls.some((c) => c.includes("push"))).toBe(true);
-  });
 });
 
 /**

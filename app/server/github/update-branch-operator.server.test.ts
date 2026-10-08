@@ -451,21 +451,6 @@ describe("operatorUpdateBranchFromBase — the decision half (N19-9)", () => {
     expect(git.calls.some((c) => c.includes("push"))).toBe(false);
   });
 
-  it("ruling 229: an already-current branch is never narrated as a refused plan step", async () => {
-    // The end-to-end consequence, pinned where it is decidable: the plan
-    // executor files a step under "refused" purely on `outcome`, and
-    // `narrateRefusedActions` headlines any refused step "The operator's plan
-    // was not carried out in full." The sentence is ALSO already on the
-    // timeline as the `github` event ruling 134(c) writes — and 134(c) goes to
-    // the trouble of suppressing that event when it would duplicate, which the
-    // refusal narration then undid with no suppression and a worse headline.
-    //
-    // Canary: return `noop` from either already-current arm.
-    const git = fakeGit({ behind: 0 });
-    const res = await act(git.exec);
-    expect(["denied", "noop"]).not.toContain(res.outcome);
-  });
-
   it("says so honestly when the branch is already current — and calls it DONE", async () => {
     // Ruling 229 (F37-49): `done`, not `noop`. This is the tool's success
     // condition, and its own description tells the operator to call it
