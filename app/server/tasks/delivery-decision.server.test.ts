@@ -864,33 +864,27 @@ describe("F15-15/B-GH1: performDelivery refuses a PR over a conflicted or failed
 });
 
 describe("R15-2: the operator's deliver_for_review decision", () => {
-  it("deliverGate: absent grant = direct; explicit off = deny; recommend promotes to direct only at full autonomy", () => {
-    expect(deliverGate(authority({}))).toBe("direct");
-    expect(deliverGate(authority({ "deliver-review-pr": "off" }))).toBe("deny");
-    expect(deliverGate(authority({ "deliver-review-pr": "human" }))).toBe("deny");
-    expect(deliverGate(authority({ "deliver-review-pr": "recommend" }))).toBe("recommend");
-    expect(
-      deliverGate(authority({ "deliver-review-pr": "recommend" }, "full")),
-    ).toBe("direct");
-  });
-
-  it("R15-9: an ABSENT grant resolves from the project's governance, not a constant", () => {
-    // `deliver-review-pr` postdates every pre-R15-2 deployment, so "absent" is
-    // the normal state on existing projects. Resolving it to a flat `direct`
-    // meant a strict project created before the pass pushed branches on its own
-    // while an identical one created after asked a human first — the same
-    // governance behaving differently by creation date.
+  // `args` are `authority()`'s: the grants, the autonomy, and whether the
+  // project human-gates advancement before work starts.
+  it.each<{ label: string; args: Parameters<typeof authority>; gate: ReturnType<typeof deliverGate> }>([
+    { label: "absent grant", args: [{}, "supervised", false], gate: "direct" },
+    { label: "explicit off", args: [{ "deliver-review-pr": "off" }, "supervised", false], gate: "deny" },
+    { label: "human", args: [{ "deliver-review-pr": "human" }, "supervised", false], gate: "deny" },
+    { label: "recommend", args: [{ "deliver-review-pr": "recommend" }, "supervised", false], gate: "recommend" },
+    // Recommend promotes to direct only at full autonomy.
+    { label: "recommend at full autonomy", args: [{ "deliver-review-pr": "recommend" }, "full", false], gate: "direct" },
+    // R15-9: `deliver-review-pr` postdates every pre-R15-2 deployment, so
+    // "absent" is the normal state on existing projects. Resolving it to a flat
+    // `direct` meant a strict project created before the pass pushed branches on
+    // its own while an identical one created after asked a human first — the
+    // same governance behaving differently by creation date. An EXPLICIT grant
+    // always wins over the derived default, in both directions.
     // Canary: return "direct" unconditionally from absentDeliverReviewPrMode.
-    expect(deliverGate(authority({}, "supervised", false))).toBe("direct");
-    expect(deliverGate(authority({}, "supervised", true))).toBe("recommend");
-
-    // An EXPLICIT grant always wins over the derived default, in both directions.
-    expect(
-      deliverGate(authority({ "deliver-review-pr": "direct" }, "supervised", true)),
-    ).toBe("direct");
-    expect(
-      deliverGate(authority({ "deliver-review-pr": "off" }, "supervised", true)),
-    ).toBe("deny");
+    { label: "absent grant, human-gated project", args: [{}, "supervised", true], gate: "recommend" },
+    { label: "explicit direct, human-gated project", args: [{ "deliver-review-pr": "direct" }, "supervised", true], gate: "direct" },
+    { label: "explicit off, human-gated project", args: [{ "deliver-review-pr": "off" }, "supervised", true], gate: "deny" },
+  ])("deliverGate: $label → $gate", ({ args, gate }) => {
+    expect(deliverGate(authority(...args))).toBe(gate);
   });
 
   it("recommend mode posts a `delivery` recommendation card that round-trips the task file", async () => {
