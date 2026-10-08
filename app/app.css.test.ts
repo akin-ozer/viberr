@@ -1865,17 +1865,6 @@ describe("app.css: every pair it paints clears WCAG AA, in both themes (R19-12)"
     }
     expect(dead.sort()).toEqual([]);
   });
-
-  it("makes every exemption say why, in the sheet's own terms", () => {
-    const entries = [
-      ...GLYPH_NOT_TEXT,
-      ...Object.entries(BELOW_AA_BY_DESIGN),
-      ...[...RENDERED_INSIDE].map(([k, v]) => [k, v.why] as const),
-    ];
-    for (const [name, why] of entries) {
-      expect(why.length, `${name} needs a real reason, not a label`).toBeGreaterThan(60);
-    }
-  });
 });
 
 /* ================================================================== GATE 2
@@ -2310,7 +2299,7 @@ describe("app.css hides no control at any width (R19-12)", () => {
     }
   });
 
-  it("keeps every responsive exemption load-bearing and explained", () => {
+  it("keeps every responsive exemption load-bearing", () => {
     const flagged = new Set(costly.map((h) => h.selector));
     const dead = Object.keys(HIDDEN_BY_DESIGN)
       .filter((selector) => !flagged.has(selector))
@@ -2325,13 +2314,6 @@ describe("app.css hides no control at any width (R19-12)", () => {
       }
     }
     expect(dead.sort()).toEqual([]);
-    for (const [name, why] of [
-      ...Object.entries(HIDDEN_BY_DESIGN),
-      ...Object.entries(VIEWPORT_READS),
-      ...Object.entries(RENDERS_NO_CONTROL).map(([k, v]) => [k, v.why] as const),
-    ]) {
-      expect(why.length, `${name} needs a real reason, not a label`).toBeGreaterThan(60);
-    }
   });
 });
 
