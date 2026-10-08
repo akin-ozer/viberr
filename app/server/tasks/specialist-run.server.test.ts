@@ -3968,41 +3968,6 @@ describe("granted skills reach a Claude run NATIVELY (pass-18)", () => {
     await runAndStop("dev");
   }
 
-  /**
-   * Run `work` with git forced OFFLINE, for the two cases below that need the
-   * workspace clone to FAIL.
-   *
-   * They used to depend on github.com answering "Repository not found" — a real
-   * network round trip inside a unit test. Observed on this machine roughly one
-   * run in three: the clone instead spent ~5s reaching the network and the
-   * assertions went red for a reason that had nothing to do with the code.
-   * `cloneRepo`'s child env spreads `process.env` (`createGitHubAskpassEnv`), so
-   * a proxy pointed at a port nothing listens on produces the SAME `git exit
-   * 128` failure instantly, offline, with git's real stderr — which is exactly
-   * what the F19-6 assertion reads.
-   */
-  const PROXY_ENV_KEYS = [
-    "https_proxy", "HTTPS_PROXY", "http_proxy", "HTTP_PROXY",
-    "all_proxy", "ALL_PROXY", "no_proxy", "NO_PROXY",
-  ] as const;
-
-  async function withOfflineGit<T>(work: () => Promise<T>): Promise<T> {
-    const saved = PROXY_ENV_KEYS.map((k) => [k, process.env[k]] as const);
-    for (const key of PROXY_ENV_KEYS) {
-      process.env[key] = key.toLowerCase().startsWith("no_")
-        ? "" // never bypass the dead proxy
-        : "http://127.0.0.1:1";
-    }
-    try {
-      return await work();
-    } finally {
-      for (const [key, value] of saved) {
-        if (value === undefined) delete process.env[key];
-        else process.env[key] = value;
-      }
-    }
-  }
-
   it("mounts the grant as the run's plugin beside the workspace, passes it to the SDK, stops injecting the body, and removes it when the run settles", async () => {
     // End to end on the fresh-run path: store grant → plugin mount → RunSpec.
     // Ruling 180 (F36-9): the plugin sits BESIDE the checkout, named by the
@@ -4073,7 +4038,7 @@ describe("granted skills reach a Claude run NATIVELY (pass-18)", () => {
     deployWithSkills(["conventional-commits"]);
     writeSkill("conventional-commits", "# Commits\n\nSENTINEL-SKILL-BODY");
 
-    await withOfflineGit(runDev);
+    await runDev();
 
     expect(lastRunSpec()?.skills).toBeUndefined();
     expect(joinedPrompt(lastRunSpec()?.systemPrompt ?? "")).toContain("SENTINEL-SKILL-BODY");
@@ -4095,7 +4060,7 @@ describe("granted skills reach a Claude run NATIVELY (pass-18)", () => {
     deployWithSkills(["conventional-commits"]);
     writeSkill("conventional-commits", "# Commits\n\nSENTINEL-SKILL-BODY");
 
-    await withOfflineGit(runDev);
+    await runDev();
 
     const note = readTaskFile({
       projectSlug: store.slug,
@@ -6140,31 +6105,6 @@ describe("P19-G11 — the run records what it was given", () => {
  * no row to say so, because the row was only minted once the workspace was ready.
  */
 describe("R21-4 — the run row exists while the workspace is prepared", () => {
-  const PROXY_KEYS = [
-    "https_proxy", "HTTPS_PROXY", "http_proxy", "HTTP_PROXY",
-    "all_proxy", "ALL_PROXY", "no_proxy", "NO_PROXY",
-  ] as const;
-
-  /** A clone that fails instantly and offline (a proxy pointed at a dead port),
-   *  while still spawning a real `git` — so the await this test observes is a
-   *  genuine child process, not a resolved promise. */
-  async function withOfflineGit<T>(work: () => Promise<T>): Promise<T> {
-    const saved = PROXY_KEYS.map((k) => [k, process.env[k]] as const);
-    for (const key of PROXY_KEYS) {
-      process.env[key] = key.toLowerCase().startsWith("no_")
-        ? ""
-        : "http://127.0.0.1:1";
-    }
-    try {
-      return await work();
-    } finally {
-      for (const [key, value] of saved) {
-        if (value === undefined) delete process.env[key];
-        else process.env[key] = value;
-      }
-    }
-  }
-
   function deployWithRepo(): void {
     const fm = readProjectFile({ projectSlug: store.slug, dataRoot: store.dataRoot })!
       .parsed.frontmatter;
@@ -6199,33 +6139,33 @@ describe("R21-4 — the run row exists while the workspace is prepared", () => {
     );
 
     const observed: { runId: string; phase: string | null; step: string | null }[] = [];
-    await withOfflineGit(async () => {
-      const pending = startAgentRun(
-        store.db,
-        { projectSlug: store.slug, taskKey: "VIB-1", profileId: "dev" },
-        actorOf(store.users.arda),
-        { dataRoot: store.dataRoot },
-      );
-      // Poll while the clone's child process is in flight. Bounded, and it can
-      // only end early by the run finishing — which would itself be the failure
-      // this asserts against (nothing visible during preparation).
-      for (let i = 0; i < 200; i++) {
-        const row = listRunsForTaskRows(store.db, store.slug, "VIB-1")[0];
-        if (row?.phase === "Preparing workspace") {
-          observed.push({ runId: row.id, phase: row.phase, step: row.step });
-          break;
-        }
-        await new Promise((r) => setTimeout(r, 5));
+    // The clone spawns a real `git`, which setup-env's `GIT_ALLOW_PROTOCOL=file`
+    // refuses at once and offline: the await observed below is a genuine child
+    // process, not a resolved promise.
+    const pending = startAgentRun(
+      store.db,
+      { projectSlug: store.slug, taskKey: "VIB-1", profileId: "dev" },
+      actorOf(store.users.arda),
+      { dataRoot: store.dataRoot },
+    );
+    // Poll while the clone's child process is in flight. Bounded, and it can
+    // only end early by the run finishing — which would itself be the failure
+    // this asserts against (nothing visible during preparation).
+    for (let i = 0; i < 200; i++) {
+      const row = listRunsForTaskRows(store.db, store.slug, "VIB-1")[0];
+      if (row?.phase === "Preparing workspace") {
+        observed.push({ runId: row.id, phase: row.phase, step: row.step });
+        break;
       }
-      const run = await pending;
-      const { interruptRun } = await import("~/server/runtimes/run-service.server");
-      await interruptRun(
-        store.db,
-        { projectSlug: store.slug, taskKey: "VIB-1", runId: run.runId, dataRoot: store.dataRoot },
-        actorOf(store.users.arda),
-      );
-      return run;
-    });
+      await new Promise((r) => setTimeout(r, 5));
+    }
+    const run = await pending;
+    const { interruptRun } = await import("~/server/runtimes/run-service.server");
+    await interruptRun(
+      store.db,
+      { projectSlug: store.slug, taskKey: "VIB-1", runId: run.runId, dataRoot: store.dataRoot },
+      actorOf(store.users.arda),
+    );
 
     expect(observed).toHaveLength(1);
     // Named: a spinner over a blank line is what the human already had. D1: this
