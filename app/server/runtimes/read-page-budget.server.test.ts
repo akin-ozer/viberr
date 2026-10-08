@@ -1,11 +1,11 @@
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { mkdirSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { readKbDocForRun } from "~/server/files/kb-injection.server";
 import { readTaskAttachment, writeTaskAttachment } from "~/server/files/task-attachments.server";
 import { pageOfText } from "~/server/tasks/operator-repo-read.server";
 import { pageEnd, READ_PAGE_BYTES } from "./read-page-budget.server";
+import { createTempDirs } from "../../../test-support/temp-dirs";
 
 /**
  * Ruling 624: one page of any agent read reaches a Codex code-mode run whole.
@@ -20,15 +20,8 @@ const codexTokens = (printed: string) => Buffer.byteLength(printed) / 4;
 /** A tool's text result as an agent prints it: the result object, as JSON. */
 const asToolResult = (text: string) => JSON.stringify({ content: [{ type: "text", text }] });
 
-const roots: string[] = [];
-afterEach(() => {
-  for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true });
-});
-function tempRoot(): string {
-  const root = mkdtempSync(path.join(tmpdir(), "viberr-623-"));
-  roots.push(root);
-  return root;
-}
+const temp = createTempDirs();
+afterEach(temp.cleanup);
 
 /** Tables, accents, dashes and an emoji: the text a knowledge base holds, at
  *  more bytes per character than ASCII. */
@@ -64,7 +57,7 @@ describe("ruling 624: pageEnd", () => {
 describe("ruling 624: one page of every agent read fits a Codex code-mode tool output", () => {
   it("a knowledge-base page, printed as its tool result", () => {
     // CANARY: put KB pages back at 48,000 characters.
-    const dataRoot = tempRoot();
+    const dataRoot = temp.make("viberr-623-");
     const kbDir = path.join(dataRoot, "kb", "notes");
     mkdirSync(kbDir, { recursive: true });
     for (const [name, text] of [["ascii.md", "a".repeat(100_000)], ["mixed.md", mixedText(100_000)]] as const) {
@@ -77,7 +70,7 @@ describe("ruling 624: one page of every agent read fits a Codex code-mode tool o
 
   it("a task attachment page, printed as the reader's JSON", () => {
     // CANARY: put attachment pages back at 40,000 characters.
-    const root = tempRoot();
+    const root = temp.make("viberr-623-");
     for (const [name, text] of [["ascii.md", "a".repeat(100_000)], ["mixed.md", mixedText(100_000)]] as const) {
       writeTaskAttachment("p1", "VIB-1", name, new TextEncoder().encode(text), root);
       const read = readTaskAttachment("p1", "VIB-1", name, root);
