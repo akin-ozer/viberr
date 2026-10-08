@@ -150,7 +150,7 @@ function applyAutonomyCeiling(
  * specialist) applies the acceptance ceiling on top, so a supervised operator's
  * "Accept completion into Done" renders under RECOMMENDS ONLY — mirroring the
  * runtime gate — instead of ACTS DIRECTLY, authority the server refuses. */
-export function capabilitiesToActionLabels(
+function capabilitiesToActionLabels(
   capabilities: CapabilityGrantView[],
   extras: { label: string; mode: CapabilityMode }[],
   autonomy?: "supervised" | "full",
