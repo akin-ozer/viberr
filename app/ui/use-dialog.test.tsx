@@ -142,8 +142,11 @@ describe("useDialog focus restore", () => {
     const confirm = getByRole("button", { name: "Undo it" });
     confirm.focus();
     fireEvent.click(confirm);
-    // The opener can no longer take the focus back: disabled, or gone.
-    expect(opener.isConnected && !opener.matches(":disabled")).toBe(false);
+    // The opener can no longer take the focus back: disabled where the row
+    // disables it, gone where it replaces or deletes it, so each row runs the
+    // path its title names.
+    expect(opener.isConnected).toBe(does === "disables");
+    if (does === "disables") expect(opener).toHaveProperty("disabled", true);
     fireEvent.transitionEnd(dialog);
     expect(dialog.isConnected).toBe(false);
     expect(document.activeElement?.tagName).toBe(lands);
