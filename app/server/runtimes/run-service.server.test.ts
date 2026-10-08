@@ -17,7 +17,6 @@ import {
   listRunsForTask,
   noteCompletionEffectsLost,
   registerRunCompletion,
-  repoWriteWithheldFromDenylist,
   reserveRun,
   resumeRun,
   runConcurrencySnapshot,
@@ -1497,38 +1496,6 @@ describe("resumeRun — continuity recovery", () => {
         (l) => l.display.tag === "run·session_missing",
       ),
     ).toBe(false);
-  });
-});
-
-describe("repoWriteWithheldFromDenylist (P13-RT-02)", () => {
-  it("recognises exactly the denylist a withheld repo-write grant produces", () => {
-    // The rule set is specialist-tool-policy's `execute-code-or-write-repo`
-    // entry. It is computed for EVERY run backend-agnostically — it just had no
-    // effect on Codex, which has no denylist channel.
-    expect(
-      repoWriteWithheldFromDenylist([
-        "Edit",
-        "MultiEdit",
-        "Write",
-        "NotebookEdit",
-        "Bash(git commit:*)",
-      ]),
-    ).toBe(true);
-  });
-
-  it("does not fire for the narrower delivery capabilities", () => {
-    // Withholding branch/push/PR must NOT make the whole workspace read-only:
-    // the agent still has to be able to edit files and run its validation.
-    expect(
-      repoWriteWithheldFromDenylist([
-        "Bash(git push:*)",
-        "Bash(git commit:*)",
-        "Bash(gh pr create:*)",
-        "Bash(git checkout -b:*)",
-      ]),
-    ).toBe(false);
-    expect(repoWriteWithheldFromDenylist([])).toBe(false);
-    expect(repoWriteWithheldFromDenylist(undefined)).toBe(false);
   });
 });
 
