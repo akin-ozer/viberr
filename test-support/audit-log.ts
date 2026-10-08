@@ -38,7 +38,9 @@ type AuditEventRow = {
 };
 
 /**
- * Newest-first, optionally filtered to one action.
+ * Newest-first, optionally filtered to one action; every row unless `limit`
+ * caps it (SQLite reads a negative LIMIT as none), so a count or an absence
+ * reads the whole table.
  *
  * Rows of one instant come back in the order they were written, newest first
  * (`rowid`), as the app's own audit readers order them. `occurred_at` is a
@@ -50,7 +52,7 @@ export function listAuditEvents(
   db: DatabaseSync,
   options: { limit?: number; action?: string } = {},
 ): AuditEventRecord[] {
-  const limit = options.limit ?? 100;
+  const limit = options.limit ?? -1;
   // SAFETY: `SELECT *` names every column of `audit_events`, and 0001_baseline
   // declares `id`, `occurred_at`, `actor_label` and `action` NOT NULL there and
   // the rest nullable TEXT — which is exactly how AuditEventRow types them.

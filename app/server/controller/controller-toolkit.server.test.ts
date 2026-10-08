@@ -3388,8 +3388,7 @@ describe("save_global_agent: grants are store keys, and an omitted list is left 
 describe("update_agent_deployment refuses catalogued values by name (ruling 139)", () => {
   async function refused(args: Record<string, JsonValue>): Promise<string> {
     const before = await projectMd();
-    // The newest row, never a count: `listAuditEvents` reads at most 100 rows,
-    // and this file has written more than that before it gets here.
+    // The newest row: a refusal that wrote an audit row would have replaced it.
     const newest = listAuditEvents(app.db, { limit: 1 })[0]?.id;
     const reply = await call(ids.projectAdmin, "update_agent_deployment", args);
     expect(reply.startsWith("[error] ")).toBe(true);
