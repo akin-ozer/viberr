@@ -84,6 +84,16 @@ function parsed(overrides: Partial<ParsedTaskFile> = {}): ParsedTaskFile {
   };
 }
 
+type AnchorInput = Parameters<typeof canonicalTaskAnchor>[0];
+
+/** The anchor on a project that leases no file and declares no gate; a case
+ *  about either passes its own. */
+function anchorOf(
+  input: Omit<AnchorInput, "fileLeases" | "gates"> & Partial<Pick<AnchorInput, "fileLeases" | "gates">>,
+): string {
+  return canonicalTaskAnchor({ fileLeases: [], gates: [], ...input });
+}
+
 beforeEach(async () => {
   ctx = createTestDbContext();
   store = setupTestStore(ctx);
@@ -117,7 +127,7 @@ afterEach(async () => {
 
 describe("canonicalTaskAnchor", () => {
   it("carries goal, stage, readiness, waiting, validation and the delivery refs", () => {
-    const anchor = canonicalTaskAnchor({ parsed: parsed(), stageName: "In Progress" });
+    const anchor = anchorOf({ parsed: parsed(), stageName: "In Progress" });
     expect(anchor).toContain("Ship the CURRENT goal, not the one you remember.");
     expect(anchor).toContain("stage: In Progress");
     expect(anchor).toContain("readiness: ready");
@@ -144,7 +154,7 @@ describe("canonicalTaskAnchor", () => {
         { kind: "custom", t: "Postgres", d: "", rec: false },
       ],
     };
-    const anchor = canonicalTaskAnchor({ parsed: parsed({ packet }), stageName: "Review" });
+    const anchor = anchorOf({ parsed: parsed({ packet }), stageName: "Review" });
     expect(anchor).toContain("Which storage backend?");
     expect(anchor).toContain("SQLite");
     expect(anchor).toContain("Postgres");
@@ -164,7 +174,7 @@ describe("canonicalTaskAnchor", () => {
       "Blocking findings:\n\n- internal/store/store.go:825 snapshot errors occur " +
       "after the WAL is synced, so Create returns an error while Get sees the object. " +
       "X".repeat(600);
-    const anchor = canonicalTaskAnchor({
+    const anchor = anchorOf({
       parsed: parsed({
         frontmatter: baseTaskFrontmatter("VIB-1", {
           stage: "impl",
@@ -243,19 +253,19 @@ describe("canonicalTaskAnchor", () => {
       },
     });
     // CANARY: drop the gates section from canonicalTaskAnchor.
-    const anchor = canonicalTaskAnchor({ parsed: parsed({ frontmatter }), stageName: "Review", gates });
+    const anchor = anchorOf({ parsed: parsed({ frontmatter }), stageName: "Review", gates });
     expect(anchor).toContain("### Project gates (run by Viberr on the revision under review)");
     expect(anchor).toContain("Gates on ddddddd: 1/2 exit 0 (run by Viberr)");
     expect(anchor).toContain("- `check` (`pnpm astro check`): exit 1 in 9 s · log: attachments/gate-ddddddd-02-check-20260925T100042Z.log");
     expect(anchor).toContain("Do not re-run the gates to report their result");
     // No gates declared: no section, whatever the file carries.
-    expect(canonicalTaskAnchor({ parsed: parsed({ frontmatter }), stageName: "Review" })).not.toContain(
+    expect(anchorOf({ parsed: parsed({ frontmatter }), stageName: "Review" })).not.toContain(
       "Project gates",
     );
   });
 
   it("ruling 392: a task with no standing verdict gains no section", () => {
-    const anchor = canonicalTaskAnchor({ parsed: parsed(), stageName: "In Progress" });
+    const anchor = anchorOf({ parsed: parsed(), stageName: "In Progress" });
     expect(anchor).not.toContain("Review verdicts that stand right now");
   });
 
@@ -269,7 +279,7 @@ describe("canonicalTaskAnchor", () => {
       toAgent: false,
       evidence: null,
     });
-    const anchor = canonicalTaskAnchor({
+    const anchor = anchorOf({
       parsed: parsed({
         goal: "g".repeat(4000),
         timeline: [1, 2, 3, 4, 5, 6, 7].map(event),
@@ -289,7 +299,7 @@ describe("canonicalTaskAnchor", () => {
     // "1=Shared … 2=RDS for SQL Server 2…", with nothing saying where the rest
     // was. CANARY: drop the stamp and a clipped answer is a dead end again;
     // stamp every entry and each whole one pays for an address it never needs.
-    const anchor = canonicalTaskAnchor({
+    const anchor = anchorOf({
       parsed: parsed({
         timeline: [
           {
@@ -336,20 +346,20 @@ describe("canonicalTaskAnchor", () => {
       toAgent: false,
       evidence: null,
     }));
-    const reader = canonicalTaskAnchor({ parsed: parsed({ timeline }), stageName: "Review", boardReader: true });
+    const reader = anchorOf({ parsed: parsed({ timeline }), stageName: "Review", boardReader: true });
     expect(reader.split("\n").at(-1)).toBe(
       "2 older entries are not shown. `read_board` on this task lists every entry by its stamp, and `read_timeline_entry` opens one whole.",
     );
-    const other = canonicalTaskAnchor({ parsed: parsed({ timeline }), stageName: "Review" });
+    const other = anchorOf({ parsed: parsed({ timeline }), stageName: "Review" });
     expect(other.split("\n").at(-1)).toBe("2 older entries are not shown.");
-    const whole = canonicalTaskAnchor({ parsed: parsed({ timeline: timeline.slice(0, 5) }), stageName: "Review", boardReader: true });
+    const whole = anchorOf({ parsed: parsed({ timeline: timeline.slice(0, 5) }), stageName: "Review", boardReader: true });
     expect(whole).not.toContain("not shown");
   });
 });
 
 describe("specialistReplyDirective", () => {
   it("prepends the canonical anchor when one is supplied", () => {
-    const anchor = canonicalTaskAnchor({ parsed: parsed(), stageName: "In Progress" });
+    const anchor = anchorOf({ parsed: parsed(), stageName: "In Progress" });
     const directive = specialistReplyDirective({
       commenterName: "Arda Test",
       taskKey: "VIB-1",
@@ -379,7 +389,9 @@ describe("specialistReplyDirective", () => {
 });
 
 describe("a RESUMED specialist re-anchors on the EDITED goal (UC-30)", () => {
-  it("the resume prompt carries the new goal, not the one the session remembers", async () => {
+  /** VIB-1, owned by arda and delivered by the deployed `dev`, whose earlier
+   *  finished run left the provider session an @mention resumes. */
+  function resumableTask(goal: string): void {
     deployDev();
     writeTask(store.dataRoot, store.slug, {
       frontmatter: baseTaskFrontmatter("VIB-1", {
@@ -398,7 +410,7 @@ describe("a RESUMED specialist re-anchors on the EDITED goal (UC-30)", () => {
           },
         ],
       }),
-      goal: "STALE: build the thing the old way.",
+      goal,
     });
     rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
 
@@ -418,6 +430,10 @@ describe("a RESUMED specialist re-anchors on the EDITED goal (UC-30)", () => {
       agentProfileId: "dev",
       state: "finished",
     });
+  }
+
+  it("the resume prompt carries the new goal, not the one the session remembers", async () => {
+    resumableTask("STALE: build the thing the old way.");
 
     // The human edits the goal, then wakes the agent.
     await updateTaskGoal(
@@ -491,5 +507,36 @@ describe("a RESUMED specialist re-anchors on the EDITED goal (UC-30)", () => {
     expect(inputs!.cloned).toBe(false);
     expect(inputs!.delivers).toBe(true);
     expect(inputs!.personaChars).toBeGreaterThan(0);
+  });
+
+  /**
+   * Ruling 245: every run's anchor names the files another task owns, high in
+   * the block, before the run edits anything. A fresh run's anchor has carried
+   * the project's leases since the ruling; the reply door built its own
+   * without them, so a person's @mention resumed the deliverer with no word of
+   * a lease until the push refused its delivery.
+   */
+  it("ruling 245: the resume prompt names the files another task owns", async () => {
+    resumableTask("Split the build into fragments.");
+    // A live holder: a finished, archived or missing one binds nobody (ruling 247).
+    writeTask(store.dataRoot, store.slug, {
+      frontmatter: baseTaskFrontmatter("VIB-9", { stage: "impl", title: "Fragment the Makefile" }),
+      goal: "Fragment the Makefile.",
+    });
+    reconfigureProject(store, {
+      fileLeases: [{ paths: ["Makefile"], taskKey: "VIB-9", reason: "splitting it into fragments" }],
+    });
+    const result = await commentToAgent(
+      store.db,
+      { projectSlug: store.slug, taskKey: "VIB-1", text: "@dev continue" },
+      { userId: store.users.arda.id, label: store.users.arda.email },
+      { dataRoot: store.dataRoot },
+    );
+    expect(result.triggered).toBe("resumed");
+    const prompt = startedRunSpecs().find((s) => s.prompt.includes("@dev continue"))?.prompt ?? "";
+    // CANARY: hand the reply door's anchor (`commentToAgent`) `fileLeases: []`
+    // and the resumed run learns of the lease only when its delivery is refused.
+    expect(prompt).toContain("### Files another task owns right now (ruling 245)");
+    expect(prompt).toContain("- `Makefile` → **VIB-9**: splitting it into fragments");
   });
 });

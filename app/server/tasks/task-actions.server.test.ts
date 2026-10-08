@@ -6453,6 +6453,7 @@ describe("ruling 245: the canonical anchor names the files another task owns", (
       },
       stageName: "Build",
       fileLeases: leases,
+      gates: [],
     });
 
   it("renders another task's lease, with its holder and its reason", () => {

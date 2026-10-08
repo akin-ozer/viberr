@@ -72,6 +72,7 @@ import {
   stageName,
 } from "./task-action-core.server";
 import { canonicalTaskAnchor, specialistReplyDirective } from "./task-replies.server";
+import { activeFileLeases } from "./file-leases.server";
 import {
   liftHoldForRun,
   markWaitingAgent,
@@ -797,15 +798,21 @@ export async function commentToAgent(
       anchor = canonicalTaskAnchor({
         parsed: existing.parsed,
         stageName: stageName(project, existing.parsed.frontmatter.stage),
+        // Ruling 245: what another task owns right now, resolved as a fresh
+        // run's anchor resolves it, so a resumed run is warned off it too.
+        fileLeases: activeFileLeases(input.projectSlug, ctx.dataRoot ? { dataRoot: ctx.dataRoot } : {}),
         // Ruling 482: what Viberr ran on the revision under review.
         gates: project.gates,
       });
     } catch {
       // A missing/unreadable project file must never block a reply run — fall
-      // back to the raw stage id rather than dropping the anchor entirely.
+      // back to the raw stage id rather than dropping the anchor entirely. The
+      // leases and the gates are read from that file, so it names neither.
       anchor = canonicalTaskAnchor({
         parsed: existing.parsed,
         stageName: existing.parsed.frontmatter.stage,
+        fileLeases: [],
+        gates: [],
       });
     }
   }

@@ -118,12 +118,11 @@ export function canonicalTaskAnchor(input: {
   /** Ruling 245: the project's file leases, so a run learns what it may not
    *  touch from STATE rather than re-deriving it from convention prose every
    *  turn. Only leases held by OTHER tasks are rendered — a holder needs no
-   *  warning about the file it was given to own. Absent on a hand-built
-   *  anchor; the real producers always pass the project's list. */
-  fileLeases?: readonly FileLease[];
+   *  warning about the file it was given to own. */
+  fileLeases: readonly FileLease[];
   /** Ruling 482: the project's declared gates, so a run reads what Viberr
-   *  itself ran on the revision under review. Absent on a hand-built anchor. */
-  gates?: readonly ProjectGate[];
+   *  itself ran on the revision under review. */
+  gates: readonly ProjectGate[];
   parsed: ParsedTaskFile;
   /** Display name of the CURRENT stage (falls back to the stage id). */
   stageName: string;
@@ -158,7 +157,7 @@ export function canonicalTaskAnchor(input: {
   // run that learns this after it has edited the file has already done the
   // thing the lease exists to stop, and the delivery refusal is then a wasted
   // turn rather than a guard.
-  const foreign = (input.fileLeases ?? []).filter((l) => l.taskKey !== fm.key);
+  const foreign = input.fileLeases.filter((l) => l.taskKey !== fm.key);
   if (foreign.length > 0) {
     lines.push("### Files another task owns right now (ruling 245)");
     lines.push(
