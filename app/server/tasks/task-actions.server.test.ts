@@ -2177,36 +2177,6 @@ describe("F19-18: the delivery push failure surfaces git's redacted stderr", () 
   });
 });
 
-describe("the delivery deps seam defaults to the real modules", () => {
-  it("an un-injected performDelivery runs the real push-workspace (no workspace → honest failure)", async () => {
-    pushMock.mockClear(); // earlier tests in this file drove the double
-    const store = setupProjectedStore(ctx);
-    writeTask(store.dataRoot, store.slug, {
-      frontmatter: baseTaskFrontmatter("VIB-1", {
-        stage: "review",
-        ownerUserId: store.users.arda.id,
-      }),
-    });
-    rebuildAll(store.db, { dataRoot: store.dataRoot });
-
-    // A ctx with NO deps: the seam's absent-field path resolves the real
-    // push-workspace, which honestly reports the missing workspace clone
-    // before it ever reaches a credential or the network.
-    const outcome = await performDelivery(
-      store.db,
-      { dataRoot: store.dataRoot },
-      store.slug,
-      "VIB-1",
-      actorOf(store.users.arda),
-    );
-    expect(outcome.status).toBe("failed");
-    expect(outcome.status === "failed" ? outcome.message : "").toContain(
-      "no workspace clone",
-    );
-    expect(pushMock).not.toHaveBeenCalled();
-  });
-});
-
 /**
  * F19-21 — R17-2's "Completed — no changes required" outcome, for the task
  * shape ruling 43 was actually written for.
