@@ -143,9 +143,8 @@ export interface OperatorMcpResolution {
   toolDenials: McpToolDenial[];
   /** Ruling 461: the mounted servers reached through Viberr's MCP gateway. */
   proxied: string[];
-  /** Ruling 486: the proxied servers signed in with OAuth, with their grants.
-   *  Optional: a prompt-shape fixture mounts none. */
-  oauthGrants?: McpRunGrant[];
+  /** Ruling 486: the proxied servers signed in with OAuth, with their grants. */
+  oauthGrants: McpRunGrant[];
 }
 
 /** Resolve the operator's MCP grants once per run (see OperatorMcpResolution).
@@ -192,6 +191,7 @@ export const NO_OPERATOR_MCPS: OperatorMcpResolution = {
   unhealthy: [],
   toolDenials: [],
   proxied: [],
+  oauthGrants: [],
 };
 
 /**
@@ -626,7 +626,7 @@ export function buildOperatorSystemPrompt(
   }
   // Ruling 461: the servers reached through Viberr's gateway, in the sentence
   // the specialist and controller prompts share.
-  const gateway = gatewayMcpSection(mcp.proxied, mcp.oauthGrants ?? []);
+  const gateway = gatewayMcpSection(mcp.proxied, mcp.oauthGrants);
   if (gateway) dynamic.push(gateway);
   if (toolDenials.length > 0) {
     dynamic.push(

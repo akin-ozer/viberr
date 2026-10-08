@@ -273,6 +273,7 @@ describe("buildOperatorSystemPrompt — safety scaffolding (A6)", () => {
       unhealthy: [],
       toolDenials: [],
       proxied: [],
+      oauthGrants: [],
     }).prompt;
     expect(prompt).toContain("MCP tools are governed too");
     expect(prompt).toContain("never use an MCP tool to merge a pull request");
@@ -291,6 +292,7 @@ describe("buildOperatorSystemPrompt — safety scaffolding (A6)", () => {
       unhealthy: [],
       toolDenials: [],
       proxied: ["cloudflare"],
+      oauthGrants: [],
     }).prompt;
     expect(prompt).toContain(
       "cloudflare is mounted through Viberr's MCP gateway: the credential is held by Viberr, " +
@@ -312,6 +314,7 @@ describe("buildOperatorSystemPrompt — safety scaffolding (A6)", () => {
       unhealthy: [],
       toolDenials: [{ server: "github", tools: ["create_pull_request", "merge_pull_request"] }],
       proxied: [],
+      oauthGrants: [],
     }).prompt;
     expect(prompt).toContain("You have tools from these attached MCP servers: ops-readonly.");
     expect(prompt).toContain("MCP write tools withheld");
@@ -325,6 +328,7 @@ describe("buildOperatorSystemPrompt — safety scaffolding (A6)", () => {
       unhealthy: [],
       toolDenials: [{ server: "github", tools: ["merge_pull_request"] }],
       proxied: [],
+      oauthGrants: [],
     }).prompt;
     expect(allGated).not.toContain("MCP tools are governed too");
     expect(allGated).toContain("Attached MCP servers: github.");
@@ -346,6 +350,7 @@ describe("buildOperatorSystemPrompt — RESOLVED MCP servers (B8)", () => {
       unhealthy: ["flaky-mcp"],
       toolDenials: [],
       proxied: [],
+      oauthGrants: [],
     }).prompt;
     expect(prompt).toContain("Attached MCP servers: flaky-mcp.");
     expect(prompt).toContain("MCP servers that may be unavailable");
