@@ -524,18 +524,65 @@ describe("openTaskPr", () => {
     expect(findOpenScopeViolation(store.db, store.slug, "pull_request:write", "VIB-201")).not.toBeNull();
   });
 
-  it("a 422 'No commits between' is an honest nothing_to_review, NOT network_unavailable", async () => {
+  /**
+   * A 422 on `POST /pulls` is classified by GitHub's own words, which ride in
+   * the envelope or in `errors[].message`. GitHub answered, so no row is ever
+   * `network_unavailable`, and none fabricates a PR on the task.
+   */
+  it.each([
+    {
+      // The reason is honest (it was mislabeled network before).
+      name: "a 422 'No commits between' is an honest nothing_to_review, NOT network_unavailable",
+      body: { message: "Validation Failed: No commits between main and vib-201" },
+      status: "nothing_to_review",
+      quote: "No commits between",
+    },
+    {
+      // The envelope message is the constant "Validation Failed" — the sentence
+      // that says WHICH validation failed rides in `errors[].message`. Sniffing
+      // only the envelope makes every 422 look identical.
+      name: "reads the 422 reason out of GitHub's errors[] rows, not just the envelope",
+      body: {
+        message: "Validation Failed",
+        errors: [
+          { resource: "PullRequest", field: "base", code: "custom",
+            message: "No commits between main and vib-201" },
+        ],
+      },
+      status: "nothing_to_review",
+      quote: "No commits between",
+    },
+    {
+      // Canary: return `network_unavailable` from the residual again.
+      name: "an unmapped 422 is `refused` and carries GitHub's own words",
+      body: {
+        message: "Validation Failed",
+        errors: [{ resource: "PullRequest", code: "custom", message: "A pull request title is required" }],
+      },
+      status: "refused",
+      quote: "A pull request title is required",
+    },
+    {
+      // A validation refusal this module has no reading for keeps the residual
+      // failure — with GitHub's own words — instead of borrowing the empty-branch
+      // meaning and marking the task as having produced no change. A prose
+      // "base is invalid" is not the structured base row either.
+      name: "an UNRELATED 422 is neither an empty branch nor a collision",
+      body: {
+        message: "Validation Failed",
+        errors: [{ message: "base is invalid" }],
+      },
+      status: "refused",
+      quote: "base is invalid",
+    },
+  ])("ruling 128: $name", async ({ body, status, quote }) => {
     const store = setupWithBranch();
     const gh = fakeGithubFetch({
       [`GET ${REPO_PATH}/pulls`]: { body: [] },
-      [`POST ${REPO_PATH}/pulls`]: {
-        status: 422,
-        body: { message: "Validation Failed: No commits between main and vib-201" },
-      },
+      [`POST ${REPO_PATH}/pulls`]: { status: 422, body },
     });
     const res = await openPr(store, gh);
-    expect(res.status).toBe("nothing_to_review");
-    // No fabricated PR, and the reason is honest (was mislabeled network before).
+    expect(res).toMatchObject({ status, message: expect.stringContaining(quote) });
     const fm = readTaskFile({ projectSlug: store.slug, taskKey: "VIB-201", dataRoot: store.dataRoot })!.parsed.frontmatter;
     expect(fm.pr).toBeNull();
   });
@@ -562,24 +609,6 @@ describe("openTaskPr", () => {
     expect(fm.pr).toBeNull();
   });
 
-  it("ruling 128: an unmapped 422 is `refused` and carries GitHub's own words", async () => {
-    // Canary: return `network_unavailable` from the residual again.
-    const store = setupWithBranch();
-    const gh = fakeGithubFetch({
-      [`GET ${REPO_PATH}/pulls`]: { body: [] },
-      [`POST ${REPO_PATH}/pulls`]: {
-        status: 422,
-        body: {
-          message: "Validation Failed",
-          errors: [{ resource: "PullRequest", code: "custom", message: "A pull request title is required" }],
-        },
-      },
-    });
-    const res = await openPr(store, gh);
-    expect(res.status).toBe("refused");
-    expect(res.status === "refused" ? res.message : "").toContain("A pull request title is required");
-  });
-
   it("F21-9: an UNREADABLE head probe never falls through to create", async () => {
     // The probe answered 200 with a payload the reader refused, so whether a PR
     // already occupies `head` is UNKNOWN. Before this, an unreadable answer was
@@ -599,30 +628,6 @@ describe("openTaskPr", () => {
     expect(gh.callsTo(`POST ${REPO_PATH}/pulls`)).toHaveLength(0);
     const fm = readTaskFile({ projectSlug: store.slug, taskKey: "VIB-201", dataRoot: store.dataRoot })!.parsed.frontmatter;
     expect(fm.pr).toBeNull();
-  });
-
-  it("reads the 422 reason out of GitHub's errors[] rows, not just the envelope", async () => {
-    // The envelope message is the constant "Validation Failed" — the sentence
-    // that says WHICH validation failed rides in `errors[].message`. Sniffing
-    // only the envelope makes every 422 look identical.
-    const store = setupWithBranch();
-    const gh = fakeGithubFetch({
-      [`GET ${REPO_PATH}/pulls`]: { body: [] },
-      [`POST ${REPO_PATH}/pulls`]: {
-        status: 422,
-        body: {
-          message: "Validation Failed",
-          errors: [
-            { resource: "PullRequest", field: "base", code: "custom",
-              message: "No commits between main and vib-201" },
-          ],
-        },
-      },
-    });
-    const res = await openPr(store, gh);
-    expect(res.status).toBe("nothing_to_review");
-    if (res.status !== "nothing_to_review") throw new Error("expected nothing_to_review");
-    expect(res.message).toContain("No commits between");
   });
 
   it("a 422 'a pull request already exists' is a COLLISION, never nothing_to_review", async () => {
@@ -696,31 +701,6 @@ describe("openTaskPr", () => {
     expect(adopted[0]!.actor).toEqual({ kind: "system", systemId: "delivery" });
     expect(listAuditEvents(store.db, { action: "github.pr.adopted" })[0]!.details).toMatchObject({ prNumber: 92, source: "delivery" });
     expect(listAuditEvents(store.db, { action: "github.pr.opened" })).toHaveLength(0);
-  });
-
-  it("an UNRELATED 422 is neither an empty branch nor a collision", async () => {
-    // A validation refusal this module has no reading for keeps the residual
-    // failure — with GitHub's own words — instead of borrowing the empty-branch
-    // meaning and marking the task as having produced no change.
-    const store = setupWithBranch();
-    const gh = fakeGithubFetch({
-      [`GET ${REPO_PATH}/pulls`]: { body: [] },
-      [`POST ${REPO_PATH}/pulls`]: {
-        status: 422,
-        body: {
-          message: "Validation Failed",
-          errors: [{ message: "base is invalid" }],
-        },
-      },
-    });
-    const res = await openPr(store, gh);
-    // Ruling 128: GitHub ANSWERED, so an unmapped 422 is `refused` (quoting
-    // GitHub), never `network_unavailable`.
-    expect(res.status).toBe("refused");
-    if (res.status !== "refused") throw new Error("expected refused");
-    expect(res.message).toContain("base is invalid");
-    const fm = readTaskFile({ projectSlug: store.slug, taskKey: "VIB-201", dataRoot: store.dataRoot })!.parsed.frontmatter;
-    expect(fm.pr).toBeNull();
   });
 
   it("skips creation when the task already carries a live PR (agent-side capture) — reconciles instead (B5)", async () => {
