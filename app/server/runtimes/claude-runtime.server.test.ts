@@ -96,22 +96,6 @@ function fakeQuery(
   return { q, wasInterrupted: () => interrupted };
 }
 
-/** The subset of SDK options these tests inspect. */
-interface CapturedOptions {
-  settingSources?: string[];
-  skills?: string[];
-  plugins?: unknown[];
-  strictMcpConfig?: boolean;
-  disallowedTools?: string[];
-  /** The system prompt as the adapter handed it over (preset+append for a
-   *  specialist) — read through a zod parse where a test needs its text. */
-  systemPrompt?: unknown;
-  /** The model id as forwarded to the SDK. */
-  model?: string;
-  effort?: string;
-  env?: Record<string, string>;
-}
-
 /**
  * A run's skill plugin as `mountGrantedSkills` builds it beside the checkout
  * (ruling 180): the manifest the CLI reads plus one folder per granted skill.
@@ -149,6 +133,25 @@ const SPEC: RunSpec = {
 async function drain(): Promise<void> {
   await new Promise((r) => setTimeout(r, 0));
   await new Promise((r) => setTimeout(r, 0));
+}
+
+/**
+ * Start one run of `spec` on a query that answers with one success result,
+ * and hand back the options the SDK was given and the lines the run wrote.
+ */
+async function started(
+  spec: RunSpec,
+  deps: Omit<NonNullable<Parameters<typeof createClaudeAdapter>[0]>, "queryFn"> = {},
+): Promise<{ options: ClaudeQueryOptions; lines: EmittedLine[] }> {
+  const lines: EmittedLine[] = [];
+  let options: ClaudeQueryOptions = {};
+  const queryFn: ClaudeQueryFn = (params) => {
+    options = params.options ?? {};
+    return fakeQuery([{ type: "result", subtype: "success", is_error: false, num_turns: 1, usage: {} }]).q;
+  };
+  createClaudeAdapter({ ...deps, queryFn }).start(spec, { onLine: (l) => lines.push(l), onExit: () => {} });
+  await drain();
+  return { options, lines };
 }
 
 describe("claude adapter (SDK, injected fake query)", () => {
@@ -426,23 +429,6 @@ describe("claude adapter (SDK, injected fake query)", () => {
     expect(errLine?.display?.text).toContain("usage quota");
   });
 
-  /** Capture the options one run was started with. */
-  async function optionsFor(spec: RunSpec): Promise<CapturedOptions> {
-    const result = [{ type: "result", subtype: "success", is_error: false, num_turns: 1, usage: {} }];
-    let captured: CapturedOptions | undefined;
-    const queryFn: ClaudeQueryFn = (params) => {
-      captured = params.options;
-      const { q } = fakeQuery(result);
-      return q;
-    };
-    createClaudeAdapter({ queryFn }).start(spec, {
-      onLine: () => {},
-      onExit: () => {},
-    });
-    await drain();
-    return captured ?? {};
-  }
-
   // P13-RT-08: only the tiers the Claude SDK's effort union allows are
   // forwarded; anything else is dropped so the SDK applies its own default.
   // "minimal" is a CODEX tier. A profile created on Codex and later switched
@@ -457,19 +443,19 @@ describe("claude adapter (SDK, injected fake query)", () => {
     ["", undefined],
     [undefined, undefined],
   ] as const)("effort %j reaches options.effort as %j", async (effort, expected) => {
-    expect((await optionsFor(effort === undefined ? SPEC : { ...SPEC, effort })).effort).toBe(expected);
+    expect((await started(effort === undefined ? SPEC : { ...SPEC, effort })).options.effort).toBe(expected);
   });
 
   it("pass 34 (F34-7): the context-window variant reaches the SDK options verbatim", async () => {
     // Canary: the same resolver edit as above; the run would start on `opus`.
     // The spec names the family label, so an adapter that forwarded
     // `spec.model` unresolved would start it on `claude-opus[1m]`.
-    const captured = await optionsFor({ ...SPEC, model: "claude-opus[1m]" });
+    const { options: captured } = await started({ ...SPEC, model: "claude-opus[1m]" });
     expect(captured.model).toBe("opus[1m]");
   });
 
   it("isolates a run with NO granted skills from the host ~/.claude (settingSources + skills empty, strict MCP)", async () => {
-    const captured = await optionsFor(SPEC);
+    const { options: captured } = await started(SPEC);
     // Empty settingSources = no host settings tiers AND no project source at
     // all; empty skills = the model sees NONE of the operator-user's personal
     // Claude Code skills, and none of the ~16 the SDK compiles into its binary.
@@ -494,7 +480,7 @@ describe("claude adapter (SDK, injected fake query)", () => {
     // Canary: drop any one of `plugins`, the `${name}:` prefix, or the Skill
     // filter on BASE_DENIED_BUILTINS and one assertion below fails.
     const plugin = pluginDir(["conventional-commits", "terraform-review"]);
-    const captured = await optionsFor({
+    const { options: captured } = await started({
       ...SPEC,
       skills: ["conventional-commits", "terraform-review"],
       skillPlugin: { path: plugin, name: "viberr" },
@@ -519,7 +505,7 @@ describe("claude adapter (SDK, injected fake query)", () => {
     // and `plugins` names the dead directory with its skills listed.
     const gone = path.join(temp.make("viberr-claude-gone-"), "run_x");
 
-    const captured = await optionsFor({
+    const { options: captured } = await started({
       ...SPEC,
       skills: ["conventional-commits"],
       skillPlugin: { path: gone, name: "viberr" },
@@ -550,7 +536,7 @@ describe("claude adapter (SDK, injected fake query)", () => {
     // Canary: drop the `nativeSkillNames` call and the first expectation gets
     // the raw list back, wildcard included.
     const plugin = pluginDir(["good-skill"]);
-    const mixed = await optionsFor({
+    const { options: mixed } = await started({
       ...SPEC,
       skills: ["good-skill", "my skill (v2)", "*", "good-skill"],
       skillPlugin: { path: plugin, name: "viberr" },
@@ -560,7 +546,7 @@ describe("claude adapter (SDK, injected fake query)", () => {
 
     // ALL unsafe ⇒ nothing to enable ⇒ the run falls back to the fully isolated
     // shape rather than loading a plugin for zero skills.
-    const none = await optionsFor({
+    const { options: none } = await started({
       ...SPEC,
       skills: ["a,b", ""],
       skillPlugin: { path: plugin, name: "viberr" },
@@ -572,19 +558,7 @@ describe("claude adapter (SDK, injected fake query)", () => {
   });
 
   it("denies the SDK bundled parity/governance tools on every run (keeps ToolSearch + coding tools), plus repo-mutation for operators", async () => {
-    const result = [{ type: "result", subtype: "success", is_error: false, num_turns: 1, usage: {} }];
-    // Capture each run's options by index (no reassignment → clean typing).
-    const seen: ({ disallowedTools?: string[] } | undefined)[] = [];
-    const queryFn: ClaudeQueryFn = (params) => {
-      seen.push(params.options);
-      const { q } = fakeQuery(result);
-      return q;
-    };
-    const run = async (spec: RunSpec) => {
-      createClaudeAdapter({ queryFn }).start(spec, { onLine: () => {}, onExit: () => {} });
-      await drain();
-      return seen[seen.length - 1];
-    };
+    const deniedOf = async (spec: RunSpec) => (await started(spec)).options.disallowedTools ?? [];
 
     // EVERY run denies the SDK-bundled tools that break Codex/Claude parity or
     // bypass viberr governance (docker-verified they load despite skills:[]):
@@ -593,7 +567,7 @@ describe("claude adapter (SDK, injected fake query)", () => {
     // for every run that mounts no granted skill of its own (a run that DOES
     // trades the deny for the `skills` context filter; see the native-skills
     // test above). These specs carry no `skills`, so `Skill` is denied here.
-    const primaryDenied = (await run({ ...SPEC, kind: "primary" }))?.disallowedTools ?? [];
+    const primaryDenied = await deniedOf({ ...SPEC, kind: "primary" });
     expect(primaryDenied).toEqual(
       expect.arrayContaining([
         "Skill",
@@ -623,16 +597,14 @@ describe("claude adapter (SDK, injected fake query)", () => {
 
     // Operator ADDS the repo-mutation built-ins on top of the base list, but must
     // keep ToolSearch (it can't reach its mcp__viberr__* governance tools without it).
-    const opDenied = (await run({ ...SPEC, kind: "operator" }))?.disallowedTools ?? [];
+    const opDenied = await deniedOf({ ...SPEC, kind: "operator" });
     expect(opDenied).toEqual(
       expect.arrayContaining(["Skill", "Task", "Bash", "Edit", "Write", "NotebookEdit"]),
     );
     expect(opDenied).not.toContain("ToolSearch");
 
     // A specialist WITH withheld caps gets the base list PLUS those.
-    const withheld =
-      (await run({ ...SPEC, kind: "primary", disallowedTools: ["Bash(git push:*)"] }))
-        ?.disallowedTools ?? [];
+    const withheld = await deniedOf({ ...SPEC, kind: "primary", disallowedTools: ["Bash(git push:*)"] });
     expect(withheld).toContain("Bash(git push:*)");
     expect(withheld).toContain("Skill");
 
@@ -643,7 +615,7 @@ describe("claude adapter (SDK, injected fake query)", () => {
     // disallowedTools carry Edit/Write/... exactly when the profile withholds
     // execute-code-or-write-repo, so a write-GRANTED supporting agent may edit
     // its own isolated checkout.
-    const reviewerDenied = (await run({ ...SPEC, kind: "reviewer" }))?.disallowedTools ?? [];
+    const reviewerDenied = await deniedOf({ ...SPEC, kind: "reviewer" });
     expect(reviewerDenied).toEqual(
       expect.arrayContaining([
         "Bash(git push:*)",
@@ -657,14 +629,11 @@ describe("claude adapter (SDK, injected fake query)", () => {
     expect(reviewerDenied).not.toContain("Bash(git commit:*)");
     // A WITHHELD supporting run gets the local-write denies from its grants
     // (the same channel every specialist run uses).
-    const reviewerWithheld =
-      (
-        await run({
-          ...SPEC,
-          kind: "reviewer",
-          disallowedTools: ["Edit", "MultiEdit", "Write", "NotebookEdit", "Bash(git commit:*)"],
-        })
-      )?.disallowedTools ?? [];
+    const reviewerWithheld = await deniedOf({
+      ...SPEC,
+      kind: "reviewer",
+      disallowedTools: ["Edit", "MultiEdit", "Write", "NotebookEdit", "Bash(git commit:*)"],
+    });
     expect(reviewerWithheld).toEqual(
       expect.arrayContaining([
         "Edit",
@@ -684,20 +653,12 @@ describe("claude adapter (SDK, injected fake query)", () => {
   // is there to answer. And there is no `tools` option: `disallowedTools` is the
   // only restriction channel, which is what the interface docstring now says.
   it("forwards the approval list, and has no `tools` restriction channel", async () => {
-    const result = [{ type: "result", subtype: "success", is_error: false, num_turns: 1, usage: {} }];
-    let captured: ClaudeQueryOptions | undefined;
-    const queryFn: ClaudeQueryFn = (params) => {
-      captured = params.options;
-      const { q } = fakeQuery(result);
-      return q;
-    };
-    createClaudeAdapter({ queryFn }).start(
-      { ...SPEC, allowedTools: ["mcp__viberr_agent", "mcp__everything__echo"] },
-      { onLine: () => {}, onExit: () => {} },
-    );
-    await drain();
+    const { options: captured } = await started({
+      ...SPEC,
+      allowedTools: ["mcp__viberr_agent", "mcp__everything__echo"],
+    });
     // Ruling 370: in name order, whatever order the caller listed them.
-    expect(captured?.allowedTools).toEqual([
+    expect(captured.allowedTools).toEqual([
       "mcp__everything__echo",
       "mcp__viberr_agent",
     ]);
@@ -888,24 +849,6 @@ describe("claude idle hang guard (P13-RT-11)", () => {
  * assertions in `runtime-registry.server.test.ts`.
  */
 describe("UC-16 MCP channel + strict MCP config (ruling 49)", () => {
-  async function optionsFor(spec: RunSpec): Promise<ClaudeQueryOptions> {
-    const result = [
-      { type: "result", subtype: "success", is_error: false, num_turns: 1, usage: {} },
-    ];
-    let captured: ClaudeQueryOptions | undefined;
-    const queryFn: ClaudeQueryFn = (params) => {
-      captured = params.options;
-      const { q } = fakeQuery(result);
-      return q;
-    };
-    createClaudeAdapter({ queryFn }).start(spec, {
-      onLine: () => {},
-      onExit: () => {},
-    });
-    await drain();
-    return captured ?? {};
-  }
-
   it("sets strictMcpConfig on EVERY run — kind, resume and skills change nothing", async () => {
     // R18-3 / ruling 49: only Viberr-granted MCP servers reach a run. Without
     // this the SDK also picks up a repo `.mcp.json`, the user's MCP config and
@@ -922,7 +865,7 @@ describe("UC-16 MCP channel + strict MCP config (ruling 49)", () => {
       { ...SPEC, mcpServers: { docs: { type: "http", url: "https://x.test" } } },
     ]) {
       expect(
-        (await optionsFor(spec)).strictMcpConfig,
+        (await started(spec)).options.strictMcpConfig,
         `strictMcpConfig for ${JSON.stringify({ kind: spec.kind, resume: spec.resumeSessionId, skills: spec.skills })}`,
       ).toBe(true);
     }
@@ -942,7 +885,7 @@ describe("UC-16 MCP channel + strict MCP config (ruling 49)", () => {
       { ...SPEC, autonomous: false },
       { ...SPEC, resumeSessionId: "sess-9" },
     ]) {
-      const options = await optionsFor(spec);
+      const { options } = await started(spec);
       expect(
         options.permissionPrompts,
         `permissionPrompts for ${JSON.stringify({ kind: spec.kind, autonomous: spec.autonomous })}`,
@@ -964,7 +907,7 @@ describe("UC-16 MCP channel + strict MCP config (ruling 49)", () => {
       { ...SPEC, autonomous: false },
       { ...SPEC, resumeSessionId: "sess-9" },
     ]) {
-      const options = await optionsFor(spec);
+      const { options } = await started(spec);
       const label = JSON.stringify({ kind: spec.kind, autonomous: spec.autonomous });
       if (spec.autonomous) {
         expect(options.allowDangerouslySkipPermissions, label).toBe(true);
@@ -996,7 +939,7 @@ describe("UC-16 MCP channel + strict MCP config (ruling 49)", () => {
       },
       viberr_agent: { type: "sdk", instance: {} },
     };
-    const captured = await optionsFor({
+    const { options: captured } = await started({
       ...SPEC,
       mcpServers: servers,
       allowedTools: ["mcp__viberr_agent"],
@@ -1023,7 +966,7 @@ describe("UC-16 MCP channel + strict MCP config (ruling 49)", () => {
         tools: [{ name: "merge_pull_request", permission_policy: "always_deny" }],
       },
     };
-    const captured = await optionsFor({
+    const { options: captured } = await started({
       ...SPEC,
       kind: "reviewer",
       mcpServers: servers,
@@ -1975,22 +1918,9 @@ describe("claude CLI process lifecycle (ruling 174)", () => {
  * a typed record carrying the cap and the spend, so the packet names both.
  */
 describe("claude spending cap (ruling 175)", () => {
-  async function optionsFor(spec: RunSpec): Promise<ClaudeQueryOptions> {
-    let captured: ClaudeQueryOptions | undefined;
-    const adapter = createClaudeAdapter({
-      queryFn: ({ options }) => {
-        captured = options;
-        return fakeQuery([{ type: "result", subtype: "success", is_error: false, num_turns: 1, usage: {} }]).q;
-      },
-    });
-    adapter.start(spec, { onLine: () => {}, onExit: () => {} });
-    await drain();
-    return captured ?? {};
-  }
-
   it("passes the cap as maxBudgetUsd when the run carries one, and names none otherwise", async () => {
-    expect((await optionsFor({ ...SPEC, maxSpendUsd: 2.5 })).maxBudgetUsd).toBe(2.5);
-    expect(await optionsFor(SPEC)).not.toHaveProperty("maxBudgetUsd");
+    expect((await started({ ...SPEC, maxSpendUsd: 2.5 })).options.maxBudgetUsd).toBe(2.5);
+    expect((await started(SPEC)).options).not.toHaveProperty("maxBudgetUsd");
   });
 
   it("an `error_max_budget_usd` result is the `max_budget` cut-off, carrying the cap and the spend", async () => {
@@ -2110,7 +2040,6 @@ describe("a cut-off result followed by the SDK's throw stays a cut-off", () => {
  * both landed on a local remote.
  */
 describe("the PreToolUse capability hook (ruling 101(e), Option D PR 5)", () => {
-  const RESULT = [{ type: "result", subtype: "success", is_error: false, num_turns: 1, usage: {} }];
   /** A Developer whose commit-push grant is withheld, as the resolver denies it. */
   const PUSH_WITHHELD = resolveSpecialistDisallowedTools([
     { capabilityId: "execute-code-or-write-repo", mode: "direct" },
@@ -2118,18 +2047,6 @@ describe("the PreToolUse capability hook (ruling 101(e), Option D PR 5)", () => 
     { capabilityId: "commit-push-branch", mode: "off" },
     { capabilityId: "open-review-pr", mode: "off" },
   ]);
-
-  async function started(spec: RunSpec) {
-    const lines: EmittedLine[] = [];
-    let options: ClaudeQueryOptions = {};
-    const queryFn: ClaudeQueryFn = (params) => {
-      options = params.options ?? {};
-      return fakeQuery(RESULT).q;
-    };
-    createClaudeAdapter({ queryFn }).start(spec, { onLine: (l) => lines.push(l), onExit: () => {} });
-    await drain();
-    return { options, lines };
-  }
 
   const hookOf = (options: ClaudeQueryOptions): ClaudePreToolUseHook | undefined =>
     options.hooks?.PreToolUse?.find((m) => m.matcher === "Bash")?.hooks[0];
@@ -2190,6 +2107,23 @@ describe("the PreToolUse capability hook (ruling 101(e), Option D PR 5)", () => 
   });
 });
 
+describe("Claude Code's auto-memory (ruling 577)", () => {
+  it("is off on every run, over the base env and the run's own", async () => {
+    // Live on 2026-09-28, 13 of 138 Claude runs spent turns writing notes
+    // into the account home's auto-memory, where ruling 564's hook refuses
+    // every write. CANARY: drop the switch from the run env and this goes red.
+    for (const spec of [SPEC, { ...SPEC, kind: "operator" as const }]) {
+      const { options } = await started(
+        { ...spec, env: { VIBERR_RUN_ID: "r1" } },
+        { env: { PATH: "/usr/bin", [AUTO_MEMORY_OFF_ENV]: "0" } },
+      );
+      expect(options.env?.[AUTO_MEMORY_OFF_ENV]).toBe("1");
+      expect(options.env?.PATH).toBe("/usr/bin");
+      expect(options.env?.VIBERR_RUN_ID).toBe("r1");
+    }
+  });
+});
+
 /**
  * Ruling 564: a run that posts files keeps its file tools, confined by a
  * PreToolUse hook to the attachments folder and the temp directory. Live on
@@ -2198,32 +2132,7 @@ describe("the PreToolUse capability hook (ruling 101(e), Option D PR 5)", () => 
  * folder and checkout below do not exist: the hook decides on the path, so a
  * directory outside the temp root needs no disk.
  */
-describe("Claude Code's auto-memory (ruling 577)", () => {
-  it("is off on every run, over the base env and the run's own", async () => {
-    // Live on 2026-09-28, 13 of 138 Claude runs spent turns writing notes
-    // into the account home's auto-memory, where ruling 564's hook refuses
-    // every write. CANARY: drop the switch from the run env and this goes red.
-    const RESULT = [{ type: "result", subtype: "success", is_error: false, num_turns: 1, usage: {} }];
-    for (const spec of [SPEC, { ...SPEC, kind: "operator" as const }]) {
-      let options: ClaudeQueryOptions = {};
-      const queryFn: ClaudeQueryFn = (params) => {
-        options = params.options ?? {};
-        return fakeQuery(RESULT).q;
-      };
-      createClaudeAdapter({ queryFn, env: { PATH: "/usr/bin", [AUTO_MEMORY_OFF_ENV]: "0" } }).start(
-        { ...spec, env: { VIBERR_RUN_ID: "r1" } },
-        { onLine: () => {}, onExit: () => {} },
-      );
-      await drain();
-      expect(options.env?.[AUTO_MEMORY_OFF_ENV]).toBe("1");
-      expect(options.env?.PATH).toBe("/usr/bin");
-      expect(options.env?.VIBERR_RUN_ID).toBe("r1");
-    }
-  });
-});
-
 describe("the file tools of a run that posts files (ruling 564)", () => {
-  const RESULT = [{ type: "result", subtype: "success", is_error: false, num_turns: 1, usage: {} }];
   /** A result-maker as the resolver denies it: evidence granted, repo-write withheld. */
   const WRITE_WITHHELD = resolveSpecialistDisallowedTools([
     { capabilityId: "attach-evidence-references", mode: "direct" },
@@ -2235,18 +2144,6 @@ describe("the file tools of a run that posts files (ruling 564)", () => {
     disallowedTools: WRITE_WITHHELD,
     attachmentsWritableDir: DROP,
   };
-
-  async function started(spec: RunSpec) {
-    const lines: EmittedLine[] = [];
-    let options: ClaudeQueryOptions = {};
-    const queryFn: ClaudeQueryFn = (params) => {
-      options = params.options ?? {};
-      return fakeQuery(RESULT).q;
-    };
-    createClaudeAdapter({ queryFn }).start(spec, { onLine: (l) => lines.push(l), onExit: () => {} });
-    await drain();
-    return { options, lines };
-  }
 
   const fileHookOf = (options: ClaudeQueryOptions): ClaudePreToolUseHook | undefined =>
     options.hooks?.PreToolUse?.find((m) => m.matcher === "Edit|MultiEdit|Write")?.hooks[0];
@@ -2575,13 +2472,11 @@ describe("claude adapter compact() (ruling 376)", () => {
     const { q } = fakeQuery(messages);
     let captured: {
       prompt: Parameters<ClaudeQueryFn>[0]["prompt"];
-      options: CapturedOptions & { resume?: string; maxTurns?: number };
+      options: ClaudeQueryOptions;
     } | null = null;
     const adapter = createClaudeAdapter({
       queryFn: (args) => {
-        // SAFETY: the test reads the handful of option fields it asserts on;
-        // the adapter's own type is wider and the SDK-typed shape is irrelevant here.
-        captured = { prompt: args.prompt, options: (args.options ?? {}) as CapturedOptions & { resume?: string; maxTurns?: number } };
+        captured = { prompt: args.prompt, options: args.options ?? {} };
         return q;
       },
     });
