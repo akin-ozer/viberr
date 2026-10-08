@@ -615,7 +615,15 @@ describe("acceptance closes it — with its OWN completion event, and no merge",
     expect(completion?.title).toBe("Completed with no changes");
     expect(completion?.text).toContain("WITHOUT a passing remote re-check");
     expect(completion?.text).not.toContain("completed with no changes");
-    expect(listAuditEvents(store.db, { action: "task.acceptance.forced" })).toHaveLength(1);
+    // Ruling 393: the row names the re-check the force closed over, which the
+    // event quotes in its own words, so its Bypassed clause does not say it
+    // twice. CANARY: leave `noChange.refusal` out of the force disclosure and
+    // the row reads "no gate (already acceptable)"; drop the clause's filter
+    // and the event repeats the refusal.
+    const rows = listAuditEvents(store.db, { action: "task.acceptance.forced" });
+    expect(rows).toHaveLength(1);
+    expect(rows[0]!.details?.bypassedGates).toEqual([expect.stringMatching(/GitHub could not be reached/)]);
+    expect(completion?.text).not.toContain("Bypassed:");
   });
 
   it.each([

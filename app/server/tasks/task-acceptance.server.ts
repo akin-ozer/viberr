@@ -769,9 +769,11 @@ export interface ForceAcceptDisclosure {
  * gates the loader reads without the probe (it makes no GitHub call): on a
  * PR-less task the probe can still add the counted "carries N commit(s)" gate,
  * or clear "no review pull request" for a branch it found empty or absent, and
- * the record names what the probe found. `gates` keeps every sentence the
- * single-reason gate would have picked first; `skippedStageIds` mirrors the
- * dialog's "Skips <stages>" row; `withdrawnPacket` its "Withdraws" row.
+ * the record names what the probe found, as it names the failed re-check of a
+ * task that claimed no changes, which is refused outside the gate list. `gates`
+ * keeps every sentence the single-reason gate would have picked first;
+ * `skippedStageIds` mirrors the dialog's "Skips <stages>" row;
+ * `withdrawnPacket` its "Withdraws" row.
  */
 function forceAcceptDisclosure(
   project: ProjectContext,
@@ -780,11 +782,19 @@ function forceAcceptDisclosure(
   noChange: AcceptanceNoChangeCheck,
 ): ForceAcceptDisclosure {
   const fm = parsed.frontmatter;
-  const gates = acceptanceRefusalReasons(project, fm, taskKey, {
-    blockedPacket: fm.readiness === "blocked" && parsed.packet?.type === "blocked",
-    noChange,
-    subjectAuthor: reviewSubjectAuthor(fm, parsed.timeline),
-  });
+  const gates = [
+    ...acceptanceRefusalReasons(project, fm, taskKey, {
+      blockedPacket: fm.readiness === "blocked" && parsed.packet?.type === "blocked",
+      noChange,
+      subjectAuthor: reviewSubjectAuthor(fm, parsed.timeline),
+    }),
+    // R19-8: a task that claimed no changes and whose live re-check did not
+    // pass is refused by `noChange.refusal`, outside the gate list, and a force
+    // closes it over that refusal: the record names it with the rest, or the
+    // row read "no gate (already acceptable)" beside an event saying the task
+    // closed WITHOUT a passing re-check (ruling 393).
+    ...(noChange.refusal ? [noChange.refusal] : []),
+  ];
   const terminalId = terminalStageIdOf(project);
   const stageIndex = project.stages.findIndex((s) => s.id === fm.stage);
   const atBoundary = acceptanceStageBlockedReason(project, fm.stage, taskKey) === null;
@@ -827,7 +837,13 @@ function gateClaim(gate: string): string {
 
 /** The clause the forced `completion` event appends (U35-3). Empty when the
  *  force bypassed nothing. */
-function forceBypassClause(project: ProjectContext, disclosure: ForceAcceptDisclosure): string {
+function forceBypassClause(
+  project: ProjectContext,
+  disclosure: ForceAcceptDisclosure,
+  /** A gate the event's own text already quotes in full: the failed no-change
+   *  re-check ("The check said: …"), left out here rather than said twice. */
+  quoted: string | null,
+): string {
   const parts: string[] = [];
   if (disclosure.skippedStageIds.length > 0) {
     parts.push(
@@ -835,7 +851,7 @@ function forceBypassClause(project: ProjectContext, disclosure: ForceAcceptDiscl
     );
     parts.push("the review gate");
   }
-  parts.push(...disclosure.gates.map(gateClaim));
+  parts.push(...disclosure.gates.filter((gate) => gate !== quoted).map(gateClaim));
   if (disclosure.withdrawnPacket) {
     parts.push(`the open decision "${disclosure.withdrawnPacket}" withdrawn unanswered`);
   }
@@ -2408,7 +2424,7 @@ export async function acceptCompletion(
   // U35-3 (pass 35): a forced acceptance says on the record what it jumped:
   // the disclosure its audit row carries too (ruling 393).
   if (input.force) {
-    event.text += forceBypassClause(project, input.force.disclosure);
+    event.text += forceBypassClause(project, input.force.disclosure, noChange.refusal);
   }
   const acceptance: Parameters<typeof applyAcceptanceWrite>[2] = {
     projectSlug: input.projectSlug,

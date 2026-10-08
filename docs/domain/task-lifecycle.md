@@ -1120,11 +1120,14 @@ them.
    first") stays in `bypassedGates` only. A decision the force ANSWERS (ruling 471, step
    7) is not withdrawn, so `withdrawnPacket` is null and the list does not name it. The
    row and the event read one disclosure, built once with the live no-change probe the
-   acceptance closes on (ruling 705). The force dialog lists the same gates
+   acceptance closes on (ruling 705). A task that claimed no changes and whose re-check did
+   not pass is closed over that refusal, so it is one of the gates too: the event quotes it
+   in full ("The check said: …") and its "Bypassed:" clause leaves it out rather than say
+   it twice. The force dialog lists the same gates
    (`AcceptanceAffordance.blockedGates`, ruling 393), read in the loader without the
    probe, so on a task with no PR the record can differ from it: it names the probe's
-   "carries N commit(s) ahead" gate, which the dialog does not show, and leaves out "no
-   review pull request" when the probe found the branch empty or absent.
+   "carries N commit(s) ahead" gate or a failed re-check, which the dialog does not show,
+   and leaves out "no review pull request" when the probe found the branch empty or absent.
    Force never bypasses two facts: a
    closed unmerged PR (ruling 37) and an **archived** task (ruling 123) — restore it
    first. Both are `forceIrreducibleRefusal`, and on an archived task the affordance is
