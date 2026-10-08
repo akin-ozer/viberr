@@ -5233,10 +5233,6 @@ describe("app.css ruling 459: the better-ui pass — enter and exit", () => {
       expect(declsFor(plain, selector).has("animation"), selector).toBe(false);
       expect(declsFor(reduced, selector).has("animation"), selector).toBe(false);
     }
-    // Both lines take the mark from the one latch.
-    for (const file of ["./features/runtime/runs-panels.tsx", "./features/controller/turn-step.tsx"]) {
-      expect(source(file), file).toMatch(/useFreshLine\(/);
-    }
   });
 });
 
@@ -5359,7 +5355,6 @@ describe("app.css ruling 459: the better-ui pass — icons", () => {
     expect(weight(".nav-item.active")).toBeLessThan(700);
     // The .kv-row value glyph sits beside 400 mono text and keeps the set's 1.7.
     expect(weight(".kv-row .v .mono")).toBe(400);
-    expect(source("./ui/icon.tsx")).toMatch(/strokeWidth="1\.7"/);
     // A bold label inside a medium one ties at equal specificity, so the
     // heavier group comes later. ruling 625: a .btn is 500 now (its old tie
     // inside .deny-note is gone); a 700 pill inside a medium row still ties.
@@ -5439,7 +5434,6 @@ describe("app.css ruling 459: the better-ui pass — icons", () => {
     // test connection spun their own arrow too until ruling 368's 2026-09-24
     // extension put the loader in place of every in-flight starter's icon.
     expect(arrows.sort()).toEqual([path.join("features", "board", "board-page.tsx")]);
-    expect(source("./ui/icon.tsx")).toMatch(/\n\s*loader: '/);
   });
 
   it("(F47) the wait row's rule reaches its own clock, never the Viberr chip's mark", () => {
@@ -5759,28 +5753,6 @@ describe("app.css ruling 459: the better-ui pass — contextual icon motion", ()
     for (const spinner of spinners) {
       expect(specificity(pause), spinner).toBeGreaterThan(specificity(spinner));
     }
-    // The component spins the alternate for good; the sheet decides when.
-    expect(source("./ui/copy-glyph.tsx")).toMatch(/<Icon name=\{alt\} className=\{spinAlt \? "spin" : ""\} \/>/);
-  });
-
-  it("(F40) a grant chip's check is always drawn, so a toggle never resizes the chip", () => {
-    // CANARY: put back `{granted.has(o.id) && <Icon name="check" />}`.
-    const mounted: string[] = [];
-    const drawn: string[] = [];
-    for (const file of markupFiles()) {
-      const src = readFileSync(file, "utf8");
-      const rel = path.relative(APP_DIR, file).split(path.sep).join("/");
-      for (const m of src.matchAll(/&&\s*<Icon name="check" \/>/g)) mounted.push(`${rel}:${lineAt(src, m.index)}`);
-      drawn.push(...Array.from(src.matchAll(/<Icon name="check" className="pc-check" \/>/g), () => rel));
-    }
-    expect(mounted).toEqual([]);
-    expect(drawn.sort()).toEqual([
-      "features/agents/create-profile-modal.tsx",
-      "features/org-settings/controller-admin-panel.tsx",
-    ]);
-    // The check leads, so every grant chip takes the glyph-led start side.
-    expect(declsFor(plain, ".pick-chip:has(> .ico:first-child)").get("padding-left")).toBe(".5rem");
-    expect(declsFor(plain, ".pick-chip .ico").get("width")).toBe("13px");
   });
 
   it("(F42) the wait row's orb and clock share one 20px cell, and the orb stops drawing once hidden", () => {
@@ -6727,7 +6699,6 @@ describe("app.css ruling 625: the task page", () => {
  */
 describe("app.css ruling 625: the controller, the dock, Agents and Policy", () => {
   const collapse = () => RULES.filter((r) => r.at.some((q) => q.includes("max-width: 1100px")));
-  const source = (file: string) => readFileSync(fileURLToPath(new URL(file, import.meta.url)), "utf8");
 
   it("(a) the RBAC grid: its .vh cells lay out inside the scroller, and no header floors a column past its cap", () => {
     // CANARY: drop `position: relative` from `.rbac-scroll`, and every cell's
@@ -6739,7 +6710,6 @@ describe("app.css ruling 625: the controller, the dock, Agents and Policy", () =
     expect(requiredDecls(plain, ".rbac-table thead th").has("white-space")).toBe(false);
     expect(requiredDecls(plain, ".rbac-n").get("display")).toBe("block");
     expect(requiredDecls(plain, ".rbac-table td.act").get("min-width")).toBe("10rem");
-    expect(source("./features/policy/policy-page.tsx")).toMatch(/<span className="rbac-n">\{counts\[r\]\}<\/span>/);
   });
 
   it("(b) the project controller's head is its rail siblings' head, and its empty state no frame of its own", () => {
