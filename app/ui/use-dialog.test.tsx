@@ -33,24 +33,27 @@ function Host() {
   );
 }
 
-/** A confirm whose action disables its own opener until the request lands, as
- *  the knowledge panel's Undo and Dismiss do, so the exit (ruling 459) ends on
- *  a disabled opener. It sits in a focusable <main>, as Home's skip-link
- *  target is; `inRow` puts the opener in a focusable list row. */
-function BusyHost({ inRow }: { inRow: boolean }) {
+/** A confirm whose action takes its own opener away before the exit (ruling
+ *  459) ends: it `disables` the opener until the request lands (the knowledge
+ *  panel's Undo and Dismiss), `replaces` it with text once the revalidation
+ *  has landed (Undo's "Undone by …"), or `deletes` its whole row. It sits in a
+ *  focusable <main>, as Home's skip-link target is; `inRow` puts the opener in
+ *  a focusable list row. */
+function BusyHost({ inRow, does }: { inRow: boolean; does: "disables" | "replaces" | "deletes" }) {
   const [open, setOpen] = useState(false);
-  const [busy, setBusy] = useState(false);
-  const opener = (
-    <button type="button" disabled={busy} onClick={() => setOpen(true)}>
-      Undo
-    </button>
-  );
+  const [done, setDone] = useState(false);
+  const opener =
+    done && does === "replaces" ? (
+      <span>Undone by Ada</span>
+    ) : (
+      <button type="button" disabled={done} onClick={() => setOpen(true)}>
+        Undo
+      </button>
+    );
   return (
     <main tabIndex={-1}>
       {inRow ? (
-        <ul>
-          <li tabIndex={-1}>{opener}</li>
-        </ul>
+        <ul>{!(done && does === "deletes") && <li tabIndex={-1}>{opener}</li>}</ul>
       ) : (
         opener
       )}
@@ -61,7 +64,7 @@ function BusyHost({ inRow }: { inRow: boolean }) {
           body="It goes back."
           confirmLabel="Undo it"
           onCancel={() => setOpen(false)}
-          onConfirm={() => setBusy(true)}
+          onConfirm={() => setDone(true)}
         />
       )}
     </main>
@@ -107,19 +110,28 @@ describe("useDialog focus restore", () => {
     expect(document.activeElement).toBe(trigger);
   });
 
-  // A disabled button takes no focus. In a list row the row takes it, so the
-  // keyboard user keeps their place; anywhere else it stays on <body>, never
-  // a region or landmark around the opener, whose focus reads the whole page
-  // out and sends the next Tab to its top.
-  // CANARY (in a list row): drop the hook's `:disabled` branch and the focus
-  // falls to <body>.
-  // CANARY (no row): widen the lookup to any `[tabindex]` ancestor and the
-  // focus lands on <main>.
+  // A disabled button takes no focus, and neither does one the action took
+  // off the page. The list row it sat in takes it while that row is still
+  // there, so the keyboard user keeps their place; anywhere else (no row, or
+  // the row deleted too) it stays on <body>, never a region or landmark
+  // around the opener, whose focus reads the whole page out and sends the
+  // next Tab to its top.
+  // CANARY (disabled, in a list row): drop the hook's `:disabled` check and
+  // the focus falls to <body>.
+  // CANARY (disabled, no row): widen the row lookup to any `[tabindex]`
+  // ancestor and the focus lands on <main>.
+  // CANARY (replaced, its row stays): look the row up from the opener when
+  // the dialog unmounts instead of when it opens, and the detached opener
+  // has no row around it: the focus falls to <body>.
+  // CANARY (deleted with its row): hand a deleted row's focus to the
+  // focusable container around it and the focus lands on <main>.
   it.each([
-    { where: "in a list row, the row takes the focus", inRow: true, lands: "LI" },
-    { where: "with no row, the focus stays on <body>, not the <main> around it", inRow: false, lands: "BODY" },
-  ])("when the exit ends on a disabled opener $where", ({ inRow, lands }) => {
-    const { container, getByRole } = render(<BusyHost inRow={inRow} />);
+    { opener: "a disabled opener", where: "in a list row, the row takes the focus", inRow: true, does: "disables", lands: "LI" },
+    { opener: "a disabled opener", where: "with no row, the focus stays on <body>, not the <main> around it", inRow: false, does: "disables", lands: "BODY" },
+    { opener: "an opener replaced by text", where: "in a list row that stays, the row takes the focus", inRow: true, does: "replaces", lands: "LI" },
+    { opener: "an opener deleted with its row,", where: "the focus stays on <body>, not the <main> around it", inRow: true, does: "deletes", lands: "BODY" },
+  ] as const)("when the exit ends on $opener $where", ({ inRow, does, lands }) => {
+    const { container, getByRole } = render(<BusyHost inRow={inRow} does={does} />);
     const opener = getByRole("button", { name: "Undo" });
     opener.focus();
     fireEvent.click(opener);
@@ -130,7 +142,8 @@ describe("useDialog focus restore", () => {
     const confirm = getByRole("button", { name: "Undo it" });
     confirm.focus();
     fireEvent.click(confirm);
-    expect(opener).toHaveProperty("disabled", true);
+    // The opener can no longer take the focus back: disabled, or gone.
+    expect(opener.isConnected && !opener.matches(":disabled")).toBe(false);
     fireEvent.transitionEnd(dialog);
     expect(dialog.isConnected).toBe(false);
     expect(document.activeElement?.tagName).toBe(lands);
