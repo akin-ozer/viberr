@@ -2886,6 +2886,25 @@ describe("stranded auto-stage resume", () => {
      * A malformed step is the cheapest whole-plan refusal there is, and it
      * exercises the same `refused.length === plan.actions.length` arithmetic a
      * policy denial does.
+     *
+     * Ruling 399 (F39-26), live on ax-clone AX-4. The operator planned one
+     * `open_packet` twice; both times Viberr refused the step, because a
+     * `create_task` option carried no `newTask` title or goal. Then the
+     * backstop wrote, 37 milliseconds after the second refusal note:
+     *
+     *   "the operator held it twice in a row without advancing, dispatching,
+     *    or opening a packet — treating that as a deliberate hold. Coordination
+     *    is paused here: run the operator manually when the hold should end"
+     *
+     * Two falsehoods and a remedy that reproduces the problem. It DID try to
+     * open a packet, twice; nothing about it was deliberate; and running the
+     * operator again plans the same refused step, which is exactly what the one
+     * automatic retry had already proved.
+     *
+     * `planWhollyRefused` is read eleven lines above this note to decide the
+     * task is stranded at all — the fact was in the same function the whole
+     * time. This pass's signature shape, in the pause that is supposed to tell
+     * a human what happened.
      */
     it("ruling 228: a plan refused IN FULL is nudged once, even at a human boundary", async () => {
       // A stage whose outbound boundary is `human`, not `auto` — the shape the
@@ -2949,30 +2968,23 @@ describe("stranded auto-stage resume", () => {
         expect(parsed.frontmatter.heldAtStage).toBe(parsed.frontmatter.stage);
         expect(parsed.frontmatter.waiting).toBe("human");
       });
+      // Ruling 399: the pause itself is right and stays, but its note says the
+      // operator was stopped. CANARY: drop the `planRefused` branch and this
+      // note calls a refused plan a deliberate hold, which is what AX-4's
+      // timeline says verbatim.
+      const note = readTaskFile({ projectSlug: store2.slug, taskKey: "VIB-1", dataRoot: store2.dataRoot })!
+        .parsed.timeline.find((e) => e.text.includes("did not hold this stage"))?.text;
+      expect(note, "no hold note says the operator was stopped").toBeDefined();
+      expect(note).toContain("Every action it planned was refused");
+      expect(note).not.toContain("deliberate hold");
+      // …and the remedy no longer sends the reader at the one move that
+      // reproduces it.
+      expect(note).not.toContain("run the operator manually");
+      expect(note).toContain("take the action yourself");
       await new Promise((resolve) => setTimeout(resolve, 80));
       expect(operatorRuns()).toHaveLength(2);
     });
 
-    /**
-     * Ruling 399 (F39-26), live on ax-clone AX-4. The operator planned one
-     * `open_packet` twice; both times Viberr refused the step, because a
-     * `create_task` option carried no `newTask` title or goal. Then the
-     * backstop wrote, 37 milliseconds after the second refusal note:
-     *
-     *   "the operator held it twice in a row without advancing, dispatching,
-     *    or opening a packet — treating that as a deliberate hold. Coordination
-     *    is paused here: run the operator manually when the hold should end"
-     *
-     * Two falsehoods and a remedy that reproduces the problem. It DID try to
-     * open a packet, twice; nothing about it was deliberate; and running the
-     * operator again plans the same refused step, which is exactly what the one
-     * automatic retry had already proved.
-     *
-     * `planWhollyRefused` is read eleven lines above this note to decide the
-     * task is stranded at all — the fact was in the same function the whole
-     * time. This pass's signature shape, in the pause that is supposed to tell
-     * a human what happened.
-     */
     /**
      * Ruling 487 (F40-65): the settle-time backstop read a task holding on a
      * pending schedule as stranded, and its nudge told the operator to "record
@@ -3025,54 +3037,6 @@ describe("stranded auto-stage resume", () => {
         readTaskFile({ projectSlug: store2.slug, taskKey: "VIB-7", dataRoot: store2.dataRoot })!.parsed
           .frontmatter.heldAtStage,
       ).toBeNull();
-    });
-
-    it("ruling 399: a plan Viberr REFUSED is not a deliberate hold", async () => {
-      writeTask(store2.dataRoot, store2.slug, {
-        frontmatter: baseTaskFrontmatter("VIB-9", {
-          title: "the refused plan",
-          stage: "triage",
-          readiness: "ready",
-          waiting: "agent",
-          ownerUserId: store2.users.arda.id,
-        }),
-        goal: "Do the thing.",
-      });
-      rebuildAll(store2.db, { dataRoot: store2.dataRoot, force: true });
-      finishedRun("run_refused", "VIB-9");
-      const resumed = await maybeResumeStrandedOperator(store2.db, {
-        projectSlug: store2.slug,
-        taskKey: "VIB-9",
-        dataRoot: store2.dataRoot,
-        runId: "run_refused",
-        stageAtStart: "triage",
-        strandedResume: true,
-        ownRun: {
-          backend: "codex",
-          autonomy: "supervised",
-          reactDepth: 0,
-          movedToStageId: "triage",
-          planWhollyRefused: true,
-        },
-      });
-      expect(resumed).toBe(false);
-      const parsed = readTaskFile({
-        projectSlug: store2.slug,
-        taskKey: "VIB-9",
-        dataRoot: store2.dataRoot,
-      })!.parsed;
-      // The pause itself is right and stays: something IS wrong here.
-      expect(parsed.frontmatter.heldAtStage).toBe("triage");
-      const note = parsed.timeline[0]!.text;
-      // CANARY: drop the `planRefused` branch and this note calls a refused
-      // plan a deliberate hold, which is what AX-4's timeline says verbatim.
-      expect(note).toContain("did not hold this stage");
-      expect(note).toContain("Every action it planned was refused");
-      expect(note).not.toContain("deliberate hold");
-      // …and the remedy no longer sends the reader at the one move that
-      // reproduces it.
-      expect(note).not.toContain("run the operator manually");
-      expect(note).toContain("take the action yourself");
     });
 
     /**
