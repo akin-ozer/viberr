@@ -311,9 +311,11 @@ describe("stage editor", () => {
     expect(view.stages).toHaveLength(5);
   });
 
-  it("rejects stage mutations from non-admins", async () => {
+  it("rejects stage mutations from a maintainer (edit-policy is admin-only)", async () => {
+    // The tier just below the grant: a contributor would be refused by a
+    // maintainer-level gate too.
     const result = actionOutcome(
-      await postAction(ids.selin, { intent: "add-stage" }),
+      await postAction(ids.murat, { intent: "add-stage" }),
     );
     expect(result.status).toBe(403);
   });
