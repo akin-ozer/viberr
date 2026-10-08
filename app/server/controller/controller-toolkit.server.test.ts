@@ -382,8 +382,8 @@ describe("list_decisions briefs the person and decides nothing (ruling 251)", ()
     // CANARIES: leave `deliveries` off get_task and no stamp is offered; drop
     // `delivery` on the way to the reader and the rework comes back instead.
     const { mkdirSync } = await import("node:fs");
-    const { taskAttachmentsDir } = await import("~/server/files/file-store-root.server");
-    const { keepDelivery, taskDeliveriesDir } = await import("~/server/files/kept-deliveries.server");
+    const { taskAttachmentsDir, taskDir } = await import("~/server/files/file-store-root.server");
+    const { keepDelivery } = await import("~/server/files/kept-deliveries.server");
     const file = path.join(taskAttachmentsDir(SLUG, "VIB-148", app.dataRoot), "ruling-597-summary.md");
     const stamp = "2026-09-29T23:35:25.588Z";
     mkdirSync(path.dirname(file), { recursive: true });
@@ -401,7 +401,7 @@ describe("list_decisions briefs the person and decides nothing (ruling 251)", ()
       expect(await attachment({})).toContain("Rework: 79/100");
     } finally {
       rmSync(file, { force: true });
-      rmSync(taskDeliveriesDir(SLUG, "VIB-148", app.dataRoot), { recursive: true, force: true });
+      rmSync(path.join(taskDir(SLUG, "VIB-148", app.dataRoot), "deliveries"), { recursive: true, force: true });
     }
   });
 
@@ -411,7 +411,8 @@ describe("list_decisions briefs the person and decides nothing (ruling 251)", ()
     // from the tool and a signed-in person who is no member of the project
     // reads the titles, origins and bytes of what its agents kept; drop
     // `args.id` on the way to the reader and an id is answered with the list.
-    const { taskSourcesDir, writeTaskSource } = await import("~/server/files/task-sources.server");
+    const { taskDir } = await import("~/server/files/file-store-root.server");
+    const { writeTaskSource } = await import("~/server/files/task-sources.server");
     try {
       writeTaskSource(
         SLUG,
@@ -450,7 +451,7 @@ describe("list_decisions briefs the person and decides nothing (ruling 251)", ()
         expect(denied).not.toContain("t3.medium");
       }
     } finally {
-      rmSync(taskSourcesDir(SLUG, "VIB-148", app.dataRoot), { recursive: true, force: true });
+      rmSync(path.join(taskDir(SLUG, "VIB-148", app.dataRoot), "sources"), { recursive: true, force: true });
     }
   });
 

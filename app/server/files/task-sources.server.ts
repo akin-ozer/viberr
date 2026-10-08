@@ -150,7 +150,7 @@ const deliveryLineSchema = z.object({
 
 const indexLineSchema = z.discriminatedUnion("kind", [sourceLineSchema, deliveryLineSchema]);
 
-export function taskSourcesDir(slug: string, key: string, dataRoot?: string): string {
+function taskSourcesDir(slug: string, key: string, dataRoot?: string): string {
   return path.join(taskDir(slug, key, dataRoot), "sources");
 }
 

@@ -1020,7 +1020,8 @@ describe("loader — ruling 690: the sources a task keeps", () => {
     // reviewer kept after the delivery reads as what the result rests on.
     const { rmSync } = await import("node:fs");
     const { updateTaskFile } = await import("~/server/files/task-writer.server");
-    const { recordDeliverySources, taskSourcesDir, writeTaskSource } = await import(
+    const { taskDir } = await import("~/server/files/file-store-root.server");
+    const { recordDeliverySources, writeTaskSource } = await import(
       "~/server/files/task-sources.server"
     );
     const ref = { projectSlug: "viberr-core", taskKey: "VIB-166", dataRoot: app.dataRoot };
@@ -1105,7 +1106,7 @@ describe("loader — ruling 690: the sources a task keeps", () => {
         ],
       });
     } finally {
-      rmSync(taskSourcesDir("viberr-core", "VIB-166", app.dataRoot), { recursive: true, force: true });
+      rmSync(`${taskDir("viberr-core", "VIB-166", app.dataRoot)}/sources`, { recursive: true, force: true });
       await updateTaskFile(ref, (parsed) => {
         parsed.frontmatter.workRevision = before.workRevision;
         parsed.frontmatter.deliveredAt = before.deliveredAt ?? null;
