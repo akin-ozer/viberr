@@ -433,13 +433,22 @@ describe("members", () => {
         )
         .get(ids.selin),
     ).toMatchObject({ n: 0 });
-    // Restore Selin via invite + role change back to reviewer (Policy owns
-    // roles; the settings invite always lands on Viewer).
+    // Restore Selin as the contributor the later cases drive: the settings
+    // invite always seats a Viewer, so her role goes back through the Policy
+    // page's writer.
     await postAction(ids.arda, {
       intent: "invite",
       name: "Selin Aksoy",
       email: "selin@viberr.dev",
     });
+    const { setMemberRole } = await import(
+      "~/features/policy/policy-actions.server"
+    );
+    await setMemberRole(
+      app.db,
+      { projectSlug: "viberr-core", targetUserId: ids.selin, role: "contributor" },
+      { userId: ids.arda, label: "arda@viberr.dev" },
+    );
   });
 
   it("membership CRUD is admin-only", async () => {
@@ -460,11 +469,11 @@ describe("grant-scope", () => {
   // action are deleted — nothing ever wrote `task.repo`, so the flag gated
   // nothing in either direction. One project, one repository.
 
-  it("grant-scope: reviewer refused; admin with no PAT gets the typed copy", async () => {
+  it("grant-scope: a contributor is refused; an admin with no PAT gets the typed copy", async () => {
     const denied = actionOutcome(
       await postAction(ids.selin, { intent: "grant-scope" }),
     );
-    // Selin was re-invited as viewer above → still not admin|maintainer.
+    // Selin is a contributor, below the admin|maintainer tier.
     expect(denied.status).toBe(403);
 
     const result = await postAction(ids.arda, { intent: "grant-scope" });
