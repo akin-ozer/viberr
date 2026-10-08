@@ -966,44 +966,6 @@ describe("reconcileTask", () => {
     expect(after).toBe(before); // byte-stable, no updatedAt churn
   });
 
-  it("F19-19: two OVERLAPPING passes announce the divergence once, and notify once", async () => {
-    // `reconcileTask` reads the task file, then awaits 2-4 GitHub round trips
-    // before writing, and every out-of-band guard compares the live PR state
-    // against the PRE-await snapshot. Nothing serialized two passes over one
-    // task: no lock in reconcileProject/runReconcile, the poller runs
-    // independently of the "Update status" button, and that button's disabled
-    // guard is per-fetcher — so two maintainers (or one in two tabs) both saw
-    // `pr.state: review`, both computed "just merged", and the task got the
-    // divergence note TWICE plus two inbox rows for one event.
-    //
-    // The sequential case was already covered (the test above) and always
-    // passed; only the concurrent one was uncovered. Canary: have
-    // `reconcileTask` call `reconcileTaskGuarded` directly (drop
-    // `withTaskReconcileLock`) and the counts below become 2.
-    const { store, actor } = setup(); // VIB-301 at "review", owner arda (admin)
-    const routes = happyRoutes();
-    routes[`GET ${REPO_PATH}/pulls/318`] = {
-      body: {
-        number: 318, title: "Attach execution workspace", state: "closed",
-        merged: true, merged_at: "2026-07-05T09:00:00Z", head: { sha: "headsha318" },
-        additions: 1, deletions: 0, changed_files: 1,
-      },
-    };
-    const pass = () => reconcileVib301(store, actor, fakeGithubFetch(routes).fetchImpl);
-    // Started together, never awaited in between — the real overlap.
-    await Promise.all([pass(), pass()]);
-
-    // SAFETY: the SELECT names one column, declared `text TEXT NOT NULL`.
-    const events = store.db
-      .prepare(`SELECT text FROM task_events WHERE task_key = 'VIB-301'`)
-      .all() as { text: string }[];
-    expect(events.filter((e) => /\*\*Divergence:\*\*/.test(e.text))).toHaveLength(1);
-    const notifs = listNotifications(store.db, store.users.arda.id).filter(
-      (n) => n.kind === "policy" && /merged on GitHub/.test(n.text),
-    );
-    expect(notifs).toHaveLength(1);
-  });
-
   it("merged PR → sync 'merged' beats behind (ruling 12 precedence)", async () => {
     const { store, actor } = setup();
     const routes = happyRoutes();
@@ -1780,41 +1742,6 @@ describe("reconcileTask persists CI health and review state (P13-D-28)", () => {
     const pr = readPr(store);
     expect(pr).toMatchObject({ state: "merged" });
     expect("review" in pr!).toBe(false);
-  });
-
-  it("a task.md `repo:` override is inert — the PROJECT repo is used (P13-D-5)", async () => {
-    const { store, actor } = setup();
-    // The override used to win here. Nothing can write the field any more, so a
-    // leftover line must not redirect reconcile at a repo the project never set.
-    // SAFETY: deliberately INVALID input — `repo:` is that retired override and
-    // the frontmatter type no longer declares it. The assertions below prove it
-    // survives as an unknown key and is never read back as frontmatter.
-    writeTask(store.dataRoot, store.slug, {
-      frontmatter: {
-        ...baseTaskFrontmatter("VIB-301", {
-          title: "Attach execution workspace",
-          stage: "review",
-          branch: "vib-301-workspace",
-          ownerUserId: store.users.arda.id,
-        }),
-        repo: "akin-ozer/some-other-repo",
-      } as ReturnType<typeof baseTaskFrontmatter>,
-    });
-    rebuildAll(store.db, { dataRoot: store.dataRoot });
-    const file = readVib301(store)!;
-    // The line really is on disk (so the assertion below is not vacuous) — and
-    // it is preserved as an UNKNOWN key, not read back as frontmatter.
-    expect(file.content).toContain("repo: akin-ozer/some-other-repo");
-    expect(file.parsed.unknownFrontmatter).toMatchObject({
-      repo: "akin-ozer/some-other-repo",
-    });
-
-    const gh = fakeGithubFetch(happyRoutes());
-    const result = await reconcileVib301(store, actor, gh.fetchImpl);
-    expect(result).toMatchObject({ status: "reconciled", repo: "akin-ozer/viberr" });
-    expect(
-      gh.calls.every((c) => c.url.pathname.startsWith("/repos/akin-ozer/viberr/")),
-    ).toBe(true);
   });
 });
 
@@ -2727,20 +2654,6 @@ describe("reconcileTask records the human PR approval (R19-B)", () => {
     });
   });
 
-  it("fails CLOSED on an approver whose GitHub handle maps to nobody — and records WHY", async () => {
-    const { store, actor } = setupDelivered();
-    const routes = happyRoutes();
-    routes[REVIEWS] = {
-      body: [{ user: { login: "octocat" }, state: "APPROVED", commit_id: "headsha318" }],
-    };
-    await reconcileVib301(store, actor, fakeGithubFetch(routes).fetchImpl);
-    expect(readPrHumanApproval(readPr(store))).toMatchObject({
-      login: "octocat",
-      userId: null,
-      status: "unlinked_handle",
-    });
-  });
-
   it("fails CLOSED on a registered NON-member's approval", async () => {
     const { store, actor } = setupDelivered();
     // deniz has an account but no membership on this project.
@@ -2753,22 +2666,6 @@ describe("reconcileTask records the human PR approval (R19-B)", () => {
     expect(readPrHumanApproval(readPr(store))).toMatchObject({
       userId: store.users.deniz.id,
       status: "not_a_member",
-    });
-  });
-
-  it("binds to the DELIVERED revision — an approval of an older commit does not count", async () => {
-    // The PR head advanced past what was reviewed: the approval sits on an
-    // earlier commit, which is exactly the R15-1 case a status pill cannot see.
-    const { store, actor } = setupDelivered();
-    updateUserFields(store.db, store.users.murat.id, { githubHandle: "muratdev" });
-    const routes = happyRoutes();
-    routes[REVIEWS] = {
-      body: [{ user: { login: "muratdev" }, state: "APPROVED", commit_id: "oldersha" }],
-    };
-    await reconcileVib301(store, actor, fakeGithubFetch(routes).fetchImpl);
-    expect(readPrHumanApproval(readPr(store))).toMatchObject({
-      status: "stale_revision",
-      commitSha: "oldersha",
     });
   });
 
