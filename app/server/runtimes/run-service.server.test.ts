@@ -55,7 +55,6 @@ import {
   type FakeRun,
 } from "../../../test-support/fake-runtime";
 import { settle } from "../../../test-support/polling";
-import { RUN_TMP_REMOVE_DELAY_MS, runTmpDir } from "./run-tmp.server";
 
 // SAFETY: stands in for a live `createSdkMcpServer(...)` config. The tests
 // mounting it assert how the service ROUTES the dictionary — key-derived
@@ -65,6 +64,13 @@ import { RUN_TMP_REMOVE_DELAY_MS, runTmpDir } from "./run-tmp.server";
 const sdkServerStub = { type: "sdk" } as McpSdkServerConfigWithInstance;
 /** A portable stdio mount, shaped as `resolveSpecialistMcpServers` builds it. */
 const stdioServerStub = { command: "npx", args: ["-y", "example-mcp"] };
+
+/** Ruling 636(a): a launched run's temporary directory, `<root>/<runId>` under
+ *  the `VIBERR_RUN_TMP_ROOT` test-support/setup-env.ts gives each file. */
+const runTmpDirOf = (runId: string) => path.join(process.env.VIBERR_RUN_TMP_ROOT!, runId);
+/** Ruling 636(b): the directory goes twice ruling 174's 5 s reap grace and 2 s
+ *  after the settle. */
+const RUN_TMP_REMOVAL_MS = 12_000;
 
 let ctx: TestDbContext;
 let store: TestStore;
@@ -553,10 +559,10 @@ describe("a run with no credential principal (ruling 127)", () => {
         env: { TMPDIR: "/tmp" },
       });
       await settle();
-      const dir = runTmpDir(runId);
+      const dir = runTmpDirOf(runId);
       expect(lastRunSpec()!.env).toMatchObject({ TMPDIR: dir, TMP: dir, TEMP: dir });
       expect(existsSync(dir)).toBe(true);
-      await vi.advanceTimersByTimeAsync(RUN_TMP_REMOVE_DELAY_MS);
+      await vi.advanceTimersByTimeAsync(RUN_TMP_REMOVAL_MS);
       await vi.waitFor(() => expect(existsSync(dir)).toBe(false), { timeout: 5_000 });
     } finally {
       vi.useRealTimers();
@@ -3017,9 +3023,9 @@ describe("compaction at completion (ruling 376)", () => {
       const { runId } = await startTestRun(store.db, specialist());
       await settle();
       await settle();
-      const dir = runTmpDir(runId);
+      const dir = runTmpDirOf(runId);
       expect(getRun(store.db, runId)!.state).toBe("finished");
-      await vi.advanceTimersByTimeAsync(RUN_TMP_REMOVE_DELAY_MS * 2);
+      await vi.advanceTimersByTimeAsync(RUN_TMP_REMOVAL_MS * 2);
       // A removal, had one been scheduled, has had its time to finish.
       const until = performance.now() + 150;
       while (performance.now() < until) await new Promise((resolve) => setImmediate(resolve));
@@ -3027,7 +3033,7 @@ describe("compaction at completion (ruling 376)", () => {
       compaction.answer();
       await settle();
       await settle();
-      await vi.advanceTimersByTimeAsync(RUN_TMP_REMOVE_DELAY_MS);
+      await vi.advanceTimersByTimeAsync(RUN_TMP_REMOVAL_MS);
       await vi.waitFor(() => expect(existsSync(dir)).toBe(false), { timeout: 5_000 });
     } finally {
       vi.useRealTimers();

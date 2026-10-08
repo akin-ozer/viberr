@@ -1,6 +1,7 @@
 import { chmodSync, existsSync, mkdirSync, readdirSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { withEnv } from "../../../test-support/env";
 import { pollUntil } from "../../../test-support/polling";
 import { createTestDbContext, type TestDbContext } from "../../../test-support/test-db";
 import {
@@ -16,7 +17,8 @@ import {
  * once the run is over. Which uid can enter it is the isolation module's
  * (`passThroughDirForAgents`, `shareDirWithAgents`) and the image's
  * (`scripts/check-agent-isolation.sh`); these pin the lifecycle, with no
- * launcher, as the server's own user.
+ * launcher, as the server's own user. Each names its root the way a deployment
+ * does, in `VIBERR_RUN_TMP_ROOT`.
  */
 
 let ctx: TestDbContext;
@@ -30,7 +32,7 @@ afterEach(() => {
 });
 
 describe("a run's temporary directory (ruling 636)", () => {
-  it("is made under the root for the run alone, and starts clean", () => {
+  it("is made under the root for the run alone, and starts clean", async () => {
     // A crashed predecessor of the same id never hands its files on.
     // CANARY: drop the removal before the `mkdirSync` in `prepareRunTmp` and
     // the launch fails on the leftover directory.
@@ -38,7 +40,7 @@ describe("a run's temporary directory (ruling 636)", () => {
     mkdirSync(path.join(root, "run_one"), { recursive: true });
     writeFileSync(path.join(root, "run_one", "left-by-a-crash.json"), "{}");
 
-    const dir = prepareRunTmp("run_one", null, root);
+    const dir = await withEnv({ VIBERR_RUN_TMP_ROOT: root }, () => prepareRunTmp("run_one", null));
 
     expect(dir).toBe(path.join(root, "run_one"));
     expect(readdirSync(dir)).toEqual([]);
@@ -50,7 +52,7 @@ describe("a run's temporary directory (ruling 636)", () => {
     // throw there would take the run's settle down with it.
     // CANARY: drop the try/catch in `removeRunTmp` and the second call rejects.
     const root = ctx.makeTempDir("viberr-run-tmp-");
-    const dir = prepareRunTmp("run_two", null, root);
+    const dir = await withEnv({ VIBERR_RUN_TMP_ROOT: root }, () => prepareRunTmp("run_two", null));
     mkdirSync(path.join(dir, "cache", "locked"), { recursive: true });
     writeFileSync(path.join(dir, "cache", "locked", "scratch.csv"), "a,b\n");
     chmodSync(path.join(dir, "cache", "locked"), 0o500);
@@ -66,7 +68,8 @@ describe("a run's temporary directory (ruling 636)", () => {
     // directory removed under a process still writing it is left half there.
     // CANARY: call `removeRunTmp` at once instead of from the timer and the
     // directory is gone on the look made well inside the delay.
-    const dir = prepareRunTmp("run_three", null, ctx.makeTempDir("viberr-run-tmp-"));
+    const root = ctx.makeTempDir("viberr-run-tmp-");
+    const dir = await withEnv({ VIBERR_RUN_TMP_ROOT: root }, () => prepareRunTmp("run_three", null));
 
     scheduleRunTmpRemoval(dir, null, "run_three", 1_500);
     // Long enough for a removal begun at once (two short child processes) to
@@ -77,17 +80,21 @@ describe("a run's temporary directory (ruling 636)", () => {
     expect(await pollUntil(() => !existsSync(dir))).toBe(true);
   });
 
-  it("boot removes every directory runs left, whoever they were, and counts them", () => {
+  it("boot removes every directory runs left, whoever they were, and counts them", async () => {
     // Nothing runs at boot, so all of them are leftovers: a server that stopped
     // before its removal timer, a removal that failed.
     // CANARY: skip directories with no run in the projection and the second stays.
     const db = ctx.makeDb();
     const root = ctx.makeTempDir("viberr-run-tmp-");
-    prepareRunTmp("run_four", null, root);
-    prepareRunTmp("run_unknown", null, root);
+    const swept = await withEnv({ VIBERR_RUN_TMP_ROOT: root }, () => {
+      prepareRunTmp("run_four", null);
+      prepareRunTmp("run_unknown", null);
+      return sweepRunTmp(db);
+    });
 
-    expect(sweepRunTmp(db, { root })).toBe(2);
+    expect(swept).toBe(2);
     expect(readdirSync(root)).toEqual([]);
-    expect(sweepRunTmp(db, { root: path.join(root, "never-made") })).toBe(0);
+    const neverMade = path.join(root, "never-made");
+    expect(await withEnv({ VIBERR_RUN_TMP_ROOT: neverMade }, () => sweepRunTmp(db))).toBe(0);
   });
 });
