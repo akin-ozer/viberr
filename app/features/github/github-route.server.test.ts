@@ -219,7 +219,7 @@ describe("loader", () => {
 });
 
 describe("action RBAC + degraded no-PAT results", () => {
-  it("rejects a reviewer from grant-scope (admin|maintainer only)", async () => {
+  it("rejects a contributor from grant-scope (admin|maintainer only)", async () => {
     const result = await postAction(ids.selin, "grant-scope");
     expect(result.init?.status).toBe(403);
   });

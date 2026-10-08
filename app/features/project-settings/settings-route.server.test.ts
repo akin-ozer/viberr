@@ -352,7 +352,7 @@ describe("members", () => {
     expect(result.error).toBe("deniz@viberr.dev is already a member");
   });
 
-  it("invites an unregistered email by creating a passwordless whitelist user", async () => {
+  it("invites an unregistered email by creating an account seated as Viewer", async () => {
     const result = actionOutcome(
       await postAction(ids.arda, {
         intent: "invite",
