@@ -20,8 +20,9 @@ import {
 } from "~/server/projections/notifications.server";
 import type { runOperator } from "~/server/runtimes/operator-run.server";
 // Loaded up front so a hand-off, were one made, reaches the stub within the
-// settle below instead of waiting on a cold dynamic import.
-
+// settle below instead of waiting on a cold dynamic import: `autoInvokeOperator`
+// loads it when a hand-off runs.
+import "./operator-authority.server";
 import { applyAcceptanceWrite, forceAcceptCompletion } from "./task-acceptance.server";
 import { resolvePacket } from "./packet-resolution.server";
 import { transitionStage } from "./task-transitions.server";
