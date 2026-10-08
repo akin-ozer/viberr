@@ -31,6 +31,7 @@ import {
   listRunsForTask,
 } from "~/server/runtimes/run-service.server";
 import { getRun, upsertRun } from "~/server/runtimes/run-store.server";
+import { recordProvenance } from "~/server/provenance/provenance-recorder.server";
 import type { runOperator } from "~/server/runtimes/operator-run.server";
 import { listProjectTasks } from "~/server/projections/board-query.server";
 import { drainRunCompletions, installFakeRuntime } from "../../../test-support/fake-runtime";
@@ -7144,28 +7145,18 @@ describe("ruling 178: the snapshot carries the project's required reviewers", ()
  * never a reason to skip the call.
  */
 describe("F37-11: the operator snapshot carries the base compare", () => {
-  /** One `github.reconcile` observation row as the reconciler writes it, cut
-   *  down to three of its fields. The snapshot reads it back through
-   *  `createBaseCompareLookup`: `behindBy` becomes `baseBehindBy`, and the
-   *  absent `headSha` makes it a compare that named no head. `branch` and
+  /** One `github.reconcile` observation row, written through the recorder the
+   *  reconciler uses and cut down to three of its fields. The snapshot reads it
+   *  back through `createBaseCompareLookup`: `behindBy` becomes `baseBehindBy`,
+   *  and the absent `headSha` makes it a compare that named no head. `branch` and
    *  `sync` ride along unread here (`sync` is what the reconciler's own
    *  `latestReconcileObservation` reads). */
   function seedCompare(behindBy: number): void {
-    const details = {
-      branch: "vib-1",
-      sync: behindBy > 0 ? "behind_main" : "synced",
-      behindBy,
-    };
-    store.db
-      .prepare(
-        `INSERT INTO provenance (source_path, content_hash, observed_at, action, details_json)
-         VALUES (?, NULL, ?, 'github.reconcile', ?)`,
-      )
-      .run(
-        `projects/${store.slug}/tasks/VIB-1/task.md`,
-        new Date().toISOString(),
-        JSON.stringify(details),
-      );
+    recordProvenance(store.db, {
+      sourcePath: `projects/${store.slug}/tasks/VIB-1/task.md`,
+      action: "github.reconcile",
+      details: { branch: "vib-1", sync: behindBy > 0 ? "behind_main" : "synced", behindBy },
+    });
   }
 
   it("reports null when no pass has compared this task", () => {
