@@ -47,7 +47,11 @@ off`), the effective `autonomy` (`supervised | full`) with `configuredAutonomy` 
 `autonomyClampedFrom`, backend, model, effort, name, skills, knowledge bases (its own
 grants plus the project's rulings KB, ruling 239, with `rulingsKb` naming it), MCP
 grants, persona, whether the operator is deployed, and `humanGatedBeforeWork` (derived
-from the workflow graph, never a stored preset).
+from the workflow graph, never a stored preset). A project with no operator deployed gets
+an empty policy, the `supervised` ceiling and no grants, and still the rulings KB:
+`runOperator` refuses no undeployed operator (the Run operator control, a schedule, boot
+recovery and the controller each start one), and every run a project makes reads its
+rulings (ruling 239).
 
 - **Autonomy is a ceiling, not a pin** (ruling 67). A per-run level may sit at or
   below the configured one; a clamp that bites writes the audit fact

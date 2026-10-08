@@ -400,8 +400,12 @@ export function resolveOperatorAuthority(
       effort: "",
       name: "Operator",
       skills: [],
-      kb: [],
-      rulingsKb: null,
+      // Ruling 239: every run a project makes reads its rulings, and this one
+      // still runs: `runOperator` refuses no undeployed operator (the Run
+      // operator control, a schedule, boot recovery and the controller each
+      // start one), so it plans from the rules the deployed branch reads.
+      kb: withProjectRulings([], projectSlug, ctx),
+      rulingsKb: projectRulingsKb(projectSlug, ctx),
       persona: null,
       mcps: [],
       deployed: false,

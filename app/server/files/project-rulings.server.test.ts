@@ -81,17 +81,24 @@ describe("withProjectRulings", () => {
 });
 
 describe("the runtimes that build a run's knowledge call it", () => {
-  it("the operator reads it through its resolved authority", async () => {
+  it.each([
+    { operator: "a deployed", deployed: true, deploy: () => deployDeliveryOperator(store, "supervised") },
+    // No operator deployed: `runOperator` still runs one (the Run operator
+    // control, a schedule, boot recovery, the controller), with no grants.
+    { operator: "an undeployed", deployed: false, deploy: () => {} },
+  ])("$operator operator reads it through its resolved authority", async ({ deployed, deploy }) => {
     // So every consumer of `authority.kb` gets it, not just the prompt builder.
-    // An undeployed operator resolves no knowledge at all, so deploy one.
-    deployDeliveryOperator(store, "supervised");
+    deploy();
     setRulings("team-rulings");
     const { resolveOperatorAuthority } = await import("~/server/tasks/operator-authority.server");
-    // CANARY: read `view.resources.kb` without `withProjectRulings` and the
-    // operator's list loses the project's rulings.
-    expect(resolveOperatorAuthority({ dataRoot: store.dataRoot }, store.slug).kb).toContain(
-      "team-rulings",
-    );
+    const authority = resolveOperatorAuthority({ dataRoot: store.dataRoot }, store.slug);
+    expect(authority.deployed).toBe(deployed);
+    // CANARY: build either branch's `kb` without `withProjectRulings` (the
+    // deployed `view.resources.kb`, the undeployed `[]`) and that operator's
+    // list loses the project's rulings; leave its `rulingsKb` null and its
+    // index no longer says they bind (ruling 286).
+    expect(authority.kb).toContain("team-rulings");
+    expect(authority.rulingsKb).toBe("team-rulings");
   });
 
   it("the controller reads it when scoped to the project, and NOT when instance-scoped", async () => {
