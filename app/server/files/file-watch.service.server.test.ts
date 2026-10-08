@@ -151,7 +151,7 @@ describe("subtree pruning (F-SPAWN1 — fd explosion)", () => {
     expect(shouldIgnoreWatchPath(root, "/somewhere/else")).toBe(false);
   });
 
-  it("integration: a workspace-file write never reprojects; task.md edits still do", async () => {
+  it("integration: the watcher holds no workspace directory; task.md edits still reproject", async () => {
     const store = setupTestStore(ctx);
     writeTask(store.dataRoot, store.slug, { frontmatter: baseTaskFrontmatter("VIB-1") });
     rebuildAll(store.db, { dataRoot: store.dataRoot });
@@ -159,18 +159,20 @@ describe("subtree pruning (F-SPAWN1 — fd explosion)", () => {
       store.db
         .prepare(`SELECT title FROM task_projections WHERE project_slug = ? AND task_key = ?`)
         .get(store.slug, "VIB-1")!.title;
-    const originalTitle = projectedTitle();
-
-    await startWatcherReady(store);
-
-    // Write a file deep inside the task's workspace clone — must be ignored (the
-    // pruning keeps the recursive watcher out of cloned-repo files).
+    // A task's workspace clone, already on disk when the watcher starts.
     const wsDir = path.join(taskDir(store.slug, "VIB-1", store.dataRoot), "workspace", "repo", "src");
     mkdirSync(wsDir, { recursive: true });
     writeFileSync(path.join(wsDir, "index.ts"), "export const x = 1;\n");
-    // Give the watcher a beat; the workspace write must NOT reproject.
-    await new Promise((r) => setTimeout(r, 600));
-    expect(projectedTitle()).toBe(originalTitle);
+
+    const watcher = await startWatcherReady(store);
+
+    // The pruning keeps the recursive watcher out of cloned-repo directories,
+    // each of which would hold descriptors. CANARY: drop `ignored:` from the
+    // watch() options and the clone's three directories are watched.
+    const inWorkspace = Object.keys(watcher.getWatched()).filter((dir) =>
+      path.relative(store.dataRoot, dir).split(path.sep).includes("workspace"),
+    );
+    expect(inWorkspace).toEqual([]);
 
     // A real task.md edit still reprojects (proves pruning didn't kill watching).
     writeTask(store.dataRoot, store.slug, {
