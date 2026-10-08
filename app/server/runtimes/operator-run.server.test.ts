@@ -48,7 +48,6 @@ import {
 } from "./run-store.server";
 import { defaultModelFor } from "./model-catalog.server";
 import {
-  deliveredFollowUpFor,
   executeStrandedCodexPlan,
   maybeResumeStrandedOperator,
   ownOperatorRunForTests,
@@ -5033,26 +5032,6 @@ describe("runOperator — authority, ordering, orphans", () => {
    * only for a drive that stopped there.
    */
   describe("ruling 357: a drive's own delivery owes a follow-up only if the drive stopped there", () => {
-    it("deliveredFollowUpFor: owed when delivered and not acted on; nothing otherwise", () => {
-      const base = { projectSlug: "p", taskKey: "VIB-1", dataRoot: "/tmp/x", transitionDepth: 2 };
-      expect(deliveredFollowUpFor({ ...base, ownRun: null })).toBeNull();
-      expect(
-        deliveredFollowUpFor({ ...base, ownRun: { backend: "claude", autonomy: "full", reactDepth: 0 } }),
-      ).toBeNull();
-      expect(
-        deliveredFollowUpFor({
-          ...base,
-          ownRun: { backend: "claude", autonomy: "full", reactDepth: 0, deliveredHeadMoved: true, actedAfterDelivery: true },
-        }),
-      ).toBeNull();
-      expect(
-        deliveredFollowUpFor({
-          ...base,
-          ownRun: { backend: "claude", autonomy: "full", reactDepth: 0, deliveredHeadMoved: true },
-        }),
-      ).toEqual({ projectSlug: "p", taskKey: "VIB-1", dataRoot: "/tmp/x", trigger: "delivered", transitionDepth: 3 });
-    });
-
     it("the lease release fires the follow-up for a drive that delivered and stopped, and none for one that kept going", async () => {
       // CANARY: drop the `deliveredFollowUpFor` call from releaseOperatorLease
       // (the second drive never starts).
@@ -5074,6 +5053,9 @@ describe("runOperator — authority, ordering, orphans", () => {
       await eventually(() => {
         expect(adapter5.pending).not.toBeNull();
       });
+      // It is a `delivered` turn, one link further down the chain.
+      expect(adapter5.pending!.spec.prompt).toContain("delivery is DONE, do not deliver again");
+      expect(ownOperatorRunForTests(store5.slug, "VIB-1")?.transitionDepth).toBe(1);
       adapter5.finish(store5, JSON.stringify({ reasoning: "nothing left", actions: [] }), "finished");
       await eventually(() => {
         expect(operatorRuns().every((r) => r.state === "finished")).toBe(true);
