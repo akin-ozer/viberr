@@ -440,7 +440,6 @@ export interface StartMcpOAuthInput {
   userId: string;
   sessionId: string;
   actor: AuditActor;
-  fetchImpl?: McpFetch;
 }
 
 /**
@@ -475,7 +474,6 @@ export async function startMcpOAuthSignIn(
   try {
     discovery = await discoverMcpOAuth(row.target, {
       resourceMetadataUrl: readPublic(row.oauth_json)?.resourceMetadataUrl ?? null,
-      fetchImpl: input.fetchImpl,
     });
   } catch (error) {
     return refuse("discovery", oauthFailureReason(error));
@@ -496,7 +494,7 @@ export async function startMcpOAuthSignIn(
       : null;
   let client: McpOAuthClient;
   try {
-    client = known ?? (await registerMcpOAuthClient(discovery, input.redirectUri, input.fetchImpl));
+    client = known ?? (await registerMcpOAuthClient(discovery, input.redirectUri));
   } catch (error) {
     return refuse("registration", oauthFailureReason(error));
   }
@@ -700,7 +698,6 @@ export async function signOutMcpOAuth(
   db: DatabaseSync,
   mcpId: string,
   actor: AuditActor,
-  options: { fetchImpl?: McpFetch } = {},
 ): Promise<{ toast: string }> {
   const row = rowById(db, mcpId);
   if (!row) throw AppError.notFound("No such MCP server.");
@@ -716,15 +713,9 @@ export async function signOutMcpOAuth(
     const discovery = discoveryOf(sealed);
     try {
       const refresh = sealed.tokens.refresh_token
-        ? await revokeMcpOAuthToken(discovery, sealed.client, sealed.tokens.refresh_token, "refresh_token", options.fetchImpl)
+        ? await revokeMcpOAuthToken(discovery, sealed.client, sealed.tokens.refresh_token, "refresh_token")
         : false;
-      const access = await revokeMcpOAuthToken(
-        discovery,
-        sealed.client,
-        sealed.tokens.access_token,
-        "access_token",
-        options.fetchImpl,
-      );
+      const access = await revokeMcpOAuthToken(discovery, sealed.client, sealed.tokens.access_token, "access_token");
       revocation = refresh || access ? "revoked" : "not offered";
     } catch (error) {
       revocation = "failed";

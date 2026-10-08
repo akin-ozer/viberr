@@ -124,7 +124,7 @@ export function isClientRefusal(cause: unknown): boolean {
 }
 
 /** `fetch` with a deadline, since the SDK's OAuth helpers set none. */
-function timed(fetchImpl: McpFetch | undefined): McpFetch {
+function timed(fetchImpl?: McpFetch): McpFetch {
   const base = fetchImpl ?? fetch;
   return (url, init) =>
     base(url, { ...init, signal: init?.signal ?? AbortSignal.timeout(OAUTH_REQUEST_TIMEOUT_MS) });
@@ -205,9 +205,9 @@ export function scrubSecrets(text: string, secrets: readonly (string | null | un
  */
 export async function discoverMcpOAuth(
   target: string,
-  options: { resourceMetadataUrl?: string | null; fetchImpl?: McpFetch } = {},
+  options: { resourceMetadataUrl?: string | null } = {},
 ): Promise<McpOAuthDiscovery> {
-  const fetchFn = timed(options.fetchImpl);
+  const fetchFn = timed();
   let resourceMetadata: Awaited<ReturnType<typeof discoverOAuthProtectedResourceMetadata>> | null = null;
   try {
     resourceMetadata = await discoverOAuthProtectedResourceMetadata(
@@ -281,7 +281,6 @@ export async function discoverMcpOAuth(
 export async function registerMcpOAuthClient(
   discovery: McpOAuthDiscovery,
   redirectUri: string,
-  fetchImpl?: McpFetch,
 ): Promise<McpOAuthClient> {
   if (!discovery.endpoints.registration_endpoint) {
     throw new McpOAuthError(
@@ -298,7 +297,7 @@ export async function registerMcpOAuthClient(
         response_types: ["code"],
       },
       scope: discovery.scope ?? undefined,
-      fetchFn: timed(fetchImpl),
+      fetchFn: timed(),
     });
     const client: McpOAuthClient = { client_id: full.client_id, redirect_uri: redirectUri };
     if (full.client_secret) client.client_secret = full.client_secret;
@@ -387,7 +386,6 @@ export async function revokeMcpOAuthToken(
   client: McpOAuthClient,
   token: string,
   hint: "refresh_token" | "access_token",
-  fetchImpl?: McpFetch,
 ): Promise<boolean> {
   const endpoint = discovery.endpoints.revocation_endpoint;
   if (!endpoint) return false;
@@ -403,7 +401,7 @@ export async function revokeMcpOAuthToken(
   }
   let res: Response;
   try {
-    res = await timed(fetchImpl)(endpoint, { method: "POST", headers, body });
+    res = await timed()(endpoint, { method: "POST", headers, body });
   } catch (error) {
     throw new McpOAuthError(`revocation failed: ${oauthFailureReason(error)}`, { cause: error });
   }
