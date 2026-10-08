@@ -7,10 +7,9 @@ import { renderToString } from "react-dom/server";
 import { createRoutesStub } from "react-router";
 import type { TaskDetailPage } from "./task-detail-page";
 import type { TaskDetail } from "~/server/projections/task-query.server";
-import type { AcceptanceAffordance } from "~/server/tasks/task-acceptance.server";
 import type { TaskSchedule } from "~/schemas/task-file.schema";
 import type { PacketRender } from "~/shared/mapping/task.server";
-import { taskDetail } from "../../../test-support/task-detail";
+import { acceptanceAffordance, connectedPrincipal, taskDetail } from "../../../test-support/task-detail";
 import { FakeEventSource } from "../../../test-support/fake-event-source";
 import type { TimelineEventRender } from "~/shared/mapping/task-event.server";
 import type { LogLine, RunView } from "~/features/runtime/runtime-types";
@@ -271,16 +270,6 @@ const ACCEPT_RECOMMENDATION: RecommendationView = {
   detail: "The review is clean and the work meets the goal.",
 };
 
-const ACCEPTANCE: AcceptanceAffordance = {
-  hasAuthority: true,
-  atBoundary: true,
-  blockedReason: null,
-  blockedGates: [],
-  blockedReasonViaPacket: null,
-  canAccept: true,
-  terminallyBlocked: false,
-};
-
 const BASE_PROPS: Omit<PageProps, "task" | "runtime"> = {
   labelSuggestions: ["runtime", "github"],
   attachments: [{ name: "screenshot-1.png", size: 48_213, modifiedAt: "2026-07-03T23:45:00.000Z" }],
@@ -290,12 +279,7 @@ const BASE_PROPS: Omit<PageProps, "task" | "runtime"> = {
   deployedSpecialists: DEPLOYED,
   operatorBackend: "claude",
   operatorAutonomy: "supervised",
-  runPrincipal: {
-    ownerUserId: "u-arda",
-    ownerName: "Arda Kaya",
-    claude: { available: true, detail: null },
-    codex: { available: true, detail: null },
-  },
+  runPrincipal: connectedPrincipal(),
   liveAgentRuns: [],
   runsVisible: true,
   timelineHasMore: true,
@@ -316,7 +300,7 @@ const BASE_PROPS: Omit<PageProps, "task" | "runtime"> = {
   recommendations: [],
   schedules: [SCHEDULE],
   archived: false,
-  acceptance: { ...ACCEPTANCE, atBoundary: false, canAccept: false },
+  acceptance: acceptanceAffordance({ atBoundary: false, canAccept: false }),
   githubHost: "https://github.com",
   githubReconciledAt: "2026-07-03T23:50:00.000Z",
   githubCheckedAt: "2026-07-03T23:58:00.000Z",
@@ -350,7 +334,7 @@ function withAcceptCard(): PageProps {
       FINISHED_OPERATOR,
     ],
     recommendations: [ACCEPT_RECOMMENDATION],
-    acceptance: ACCEPTANCE,
+    acceptance: acceptanceAffordance(),
   };
 }
 

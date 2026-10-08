@@ -27,18 +27,7 @@ import type { RecommendationView } from "./operator-recommendations";
 import { TaskDetailPage } from "./task-detail-page";
 import type { RunView } from "~/features/runtime/runtime-types";
 import { NO_RUN_CACHE } from "../../../test-support/run-view";
-import { taskDetail } from "../../../test-support/task-detail";
-
-/** Ruling 127: the task owner whose accounts a run bills, both backends
- *  connected — the ordinary case, so the run controls render live and these
- *  tests keep testing what they are about. The refusal states are covered in
- *  execution-profile.test.tsx. */
-const CONNECTED_PRINCIPAL = {
-  ownerUserId: "u-arda",
-  ownerName: "Arda Kaya",
-  claude: { available: true, detail: null },
-  codex: { available: true, detail: null },
-};
+import { acceptanceAffordance, connectedPrincipal, taskDetail } from "../../../test-support/task-detail";
 
 afterEach(cleanup);
 
@@ -62,16 +51,6 @@ function detail(patch: Partial<TaskDetail> = {}): TaskDetail {
     ...patch,
   });
 }
-
-const ACCEPTANCE: AcceptanceAffordance = {
-  hasAuthority: true,
-  atBoundary: true,
-  blockedReason: null,
-  blockedGates: [],
-  blockedReasonViaPacket: null,
-  canAccept: true,
-  terminallyBlocked: false,
-};
 
 function renderPage(props: {
   acceptance?: Partial<AcceptanceAffordance>;
@@ -121,7 +100,7 @@ function renderPage(props: {
               deployedSpecialists={props.deployedSpecialists ?? []}
               operatorBackend="claude"
               operatorAutonomy="supervised"
-              runPrincipal={CONNECTED_PRINCIPAL}
+              runPrincipal={connectedPrincipal()}
               liveAgentRuns={props.liveAgentRuns ?? []}
               timelineHasMore={false}
               timelineRemaining={0}
@@ -137,7 +116,7 @@ function renderPage(props: {
               recommendations={props.recommendations ?? []}
               schedules={props.schedules ?? []}
               archived={props.archived ?? false}
-              acceptance={{ ...ACCEPTANCE, ...props.acceptance }}
+              acceptance={acceptanceAffordance(props.acceptance)}
               githubHost="https://github.com"
               workRevisionSha={props.workRevisionSha ?? null}
               canDeliver={props.canDeliver ?? false}

@@ -3,7 +3,6 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { cleanup, fireEvent, render, waitFor, within } from "@testing-library/react";
 import { createRoutesStub } from "react-router";
 import type { TaskDetail } from "~/server/projections/task-query.server";
-import type { AcceptanceAffordance } from "~/server/tasks/task-acceptance.server";
 import type { TimelineEventRender } from "~/shared/mapping/task-event.server";
 import type { LogLine, RunView } from "~/features/runtime/runtime-types";
 import { NO_RUN_CACHE } from "../../../test-support/run-view";
@@ -11,18 +10,7 @@ import { ToastProvider } from "~/ui/toast";
 import { ContinuityRecoveryPanel } from "./continuity-recovery";
 import { deriveContinuityLoss } from "./continuity-loss";
 import { TaskDetailPage } from "./task-detail-page";
-import { taskDetail } from "../../../test-support/task-detail";
-
-/** Ruling 127: the task owner whose accounts a run bills, both backends
- *  connected — the ordinary case, so the run controls render live and these
- *  tests keep testing what they are about. The refusal states are covered in
- *  execution-profile.test.tsx. */
-const CONNECTED_PRINCIPAL = {
-  ownerUserId: "u-arda",
-  ownerName: "Arda Kaya",
-  claude: { available: true, detail: null },
-  codex: { available: true, detail: null },
-};
+import { acceptanceAffordance, connectedPrincipal, taskDetail } from "../../../test-support/task-detail";
 
 afterEach(() => {
   cleanup();
@@ -411,16 +399,6 @@ describe("ContinuityRecoveryPanel", () => {
 
 /* ------------------------------------------------------------ page wiring */
 
-const ACCEPTANCE: AcceptanceAffordance = {
-  hasAuthority: true,
-  atBoundary: true,
-  blockedReason: null,
-  blockedGates: [],
-  blockedReasonViaPacket: null,
-  canAccept: true,
-  terminallyBlocked: false,
-};
-
 function detail(patch: Partial<TaskDetail> = {}): TaskDetail {
   return taskDetail({
     key: "VIB-160",
@@ -458,7 +436,7 @@ function renderPage(task: Partial<TaskDetail> = {}, runtime: RunView[] = [broken
             deployedSpecialists={[]}
             operatorBackend="claude"
             operatorAutonomy="supervised"
-            runPrincipal={CONNECTED_PRINCIPAL}
+            runPrincipal={connectedPrincipal()}
             liveAgentRuns={[]}
             timelineHasMore={false}
             timelineRemaining={0}
@@ -470,7 +448,7 @@ function renderPage(task: Partial<TaskDetail> = {}, runtime: RunView[] = [broken
             mentionables={{ agents: [], users: [], reserved: [] }}
             recommendations={[]}
             schedules={[]}
-            acceptance={ACCEPTANCE}
+            acceptance={acceptanceAffordance()}
             githubHost="https://github.com"
           />
         </ToastProvider>

@@ -28,8 +28,7 @@ import {
   type DeployedSpecialistView,
   type TaskMemberView,
 } from "./execution-profile";
-import type { TaskRunPrincipalView } from "./run-principal-view";
-import { taskDetail, taskSummary } from "../../../test-support/task-detail";
+import { connectedPrincipal, taskDetail, taskSummary } from "../../../test-support/task-detail";
 
 afterEach(cleanup);
 
@@ -826,21 +825,6 @@ const deployedFixture: DeployedSpecialistView[] = [
 
 function execTask(patch: Partial<TaskSummary> = {}): TaskSummary {
   return { ...taskFixture("u-arda", "Arda Kaya"), ...patch };
-}
-
-/** Ruling 127: the fixture task's OWNER (`u-arda`, who is also the viewer) and
- *  what their accounts can run. A run on this task bills them, so this — not a
- *  deployment probe — is what every run control here answers from. */
-function connectedPrincipal(
-  patch: Partial<TaskRunPrincipalView> = {},
-): TaskRunPrincipalView {
-  return {
-    ownerUserId: "u-arda",
-    ownerName: "Arda Kaya",
-    claude: { available: true, detail: null },
-    codex: { available: true, detail: null },
-    ...patch,
-  };
 }
 
 /** Renders the rebuilt panel (dynamic-dispatch rework 2026-08-29): the operator
