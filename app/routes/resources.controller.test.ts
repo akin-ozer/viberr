@@ -369,7 +369,7 @@ describe("POST /resources/controller", () => {
     expect(refused.data.error).toContain("Claude isn't connected for you yet");
     // The same sentence is in the transcript the reload shows.
     const messages = listMessages(app.db, thread.id);
-    expect(messages[messages.length - 1]).toMatchObject({ author: "controller" });
+    expect(messages.at(-1)).toMatchObject({ author: "controller", text: refused.data.error });
   });
 
   it("creates a conversation bound to the exact scope, records the surface, and runs the turn", async () => {
