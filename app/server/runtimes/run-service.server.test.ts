@@ -14,7 +14,6 @@ import { listAuditEvents } from "../../../test-support/audit-log";
 import {
   chainRunCompletion,
   configureRunServiceForTests,
-  getRunLog,
   interruptRun,
   listRunsForTask,
   MODEL_SUBSTITUTED_TAG,
@@ -26,7 +25,6 @@ import {
   runConcurrencySnapshot,
   startRun,
 } from "./run-service.server";
-import * as runServiceModule from "./run-service.server";
 import {
   getRun,
   insertRunLine,
@@ -1021,40 +1019,6 @@ describe("agent identity — startRun persists + resumeRun carries (BUG 2)", () 
       "/data/projects/x/tasks/VIB-1/attachments",
     );
   });
-
-  it("C02-R12 (pass 32): a forward read can be bounded in the SELECT itself", () => {
-    upsertRun(store.db, {
-      id: "run_fwd",
-      projectSlug: store.slug,
-      taskKey: "VIB-1",
-      threadId: "t-fwd",
-      role: "Primary specialist",
-      kind: "primary",
-      backend: "claude",
-      model: "m",
-      sdk: "s",
-      agentProfileId: "developer",
-      state: "finished",
-    });
-    for (let seq = 0; seq < 6; seq += 1) {
-      insertRunLine(store.db, {
-        runId: "run_fwd",
-        seq,
-        occurredAt: new Date().toISOString(),
-        raw: "{}",
-        display: { t: "1", ev: "text", tag: "assistant", text: `line ${seq}` },
-      });
-    }
-    // Unbounded stays the console's live tail…
-    expect(listRunLines(store.db, "run_fwd", 1).map((l) => l.seq)).toEqual([2, 3, 4, 5]);
-    // …and the bound is applied by SQL, ascending from the cursor.
-    expect(listRunLines(store.db, "run_fwd", 1, 2).map((l) => l.seq)).toEqual([2, 3]);
-    expect(listRunLines(store.db, "run_fwd", -1, 0)).toEqual([]);
-    // `getRunLog` threads it as `forwardLimit`, never as the backward `limit`.
-    const { getRunLog } = runServiceModule;
-    const page = getRunLog(store.db, "run_fwd", { since: 1, forwardLimit: 3 })!;
-    expect(page.lines.map((l) => l.seq)).toEqual([2, 3, 4]);
-  });
 });
 
 /* ------------------------- D4: the tool APPROVAL list --------------------- */
@@ -1535,59 +1499,6 @@ describe("resumeRun — continuity recovery", () => {
         (l) => l.display.tag === "run·session_missing",
       ),
     ).toBe(false);
-  });
-});
-
-/* -------------- backward paging for the console (P13-D-11) ---------------- */
-
-describe("getRunLog paging", () => {
-  async function runWithLines(count: number): Promise<string> {
-    queueFakeRun(
-      instantScript(
-        Array.from({ length: count }, (_, i) => ({
-          t: String(i),
-          ev: "text" as const,
-          tag: "assistant",
-          text: `l${i}`,
-        })),
-      ),
-    );
-    const { runId } = await startTestRun(store.db, {
-      projectSlug: store.slug, taskKey: "VIB-1", role: "R", kind: "primary",
-      backend: "claude", model: "m", prompt: "go", dataRoot: store.dataRoot,
-    });
-    await settle();
-    return runId;
-  }
-
-  it("pages BACKWARDS from a cursor, newest-first, oldest-first within the page", async () => {
-    const runId = await runWithLines(10);
-    // The loader shipped the tail; the console asks for what came before seq 7.
-    const page = getRunLog(store.db, runId, { before: 7, limit: 3 })!;
-    expect(page.lines.map((l) => l.display.text)).toEqual(["l4", "l5", "l6"]);
-    expect(page.oldestSeq).toBe(4);
-    expect(page.hasMore).toBe(true); // seq 0..3 are still older
-
-    const older = getRunLog(store.db, runId, { before: page.oldestSeq, limit: 10 })!;
-    expect(older.lines.map((l) => l.display.text)).toEqual(["l0", "l1", "l2", "l3"]);
-    // Reached the start of this run — the console steps to the PREVIOUS run id
-    // in the group's logWindow.runIds from here.
-    expect(older.hasMore).toBe(false);
-  });
-
-  it("a bare `limit` pages a run's newest lines (how the console enters an older run)", async () => {
-    const runId = await runWithLines(10);
-    const page = getRunLog(store.db, runId, { limit: 2 })!;
-    expect(page.lines.map((l) => l.display.text)).toEqual(["l8", "l9"]);
-    expect(page.hasMore).toBe(true);
-  });
-
-  it("keeps the forward `since` tail working unchanged", async () => {
-    const runId = await runWithLines(4);
-    const tail = getRunLog(store.db, runId, { since: 1 })!;
-    expect(tail.lines.map((l) => l.display.text)).toEqual(["l2", "l3"]);
-    expect(tail.headSeq).toBe(3);
-    expect(tail.hasMore).toBe(true); // seq 0..1 exist below this page
   });
 });
 

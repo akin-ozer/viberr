@@ -268,7 +268,7 @@ const RUN_LOG_REPLY = z.strictObject({
     logLines: z.number(),
   }),
   /**
-   * Page position stated in full. `getRunLog`'s own headSeq/oldestSeq/hasMore
+   * Page position stated in full. `runLogPage`'s own headSeq/oldestSeq/hasMore
    * are page-local cursors for a stateful console — the schema refuses them, so
    * relaying them again would fail here rather than reach a model that has no
    * second source to check them against.
@@ -837,7 +837,7 @@ describe("read_run_log: every page is bounded, and says where it sits", () => {
     expect(forward.page.newerExist).toBe(true);
     expect(forward.page.next.newer).toEqual({ since: 15 });
     expect(forward.page.olderExist).toBe(true);
-    // The forward path is bounded even when no limit is named: `getRunLog`
+    // The forward path is bounded even when no limit is named: `runLogPage`
     // ignores `limit` in forward mode by design, so the bound is the tool's.
     const unbounded = parsed(RUN_LOG_REPLY, await page({ since: 10 }));
     expect(unbounded.lines.length).toBe(DEFAULT_PAGE);
@@ -903,7 +903,7 @@ describe("read_run_log: every page is bounded, and says where it sits", () => {
   });
 
   it("an empty page says it is empty without inventing a sequence number", async () => {
-    // Past the end of the run: `getRunLog` would answer headSeq = the cursor
+    // Past the end of the run: `runLogPage` would answer headSeq = the cursor
     // the caller sent, a number that exists nowhere in the run.
     const body = parsed(RUN_LOG_REPLY, await page({ since: 10_000 }));
     expect(body.lines).toEqual([]);

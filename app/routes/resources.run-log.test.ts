@@ -63,7 +63,7 @@ beforeAll(async () => {
 });
 afterAll(() => app.cleanup());
 
-/** The 200-branch wire body: the route wraps `getRunLog`'s own contract. */
+/** The 200-branch wire body: the route wraps `runLogPage`'s own contract. */
 interface RunLogBody {
   data: RunLog;
 }
@@ -88,7 +88,7 @@ async function load(query: string, cookie?: string, runId = RUN_ID): Promise<Res
 async function get(query: string): Promise<RunLog> {
   const res = await load(query, (await app.cookieFor(ardaId)).cookie);
   // A 200 rules out the route's two error branches, so the body is the
-  // success payload the route builds from `getRunLog`.
+  // success payload the route builds from `runLogPage`.
   expect(res.status).toBe(200);
   const body: RunLogBody = await res.json();
   return body.data;
