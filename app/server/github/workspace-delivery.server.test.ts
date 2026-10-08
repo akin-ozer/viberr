@@ -295,47 +295,25 @@ describe("reconcileWorkspaceDelivery", () => {
     expect(fm.verdicts).toHaveLength(1);
   });
 
-  it("locates the repo via the conventional <taskDir>/workspace/<name> path when no workdir is given", async () => {
-    const store = setupTask();
-    // "akin-ozer/viberr" → repo name "viberr".
-    mkdirSync(
-      path.join(taskDir(store.slug, "ATL-3", store.dataRoot), "workspace", "viberr", ".git"),
-      { recursive: true },
-    );
+  // With no workdir, each conventional clone path is found: the repo's name
+  // ("akin-ozer/viberr" → "viberr"), `repo` (reviewer clones) and the
+  // workspace itself (an agent told to clone into ./).
+  it.each(["viberr", "repo", ""])(
+    "locates the repo at <taskDir>/workspace/%s when no workdir is given (B12)",
+    async (sub) => {
+      const store = setupTask();
+      mkdirSync(
+        path.join(taskDir(store.slug, "ATL-3", store.dataRoot), "workspace", sub, ".git"),
+        { recursive: true },
+      );
 
-    const res = await deliver(store, { exec: fakeExec({ branch: BRANCH, commits: COMMITS }) });
+      const res = await deliver(store, { exec: fakeExec({ branch: BRANCH, commits: COMMITS }) });
 
-    expect(res.status).toBe("reconciled");
-    expect(res.branchLinked).toBe(true);
-    expect(readFm(store).frontmatter.branch).toBe(BRANCH);
-  });
-
-  it("probes <taskDir>/workspace/repo when no workdir is given (reviewer clones — B12)", async () => {
-    const store = setupTask();
-    mkdirSync(
-      path.join(taskDir(store.slug, "ATL-3", store.dataRoot), "workspace", "repo", ".git"),
-      { recursive: true },
-    );
-
-    const res = await deliver(store, { exec: fakeExec({ branch: BRANCH, commits: COMMITS }) });
-
-    expect(res.status).toBe("reconciled");
-    expect(res.branchLinked).toBe(true);
-    expect(readFm(store).frontmatter.branch).toBe(BRANCH);
-  });
-
-  it("probes <taskDir>/workspace itself when the agent cloned into ./ (B12)", async () => {
-    const store = setupTask();
-    mkdirSync(
-      path.join(taskDir(store.slug, "ATL-3", store.dataRoot), "workspace", ".git"),
-      { recursive: true },
-    );
-
-    const res = await deliver(store, { exec: fakeExec({ branch: BRANCH, commits: COMMITS }) });
-
-    expect(res.status).toBe("reconciled");
-    expect(res.branchLinked).toBe(true);
-  });
+      expect(res.status).toBe("reconciled");
+      expect(res.branchLinked).toBe(true);
+      expect(readFm(store).frontmatter.branch).toBe(BRANCH);
+    },
+  );
 
   it("shallow clone: deepens before counting ahead-commits (B12)", async () => {
     const store = setupTask();
