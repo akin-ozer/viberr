@@ -552,6 +552,13 @@ function DiffLines({
   // The drag as the last pointer event left it, for the release, which can
   // arrive before React has drawn the last move.
   const live = useRef<Drag | null>(null);
+  // The rows, and the lines a new note may not take, as the last render drew
+  // them: the release is the render's that began the drag. Written in an
+  // effect to keep render pure.
+  const latest = useRef({ rows, taken: takenBy(null) });
+  useEffect(() => {
+    latest.current = { rows, taken: takenBy(null) };
+  });
   const moveDrag = (next: Drag | null) => {
     live.current = next;
     setDrag(next);
@@ -568,8 +575,16 @@ function DiffLines({
       const onOrigin = e.target instanceof Node && done.from.contains(e.target);
       if (onOrigin && done.start.row === done.end.row) return;
       const { anchor, start, end, from } = done;
-      if (done.moves) onMove(start, end, anchor, from);
-      else onOpen({ path, anchor, start, end, edits: null, text: "" }, from);
+      if (done.moves) {
+        onMove(start, end, anchor, from);
+        return;
+      }
+      // A key pressed during the drag may have saved a note on a line it
+      // crossed (the open editor holds its lines only once it is saved): the
+      // new note stops before that line, as it would had the drag begun after.
+      const far = anchor === start.row ? end.row : start.row;
+      const range = noteRange(latest.current.rows, anchor, far, latest.current.taken);
+      if (range) onOpen({ path, anchor, ...range, edits: null, text: "" }, from);
     };
     const drop = () => moveDrag(null);
     const escape = (e: KeyboardEvent) => {
@@ -583,7 +598,8 @@ function DiffLines({
       window.removeEventListener("pointercancel", drop);
       window.removeEventListener("keydown", escape);
     };
-    // The doors are the panel's; the drag reads its own state from `live`.
+    // The doors are the panel's; the drag reads its own state from `live`, and
+    // the notes from `latest`.
   }, [dragging]);
 
   /** A primary mouse press on a number starts a drag. A finger or a stylus on
