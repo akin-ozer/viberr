@@ -46,8 +46,8 @@ import { type StoreTarget, utf8Bytes, writeStoreDoc } from "./store-files.server
  * it by hand.
  */
 
-export const KB_CORRECTION_MERGED_ACTION = "task.kb_correction.merged";
-export const KB_CORRECTION_UNDONE_ACTION = "task.kb_correction.undone";
+const KB_CORRECTION_MERGED_ACTION = "task.kb_correction.merged";
+const KB_CORRECTION_UNDONE_ACTION = "task.kb_correction.undone";
 
 /** A correction replaces a passage, not a document: each side is capped, which
  *  also bounds the audit row that carries both (UTF-8 bytes, ruling 466). */

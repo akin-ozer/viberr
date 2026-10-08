@@ -90,7 +90,6 @@ import {
 } from "./operator-authority.server";
 import { undoKbCorrectionOnTask } from "./kb-correction-actions.server";
 import { readTimelineEntry } from "./board-read.server";
-import { KB_CORRECTION_MERGED_ACTION } from "~/server/org/kb-corrections.server";
 
 /**
  * The operator's capability-GATED, operator-authorized actions: the RBAC the
@@ -4701,7 +4700,7 @@ describe("operatorCorrectKnowledgeDoc (rulings 378, 483 and 498)", () => {
     expect(top.text).toContain("- **Evidence:** `CGO_ENABLED=1 go test -race ./...` exited 127; no cc, gcc or clang on PATH.");
     expect(top.text).not.toContain("binding");
 
-    const [row] = listAuditEvents(store.db, { action: KB_CORRECTION_MERGED_ACTION });
+    const [row] = listAuditEvents(store.db, { action: "task.kb_correction.merged" });
     expect(row).toMatchObject({ taskKey: "VIB-1", actorLabel: "operator" });
     expect(row?.details).toMatchObject({
       filedBy: "Operator",
@@ -4918,7 +4917,7 @@ describe("operatorCorrectKnowledgeDoc (rulings 378, 483 and 498)", () => {
     const text = "- Yarış kapısı yok: bu makine çalıştıramaz.";
     const r = await correct({ replaces: "- Her kapı çalışır.", text, evidence: "`go test -race` çıkış kodu 127 döndü." });
     expect(r.outcome).toBe("done");
-    const row = listAuditEvents(store.db, { action: KB_CORRECTION_MERGED_ACTION })[0];
+    const row = listAuditEvents(store.db, { action: "task.kb_correction.merged" })[0];
     expect(row?.details).toMatchObject({ bytes: Buffer.byteLength(text, "utf8") });
     expect(Buffer.byteLength(text, "utf8")).toBeGreaterThan(text.length);
   });

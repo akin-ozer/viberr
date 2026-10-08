@@ -10,8 +10,6 @@ import { writeStoreDoc } from "./store-files.server";
 import { listKbProposals } from "./kb-proposals.server";
 import {
   KB_CORRECTION_MAX_BYTES,
-  KB_CORRECTION_MERGED_ACTION,
-  KB_CORRECTION_UNDONE_ACTION,
   editKbPassage,
   listKbCorrections,
   mergeKbCorrection,
@@ -101,7 +99,7 @@ describe("mergeKbCorrection", () => {
     // A model's trailing newline is not part of the passage.
     expect(read(kb)).toBe("# Facts\n\n- T-003: wrangler 4.139.0\n- T-013: dist/server/\n");
     expect(c.id).toMatch(/^kc-[0-9a-f]{10}$/);
-    const [row] = listAuditEvents(store.db, { action: KB_CORRECTION_MERGED_ACTION });
+    const [row] = listAuditEvents(store.db, { action: "task.kb_correction.merged" });
     expect(row).toMatchObject({ projectSlug: store.slug, taskKey: "VIB-1", subjectKind: "task" });
     expect(row?.details).toMatchObject({
       id: c.id,
@@ -148,7 +146,7 @@ describe("mergeKbCorrection", () => {
     // The document's own line, fenced, for the agent to copy.
     expect(message).toContain("````\n5. **Non-production branch builds:** on\n````");
     expect(read(kb)).toBe(before);
-    expect(listAuditEvents(store.db, { action: KB_CORRECTION_MERGED_ACTION })).toEqual([]);
+    expect(listAuditEvents(store.db, { action: "task.kb_correction.merged" })).toEqual([]);
   });
 
   it("counts only the settled text: a passage a proposal entry quotes is not in the document", async () => {
@@ -297,7 +295,7 @@ describe("undoKbCorrection", () => {
     const r = await undo(c.id);
     expect(r.outcome).toBe("done");
     expect(read(kb)).toBe("# Facts\n\n- T-003: wrangler 4.138.0\n- T-013: dist/server/\n");
-    const [row] = listAuditEvents(store.db, { action: KB_CORRECTION_UNDONE_ACTION });
+    const [row] = listAuditEvents(store.db, { action: "task.kb_correction.undone" });
     expect(row).toMatchObject({ actorUserId: store.users.arda.id, projectSlug: store.slug, taskKey: "VIB-1" });
     expect(row?.details).toMatchObject({ id: c.id, reason: "Not what we run.", byName: "Arda Kaya" });
     expect(listKbCorrections(store.db, { projectSlug: store.slug })[0]!.undone).toMatchObject({
@@ -327,7 +325,7 @@ describe("undoKbCorrection", () => {
     expect(r.outcome).toBe("noop");
     expect(r.message).toContain("was edited since");
     expect(read(kb)).toBe(edited);
-    expect(listAuditEvents(store.db, { action: KB_CORRECTION_UNDONE_ACTION })).toEqual([]);
+    expect(listAuditEvents(store.db, { action: "task.kb_correction.undone" })).toEqual([]);
   });
 
   it("finds a correction only on its own board", async () => {
