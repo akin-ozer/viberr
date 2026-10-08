@@ -129,8 +129,9 @@ export interface AgentProfileView {
   spanAll: boolean;
   /** Operator only: default autonomy (supervised | full); undefined for specialists. */
   autonomy?: "supervised" | "full";
-  /** Display-label buckets (catalog labels + extras) — what CapColumns,
-   * pcap counts and the matrix modal render. */
+  /** Display-label buckets (catalog labels + extras) — what the profile's
+   * `CapabilityPolicyPanel`, the Policy page's pcap counts and the matrix
+   * modal render. */
   actions: { direct: string[]; recommend: string[]; forbidden: string[]; off?: string[] };
   /** Id-based policy (edit-modal seeding; ruling 7). */
   capabilities: { capabilityId: string; mode: "direct" | "recommend" | "human" | "off" }[];
@@ -237,7 +238,7 @@ export type MatrixProfile = Pick<
   "id" | "kind" | "name" | "icon" | "actions" | "backends" | "capabilities"
 >;
 
-/** Mock statusKind (agents.jsx): status string → pill kind. */
+/** A deployment's status string → the pill kind the Agents page draws it in. */
 export function deploymentStatusKind(
   status: string,
 ): "agent" | "input" | "info" | "neutral" {

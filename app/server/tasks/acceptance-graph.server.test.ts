@@ -328,8 +328,9 @@ describe("P14-LV-02: acceptance respects the workflow graph", () => {
    * board, so walling it off behind the workflow graph would have removed the
    * only exit. The burden is HONESTY instead: the affordance says it skips the
    * remaining stages and the review gate, and the confirm dialog enumerates
-   * which stages those are (`accept-confirm.tsx`). The server's job is to name
-   * the bypassed gate in the audit row — which is what this asserts.
+   * which stages those are (`skippedStages`, accept-confirm-derive.ts). The
+   * server's job is to name the bypassed gate in the audit row — which is what
+   * this asserts.
    */
   it("an admin can still force-accept off-boundary, and the audit names the graph gate", async () => {
     const store = setupProjectedStore(ctx);

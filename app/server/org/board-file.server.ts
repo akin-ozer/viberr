@@ -296,27 +296,21 @@ export function readBoardFile(bytes: Uint8Array): BoardBundle {
   return bundle;
 }
 
-const kbRowSchema = z
-  .object({
-    dir: z.string().min(1),
-    name: z.string().min(1).optional(),
-    refresh: z.enum(KB_REFRESH_MODES).default("on change"),
-    private: z.boolean().default(false),
-  })
-  .strict();
+const kbRowSchema = z.strictObject({
+  dir: z.string().min(1),
+  name: z.string().min(1).optional(),
+  refresh: z.enum(KB_REFRESH_MODES).default("on change"),
+  private: z.boolean().default(false),
+});
 
-const skillRowSchema = z
-  .object({ name: z.string().min(1), summary: z.string().default("") })
-  .strict();
+const skillRowSchema = z.strictObject({ name: z.string().min(1), summary: z.string().default("") });
 
-const mcpRowSchema = z
-  .object({
-    name: z.string().min(1),
-    transport: z.enum(["HTTP", "stdio"]),
-    target: z.string().min(1),
-    writeTools: z.array(z.string()).optional(),
-  })
-  .strict();
+const mcpRowSchema = z.strictObject({
+  name: z.string().min(1),
+  transport: z.enum(["HTTP", "stdio"]),
+  target: z.string().min(1),
+  writeTools: z.array(z.string()).optional(),
+});
 
 /** A list of board.md rows, each decoded alone so every bad row is named. */
 function boardRows<T>(

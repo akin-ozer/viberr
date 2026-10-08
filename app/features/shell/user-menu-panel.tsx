@@ -9,12 +9,8 @@ import { applyThemePreference } from "./theme-preference";
 import { Icon } from "~/ui/icon";
 import { useFetcherResult } from "~/ui/use-fetcher-result";
 import { useToast } from "~/ui/toast";
-import {
-  ACCOUNT_MENU_LABEL,
-  accountTriggerClass,
-  type MenuHandOver,
-  type MenuUser,
-} from "./user-menu";
+import { accountTriggerClass } from "./account-trigger";
+import { ACCOUNT_MENU_LABEL, type MenuHandOver, type MenuUser } from "./user-menu";
 
 /**
  * Account menu (`user-menu`) — ONE implementation for the workspace topbar and

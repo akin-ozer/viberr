@@ -275,7 +275,7 @@ function PropRow({
       btnRef.current?.focus({ preventScroll: true });
     }
     wasOpen.current = open;
-  }, [open]);
+  }, [open, btnRef]);
 
   return (
     <div className="kv-row" data-prop={prop} {...rowData}>

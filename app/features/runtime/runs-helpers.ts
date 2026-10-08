@@ -112,7 +112,8 @@ export function roleShort(run: RunView): string | null {
   // (`kind: delivers ? "primary" : "reviewer"`, specialist-run.server.ts) — the
   // returned string is rendered copy and speaks the one shipped engagement
   // vocabulary. "primary" gave the delivering agent a THIRD name on the very
-  // page whose Execution profile already heads it "Delivering agent"; and
+  // page whose Execution profile already calls it "the delivering agent" (the
+  // Run an agent posture line); and
   // "reviewer" is written for EVERY non-delivering run, so it claimed verdict
   // authority for supporting engagements that hold none. Same mapping the
   // Agents roster applies under F10-20.

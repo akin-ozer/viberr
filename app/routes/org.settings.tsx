@@ -196,8 +196,8 @@ export async function loader({ request }: Route.LoaderArgs) {
 type SettingsOk = {
   ok: true;
   toast?: string;
-  /** `user-invite` / `user-reset-password`: the one-time local password, shown
-   *  once, with the account it belongs to. */
+  /** `invite-local` / `user-reset-password`: the one-time local password, shown
+   *  once. `email` comes back only from `invite-local`, naming the new account. */
   tempPassword?: string;
   email?: string;
   /** `store-upload`: a second toast when a SKILL.md body was captured. */

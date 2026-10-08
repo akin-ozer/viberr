@@ -3,7 +3,6 @@ import { z } from "zod";
 import { useNavigate, type FetcherWithComponents } from "react-router";
 import { Avatar } from "~/ui/avatar";
 import { initialsOf } from "~/ui/initials";
-import { GlyphSwap } from "~/ui/copy-glyph";
 import { Icon } from "~/ui/icon";
 import { Pill } from "~/ui/pill";
 import { TglP } from "~/ui/toggle";
@@ -22,8 +21,8 @@ import {
   type DesktopAlertState,
 } from "~/features/notifications/desktop-alerts";
 import { MiniModal } from "~/features/org-settings/mini-modal";
-import { ConfirmDialog } from "~/ui/confirm-dialog";
 import { AgentAccountsPanel } from "./agent-accounts-panel";
+import { GithubOAuthIdentity } from "./profile-github";
 import type { ProfileBackend } from "./profile-query.server";
 
 /**
@@ -622,6 +621,15 @@ const socialSignIn = z
   .object({ url: z.string().min(1).optional().catch(undefined) })
   .catch({});
 
+/** The "GitHub account" fact: the handle and whether it signs in here or an
+ *  org admin linked it (ruling 154). */
+function githubAccountLine(user: ProfileData["user"]): string {
+  if (user.githubConnected) {
+    return user.githubHandle ? `@${user.githubHandle} · GitHub sign-in` : "linked · GitHub sign-in";
+  }
+  return user.githubHandle ? `@${user.githubHandle} · linked by an org admin` : "not connected";
+}
+
 function ProfileGithub({
   data,
   onNav,
@@ -647,6 +655,14 @@ function ProfileGithub({
   const [connectBusy, setConnectBusy] = useState(false);
   const [connectErr, setConnectErr] = useState<string | null>(null);
   const [confirmDisconnect, setConfirmDisconnect] = useState(false);
+  // The confirm asks about the connection on screen, so it goes when that
+  // connection does. A confirmed Disconnect closes it itself (ruling 459); a
+  // connection that goes away otherwise (disconnected in another tab while
+  // "Disconnect GitHub?" is open here) takes the dialog off with the connected
+  // box but not this state, and the next load that finds GitHub connected
+  // again would open the dialog with nobody asking. Adjusted during render,
+  // React's pattern for state a prop invalidates, not in an effect.
+  if (confirmDisconnect && !gh) setConfirmDisconnect(false);
 
   // Start better-auth's GitHub OAuth link and follow the returned provider URL
   // — the same flow the login screen uses. (The old `/auth/github` href had no
@@ -693,15 +709,7 @@ function ProfileGithub({
         </div>
         <div className="kv-row">
           <span className="k">GitHub account</span>
-          <span className="v light">
-            {gh
-              ? user.githubHandle
-                ? `@${user.githubHandle} · GitHub sign-in`
-                : "linked · GitHub sign-in"
-              : user.githubHandle
-                ? `@${user.githubHandle} · linked by an org admin`
-                : "not connected"}
-          </span>
+          <span className="v light">{githubAccountLine(user)}</span>
         </div>
       </div>
       {!showConnectAffordance ? (
@@ -719,101 +727,19 @@ function ProfileGithub({
           </span>
         </div>
       ) : (
-      <div className="cred-card">
-        <div className="cred-top">
-          <Icon name="github" />
-          <span className="cred-name">Personal OAuth identity</span>
-          {/* "not connected" in words: the "−" this slot used to show read as a
-              collapse control that did nothing. */}
-          <span className="fine push">{gh ? "oauth" : "not connected"}</span>
+        <div className="cred-card">
+          <GithubOAuthIdentity
+            connected={gh}
+            handle={user.githubHandle}
+            email={user.email}
+            busy={fetcher.state !== "idle"}
+            confirming={confirmDisconnect}
+            onConfirming={setConfirmDisconnect}
+            onDisconnect={() => submit({ intent: "github-disconnect" })}
+            connectBusy={connectBusy}
+            onConnect={startConnect}
+          />
         </div>
-        <div className="scope-chips">
-          <span className={"scope-chip" + (gh ? "" : " miss")}>
-            <Icon name={gh ? "check" : "alert"} />
-            read:user
-          </span>
-          <span className={"scope-chip" + (gh ? "" : " miss")}>
-            <Icon name={gh ? "check" : "alert"} />
-            user:email
-          </span>
-        </div>
-        {gh ? (
-          <div className="cred-ok">
-            <Icon name="check" />
-            <span>
-              Connected. Your approvals, acceptances, and runtime-session
-              opens are attributed to{" "}
-              <strong>
-                {user.githubHandle ? `@${user.githubHandle}` : user.email}
-              </strong>{" "}
-              in audit records.
-            </span>
-            <button
-              type="button"
-              // Ruling 149: disconnecting an identity is destructive.
-              className="btn ghost sm push danger"
-              // Ruling 481(b) (F40-49): asks first, like the agent account
-              // Disconnect beside it.
-              onClick={() => setConfirmDisconnect(true)}
-            >
-              Disconnect
-            </button>
-            {confirmDisconnect && (
-              <ConfirmDialog
-                screenLabel="Disconnect GitHub dialog"
-                title="Disconnect GitHub?"
-                body={
-                  <>
-                    Your approvals, acceptances, and runtime-session opens are
-                    attributed to your workspace identity instead of{" "}
-                    {user.githubHandle ? `@${user.githubHandle}` : "your GitHub account"}{" "}
-                    in audit records until you connect again.
-                  </>
-                }
-                confirmLabel="Disconnect GitHub"
-                busy={fetcher.state !== "idle"}
-                onCancel={() => setConfirmDisconnect(false)}
-                onConfirm={() => submit({ intent: "github-disconnect" })}
-              />
-            )}
-          </div>
-        ) : (
-          <div className="cred-warn">
-            <Icon name="alert" />
-            {/* Ruling 154 (pass 35, G35-3): an org admin can link the handle
-                on a deployment where GitHub sign-in IS configured too, so this
-                card can no longer say the approvals go unmatched. The line
-                above already reads "@handle · linked by an org admin". */}
-            <span>
-              {user.githubHandle ? (
-                <>
-                  Not connected. An org admin linked{" "}
-                  <strong>@{user.githubHandle}</strong>, so your approvals on
-                  review pull requests already count as the review verdict.
-                  Connecting GitHub also records your own actions under that
-                  identity.
-                </>
-              ) : (
-                <>
-                  Not connected. Actions record under your workspace identity
-                  only, and your GitHub review approvals can't be matched back
-                  to you.
-                </>
-              )}
-            </span>
-            <button
-              type="button"
-              className="btn sm push"
-              disabled={connectBusy}
-              aria-busy={connectBusy || undefined}
-              onClick={startConnect}
-            >
-              <GlyphSwap rest="github" alt="loader" on={connectBusy} spinAlt />
-              {connectBusy ? "Connecting…" : "Connect"}
-            </button>
-          </div>
-        )}
-      </div>
       )}
       {(error || connectErr) && (
         <div className="login-err spaced" role="alert">

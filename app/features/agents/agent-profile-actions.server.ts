@@ -1049,7 +1049,8 @@ function openEngagementRefusal(
     ...new Set(engaged.filter((e) => e.engagement === engagement).map((e) => e.taskKey)),
   ];
   const delivering = keys("primary");
-  const supporting = keys("reviewer").filter((k) => !delivering.includes(k));
+  const delivers = new Set(delivering);
+  const supporting = keys("reviewer").filter((k) => !delivers.has(k));
   const where = [
     delivering.length ? `the delivering agent on ${delivering.join(", ")}` : "",
     supporting.length ? `engaged on ${supporting.join(", ")}` : "",

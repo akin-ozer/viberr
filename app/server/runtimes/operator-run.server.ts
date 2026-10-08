@@ -126,7 +126,7 @@ import {
  *     `mcp__viberr__*` tools; every call mutates the store and updates the
  *     board live. This is the path the "operator end to end" proof exercises.
  *   codex + credential present → STRUCTURED-PLAN run: Codex emits a structured
- *     JSON plan (OPERATOR_PLAN_SCHEMA), which `executeCodexPlan` runs through the
+ *     JSON plan (`operatorPlanSchemaFor`), which `executeCodexPlan` runs through the
  *     same gated actions as the Claude tools (operator-actions, operator-packets,
  *     operator-dispatch, operator-moves) — so Codex honors the identical RBAC +
  *     autonomy, it just plans-then-executes instead of calling tools live.
@@ -290,15 +290,21 @@ export interface RunOperatorResult {
   /**
    * The trigger was REFUSED at fire time rather than driven. The caller owns the
    * honesty follow-up.
-   *   `terminal-stage` (F19-20) — FR39's "a scheduled re-run never fires on a
-   *     terminal stage", enforced where the run would actually start rather than
-   *     only where it was scheduled (the schedule runner records the retirement).
-   *   `open-packet` (R20-1 / F20-5) — a HUMAN pressed "Run operator" while a
-   *     decision packet is open, which is a paid no-op (coordination is paused
-   *     by the packet). Scoped to the `manual` trigger: machine triggers
-   *     legitimately run with a packet open (a `pr-diverged` recovery withdraws
-   *     a moot packet — ruling 17; `agent-reply` reacts to a run already in
-   *     flight). The route turns this into "resolve the decision first".
+   *   `closed` (F19-20, widened by ruling 177) — FR39's "a scheduled re-run
+   *     never fires on a terminal stage", enforced where the run would actually
+   *     start rather than only where it was scheduled (the schedule runner
+   *     records the retirement). Ruling 177 refuses EVERY trigger on a closed
+   *     task, archived or at its terminal stage, with the sentence in
+   *     `refusalReason`.
+   *   `open-packet` (R20-1 / F20-5, widened by ruling 141) — a HUMAN pressed
+   *     "Run operator" while a decision packet is open, which is a paid no-op
+   *     (coordination is paused by the packet). Scoped to the `manual` trigger
+   *     and, since ruling 141, the `scheduled` one, the same turn with nobody
+   *     watching (`PACKET_REFUSED_TRIGGERS`; the schedule runner records it as
+   *     `skipped-packet`). The other machine triggers legitimately run with a
+   *     packet open (a `pr-diverged` recovery withdraws a moot packet — ruling
+   *     17; `agent-reply` reacts to a run already in flight). The route turns
+   *     this into "resolve the open decision to continue".
    *   `blocked-by` (ruling 131(d), pass 34) — the task WAITS ON OTHER WORK
    *     (`blockedBy` is non-empty). The `create`, `transition` and `scheduled`
    *     triggers are refused at fire time: no run, no cost. Reactive triggers
@@ -766,11 +772,12 @@ function leaseRefFromKey(key: string) {
  * the front of the lease queue says so on the task — the refusal used to exist
  * only in the server log while the timeline still said "Scheduled action
  * starting". Mirrors {@link noteQueuedTriggerFireFailed} but SETTLES NOTHING:
- * an open packet owns `waiting: "human"`, and the terminal-stage refusal
- * already settled inside `runOperator`. When the trigger carries a schedule
- * occurrence (`scheduleId`) the occurrence is retired the same way the schedule
- * runner retires a fire-time refusal (`fired`, `claimedAt: null`) and the final
- * `task.schedule.fired` row records the outcome. A `blocked-by` refusal is
+ * every refusal arm (`closed`, `blocked-by`, `open-packet`) already settled
+ * inside `runOperator` (ruling 195 made the open-packet arm settle too). When
+ * the trigger carries a schedule occurrence (`scheduleId`) the occurrence is
+ * retired the same way the schedule runner retires a fire-time refusal
+ * (`fired`, `claimedAt: null`) and the final `task.schedule.fired` row records
+ * the outcome. A `blocked-by` refusal is
  * noted only for a schedule occurrence: a drained transition on a held task is
  * the ruling-131 hold itself, already on the record.
  */

@@ -1714,7 +1714,7 @@ describe("commentToAgent", () => {
     expect(result.triggered).toBe("started");
 
     // The reply lands as an agent-authored comment once the run finishes. The
-    // fresh fallback reuses startSpecialistRun's realistic-cadence analyze
+    // fresh fallback reuses startAgentRun's realistic-cadence analyze
     // stream (~7 lines at 1–3.2s each), so allow generous headroom.
     const posted = await pollUntil(() => {
       const file = readTaskFile({ projectSlug: store.slug, taskKey: "VIB-1", dataRoot: store.dataRoot })!;

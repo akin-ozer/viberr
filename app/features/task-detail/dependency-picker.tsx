@@ -66,6 +66,22 @@ function matching(candidates: readonly DependencyCandidate[], typed: string): De
     .map((r) => r.c);
 }
 
+/** What the field says when no row shows: why the read failed, that it is
+ *  still loading, or that no task matches what is typed or is left to add. */
+function noRowsText(
+  view: DependencyCandidatesView | undefined,
+  candidates: readonly DependencyCandidate[] | null,
+  typed: string,
+): string {
+  return view && !view.ok
+    ? `${view.reason} A key typed in full still goes in, and Save checks it.`
+    : !candidates
+      ? "Loading the project's tasks…"
+      : typed
+        ? `No task to add matches “${typed}”.`
+        : "No other task to add.";
+}
+
 export function DependencyPicker({
   view,
   taskKey,
@@ -271,15 +287,7 @@ export function DependencyPicker({
           ))}
         </ul>
       ) : (
-        <p className="fine">
-          {view && !view.ok
-            ? `${view.reason} A key typed in full still goes in, and Save checks it.`
-            : !candidates
-              ? "Loading the project's tasks…"
-              : typed
-                ? `No task to add matches “${typed}”.`
-                : "No other task to add."}
-        </p>
+        <p className="fine">{noRowsText(view, candidates, typed)}</p>
       )}
       {found.length > rows.length && (
         <p className="fine">

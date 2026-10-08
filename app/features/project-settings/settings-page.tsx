@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { useFetcher, useNavigate } from "react-router";
+import { useNavigate } from "react-router";
 import { STAGE_COLORS, type StageColor } from "~/shared/workflow/stage-colors";
 import {
   DragDropProvider,
@@ -22,17 +22,14 @@ import { ConfirmDialog } from "~/ui/confirm-dialog";
 import { useCsrfToken } from "~/ui/csrf-input";
 import { GlyphSwap } from "~/ui/copy-glyph";
 import { Icon } from "~/ui/icon";
-import { inFlightIntent } from "~/ui/in-flight";
 import { Pill } from "~/ui/pill";
 import { useToast } from "~/ui/toast";
 import { useDialog } from "~/ui/use-dialog";
-import { useActionToast } from "~/ui/use-action-toast";
-import { useFetcherResult } from "~/ui/use-fetcher-result";
 import {
   CredentialCard,
   CredentialManageActions,
-  replaceTokenHref,
 } from "~/features/github/credential-card";
+import { replaceTokenHref } from "~/features/github/replace-token-href";
 // Ruling 148(b): the invite form is a button that opens THIS shared modal —
 // the same chrome (and the same ruling 147 refusal) as every org-settings
 // create modal, including the org-level twin of this very action.
@@ -41,6 +38,17 @@ import { MiniModal } from "~/features/org-settings/mini-modal";
 import { useDismiss } from "~/ui/use-dismiss";
 import type { MembershipView } from "./membership.server";
 import type { FileLeaseView, SettingsViewData } from "./settings-query.server";
+import {
+  useChangeRepoForm,
+  useCredentialPosts,
+  useDangerPosts,
+  useIdentityPost,
+  useListSave,
+  useMemberPosts,
+  useRepoPosts,
+  useStageEditor,
+} from "./settings-page-actions";
+import { resolveStageOrder, stageMoveOptions } from "./stage-order";
 import {
   GATE_COMMAND_MAX_CHARS,
   GATE_DEFAULT_TIMEOUT_SECONDS,
@@ -64,10 +72,6 @@ import { useRefusalShake } from "~/ui/use-refusal-shake";
  * route-action POST (no optimistic UI). Client-side guard toasts mirror
  * the mock; the server re-checks every guard.
  */
-
-type ActionResult =
-  | { ok: true; toast: string; stageId?: string }
-  | { ok: false; error: string };
 
 // ------------------------------------------------------------------ project
 
@@ -380,73 +384,6 @@ const stageDragDataSchema = z.object({ nextId: z.string().nullable() });
 type StageDragData = z.infer<typeof stageDragDataSchema>;
 
 /**
- * Resolve a finished stage drag — or a Move-menu pick — into the ordered id
- * list the `reorder-stages` action takes, or null when nothing should be
- * submitted. Pure, so the pinning and no-op rules are unit-testable without a
- * drag library; the direct counterpart of `board-dnd.ts:resolveBoardDrop`.
- *
- * `beforeId` names the stage the moved one should land immediately BEFORE
- * (null = the end of the list), exactly like the board's `beforeKey`.
- */
-export function resolveStageOrder(
-  stages: readonly { id: string }[],
-  moveId: string,
-  beforeId: string | null,
-): string[] | null {
-  const ids = stages.map((s) => s.id);
-  if (!ids.includes(moveId)) return null;
-  if (beforeId === moveId) return null;
-  const rest = ids.filter((id) => id !== moveId);
-  // A target that vanished under the drag (the list can change via SSE
-  // revalidation) degrades to the end rather than submitting a reference the
-  // server cannot place.
-  const found = beforeId === null ? -1 : rest.indexOf(beforeId);
-  const insertAt = beforeId === null || found < 0 ? rest.length : found;
-  const next = [...rest.slice(0, insertAt), moveId, ...rest.slice(insertAt)];
-  // Entry stays first, terminal stays last — pinned by CURRENT identity, not by
-  // literal id, mirroring what the server re-applies on top of whatever we send.
-  const entryId = ids[0];
-  const terminalId = ids.length > 1 ? ids[ids.length - 1] : undefined;
-  const pinned = [
-    ...(entryId === undefined ? [] : [entryId]),
-    ...next.filter((id) => id !== entryId && id !== terminalId),
-    ...(terminalId === undefined ? [] : [terminalId]),
-  ];
-  if (pinned.every((id, i) => id === ids[i])) return null;
-  return pinned;
-}
-
-/** The stages a member may actually reorder: everything between the pinned
- *  entry and terminal stages. */
-function movableStages<T extends { id: string }>(stages: readonly T[]): T[] {
-  return stages.length > 2 ? stages.slice(1, -1) : [];
-}
-
-/**
- * Every reorder this row can perform, as `{label, beforeId}` pairs. Empty when
- * the row cannot move, which is what hides the Move control.
- */
-export function stageMoveOptions(
-  stages: readonly { id: string; name: string }[],
-  stageId: string,
-): { label: string; beforeId: string | null }[] {
-  const movable = movableStages(stages);
-  const i = movable.findIndex((s) => s.id === stageId);
-  if (i < 0 || movable.length < 2) return [];
-  const out: { label: string; beforeId: string | null }[] = [];
-  if (i > 0) {
-    out.push({ label: "Move earlier", beforeId: movable[i - 1]!.id });
-    if (i > 1) out.push({ label: "Move to first", beforeId: movable[0]!.id });
-  }
-  if (i < movable.length - 1) {
-    // Land after my current neighbour: before whatever follows it.
-    out.push({ label: "Move later", beforeId: movable[i + 2]?.id ?? null });
-    if (i < movable.length - 2) out.push({ label: "Move to last", beforeId: null });
-  }
-  return out;
-}
-
-/**
  * The keyboard/AT path for stage reordering, modelled on `ui/stage-menu.tsx` —
  * the board's sanctioned non-drag path. Drag here is pointer-only for the same
  * reason it is on the board, and before this the stage order was reachable by
@@ -677,6 +614,18 @@ function StageColorMenu({
   );
 }
 
+/** A stage row's class (ruling 700(e) took it out of `StageRow`): the
+ *  grab cursor while it can drag, the lifted row while it does, and the
+ *  insertion line where the dragged row would land. */
+function stageRowClass(canDrag: boolean, dragging: boolean, over: boolean): string {
+  return (
+    "stg-row" +
+    (canDrag ? " draggable" : "") +
+    (dragging ? " dragging" : "") +
+    (over ? " over" : "")
+  );
+}
+
 function StageRow({
   stage,
   index,
@@ -736,12 +685,7 @@ function StageRow({
       // `.draggable` is the grab-cursor hook, named to match the board's
       // `.card-wrap.draggable` — the whole-row surface has no grip, so the
       // cursor is its only pointer affordance.
-      className={
-        "stg-row" +
-        (canDrag ? " draggable" : "") +
-        (dragging ? " dragging" : "") +
-        (over ? " over" : "")
-      }
+      className={stageRowClass(canDrag, dragging, over)}
     >
       {/* The grip is gone (it was the affordance the board deliberately
           rejected), but the slot stays so locked and unlocked rows still line
@@ -1225,6 +1169,13 @@ interface FileLeaseDraft {
   reason: string;
 }
 
+/** One lease as the panel saves it: the paths split, the reason trimmed. */
+interface SavedLease {
+  paths: string[];
+  taskKey: string;
+  reason: string;
+}
+
 const leaseKey = (rows: readonly FileLeaseDraft[]) =>
   JSON.stringify(rows.map((r) => [splitPaths(r.paths), r.taskKey, r.reason.trim()]));
 
@@ -1262,7 +1213,7 @@ export function FileLeasesPanel({
   candidates: { key: string; title: string }[];
   canManage: boolean;
   busy: boolean;
-  onSave: (leases: { paths: string[]; taskKey: string; reason: string }[]) => void;
+  onSave: (leases: SavedLease[]) => void;
 }) {
   const asDraft = (rows: readonly FileLeaseView[]): FileLeaseDraft[] =>
     rows.map((l) => ({ paths: l.paths.join(" "), taskKey: l.taskKey, reason: l.reason }));
@@ -1457,6 +1408,13 @@ interface GateDraft {
   timeout: string;
 }
 
+/** One gate as the panel saves it: an empty timeout is null (the default). */
+interface SavedGate {
+  name: string;
+  command: string;
+  timeoutSeconds: number | null;
+}
+
 const gateDraftOf = (gates: readonly ProjectGate[]): GateDraft[] =>
   gates.map((g) => ({
     name: g.name,
@@ -1500,7 +1458,7 @@ export function ProjectGatesPanel({
   gates: ProjectGate[];
   canManage: boolean;
   busy: boolean;
-  onSave: (gates: { name: string; command: string; timeoutSeconds: number | null }[]) => void;
+  onSave: (gates: SavedGate[]) => void;
 }) {
   const [draft, setDraft] = useState<GateDraft[]>(() => gateDraftOf(gates));
   const changed =
@@ -1974,6 +1932,17 @@ export function MembersPanel({
 
 // -------------------------------------------------- repository & credentials
 
+/** What the dialog says it checks the new repository with (ruling 700(e) took
+ *  it out of the markup). */
+function repoCheckNote(current: string | null, hasCredential: boolean): string {
+  return current && hasCredential
+    ? "Viberr checks it with the attached credential first. Nothing changes if the check fails."
+    : // Rulings 667 and 669: with no credential of the project's to ask
+      // with, the change finds a connection's token and binds it.
+      (current ? "No credential is attached, so " : "") +
+        "Viberr checks it first with the GitHub connection for its owner, or the instance's default one, takes the repository's default branch from GitHub, and binds that connection to this project. Nothing changes if the check fails.";
+}
+
 /**
  * Owner ruling 2026-07-26: a project has one repository, and this dialog is
  * the one door that changes which (ruling 539 named it Change: "repair" was
@@ -2003,36 +1972,24 @@ function ChangeRepoDialog({
   onCancel: () => void;
   onSubmit: (repo: string, confirmFootprint: boolean) => void;
 }) {
-  const { ref, close } = useDialog(onCancel);
-  useEffect(() => {
-    if (done) close();
-  }, [done, close]);
-  const verb = current ? "Change" : "Attach";
-  const [repo, setRepo] = useState("");
-  const [ack, setAck] = useState(false);
-  const [sent, setSent] = useState(false);
-  const repoRef = useRef<HTMLInputElement>(null);
-  const ackRef = useRef<HTMLInputElement>(null);
   // Ruling 147: the primary stays enabled; a refused submit names what is
-  // missing, marks it and moves focus there. Counted so each refusal
-  // re-inserts the alert.
-  const [refused, setRefused] = useState(0);
-  // Ruling 451(g): the box shakes once per refusal, not on each mount.
-  const refusalShake = useRefusalShake(refused);
-  const missing: "repo" | "ack" | null =
-    repo.trim().length <= 2 ? "repo" : footprintTasks > 0 && !ack ? "ack" : null;
-  const error = sent && !busy && result && !result.ok ? result.error : null;
-  const submit = () => {
-    if (busy || done) return;
-    if (missing) {
-      setRefused((n) => n + 1);
-      (missing === "repo" ? repoRef : ackRef).current?.focus();
-      return;
-    }
-    setSent(true);
-    onSubmit(repo, ack);
-  };
-  const flagged = refused > 0 ? missing : null;
+  // missing, marks it and moves focus there (`useChangeRepoForm`).
+  const {
+    ref,
+    close,
+    repo,
+    setRepo,
+    ack,
+    setAck,
+    repoRef,
+    ackRef,
+    refused,
+    refusalShake,
+    error,
+    flagged,
+    submit,
+  } = useChangeRepoForm({ footprintTasks, busy, result, done, onCancel, onSubmit });
+  const verb = current ? "Change" : "Attach";
   return (
     <dialog ref={ref} className="confirm-card" aria-label={verb + " repository"}>
       {/* colo-7: a primary commit, so the primary wash, not the danger one. */}
@@ -2067,14 +2024,7 @@ function ChangeRepoDialog({
           data-autofocus=""
         />
       </div>
-      <p className="repo-note">
-        {current && hasCredential
-          ? "Viberr checks it with the attached credential first. Nothing changes if the check fails."
-          : // Rulings 667 and 669: with no credential of the project's to ask
-            // with, the change finds a connection's token and binds it.
-            (current ? "No credential is attached, so " : "") +
-            "Viberr checks it first with the GitHub connection for its owner, or the instance's default one, takes the repository's default branch from GitHub, and binds that connection to this project. Nothing changes if the check fails."}
-      </p>
+      <p className="repo-note">{repoCheckNote(current, hasCredential)}</p>
       {footprintTasks > 0 && (
         <label
           className="cred-warn ack"
@@ -2096,10 +2046,11 @@ function ChangeRepoDialog({
         </label>
       )}
       {/* Pass-19 UX audit #20 named this slot too, but it is NOT silent: the
-          change rides `repoFetcher`, and `useActionToast(repoFetcher)` in
-          SettingsPage already pushes the failure through the app's announcer
-          with the error glyph. This div is the "also render it in place" half.
-          Adding `role="alert"` here would announce the same refusal twice. */}
+          change rides the repository fetcher, and its `useActionToast` in
+          `useRepoPosts` (settings-page-actions.ts) already pushes the failure
+          through the app's announcer with the error glyph. This div is the
+          "also render it in place" half. Adding `role="alert"` here would
+          announce the same refusal twice. */}
       {error && (
         <div className="form-err spaced">
           <Icon name="alert" />
@@ -2136,6 +2087,82 @@ function ChangeRepoDialog({
         </button>
       </div>
     </dialog>
+  );
+}
+
+/**
+ * The Repository panel's credential slot (ruling 700(e), the split of
+ * `RepoPanel`): the shared CredentialCard with its Re-check scopes and manage
+ * actions for a reader who holds `grant-github-scope`, and the lock note for
+ * everyone else. Hook-free; the panel renders it only while a repository is
+ * attached (see the F21-5 note there).
+ */
+function RepoCredentialSlot({
+  credential,
+  canGrant,
+  inFlight,
+  credInFlight,
+  instanceAdmin,
+  onGrantScope,
+  onSetCredential,
+  onClearCredential,
+  onOpenTask,
+}: {
+  credential: SettingsViewData["credential"];
+  canGrant: boolean;
+  /** The repository fetcher's intent (ruling 368): the scope re-check rides it. */
+  inFlight: string | null;
+  credInFlight: string | null;
+  instanceAdmin: boolean;
+  onGrantScope: () => void;
+  onSetCredential: () => void;
+  onClearCredential: () => void;
+  onOpenTask: (taskKey: string) => void;
+}) {
+  const rechecking = inFlight === "grant-scope";
+  return canGrant ? (
+    <CredentialCard
+      credential={credential}
+      onOpenTask={onOpenTask}
+      warnActions={
+        // "Re-check scopes" re-validates a credential — on the no-credential card
+        // it can only no-op into a toast, so it doesn't render there.
+        credential.source !== "none" ? (
+          <button
+            type="button"
+            className="btn sm push"
+            onClick={onGrantScope}
+            disabled={inFlight !== null}
+            aria-busy={rechecking || undefined}
+            title="Re-check the credential's scopes against GitHub"
+          >
+            <GlyphSwap rest="check" alt="loader" on={rechecking} spinAlt />
+            {rechecking ? "Checking…" : "Re-check scopes"}
+          </button>
+        ) : undefined
+      }
+      manageActions={
+        <CredentialManageActions
+          configured={credential.source === "pat"}
+          inFlight={credInFlight}
+          replaceHref={
+            instanceAdmin ? replaceTokenHref(credential.connectionId) : null
+          }
+          onSet={onSetCredential}
+          onClear={onClearCredential}
+        />
+      }
+    />
+  ) : (
+    <div className="pol-note after last">
+      <Icon name="lock" />
+      <span>
+        Credential details need the{" "}
+        <strong>Manage the GitHub credential</strong> grant (project admin
+        or maintainer). The project GitHub page still shows whether this
+        repository is reachable.
+      </span>
+    </div>
   );
 }
 
@@ -2190,17 +2217,23 @@ export function RepoPanel({
 }) {
   const [changing, setChanging] = useState(false);
   const [removing, setRemoving] = useState(false);
-  const rechecking = inFlight === "grant-scope";
   // Close the dialog only when a change SUCCEEDS — a probe refusal keeps it
   // open with the typed reason so the owner can correct the input.
   // Ruling 459: through the dialog's exit (`changeDone`), then its onCancel
   // unmounts it.
   const [changeDone, setChangeDone] = useState(false);
   const settled = useRef<unknown>(changeResult);
+  // The repository fetcher (`useRepoPosts`) also carries branch cleanup, the
+  // scope re-check and Remove, and their ok must not close a dialog opened
+  // while they ran. The dialog's
+  // primary is disabled while busy, so its change goes out on an idle fetcher
+  // and the next new result is that change's answer.
+  const changeSent = useRef(false);
   useEffect(() => {
     if (!changeResult || settled.current === changeResult) return;
     settled.current = changeResult;
-    if (changeResult.ok) setChangeDone(true);
+    if (changeResult.ok && changeSent.current) setChangeDone(true);
+    changeSent.current = false;
   }, [changeResult]);
   return (
     <div className="panel">
@@ -2240,9 +2273,11 @@ export function RepoPanel({
                 type="button"
                 className="btn ghost sm repo-btn"
                 onClick={() => {
-                  // A change that landed after a Cancel must not close the
-                  // next opening at once.
+                  // A change an earlier opening sent must not close this one:
+                  // not one that landed after its Cancel, nor one still in
+                  // flight when it is answered.
                   setChangeDone(false);
+                  changeSent.current = false;
                   setChanging(true);
                 }}
               >
@@ -2304,7 +2339,10 @@ export function RepoPanel({
             setChanging(false);
             setChangeDone(false);
           }}
-          onSubmit={onChangeRepo}
+          onSubmit={(next, confirmFootprint) => {
+            changeSent.current = true;
+            onChangeRepo(next, confirmFootprint);
+          }}
         />
       )}
       {removing && repo && (
@@ -2330,49 +2368,18 @@ body="Tasks are then delivered as the files their agents save on them. The proje
           loader redacts the same fields it hides, so the withheld detail never
           reaches the browser at all. Ruling 667: with no repository there is
           no credential to speak of, and attaching one is the row above. */}
-      {!repo ? null : canGrant ? (
-        <CredentialCard
+      {!repo ? null : (
+        <RepoCredentialSlot
           credential={credential}
+          canGrant={canGrant}
+          inFlight={inFlight}
+          credInFlight={credInFlight}
+          instanceAdmin={instanceAdmin}
+          onGrantScope={onGrantScope}
+          onSetCredential={onSetCredential}
+          onClearCredential={onClearCredential}
           onOpenTask={onOpenTask}
-          warnActions={
-            // "Re-check scopes" re-validates a credential — on the no-credential card
-            // it can only no-op into a toast, so it doesn't render there.
-            credential.source !== "none" ? (
-              <button
-                type="button"
-                className="btn sm push"
-                onClick={onGrantScope}
-                disabled={inFlight !== null}
-                aria-busy={rechecking || undefined}
-                title="Re-check the credential's scopes against GitHub"
-              >
-                <GlyphSwap rest="check" alt="loader" on={rechecking} spinAlt />
-                {rechecking ? "Checking…" : "Re-check scopes"}
-              </button>
-            ) : undefined
-          }
-          manageActions={
-            <CredentialManageActions
-              configured={credential.source === "pat"}
-              inFlight={credInFlight}
-              replaceHref={
-                instanceAdmin ? replaceTokenHref(credential.connectionId) : null
-              }
-              onSet={onSetCredential}
-              onClear={onClearCredential}
-            />
-          }
         />
-      ) : (
-        <div className="pol-note after last">
-          <Icon name="lock" />
-          <span>
-            Credential details need the{" "}
-            <strong>Manage the GitHub credential</strong> grant (project admin
-            or maintainer). The project GitHub page still shows whether this
-            repository is reachable.
-          </span>
-        </div>
       )}
     </div>
   );
@@ -2558,25 +2565,22 @@ export function SettingsPage({
 }) {
   const navigate = useNavigate();
   const csrf = useCsrfToken();
-  const identityFetcher = useFetcher<ActionResult>();
-  const stageFetcher = useFetcher<ActionResult>();
-  const memberFetcher = useFetcher<ActionResult>();
-  const repoFetcher = useFetcher<ActionResult>();
-  const credFetcher = useFetcher<ActionResult>();
-  const dangerFetcher = useFetcher<ActionResult>();
-  const reviewerFetcher = useFetcher<ActionResult>();
-  const leaseFetcher = useFetcher<ActionResult>();
-  const gateFetcher = useFetcher<ActionResult>();
-  useActionToast(identityFetcher);
-  useActionToast(stageFetcher);
-  useActionToast(memberFetcher);
-  useActionToast(repoFetcher);
-  useActionToast(credFetcher);
-  useActionToast(dangerFetcher);
-  useActionToast(reviewerFetcher);
+  // The page's posts (settings-page-actions.ts), each with its fetcher and its
+  // toast, in the order the nine fetchers always registered.
+  const identityPost = useIdentityPost(csrf);
+  const stageEditor = useStageEditor(csrf);
+  const memberPosts = useMemberPosts(csrf);
+  const repoPosts = useRepoPosts(csrf);
+  const credentialPosts = useCredentialPosts(csrf);
+  const dangerPosts = useDangerPosts(csrf);
+  const reviewerSave = useListSave<RequiredReviewerDraft>(
+    csrf,
+    "set-required-reviewers",
+    "rules",
+  );
   // Ruling 652(b): a lease save answers like every other panel's.
-  useActionToast(leaseFetcher);
-  useActionToast(gateFetcher);
+  const leaseSave = useListSave<SavedLease>(csrf, "set-file-leases", "leases");
+  const gateSave = useListSave<SavedGate>(csrf, "set-project-gates", "gates");
 
   // E3: every panel gate names the RbacAction its OWN server mutation checks,
   // never a shared `myRole === "admin"` literal. Project identity, the stage
@@ -2592,15 +2596,6 @@ export function SettingsPage({
   const canManageMembers = roleCan(role, "manage-members");
   const canGrant = roleCan(role, "grant-github-scope");
   const slug = data.project.slug;
-
-  // Stage rename edit-mode lives here so a fresh add-stage response can
-  // drop the new row straight into edit mode (mock behavior).
-  const [editingStageId, setEditingStageId] = useState<string | null>(null);
-  useFetcherResult(stageFetcher, (d) => {
-    if (d.ok && d.stageId) {
-      setEditingStageId(d.stageId);
-    }
-  });
 
   const onNavPolicy = () => navigate(`/projects/${slug}/policy`);
   const onOpenTask = (taskKey: string) =>
@@ -2635,95 +2630,37 @@ export function SettingsPage({
               key={`${data.project.name}\u0000${data.project.prefix}\u0000${data.project.description}`}
               project={data.project}
               canManage={canEditPolicy}
-              busy={identityFetcher.state !== "idle"}
-              onSave={(fields) =>
-                identityFetcher.submit(
-                  { intent: "save-project", _csrf: csrf, ...fields },
-                  { method: "post" },
-                )
-              }
+              busy={identityPost.busy}
+              onSave={identityPost.save}
             />
             <MembersPanel
               members={data.members}
               meId={meId}
               projectName={data.project.name}
               canManage={canManageMembers}
-              busy={memberFetcher.state !== "idle"}
-              removing={
-                inFlightIntent(memberFetcher) === "remove-member"
-                  ? String(memberFetcher.formData?.get("userId") ?? "")
-                  : null
-              }
-              onInvite={(name, email) =>
-                memberFetcher.submit(
-                  { intent: "invite", _csrf: csrf, name, email },
-                  { method: "post" },
-                )
-              }
-              onRemove={(member) =>
-                memberFetcher.submit(
-                  { intent: "remove-member", _csrf: csrf, userId: member.userId },
-                  { method: "post" },
-                )
-              }
+              busy={memberPosts.busy}
+              removing={memberPosts.removing}
+              onInvite={memberPosts.invite}
+              onRemove={memberPosts.remove}
               onNavPolicy={onNavPolicy}
             />
             <RepoPanel
               repo={data.project.repo}
               credential={data.credential}
               canGrant={canGrant}
-              inFlight={inFlightIntent(repoFetcher)}
-              credInFlight={inFlightIntent(credFetcher)}
+              inFlight={repoPosts.inFlight}
+              credInFlight={credentialPosts.inFlight}
               canEditPolicy={canEditPolicy}
               footprintTasks={data.repoFootprintTasks}
               branchCleanup={data.branchCleanupOnMerge}
-              repoBusy={repoFetcher.state !== "idle"}
-              changeResult={repoFetcher.data}
-              onChangeRepo={(repoInput, confirmFootprint) => {
-                const fields = {
-                  intent: "change-repo",
-                  _csrf: csrf,
-                  repo: repoInput,
-                };
-                // Only a confirmed change carries the field: the route reads it
-                // as `confirmFootprint === "1"`, so it is sent or absent, never
-                // blank.
-                repoFetcher.submit(
-                  confirmFootprint ? { ...fields, confirmFootprint: "1" } : fields,
-                  { method: "post" },
-                );
-              }}
-              onRemoveRepo={() =>
-                repoFetcher.submit({ intent: "remove-repo", _csrf: csrf }, { method: "post" })
-              }
-              onSetBranchCleanup={(enabled) =>
-                repoFetcher.submit(
-                  {
-                    intent: "set-branch-cleanup",
-                    _csrf: csrf,
-                    enabled: enabled ? "1" : "0",
-                  },
-                  { method: "post" },
-                )
-              }
-              onGrantScope={() =>
-                repoFetcher.submit(
-                  { intent: "grant-scope", _csrf: csrf },
-                  { method: "post" },
-                )
-              }
-              onSetCredential={() =>
-                credFetcher.submit(
-                  { intent: "set-credential", _csrf: csrf },
-                  { method: "post" },
-                )
-              }
-              onClearCredential={() =>
-                credFetcher.submit(
-                  { intent: "clear-credential", _csrf: csrf },
-                  { method: "post" },
-                )
-              }
+              repoBusy={repoPosts.busy}
+              changeResult={repoPosts.result}
+              onChangeRepo={repoPosts.change}
+              onRemoveRepo={repoPosts.remove}
+              onSetBranchCleanup={repoPosts.setBranchCleanup}
+              onGrantScope={repoPosts.grantScope}
+              onSetCredential={credentialPosts.set}
+              onClearCredential={credentialPosts.clear}
               onOpenTask={onOpenTask}
               instanceAdmin={instanceAdmin}
             />
@@ -2733,42 +2670,13 @@ export function SettingsPage({
               stages={data.stages}
               counts={data.stageCounts}
               canManage={canEditPolicy}
-              editingId={editingStageId}
-              setEditingId={setEditingStageId}
-              onRename={(stageId, name) =>
-                stageFetcher.submit(
-                  { intent: "rename-stage", _csrf: csrf, stageId, name },
-                  { method: "post" },
-                )
-              }
-              onReorder={(orderedIds) =>
-                stageFetcher.submit(
-                  {
-                    intent: "reorder-stages",
-                    _csrf: csrf,
-                    orderedIds: orderedIds.join(","),
-                  },
-                  { method: "post" },
-                )
-              }
-              onAdd={(name) =>
-                stageFetcher.submit(
-                  { intent: "add-stage", _csrf: csrf, name },
-                  { method: "post" },
-                )
-              }
-              onRemove={(stageId) =>
-                stageFetcher.submit(
-                  { intent: "remove-stage", _csrf: csrf, stageId },
-                  { method: "post" },
-                )
-              }
-              onRecolor={(stageId, color) =>
-                stageFetcher.submit(
-                  { intent: "recolor-stage", _csrf: csrf, stageId, color },
-                  { method: "post" },
-                )
-              }
+              editingId={stageEditor.editingId}
+              setEditingId={stageEditor.setEditingId}
+              onRename={stageEditor.rename}
+              onReorder={stageEditor.reorder}
+              onAdd={stageEditor.add}
+              onRemove={stageEditor.remove}
+              onRecolor={stageEditor.recolor}
               onNavPolicy={onNavPolicy}
             />
             <RequiredReviewersPanel
@@ -2777,17 +2685,8 @@ export function SettingsPage({
               stages={data.stages}
               candidates={data.reviewerCandidates}
               canManage={canEditPolicy}
-              busy={reviewerFetcher.state !== "idle"}
-              onSave={(rules) =>
-                reviewerFetcher.submit(
-                  {
-                    intent: "set-required-reviewers",
-                    _csrf: csrf,
-                    rules: JSON.stringify(rules),
-                  },
-                  { method: "post" },
-                )
-              }
+              busy={reviewerSave.busy}
+              onSave={reviewerSave.save}
             />
             {/* Ruling 396: a lease names a task and a path, and it is policy in
                 the same sense the reviewer rules are, so it stacks in the same
@@ -2797,17 +2696,8 @@ export function SettingsPage({
               leases={data.fileLeases}
               candidates={data.leaseCandidates}
               canManage={canEditPolicy}
-              busy={leaseFetcher.state !== "idle"}
-              onSave={(leases) =>
-                leaseFetcher.submit(
-                  {
-                    intent: "set-file-leases",
-                    _csrf: csrf,
-                    leases: JSON.stringify(leases),
-                  },
-                  { method: "post" },
-                )
-              }
+              busy={leaseSave.busy}
+              onSave={leaseSave.save}
             />
             {/* Ruling 482: the gates decide what acceptance waits on, as the
                 reviewer rules above do, so they stack in the same column. */}
@@ -2815,17 +2705,8 @@ export function SettingsPage({
               key={`gates:${JSON.stringify(data.gates ?? [])}`}
               gates={data.gates ?? []}
               canManage={canEditPolicy}
-              busy={gateFetcher.state !== "idle"}
-              onSave={(gates) =>
-                gateFetcher.submit(
-                  {
-                    intent: "set-project-gates",
-                    _csrf: csrf,
-                    gates: JSON.stringify(gates),
-                  },
-                  { method: "post" },
-                )
-              }
+              busy={gateSave.busy}
+              onSave={gateSave.save}
             />
           </div>
         </div>
@@ -2840,20 +2721,10 @@ export function SettingsPage({
         <DangerZone
           projectName={data.project.name}
           archived={data.project.archived}
-          busy={dangerFetcher.state !== "idle"}
-          inFlight={inFlightIntent(dangerFetcher)}
-          onArchive={(archived) =>
-            dangerFetcher.submit(
-              { intent: "archive-project", _csrf: csrf, archived: String(archived) },
-              { method: "post" },
-            )
-          }
-          onDelete={(confirmName) =>
-            dangerFetcher.submit(
-              { intent: "delete-project", _csrf: csrf, confirmName },
-              { method: "post" },
-            )
-          }
+          busy={dangerPosts.busy}
+          inFlight={dangerPosts.inFlight}
+          onArchive={dangerPosts.archive}
+          onDelete={dangerPosts.deleteProject}
         />
         )}
       </div>

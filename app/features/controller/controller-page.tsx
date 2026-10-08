@@ -54,8 +54,9 @@ import { NotConnectedNote } from "./not-connected";
 import { KnowledgePanel } from "./knowledge-panel";
 import { useOpResultToast, type ActionResult } from "./op-result";
 import { viewerTimeZone } from "~/shared/dates/time-zone";
-import { withRetracted } from "./waiting-actions";
+import { withRetracted } from "./with-retracted";
 import { MessageList } from "./message-list";
+import { surfaceLabel } from "./surface-label";
 
 /**
  * The controller surface (ruling 99): a conversation list, one transcript,
@@ -941,64 +942,88 @@ function Composer({
         disabled={disabled}
         aria-label="Message to the controller"
       />
-      <div className="ctl-composer-foot">
-        <span className="att-lead">
-          <AttachButton onFiles={addFiles} disabled={disabled || busy} />
-          <span className="fine xs dim">
-            Acts with your permissions · refusals say why
-            {/* A touch screen has no key to name; app.css drops this on a
-                coarse pointer (`.kbd-hint`). */}
-            <span className="kbd-hint" suppressHydrationWarning>
-              {live ? ` · ${sendHint} steers · ${queueHint} queues` : ` · ${sendHint} sends`}
-            </span>
-          </span>
-        </span>
-        <span className="inline-row">
-          {live && (
-            <button
-              type="button"
-              className="btn sm"
-              title="Wait for its own turn, after the one working now"
-              onClick={() => submit("queue")}
-              disabled={busy || disabled || empty}
-              aria-busy={sending === "queue" || undefined}
-            >
-              {sending === "queue" && <Icon name="loader" className="spin" />}
-              {sending === "queue" ? "Queueing…" : "Queue"}
-            </button>
-          )}
-          <button
-            type="button"
-            className="btn primary sm"
-            title={live ? "Go into the turn working now, at its next step" : undefined}
-            onClick={() => submit("steer")}
-            disabled={busy || disabled || empty}
-            aria-busy={sending === "steer" || undefined}
-          >
-            {sending === "steer" && <Icon name="loader" className="spin" />}
-            {sending === "steer" ? "Sending…" : live ? "Steer" : "Send"}
-          </button>
-        </span>
-      </div>
+      <ComposerFoot
+        live={live}
+        busy={busy}
+        disabled={disabled}
+        blocked={busy || disabled || empty}
+        sending={sending}
+        addFiles={addFiles}
+        onSubmit={submit}
+        sendHint={sendHint}
+        queueHint={queueHint}
+      />
     </div>
   );
 }
 
 /**
- * Ruling 121: the surface a message was sent from, as a short word — the
- * workspace view's name, a task key, or "Home". The full path stays in the
- * title attribute.
+ * The composer's foot (ruling 700(e), split out of `Composer` on the task
+ * page's recipe; it calls no hook): attach, the key hint, and Queue beside
+ * Steer or Send, each naming the send it made while that send is out.
  */
-export function surfaceLabel(surface: string): string {
-  const path = surface.split("?")[0] ?? surface;
-  const task = path.match(/^\/projects\/[^/]+\/tasks\/([^/]+)/);
-  if (task?.[1]) return task[1];
-  const view = path.match(/^\/projects\/[^/]+(?:\/([^/]+))?/);
-  if (view) {
-    const segment = view[1] ?? "board";
-    return segment.charAt(0).toUpperCase() + segment.slice(1);
-  }
-  if (path === "/") return "Home";
-  const top = path.split("/").filter(Boolean)[0] ?? "";
-  return top ? top.charAt(0).toUpperCase() + top.slice(1) : "Home";
+function ComposerFoot({
+  live,
+  busy,
+  disabled,
+  blocked,
+  sending,
+  addFiles,
+  onSubmit,
+  sendHint,
+  queueHint,
+}: {
+  live: boolean;
+  busy: boolean;
+  disabled: boolean;
+  /** Busy, disabled or empty: nothing can be sent. */
+  blocked: boolean;
+  /** The mode of the send that is out, if one is. */
+  sending: SendMode | null;
+  addFiles: (incoming: File[]) => void;
+  onSubmit: (mode: SendMode) => void;
+  sendHint: string;
+  queueHint: string;
+}) {
+  return (
+    <div className="ctl-composer-foot">
+      <span className="att-lead">
+        <AttachButton onFiles={addFiles} disabled={disabled || busy} />
+        <span className="fine xs dim">
+          Acts with your permissions · refusals say why
+          {/* A touch screen has no key to name; app.css drops this on a
+              coarse pointer (`.kbd-hint`). */}
+          <span className="kbd-hint" suppressHydrationWarning>
+            {live ? ` · ${sendHint} steers · ${queueHint} queues` : ` · ${sendHint} sends`}
+          </span>
+        </span>
+      </span>
+      <span className="inline-row">
+        {live && (
+          <button
+            type="button"
+            className="btn sm"
+            title="Wait for its own turn, after the one working now"
+            onClick={() => onSubmit("queue")}
+            disabled={blocked}
+            aria-busy={sending === "queue" || undefined}
+          >
+            {sending === "queue" && <Icon name="loader" className="spin" />}
+            {sending === "queue" ? "Queueing…" : "Queue"}
+          </button>
+        )}
+        <button
+          type="button"
+          className="btn primary sm"
+          title={live ? "Go into the turn working now, at its next step" : undefined}
+          onClick={() => onSubmit("steer")}
+          disabled={blocked}
+          aria-busy={sending === "steer" || undefined}
+        >
+          {sending === "steer" && <Icon name="loader" className="spin" />}
+          {sending === "steer" ? "Sending…" : live ? "Steer" : "Send"}
+        </button>
+      </span>
+    </div>
+  );
 }

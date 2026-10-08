@@ -179,7 +179,14 @@ the only gates. Jobs run again since 2026-10-01.
   `AnimationEvent` (React picks the event name `onAnimationEnd` listens for once, as it
   loads, and falls back to one no test can fire without it; ruling 451(g)) and
   `Range.prototype.getBoundingClientRect` (Lexical measures a selection with it). jsdom
-  30 ships none of the four. It stubs no canvas: the run console's orb is CSS since
+  30 ships none of the four. Last, and only under jsdom, it gives Testing Library's
+  `findBy*` and `waitFor` 10 s (`asyncUtilTimeout`) in place of the library's 1 s: what
+  they wait on (a stubbed loader or action and its revalidation, a lazily imported chunk
+  Vite transforms on first import, a commit, a `ByRole` query) measured past 5 s on a
+  loaded machine, where tests failed on any commit and passed alone. A wait that never
+  succeeds still fails with Testing Library's message well inside the 20 s
+  `testTimeout`. No test waits for one to run out, and none passes a `timeout` of its
+  own (§0). It stubs no canvas: the run console's orb is CSS since
   ruling 499, and nothing in the app draws on one. jsdom is pinned exactly at 30.1.1:
   30.1.2's `focus()` refuses an element hidden by `display`, and jsdom's own stylesheet
   hides a `<dialog>` until the polyfill opens it (after React's commit-time `autoFocus`)

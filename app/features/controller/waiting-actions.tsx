@@ -2,7 +2,7 @@ import { useRef, useState } from "react";
 import { useFetcher } from "react-router";
 import type { ConversationTurnState } from "~/server/controller/controller-run.server";
 import type { MessageFile } from "~/server/controller/controller-conversations.server";
-import { messageFileHref } from "./message-files";
+import { messageFileHref } from "./message-file-href";
 import { useToast } from "~/ui/toast";
 import { useFetcherResult } from "~/ui/use-fetcher-result";
 
@@ -13,15 +13,6 @@ export interface WaitingActionResult {
   toast?: string;
   /** Retract: the message's own text, for the composer. */
   retracted?: string;
-}
-
-/**
- * Ruling 527: the composer's box once a retracted message comes back. What
- * the person is typing stays where it is and the message goes under it, so
- * neither is lost (ruling 259's rule for the box).
- */
-export function withRetracted(box: string, retracted: string): string {
-  return box.trim() ? `${box.trimEnd()}\n\n${retracted}` : retracted;
 }
 
 /** Ruling 527: where a message waits on the running turn, if it still does. */

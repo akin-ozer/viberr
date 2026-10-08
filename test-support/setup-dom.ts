@@ -76,3 +76,25 @@ if ("window" in globalThis && !Object.hasOwn(window, "AnimationEvent")) {
 if ("window" in globalThis && !Object.hasOwn(window.Range.prototype, "getBoundingClientRect")) {
   window.Range.prototype.getBoundingClientRect = () => new window.DOMRect(0, 0, 0, 0);
 }
+
+/**
+ * Testing Library gives every `findBy*` and `waitFor` 1 s (`asyncUtilTimeout`)
+ * by default. What those waits cover here is honest work with no fixed delay in
+ * it: a stubbed route's loader or action and the revalidation after it, a
+ * chunk the component imports lazily (which Vite transforms on its first
+ * import), React's commit, and the query itself (`ByRole` computes every
+ * element's accessible name). That takes tens of milliseconds on an idle
+ * machine and measured past 5 s on a loaded one, where tests failed on any
+ * commit and passed alone. 10 s covers that, and a wait that will never succeed
+ * still ends in Testing Library's message (what was missing, and the DOM) well
+ * inside `vitest.config.ts`'s 20 s `testTimeout`. No test waits for one to run
+ * out, so a passing test pays nothing for it. Loaded last and only under jsdom:
+ * Testing Library loads react-dom, which must find the `AnimationEvent` above.
+ */
+if ("window" in globalThis) {
+  const { configure } = await import("@testing-library/react");
+  configure({ asyncUtilTimeout: 10_000 });
+}
+
+// That `await` needs a module, and nothing else here imports or exports.
+export {};

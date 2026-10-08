@@ -17,6 +17,7 @@ import { DocViewToggle, MarkdownDoc, type DocView } from "~/ui/markdown-doc";
 import { useDialog } from "~/ui/use-dialog";
 import { useRemoveFromRecord } from "./remove-from-record";
 import { attachmentKind, looksBinary } from "./attachment-kind";
+import { attachmentDownloadHref } from "./attachment-download-href";
 
 /**
  * Attachment lightbox (owner request 2026-08-21): clicking a piece of image
@@ -68,20 +69,6 @@ export interface LightboxImage {
 const LightboxContext = createContext<((img: LightboxImage) => void) | null>(
   null,
 );
-
-/**
- * The serving-route URL with the save-dialog flag. D04-U11 (pass 32): the
- * "every call site passes a query-less URL" invariant lived in a comment here
- * and in the markdown gate only; a fifth caller passing `…?x=1` would have
- * produced `…?x=1?download=1`. One function joins the flag correctly for any
- * URL shape (query or not, fragment kept last), so no caller has to know.
- */
-export function attachmentDownloadHref(url: string): string {
-  const hashAt = url.indexOf("#");
-  const base = hashAt === -1 ? url : url.slice(0, hashAt);
-  const hash = hashAt === -1 ? "" : url.slice(hashAt);
-  return `${base}${base.includes("?") ? "&" : "?"}download=1${hash}`;
-}
 
 /**
  * Click-handler factory for an attachment link — every kind opens the card
@@ -268,6 +255,71 @@ function LightboxTextBody({
   );
 }
 
+/**
+ * Every body but the text reader's (ruling 700(e)): the no-preview card, the
+ * picture that would not load, a page capture, or the image. Lightbox owns
+ * the state and hands it in, so the markup is what it was.
+ */
+function LightboxMediaBody({
+  img,
+  isOther,
+  fetchFailed,
+  failed,
+  captureView,
+  onFailed,
+}: {
+  img: LightboxImage;
+  /** The kind has no in-app viewer. */
+  isOther: boolean;
+  /** A fetch proved the file unservable. */
+  fetchFailed: boolean;
+  /** The picture did not load. */
+  failed: boolean;
+  /** Ruling 691: the width a page capture was taken at, or null. */
+  captureView: ReturnType<typeof viewOfCaptureName>;
+  onFailed: () => void;
+}) {
+  if (isOther) {
+    return (
+      <div className="lightbox-broken">
+        <Icon name="file" />
+        {/* "in-app": the route DOES serve some of these inline (PDFs), so
+            Open original below may still render one — the card only says
+            this popup has no viewer for the kind. */}
+        <p>
+          {fetchFailed
+            ? UNSERVABLE_COPY
+            : "This file type has no in-app preview. Use Download to save it."}
+        </p>
+      </div>
+    );
+  }
+  if (failed) {
+    return (
+      <div className="lightbox-broken">
+        <Icon name="file" />
+        {/* onError cannot tell a 404 from bytes the browser cannot decode,
+            and Download stays for exactly the second case — so point at it. */}
+        <p>
+          Unable to show this image. Use Download or Open original to get the
+          file itself.
+        </p>
+      </div>
+    );
+  }
+  const image = <img className="lightbox-img" src={img.url} alt={img.name} onError={onFailed} />;
+  // Ruling 691: a page capture is the whole page. It opens at the page's own
+  // width and scrolls, so it takes focus and a name, as the markdown preview
+  // does: a keyboard reaches all of a long page.
+  return captureView ? (
+    <div className="lightbox-shot" tabIndex={0} role="region" aria-label={"Picture of " + pageOfCaptureName(img.name)}>
+      {image}
+    </div>
+  ) : (
+    image
+  );
+}
+
 function Lightbox({
   img,
   links,
@@ -339,46 +391,14 @@ function Lightbox({
           onUnservable={markUnservable}
           links={links}
         />
-      ) : isOther ? (
-        <div className="lightbox-broken">
-          <Icon name="file" />
-          {/* "in-app": the route DOES serve some of these inline (PDFs), so
-              Open original below may still render one — the card only says
-              this popup has no viewer for the kind. */}
-          <p>
-            {fetchFailed
-              ? UNSERVABLE_COPY
-              : "This file type has no in-app preview. Use Download to save it."}
-          </p>
-        </div>
-      ) : failed ? (
-        <div className="lightbox-broken">
-          <Icon name="file" />
-          {/* onError cannot tell a 404 from bytes the browser cannot decode,
-              and Download stays for exactly the second case — so point at it. */}
-          <p>
-            Unable to show this image. Use Download or Open original to get the
-            file itself.
-          </p>
-        </div>
-      ) : captureView ? (
-        // Ruling 691: a page capture is the whole page. It opens at the
-        // page's own width and scrolls, so it takes focus and a name, as the
-        // markdown preview does: a keyboard reaches all of a long page.
-        <div className="lightbox-shot" tabIndex={0} role="region" aria-label={"Picture of " + pageOfCaptureName(img.name)}>
-          <img
-            className="lightbox-img"
-            src={img.url}
-            alt={img.name}
-            onError={() => setFailed(true)}
-          />
-        </div>
       ) : (
-        <img
-          className="lightbox-img"
-          src={img.url}
-          alt={img.name}
-          onError={() => setFailed(true)}
+        <LightboxMediaBody
+          img={img}
+          isOther={isOther}
+          fetchFailed={fetchFailed}
+          failed={failed}
+          captureView={captureView}
+          onFailed={() => setFailed(true)}
         />
       )}
       <div className="lightbox-foot">

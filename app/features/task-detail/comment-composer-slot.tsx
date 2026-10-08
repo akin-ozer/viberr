@@ -101,9 +101,14 @@ const LazyCommentEditor = lazy(() =>
 
 /** The stand-in's draft as plain text. `innerText` keeps the line breaks a
  *  contenteditable draws as `<br>`; jsdom has no layout and leaves it
- *  undefined, so tests read `textContent`. */
+ *  undefined, so tests read `textContent`. A draft that ends in a line break
+ *  also holds the one the browser adds so the empty last line can take the
+ *  caret (`first line` and Enter reads `first line\n\n` until the next key):
+ *  it is not the person's, and an editor arriving in that moment carried it
+ *  in as a blank line. */
 function standInText(el: HTMLElement): string {
-  return el.innerText ?? el.textContent ?? "";
+  const text = el.innerText ?? el.textContent ?? "";
+  return text.endsWith("\n") ? text.slice(0, -1) : text;
 }
 
 function StandIn({

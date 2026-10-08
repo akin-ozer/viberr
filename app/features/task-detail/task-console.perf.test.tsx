@@ -29,8 +29,8 @@ import { FakeEventSource } from "../../../test-support/fake-event-source";
  * this cluster's). A fake EventSource delivers each frame to every open
  * connection holding the task's scope, as the broker does; a fake
  * `/resources/run-log` answers a tail with the one new line and a backward
- * page with the lines asked for. Timers are fake, so nothing but the measured
- * event runs.
+ * page with the lines asked for. Timers, animation frames and the clock that
+ * stamps the frames are fake, so nothing but the measured event runs.
  */
 
 type PageProps = ComponentProps<typeof TaskDetailPage>;
@@ -267,7 +267,24 @@ beforeEach(() => {
     const body = runLogResponse(url);
     return Promise.resolve({ ok: true, status: 200, json: () => Promise.resolve(body) });
   });
-  vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "setInterval", "clearInterval", "Date"] });
+  // The footer's event count eases on animation frames (NumberTicker). With
+  // only the timers fake, jsdom ran those frames off the fake interval but
+  // stamped them with the real `performance.now()`, so a fake second moved the
+  // count by however long the machine took to run it: a figure more under
+  // load, and one render more inside the clock tick. Frames and their stamps
+  // ride the same fake clock as the timers.
+  vi.useFakeTimers({
+    toFake: [
+      "setTimeout",
+      "clearTimeout",
+      "setInterval",
+      "clearInterval",
+      "Date",
+      "requestAnimationFrame",
+      "cancelAnimationFrame",
+      "performance",
+    ],
+  });
   vi.setSystemTime(new Date("2026-09-24T10:00:00.000Z"));
 });
 
@@ -445,6 +462,14 @@ describe("the task page per console line (ruling 457)", () => {
 
   it("the Live run clock's one-second tick", async () => {
     const { counter, mutations } = await mountPage(40);
+    // The footer counts up from zero for two seconds of frames after the
+    // mount; that is the mount's tail, not the tick, so it finishes first.
+    // CANARY: drop this step and the count-up moves inside the measured second:
+    // NumberTicker renders in the tick's commit (6 renders against 5).
+    await act(async () => {
+      vi.advanceTimersByTime(2100);
+      await settle();
+    });
     counter.reset();
     mutations.take();
     await act(async () => {

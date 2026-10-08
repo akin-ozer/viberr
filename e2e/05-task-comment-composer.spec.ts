@@ -76,6 +76,38 @@ test("Enter makes a line break and ControlOrMeta+Enter sends the multiline draft
   await expect(page.locator(".timeline").getByText("second line").first()).toBeVisible();
 });
 
+test("the editor arriving just after an Enter carries the one line break typed", async ({
+  page,
+}) => {
+  // CANARY: read the stand-in's draft with the trailing line break the
+  // browser adds for the caret (`standInText` in comment-composer-slot.tsx)
+  // and the editor takes it in as a blank line between the two.
+  let release: () => void = () => {};
+  const held = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  // Holds the editor's chunk (routing also turns the page's cache off), so
+  // the stand-in takes the typing until the swap lands after the Enter.
+  await page.route(/\/assets\/comment-composer-(?!slot)[^/]*\.js$/, async (route) => {
+    await held;
+    await route.continue();
+  });
+  await page.reload();
+  await expect(page.locator(".composer-ce")).toBeVisible();
+  const stamp = `e2e carried break ${Date.now()}`;
+  await page.locator(".composer-ce").click();
+  await page.keyboard.type(`${stamp} first line`);
+  await page.keyboard.press("Enter");
+  release();
+  await expect(page.locator(".composer-ce[data-lexical-editor]")).toBeVisible();
+  await page.keyboard.type("second line");
+
+  const request = commentPost(page, (body) => body.includes("carried"));
+  await page.keyboard.press("ControlOrMeta+Enter");
+  const body = decodeURIComponent((await request).postData()!.replace(/\+/g, " "));
+  expect(body).toContain(`${stamp} first line\nsecond line`);
+});
+
 test("@-mention: keyboard selection inserts the display name as a live chip", async ({
   page,
 }) => {

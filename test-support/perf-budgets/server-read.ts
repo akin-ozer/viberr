@@ -129,7 +129,7 @@ export const SERVER_READ_BUDGETS: PerfBudgetTable = {
   },
   // CTL-6: task-scope dock view, VIB-142 — the task summary built to answer
   // "does it exist?", and the controller definition read for its name.
-  // 7 before dockTaskExists stopped building a task summary and the dock stopped reading the definition doc for the controller's name.
+  // 7 before the dock's task check (now `taskExists`, resources.controller.ts) stopped building a task summary and the dock stopped reading the definition doc for the controller's name.
   "server-read:dock-task-view.store-reads": {
     ceiling: 2,
     unit: "count",
@@ -137,7 +137,7 @@ export const SERVER_READ_BUDGETS: PerfBudgetTable = {
     fixture: DOCK,
   },
   // CTL-6.
-  // 13 before dockTaskExists became one SELECT 1.
+  // 13 before the dock's task check became `taskExists`'s one SELECT 1.
   "server-read:dock-task-view.sql": {
     ceiling: 10,
     unit: "count",

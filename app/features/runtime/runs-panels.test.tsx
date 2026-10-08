@@ -1172,7 +1172,7 @@ describe("the run picker speaks the same vocabulary as the panel around it", () 
     const role = () => container.querySelector(".rsel-role")!.textContent!;
     expect(role()).toContain("delivering");
     // "primary" is the internal kind literal — a THIRD name for the agent the
-    // Execution profile on this same page calls "Delivering agent".
+    // Execution profile on this same page calls "the delivering agent".
     expect(role()).not.toContain("primary");
     rerender(
       <Logs runtime={runs} sel="c0" onSel={() => {}} linesByThread={{ primary: [], c0: [] }} />,
@@ -1465,9 +1465,25 @@ describe("AgentLogsPanel — run inputs (P19-G11)", () => {
     // The `{ } raw` contract is "the stored envelope, verbatim" — a viberr line
     // does not get to keep its friendly rendering there.
     const { getByText, queryByText, container } = renderConsole([line]);
+    const clock = container.querySelector(".log-line .lt");
+    const tag = container.querySelector(".log-line .ltag");
     fireEvent.click(getByText("{ } raw"));
     expect(container.textContent).toContain(rawEnvelope);
     expect(queryByText("show what this run was given")).toBeNull();
+    // ...and, like every other line, it is patched there rather than replaced:
+    // a reader's selection in its clock or tag survives the toggle, and so
+    // does the size `content-visibility` remembered for the row. Ruling
+    // 700(e)'s split once drew this branch as a component of its own, a
+    // different element type from the other branch's fragment, and React
+    // swapped the whole row on every toggle with the same markup either side.
+    // CANARY: make `runInputsRow` a component LineRow renders
+    // (`<RunInputsRow … />`) again.
+    expect(container.querySelector(".log-line .lt")).toBe(clock);
+    expect(container.querySelector(".log-line .ltag")).toBe(tag);
+    fireEvent.click(getByText("{ } raw"));
+    expect(getByText("show what this run was given")).toBeTruthy();
+    expect(container.querySelector(".log-line .lt")).toBe(clock);
+    expect(container.querySelector(".log-line .ltag")).toBe(tag);
   });
 });
 
@@ -1580,7 +1596,7 @@ describe("a run interrupted by a restart", () => {
      * timeline says the opposite one panel away — "Viberr did NOT re-invoke the
      * operator for it… Run the operator from this page when you are ready."
      *
-     * CANARY: restore the old sentence in `runs-panels.tsx`.
+     * CANARY: restore the old sentence in `runs-panels-derive.ts` (`interruptedFooter`).
      */
     expect(container.textContent).toContain(
       "interrupted by a restart; the task record says what recovery did",
@@ -1915,6 +1931,57 @@ describe("ruling 451(c): copy controls trade their glyph in place", () => {
     expect(container.querySelector(".copy-glyph")!.getAttribute("data-copied")).toBe("true");
     // The same element carries the change: nothing remounted.
     expect(container.querySelector(".copy-glyph")).toBe(glyph);
+  });
+
+  describe("the confirmation's 1.4 s lapse", () => {
+    afterEach(() => {
+      vi.useRealTimers();
+    });
+
+    it("runs from the first copy, gives each later copy its full window, and dies with the chip", async () => {
+      // CANARY: arm a bare `window.setTimeout(() => setCopied(false), 1400)`
+      // per click again (useState in place of useCopied): the re-copy's
+      // leftover timer ends the third confirmation 500 ms early, and closing
+      // the panel leaves a timer that sets state on the gone chip (after a
+      // suite's jsdom is torn down, an unhandled "window is not defined").
+      vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+      Object.defineProperty(navigator, "clipboard", {
+        value: { writeText: async () => {} },
+        configurable: true,
+      });
+      const { container, getByRole, unmount } = render(
+        <Logs runtime={[mkRun({})]} sel="primary" onSel={() => {}} linesByThread={{}} />,
+      );
+      const button = getByRole("button", { name: "Copy full session id" });
+      const copy = () =>
+        act(async () => {
+          fireEvent.click(button);
+        });
+      const wait = (ms: number) =>
+        act(() => {
+          vi.advanceTimersByTime(ms);
+        });
+      const copied = () => container.querySelector(".session-id-copy .copy-glyph")!.hasAttribute("data-copied");
+
+      await copy();
+      expect(copied()).toBe(true);
+      // A re-copy inside the window does not restart it.
+      wait(1000);
+      await copy();
+      wait(400);
+      expect(copied()).toBe(false);
+      // The next copy stands its full 1.4 s.
+      wait(100);
+      await copy();
+      wait(1399);
+      expect(copied()).toBe(true);
+      wait(1);
+      expect(copied()).toBe(false);
+
+      await copy();
+      unmount();
+      expect(vi.getTimerCount()).toBe(0);
+    });
   });
 });
 

@@ -19,7 +19,7 @@ import type { DatabaseSync } from "node:sqlite";
  * The honest "last check" lives here instead, in the per-tick audit row, which
  * is:
  *  - **unconditional** — `recordAudit({action: "github.reconcile.task"})` sits
- *    after every early return in `reconcileTaskExclusive`, so a row exists iff a
+ *    after every early return in `reconcileTaskUnlocked`, so a row exists iff a
  *    pass completed for that task, changed or not;
  *  - **bounded** — `AUDIT_RETENTION_DAYS` (90) caps it at roughly 26k rows per
  *    task-year (288 ticks/day). `idx_audit_events__task_action` (project_slug,

@@ -14,7 +14,7 @@ import type { CredentialKind } from "./backend-credentials.server";
 
 /**
  * Run persistence: the RAW .jsonl append (canonical truth, under
- * ${VIBERR_DATA_ROOT}/runtimes/<backend>/<sessionOrRunId>.jsonl) and the DB
+ * ${VIBERR_DATA_ROOT}/runtimes/<backend>/<runId>.jsonl) and the DB
  * projection rows (agent_runs + run_log_lines). Callers append a line with
  * `appendRawLine` (the raw file) and then `insertRunLine` (the DB row), and read
  * via the query helpers here.

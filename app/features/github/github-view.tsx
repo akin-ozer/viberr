@@ -7,11 +7,8 @@ import { inFlightIntent } from "~/ui/in-flight";
 import { Pill } from "~/ui/pill";
 import { useToast } from "~/ui/toast";
 import { useActionToast } from "~/ui/use-action-toast";
-import {
-  CredentialCard,
-  CredentialManageActions,
-  replaceTokenHref,
-} from "./credential-card";
+import { CredentialCard, CredentialManageActions } from "./credential-card";
+import { replaceTokenHref } from "./replace-token-href";
 import { RECONCILE_START_TOAST } from "./github-copy";
 import {
   checksPill,
@@ -462,6 +459,221 @@ export interface ReconcileCheckView {
   stale: boolean;
 }
 
+/** The freshness chip's tone, line and sentence (ruling 700(e), the split of
+ *  `GithubViewPage`). */
+interface Freshness {
+  staleCache: boolean;
+  text: string;
+  title: string;
+}
+
+/**
+ * What the freshness chip says, from the last CHANGE and the last CHECK
+ * (ruling 700(e): a pure function of the loader's two values, read once per
+ * render by {@link GithubViewPage}).
+ */
+function reconcileFreshness(
+  reconcile: GithubViewData["reconcile"],
+  reconcileCheck: ReconcileCheckView,
+): Freshness {
+  // R17-5 (UX-3): "never synced" and "stale cache" are different situations
+  // and the payload already distinguishes them (`at: null` vs an old
+  // timestamp) — but both rendered the coral alert tone, so a brand-new
+  // project's FIRST impression of this page was a warning about nothing being
+  // wrong. Only a genuinely old cache warns; never-synced reads neutral with a
+  // nudge to run the first sync.
+  const changeStale = reconcile.stale && reconcile.at !== null;
+  // F19-22: with a completed pass on record the warn tone tracks THAT, not the
+  // last change. An hour without a change is what a quiet repository looks like
+  // and must not shout; an hour without a CHECK means the poller or the
+  // credential is down, which is the only case here worth a warning — and the
+  // case the old chip could not see (`reconcileTaskUnlocked` returns BEFORE the
+  // `github.reconcile.task` audit write on `auth_failed` / `network_unavailable`,
+  // so a poller running against a dead PAT stops this clock while the change
+  // clock, frozen anyway, looks no different than on a quiet day).
+  //
+  // With no check on record `reconcileCheck.stale` is meaningless — the loader
+  // derives it from a null instant — so the last change is the only evidence a
+  // pass ever ran and the R17-5 rule above still decides.
+  const staleCache = reconcileCheck.at ? reconcileCheck.stale : changeStale;
+  const changeLabel = reconcile.at
+    ? `last change ${reconcile.label}`
+    : "no changes recorded";
+  const text = reconcileCheck.at
+    ? `Checked ${reconcileCheck.label} · ${changeLabel}`
+    : reconcile.at
+      ? `Last change ${reconcile.label}`
+      : "No changes recorded";
+  const title = reconcileCheck.at
+    ? staleCache
+      ? "No reconcile pass has completed for over an hour, though the background poller re-checks GitHub every 5 minutes. Either every branched task here is finished (the poller skips terminal tasks, so a wrapped-up project goes quiet legitimately), or the poller or credential is down and the branch and PR state below is out of date. Update status checks now."
+      : "When a reconcile pass last completed, and when one last found a change. The background poller re-checks GitHub every 5 minutes and records nothing on a pass that finds nothing new, so a much older last change means a quiet repository. Update status forces a check now."
+    : staleCache
+      ? "No branch or PR change has been recorded for over an hour. The background poller re-checks GitHub every 5 minutes and records nothing on a pass that finds nothing new, so this is also what a quiet repository looks like. Update status forces a check now."
+      : reconcile.at
+        ? "When the cached branch/PR state last CHANGED. A background poller re-checks GitHub every 5 minutes and records nothing on a pass that finds nothing new. Update status forces a check now."
+        : "No branch or PR change has been recorded yet. Nothing is wrong. Update status checks GitHub now.";
+  return { staleCache, text, title };
+}
+
+/** Ruling 667's page for a project with no repository (ruling 700(e): the
+ *  early return of `GithubViewPage`, hook-free). */
+function NoRepositoryPage({ name, slug }: { name: string; slug: string }) {
+  return (
+    <div className="board-wrap" data-screen-label="GitHub">
+      <div className="board-head">
+        <div>
+          <h1>GitHub</h1>
+          <div className="sub">{name} has no repository</div>
+        </div>
+      </div>
+      <div className="policy-wrap">
+        <div className="panel">
+          <div className="panel-head">
+            <Icon name="github" />
+            <h2>Repository</h2>
+          </div>
+          <p className="empty sm">
+            This project has no repository: each task comes back as the files
+            its agents save on it, so there are no branches or pull requests to
+            show. A project admin attaches one in{" "}
+            <Link to={`/projects/${slug}/settings`}>Settings → Repository &amp; credentials</Link>{" "}
+            when its agents should read or write one.
+          </p>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/** The page head: title, the freshness chip, Update status and Open on GitHub
+ *  (ruling 700(e): the `.board-head` slot of `GithubViewPage`, hook-free). */
+function GithubHead({
+  name,
+  repo,
+  githubHost,
+  freshness,
+  canReconcile,
+  reconciling,
+  busy,
+  onReconcile,
+}: {
+  name: string;
+  repo: string | null;
+  githubHost: string;
+  freshness: Freshness;
+  canReconcile: boolean;
+  reconciling: boolean;
+  busy: boolean;
+  onReconcile: () => void;
+}) {
+  const { staleCache, text, title } = freshness;
+  return (
+    <div className="board-head">
+      <div>
+        <h1>GitHub</h1>
+        <div className="sub">
+          Execution surface for {name}: branches, pull requests,
+          and credential health
+        </div>
+      </div>
+      <div className="board-tools">
+        {/* P11-14: GitHub state is served from cache; a background poller
+            refreshes it every 5 minutes, and "Update status" refreshes it now.
+            Show how fresh it is so stale state can't look current.
+
+            F19-22: `data.reconcile.at` is `MAX(observed_at)` over
+            `github.reconcile` PROVENANCE, and DG-3 skips that row on an
+            unchanged poller tick — so it is the last pass that CHANGED
+            something, never the last pass that ran. Labelled "Updated Nm ago"
+            it claimed the second while holding the first, and contradicted its
+            own tooltip's "every 5 minutes" (live-proven on the task panel:
+            "Synced 1h ago" over seven successful passes in the same hour).
+            The second half now arrives as `reconcileCheck` (the per-tick
+            `github.reconcile.task` audit row, unioned with the human sweep's
+            project row) and the chip renders both: "Checked 2m ago · last
+            change 40m ago" says in one line what neither number could say
+            alone. */}
+        <span
+          className={"gh-freshness" + (staleCache ? " stale" : "")}
+          title={title}
+        >
+          <Icon name={staleCache ? "alert" : "clock"} />
+          {text}
+          {/* The title is a mouse-only extra; this is the same sentence for
+              assistive tech (interface review 2026-09-24, acce-5). */}
+          <span className="vh"> · {title}</span>
+        </span>
+        {canReconcile && (
+          <button
+            type="button"
+            className="btn ghost sm"
+            onClick={onReconcile}
+            disabled={busy}
+            aria-busy={reconciling || undefined}
+            title="Update branch/PR status from GitHub now"
+          >
+            <GlyphSwap rest="refresh" alt="loader" on={reconciling} spinAlt />
+            {reconciling ? "Updating…" : "Update status"}
+          </button>
+        )}
+        {repo && (
+          <a
+            className="btn ghost sm"
+            href={`${githubHost}/${repo}`}
+            target="_blank"
+            rel="noopener noreferrer"
+          >
+            <Icon name="ext" />
+            Open on GitHub
+          </a>
+        )}
+      </div>
+    </div>
+  );
+}
+
+/** The cred-warn action slot (ruling 700(e): the element `GithubViewPage`
+ *  hands the credential card, hook-free): Re-check scopes for a reader who
+ *  holds the grant once a PAT is bound, and Fix in Settings. */
+function CredentialWarnActions({
+  canGrant,
+  hasCredential,
+  busy,
+  rechecking,
+  onRecheck,
+  onFix,
+}: {
+  canGrant: boolean;
+  hasCredential: boolean;
+  busy: boolean;
+  rechecking: boolean;
+  onRecheck: () => void;
+  onFix: () => void;
+}) {
+  return (
+    <span className="warn-acts">
+      {canGrant && hasCredential && (
+        <button
+          type="button"
+          className="btn sm"
+          onClick={onRecheck}
+          disabled={busy}
+          aria-busy={rechecking || undefined}
+          title="Re-check the credential's scopes against GitHub"
+        >
+          <GlyphSwap rest="check" alt="loader" on={rechecking} spinAlt />
+          {rechecking ? "Checking…" : "Re-check scopes"}
+        </button>
+      )}
+      <button type="button" className="btn sm" onClick={onFix}>
+        <Icon name="sliders" />
+        Fix in Settings
+      </button>
+    </span>
+  );
+}
+
 export function GithubViewPage({
   data,
   reconcileCheck,
@@ -533,32 +745,17 @@ export function GithubViewPage({
   const rechecking = grantFetcher.state !== "idle";
   const busy = reconciling || rechecking;
 
-  // The cred-warn action slot: Re-check scopes (lives here until the
-  // Phase-9 Settings card exists) + the mock's Fix in Settings navigation.
+  // The cred-warn action slot: Re-check scopes (Settings' Repository panel
+  // offers it too) + the mock's Fix in Settings navigation.
   const warnActions = (
-    <span className="warn-acts">
-      {canGrant && hasCredential && (
-        <button
-          type="button"
-          className="btn sm"
-          onClick={grantScope}
-          disabled={busy}
-          aria-busy={rechecking || undefined}
-          title="Re-check the credential's scopes against GitHub"
-        >
-          <GlyphSwap rest="check" alt="loader" on={rechecking} spinAlt />
-          {rechecking ? "Checking…" : "Re-check scopes"}
-        </button>
-      )}
-      <button
-        type="button"
-        className="btn sm"
-        onClick={() => navigate(`/projects/${slug}/settings`)}
-      >
-        <Icon name="sliders" />
-        Fix in Settings
-      </button>
-    </span>
+    <CredentialWarnActions
+      canGrant={canGrant}
+      hasCredential={hasCredential}
+      busy={busy}
+      rechecking={rechecking}
+      onRecheck={grantScope}
+      onFix={() => navigate(`/projects/${slug}/settings`)}
+    />
   );
 
   // Attach / re-attach / remove the project credential (finding #13) —
@@ -585,74 +782,14 @@ export function GithubViewPage({
     />
   ) : undefined;
 
-  // R17-5 (UX-3): "never synced" and "stale cache" are different situations
-  // and the payload already distinguishes them (`at: null` vs an old
-  // timestamp) — but both rendered the coral alert tone, so a brand-new
-  // project's FIRST impression of this page was a warning about nothing being
-  // wrong. Only a genuinely old cache warns; never-synced reads neutral with a
-  // nudge to run the first sync.
-  const changeStale = data.reconcile.stale && data.reconcile.at !== null;
-  // F19-22: with a completed pass on record the warn tone tracks THAT, not the
-  // last change. An hour without a change is what a quiet repository looks like
-  // and must not shout; an hour without a CHECK means the poller or the
-  // credential is down, which is the only case here worth a warning — and the
-  // case the old chip could not see (`reconcileTaskExclusive` returns BEFORE the
-  // `github.reconcile.task` audit write on `auth_failed` / `network_unavailable`,
-  // so a poller running against a dead PAT stops this clock while the change
-  // clock, frozen anyway, looks no different than on a quiet day).
-  //
-  // With no check on record `reconcileCheck.stale` is meaningless — the loader
-  // derives it from a null instant — so the last change is the only evidence a
-  // pass ever ran and the R17-5 rule above still decides.
-  const staleCache = reconcileCheck.at ? reconcileCheck.stale : changeStale;
-  const changeLabel = data.reconcile.at
-    ? `last change ${data.reconcile.label}`
-    : "no changes recorded";
-  const freshnessText = reconcileCheck.at
-    ? `Checked ${reconcileCheck.label} · ${changeLabel}`
-    : data.reconcile.at
-      ? `Last change ${data.reconcile.label}`
-      : "No changes recorded";
-  const freshnessTitle = reconcileCheck.at
-    ? staleCache
-      ? "No reconcile pass has completed for over an hour, though the background poller re-checks GitHub every 5 minutes. Either every branched task here is finished (the poller skips terminal tasks, so a wrapped-up project goes quiet legitimately), or the poller or credential is down and the branch and PR state below is out of date. Update status checks now."
-      : "When a reconcile pass last completed, and when one last found a change. The background poller re-checks GitHub every 5 minutes and records nothing on a pass that finds nothing new, so a much older last change means a quiet repository. Update status forces a check now."
-    : staleCache
-      ? "No branch or PR change has been recorded for over an hour. The background poller re-checks GitHub every 5 minutes and records nothing on a pass that finds nothing new, so this is also what a quiet repository looks like. Update status forces a check now."
-      : data.reconcile.at
-        ? "When the cached branch/PR state last CHANGED. A background poller re-checks GitHub every 5 minutes and records nothing on a pass that finds nothing new. Update status forces a check now."
-        : "No branch or PR change has been recorded yet. Nothing is wrong. Update status checks GitHub now.";
+  const freshness = reconcileFreshness(data.reconcile, reconcileCheck);
 
   // Ruling 667: a board that delivers results may have no repository, and
   // then this page has one thing to say. The rail no longer lists the page
   // for such a project; a link that still lands here reads this, not a
   // credential warning and three empty lists about a repository nobody needs.
   if (!data.project.repo) {
-    return (
-      <div className="board-wrap" data-screen-label="GitHub">
-        <div className="board-head">
-          <div>
-            <h1>GitHub</h1>
-            <div className="sub">{data.project.name} has no repository</div>
-          </div>
-        </div>
-        <div className="policy-wrap">
-          <div className="panel">
-            <div className="panel-head">
-              <Icon name="github" />
-              <h2>Repository</h2>
-            </div>
-            <p className="empty sm">
-              This project has no repository: each task comes back as the files
-              its agents save on it, so there are no branches or pull requests to
-              show. A project admin attaches one in{" "}
-              <Link to={`/projects/${slug}/settings`}>Settings → Repository &amp; credentials</Link>{" "}
-              when its agents should read or write one.
-            </p>
-          </div>
-        </div>
-      </div>
-    );
+    return <NoRepositoryPage name={data.project.name} slug={slug} />;
   }
 
   return (
@@ -663,67 +800,16 @@ export function GithubViewPage({
           violation.updated / projection.rebuilt all match the project
           scope, and useRevalidator refreshes every active loader,
           including this route's. */}
-      <div className="board-head">
-        <div>
-          <h1>GitHub</h1>
-          <div className="sub">
-            Execution surface for {data.project.name}: branches, pull requests,
-            and credential health
-          </div>
-        </div>
-        <div className="board-tools">
-          {/* P11-14: GitHub state is served from cache; a background poller
-              refreshes it every 5 minutes, and "Update status" refreshes it now.
-              Show how fresh it is so stale state can't look current.
-
-              F19-22: `data.reconcile.at` is `MAX(observed_at)` over
-              `github.reconcile` PROVENANCE, and DG-3 skips that row on an
-              unchanged poller tick — so it is the last pass that CHANGED
-              something, never the last pass that ran. Labelled "Updated Nm ago"
-              it claimed the second while holding the first, and contradicted its
-              own tooltip's "every 5 minutes" (live-proven on the task panel:
-              "Synced 1h ago" over seven successful passes in the same hour).
-              The second half now arrives as `reconcileCheck` (the per-tick
-              `github.reconcile.task` audit row, unioned with the human sweep's
-              project row) and the chip renders both: "Checked 2m ago · last
-              change 40m ago" says in one line what neither number could say
-              alone. */}
-          <span
-            className={"gh-freshness" + (staleCache ? " stale" : "")}
-            title={freshnessTitle}
-          >
-            <Icon name={staleCache ? "alert" : "clock"} />
-            {freshnessText}
-            {/* The title is a mouse-only extra; this is the same sentence for
-                assistive tech (interface review 2026-09-24, acce-5). */}
-            <span className="vh"> · {freshnessTitle}</span>
-          </span>
-          {canReconcile && (
-            <button
-              type="button"
-              className="btn ghost sm"
-              onClick={reconcile}
-              disabled={busy}
-              aria-busy={reconciling || undefined}
-              title="Update branch/PR status from GitHub now"
-            >
-              <GlyphSwap rest="refresh" alt="loader" on={reconciling} spinAlt />
-              {reconciling ? "Updating…" : "Update status"}
-            </button>
-          )}
-          {data.project.repo && (
-            <a
-              className="btn ghost sm"
-              href={`${data.githubHost}/${data.project.repo}`}
-              target="_blank"
-              rel="noopener noreferrer"
-            >
-              <Icon name="ext" />
-              Open on GitHub
-            </a>
-          )}
-        </div>
-      </div>
+      <GithubHead
+        name={data.project.name}
+        repo={data.project.repo}
+        githubHost={data.githubHost}
+        freshness={freshness}
+        canReconcile={canReconcile}
+        reconciling={reconciling}
+        busy={busy}
+        onReconcile={reconcile}
+      />
 
       <div className="policy-wrap">
         <div className="policy-cols">

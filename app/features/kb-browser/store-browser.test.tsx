@@ -58,8 +58,9 @@ function renderBrowser(
     onClose?: () => void;
     /** Make the org-settings action fail, to exercise the failure toast. */
     actionResult?: StubActionReply;
-    /** Per-intent canned responses (the editor reads AND writes). */
-    respond?: (intent: string) => StubActionReply | undefined;
+    /** Per-intent canned responses (the editor reads AND writes); a promise
+     *  holds the answer until the test settles it. */
+    respond?: (intent: string) => StubActionReply | Promise<StubActionReply> | undefined;
   } = {},
 ) {
   lastForm = null;
@@ -293,13 +294,15 @@ describe("StoreBrowser", () => {
   });
 
   it("GitHub bar validates empty input client-side and posts the import", async () => {
-    const { getByText, getByPlaceholderText } = renderBrowser();
+    const { getByText, getByLabelText } = renderBrowser();
     fireEvent.click(getByText("Add from GitHub"));
     fireEvent.click(getByText("Import"));
     expect(getByText(/Paste a GitHub link: a repo, or a folder like/)).toBeTruthy();
     expect(lastForm).toBeNull();
 
-    fireEvent.change(getByPlaceholderText("https://github.com/owner/repo/tree/main/docs"), {
+    // Named in its own right: the placeholder is an example that goes as
+    // the person types.
+    fireEvent.change(getByLabelText("GitHub repo or folder link"), {
       target: { value: "https://github.com/owner/repo/tree/main/docs" },
     });
     fireEvent.click(getByText("Import"));
@@ -343,6 +346,61 @@ describe("StoreBrowser document editor", () => {
     );
     // A fresh name never carries the replace intent.
     expect(lastForm?.overwrite).toBeUndefined();
+  });
+
+  // A save reveals the folder the document was saved in, not the one the
+  // "into" select names by then: a new draft keeps the folder it opened with
+  // while the select moves on, and an opened document never sets the select at
+  // all. Both folders start collapsed by hand, so the tree's state after the
+  // save is the reveal's alone. CANARY: reveal the toolbar's destination on
+  // save and `decisions` stays shut while `notes` springs open.
+  it.each([
+    {
+      doc: "a new document, after the destination moved on",
+      open: (view: ReturnType<typeof renderBrowser>) => {
+        const dest = view.getByLabelText("Destination folder");
+        fireEvent.change(dest, { target: { value: "decisions" } });
+        fireEvent.click(view.getByText("New document"));
+        fireEvent.change(dest, { target: { value: "notes" } });
+        fireEvent.change(view.getByPlaceholderText("file-name.md"), {
+          target: { value: "adr-002" },
+        });
+      },
+    },
+    {
+      doc: "an opened document",
+      open: async (view: ReturnType<typeof renderBrowser>) => {
+        fireEvent.change(view.getByLabelText("Destination folder"), {
+          target: { value: "notes" },
+        });
+        fireEvent.click(view.getByLabelText("Open adr-001.md"));
+        await view.findByRole("region", { name: "Preview of adr-001.md" });
+        fireEvent.click(view.getByRole("button", { name: "Raw" }));
+      },
+    },
+  ])("saving $doc reveals the folder it was saved in", async ({ open }) => {
+    const view = renderBrowser({
+      tree: [...TREE, { type: "dir", name: "notes", children: [] }],
+      respond: (intent) =>
+        intent === "store-read-doc" ? { ok: true, text: "# ADR 1", truncated: false } : undefined,
+    });
+    await open(view);
+    const decisions = view.getByRole("button", { name: /^decisions/ });
+    const notes = view.getByRole("button", { name: /^notes/ });
+    fireEvent.click(decisions);
+    fireEvent.click(notes);
+    expect(decisions.getAttribute("aria-expanded")).toBe("false");
+    expect(notes.getAttribute("aria-expanded")).toBe("false");
+    fireEvent.change(view.getByLabelText("Document contents"), {
+      target: { value: "# ADR, edited" },
+    });
+    fireEvent.click(view.getByText("Save document"));
+    await waitFor(() =>
+      expect(lastForm).toMatchObject({ intent: "store-write-doc", path: JSON.stringify(["decisions"]) }),
+    );
+    await view.findByText("stub done");
+    expect(decisions.getAttribute("aria-expanded")).toBe("true");
+    expect(notes.getAttribute("aria-expanded")).toBe("false");
   });
 
   it("ruling 149: the file name rides the shared .field chrome, and the raw text the card's (ruling 614)", () => {
@@ -513,30 +571,175 @@ describe("StoreBrowser document editor", () => {
     );
   });
 
-  it("P14-UI-60: a rejected save keeps the typed body and says why", async () => {
-    const { getByText, getByPlaceholderText, getByLabelText } = renderBrowser({
+  // A save's answer settles the draft it saved, not whatever the card holds
+  // when it arrives (P14-UI-60: the typed body is the only copy). The stub
+  // holds the save, and a document read, open while the person keeps the
+  // draft, closes it, or opens another. While the save is in flight the card's
+  // name and text are read-only, whichever draft it holds, so nothing typed
+  // then is lost to the answer: a success closing its draft, or a refusal
+  // taking the card back. A browser refuses typing into a read-only field and
+  // `fireEvent` does not, so the rows read the lock itself. CANARY: drop the
+  // lock and the draft a success closes takes typing (the second row), as does
+  // a New document a refusal then replaces; lock only a new draft and the
+  // opened document's raw text takes typing a refusal then overwrites (the
+  // row that opens another document); keep it past the answer and the
+  // refused draft cannot be fixed, nor an opened document ever typed in again; leave a refusal off the draft it saved and
+  // the first row says nothing; settle the answer against the open draft (drop
+  // the opening `openNew` or `openExisting` counts) and the newer draft is
+  // closed under the person or wears the old save's error; bring a refused
+  // draft back only into an empty card and a glance at another document drops
+  // the only copy; drop the read's opening check, or the count a draft brought
+  // back takes, and a read still in flight overwrites it.
+  const REFUSED = "facts.md already exists. Open it to edit, or pick another name.";
+  type View = ReturnType<typeof renderBrowser>;
+  type HeldRead = PromiseWithResolvers<StubActionReply>;
+  const typed = (view: View) =>
+    control(view.getByLabelText("Document contents"), HTMLTextAreaElement).value;
+  /** Whether a new document's name and text are read-only, in that order. */
+  const locked = (view: View) => [
+    control(view.getByPlaceholderText("file-name.md"), HTMLInputElement).readOnly,
+    control(view.getByLabelText("Document contents"), HTMLTextAreaElement).readOnly,
+  ];
+  const startAnother = (view: View) => {
+    // The open card is titled "New document" too: the toolbar's is the button.
+    fireEvent.click(view.getByRole("button", { name: "New document" }));
+    expect(locked(view)).toEqual([true, true]);
+  };
+  const openOverview = async (view: View, read: HeldRead) => {
+    fireEvent.click(view.getByLabelText("Open overview.md"));
+    read.resolve({ ok: true, text: "# Overview\n\nOTHER FILE", truncated: false, version: "v2" });
+    await view.findByRole("region", { name: "Preview of overview.md" });
+  };
+  const keptWithReason = async (view: View) => {
+    await view.findByText(REFUSED);
+    expect(typed(view)).toBe("THE ONLY COPY");
+    expect(control(view.getByPlaceholderText("file-name.md"), HTMLInputElement).value).toBe(
+      "facts.md",
+    );
+    expect(locked(view)).toEqual([false, false]);
+  };
+  it.each([
+    {
+      answer: "a save refused while its draft is still open",
+      settles: "keeps the typed body and says why (P14-UI-60)",
+      meanwhile: () => {},
+      reply: { ok: false, error: REFUSED },
+      after: keptWithReason,
+    },
+    {
+      answer: "a save that lands while its draft is still open",
+      settles: "closes it, and nothing could be typed into it meanwhile",
+      meanwhile: (view: View) => {
+        expect(locked(view)).toEqual([true, true]);
+      },
+      reply: { ok: true, toast: "facts.md saved · 13 bytes" },
+      after: async (view: View) => {
+        await view.findByText("facts.md saved · 13 bytes");
+        expect(view.queryByLabelText("Document contents")).toBeNull();
+      },
+    },
+    {
+      answer: "a save that lands after New document",
+      settles: "leaves that draft open, and it takes typing again",
+      meanwhile: startAnother,
+      reply: { ok: true, toast: "facts.md saved · 13 bytes" },
+      after: async (view: View) => {
+        await view.findByText("facts.md saved · 13 bytes");
+        expect(control(view.getByPlaceholderText("file-name.md"), HTMLInputElement).value).toBe("");
+        expect(locked(view)).toEqual([false, false]);
+      },
+    },
+    {
+      answer: "a save that lands after another document opened",
+      settles: "leaves that document open, and it takes typing again",
+      meanwhile: openOverview,
+      reply: { ok: true, toast: "facts.md saved · 13 bytes" },
+      after: async (view: View) => {
+        await view.findByText("facts.md saved · 13 bytes");
+        expect(view.getByRole("region", { name: "Preview of overview.md" })).toBeTruthy();
+        fireEvent.click(view.getByRole("button", { name: "Raw" }));
+        expect(control(view.getByLabelText("Document contents"), HTMLTextAreaElement).readOnly).toBe(false);
+      },
+    },
+    {
+      answer: "a save refused after Escape closed its draft",
+      settles: "brings the draft back and says why",
+      meanwhile: (view: View) => {
+        fireEvent(
+          document.querySelector("dialog.modal-wide")!,
+          new Event("cancel", { bubbles: false, cancelable: true }),
+        );
+        expect(view.queryByLabelText("Document contents")).toBeNull();
+      },
+      reply: { ok: false, error: REFUSED },
+      after: keptWithReason,
+    },
+    {
+      answer: "a save refused after New document",
+      settles: "brings the draft back over it",
+      meanwhile: startAnother,
+      reply: { ok: false, error: REFUSED },
+      after: keptWithReason,
+    },
+    {
+      answer: "a save refused after another document opened",
+      settles: "brings the draft back over it",
+      meanwhile: async (view: View, read: HeldRead) => {
+        await openOverview(view, read);
+        fireEvent.click(view.getByRole("button", { name: "Raw" }));
+        expect(control(view.getByLabelText("Document contents"), HTMLTextAreaElement).readOnly).toBe(
+          true,
+        );
+      },
+      reply: { ok: false, error: REFUSED },
+      after: keptWithReason,
+    },
+    {
+      answer: "a save refused while another document is still reading",
+      settles: "brings the draft back, and the read does not fill it",
+      meanwhile: (view: View) => {
+        fireEvent.click(view.getByLabelText("Open overview.md"));
+        expect(view.getByText("Loading document…")).toBeTruthy();
+      },
+      reply: { ok: false, error: REFUSED },
+      after: async (view: View, read: HeldRead) => {
+        await keptWithReason(view);
+        read.resolve({ ok: true, text: "OTHER FILE", truncated: false, version: "v2" });
+        // Save waits out a read in flight, so it posts once that read has
+        // answered: what it posts is the draft as the read left it.
+        lastForm = null;
+        await waitFor(() => {
+          fireEvent.click(view.getByText("Save document"));
+          expect(lastForm?.intent).toBe("store-write-doc");
+        });
+        expect(lastForm).toMatchObject({ name: "facts.md", body: "THE ONLY COPY" });
+      },
+    },
+  ])("$answer $settles", async ({ meanwhile, reply, after }) => {
+    const held = Promise.withResolvers<StubActionReply>();
+    const read: HeldRead = Promise.withResolvers<StubActionReply>();
+    const view = renderBrowser({
       respond: (intent) =>
         intent === "store-write-doc"
-          ? { ok: false, error: "facts.md already exists — open it to edit." }
-          : undefined,
+          ? held.promise
+          : intent === "store-read-doc"
+            ? read.promise
+            : undefined,
     });
-    fireEvent.click(getByText("New document"));
-    fireEvent.change(getByPlaceholderText("file-name.md"), {
+    fireEvent.click(view.getByText("New document"));
+    fireEvent.change(view.getByPlaceholderText("file-name.md"), {
       target: { value: "facts.md" },
     });
-    fireEvent.change(getByLabelText("Document contents"), {
+    fireEvent.change(view.getByLabelText("Document contents"), {
       target: { value: "THE ONLY COPY" },
     });
-    fireEvent.click(getByText("Save document"));
-
-    // The editor used to close optimistically, so the server's rejection
-    // arrived after the draft had already been destroyed.
+    fireEvent.click(view.getByText("Save document"));
     await waitFor(() =>
-      expect(getByText("facts.md already exists — open it to edit.")).toBeTruthy(),
+      expect(lastForm).toMatchObject({ intent: "store-write-doc", name: "facts.md" }),
     );
-    expect(
-      control(getByLabelText("Document contents"), HTMLTextAreaElement).value,
-    ).toBe("THE ONLY COPY");
+    await meanwhile(view, read);
+    held.resolve(reply);
+    await after(view, read);
   });
 
   // Ruling 147: an empty file name no longer kills the primary. Save stays

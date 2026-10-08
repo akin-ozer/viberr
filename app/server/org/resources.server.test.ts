@@ -2047,7 +2047,21 @@ describe("ruling 176: an org MCP server's write tools", () => {
     expect(audits[0]!.actorLabel).toBe(ACTOR.label);
   });
 
-  it("refuses a name outside the MCP alphabet before spawning anything", async () => {
+  it.each([
+    [
+      "a name outside the MCP alphabet",
+      ["create pull request"],
+      '"create pull request" is not an MCP tool name',
+    ],
+    // CANARY: check the cap after the loop again and this list reports its bad
+    // name instead; an oversized list (a received board file's) is then
+    // de-duplicated in full before the refusal, in time that grows with its square.
+    [
+      "a list at the first name past the 200-tool cap",
+      [...Array.from({ length: 201 }, (_, i) => `tool_${i}`), "bad name"],
+      "Mark at most 200 write tools on one server.",
+    ],
+  ])("refuses %s before spawning anything", async (_label, writeTools, refusal) => {
     const { db } = setup();
     let spawned = 0;
     const counting: McpSpawn = (...args) => {
@@ -2055,10 +2069,8 @@ describe("ruling 176: an org MCP server's write tools", () => {
       return fakeMcpSpawn(1)(...args);
     };
     await expect(
-      saveMcpServer(db, { ...STDIO, writeTools: ["create pull request"] }, ACTOR, {
-        spawnImpl: counting,
-      }),
-    ).rejects.toThrow('"create pull request" is not an MCP tool name');
+      saveMcpServer(db, { ...STDIO, writeTools }, ACTOR, { spawnImpl: counting }),
+    ).rejects.toThrow(refusal);
     expect(spawned).toBe(0);
     expect(listMcpServers(db)).toHaveLength(0);
   });

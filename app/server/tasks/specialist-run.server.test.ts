@@ -526,7 +526,7 @@ describe("engagement uniqueness (adversarial-review)", () => {
   });
 });
 
-describe("startSpecialistRun", () => {
+describe("startAgentRun — delivering (specialist) dispatch, and ruling 133's stage gate on a supporting one", () => {
   async function assign(): Promise<void> {
     await assignSpecialist(
       store.db,
@@ -540,7 +540,7 @@ describe("startSpecialistRun", () => {
     await assign();
     const { upsertRun } = await import("~/server/runtimes/run-store.server");
     // A primary run is already live on this task (e.g. a prior operator turn
-    // started it). A second startSpecialistRun must not spawn a rival agent in
+    // started it). A second startAgentRun must not spawn a rival agent in
     // the same workspace clone.
     upsertRun(store.db, {
       id: "run_inflight_primary",
@@ -4243,7 +4243,8 @@ describe("granted skills reach a Claude run NATIVELY (pass-18)", () => {
     // README because the support clone's origin/main was the delivering
     // checkout's stale main. The mirror is the store fetched against GitHub;
     // the support clone now fetches its remote-tracking refs from it.
-    // Canary: drop the `refreshSupportBase` call in cloneRepo's support arm.
+    // Canary: drop the `refreshWorkspaceFromMirror(db, supportRefresh)` call in
+    // cloneRepo's support arm.
     const ws = await workspaceCheckout();
     await exec("git", ["-C", ws, "branch", "-M", "main"]);
     await exec("git", ["-C", ws, "checkout", "-q", "-b", "vib-1-work"]);
@@ -4537,7 +4538,7 @@ describe("granted skills reach a Claude run NATIVELY (pass-18)", () => {
   describe("R18-1 / R19-3 — the boundary holds in the NATIVE channel too", () => {
     it("the reviewer inherits the deliverer's KB and mounts ONLY its own skills", async () => {
       // Canary (verified): union the deliverer's skills into the `skills:`
-      // argument of the `mountGrantedSkills` call in startSpecialistRun.
+      // argument of the fresh run's `mountGrantedSkills` call (`dispatchAgentRun`).
       // This test goes red on `spec.skills` and on the workspace catalog,
       // although the widened grant is mounted rather than injected and its
       // body is absent from the prompt either way.

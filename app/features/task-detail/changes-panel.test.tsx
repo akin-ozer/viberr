@@ -363,6 +363,61 @@ describe("ruling 509: a note on several lines", () => {
     expect(box.value).toBe("Half a thought");
   });
 
+  // CANARY: re-range the note a drag began on whatever happened since
+  // (`setDraft({ ...draft, … })` in moveDraft) and the release brings back the
+  // note just saved or cancelled, or replaces the one just opened; list the
+  // drag effect's `onMove` (or call it through useEffectEvent) and the release
+  // re-ranges the note just opened onto the dragged lines; set `opener` for a
+  // note no longer open and closing the new one sends focus to the number the
+  // drag began on; open a new note on the range as the drag
+  // tracked it, or clamp it against the notes of the render the drag began in
+  // (not `latest`), and it takes the line of the note saved during the drag.
+  it.each([
+    {
+      what: "saves the note (Ctrl+Enter)",
+      opened: "line 1",
+      key: () => fireEvent.keyDown(screen.getByRole("textbox"), { key: "Enter", ctrlKey: true }),
+      editor: null,
+      focused: "Edit the note on notes/one.md line 1",
+    },
+    {
+      what: "cancels it",
+      opened: "line 1",
+      key: () => fireEvent.click(screen.getByRole("button", { name: "Cancel" })),
+      editor: null,
+      focused: "Add a note on notes/one.md line 1",
+    },
+    {
+      what: "opens another line's note",
+      opened: "line 1",
+      key: () => fireEvent.click(num("Add a note on notes/one.md line 1, removed")),
+      editor: "Note on notes/one.md line 1, removed",
+      focused: "Add a note on notes/one.md line 1, removed",
+    },
+    {
+      // A drag from outside the open note opens a new one, which stops before
+      // the line just saved, as it would had the drag begun after the save.
+      what: "saves the note a new note's drag crossed",
+      opened: "line 3",
+      key: () => fireEvent.keyDown(screen.getByRole("textbox"), { key: "Enter", ctrlKey: true }),
+      editor: "Note on notes/one.md lines 1 to 2",
+      focused: "Add a note on notes/one.md line 1",
+    },
+  ])("a key that $what during a drag stays done when the drag is let go", async ({ opened, key, editor, focused }) => {
+    renderPanel();
+    await open();
+    fireEvent.click(num(`Add a note on notes/one.md ${opened}`));
+    fireEvent.change(screen.getByRole("textbox"), { target: { value: "Half a thought" } });
+    fireEvent.pointerDown(num("Add a note on notes/one.md line 1"), { pointerType: "mouse", button: 0 });
+    fireEvent.pointerOver(num("Add a note on notes/one.md line 3"));
+    key();
+    fireEvent.pointerUp(window);
+    expect(screen.queryByRole("textbox")?.getAttribute("aria-label") ?? null).toBe(editor);
+    // Escape closes an editor still open, and focus is on the number that opened it.
+    fireEvent.keyDown(document.activeElement!, { key: "Escape" });
+    expect(document.activeElement).toBe(num(focused));
+  });
+
   it("a range stops before a line that has its own note, and a line carries one note", async () => {
     const { container } = renderPanel();
     await open();

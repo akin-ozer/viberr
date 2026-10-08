@@ -222,9 +222,10 @@ export function reviewRowSub(t: ReviewRowView): string {
   }
   // F19-31: `none` used to fall through to the agent sentence, so the legal
   // `review + none` combination (nothing is waiting on either side) claimed a
-  // live agent run on this surface while the board's WaitTag rendered NOTHING
-  // for the same stored value. One value, two claims. It gets its own honest
-  // line: the row is at the boundary with no run and no decision behind it.
+  // live agent run on this surface while the board card claims no wait at all
+  // for the same stored value (its status seat, `cardStatus`, shows the
+  // readiness word). One value, two claims. It gets its own honest line: the
+  // row is at the boundary with no run and no decision behind it.
   if (t.waiting === "none") {
     return "At the review boundary: no agent is running and no decision is pending.";
   }

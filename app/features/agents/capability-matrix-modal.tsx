@@ -62,17 +62,13 @@ const MODE_TITLE = {
   direct: MODE_LABEL.direct,
 } satisfies Record<Mode, string>;
 
-export function CapabilityMatrixModal({
-  profiles,
-  projectName,
-  onClose,
-}: {
-  profiles: MatrixProfile[];
-  projectName: string;
-  onClose: () => void;
-}) {
-  const { ref: dialogRef, close } = useDialog(onClose);
-
+/**
+ * What the matrix draws from the roster (ruling 700(e), the split of
+ * `CapabilityMatrixModal`): the grid's groups, the curated catalog plus
+ * "Operator actions", and the advisory lines that never reach a cell. A pure
+ * function of the profiles; the modal calls it once per render.
+ */
+function matrixGroups(profiles: MatrixProfile[]) {
   const known = new Set(
     CAP_MODAL_CATALOG.flatMap((g) => g.caps.map((c) => c.label)),
   );
@@ -110,6 +106,20 @@ export function CapabilityMatrixModal({
   if (operatorOnly.size) {
     groups.push({ group: "Operator actions", labels: [...operatorOnly] });
   }
+  return { groups, advisory };
+}
+
+export function CapabilityMatrixModal({
+  profiles,
+  projectName,
+  onClose,
+}: {
+  profiles: MatrixProfile[];
+  projectName: string;
+  onClose: () => void;
+}) {
+  const { ref: dialogRef, close } = useDialog(onClose);
+  const { groups, advisory } = matrixGroups(profiles);
 
   return (
     <dialog
@@ -312,119 +322,130 @@ export function CapabilityMatrixModal({
               </div>
             </details>
           )}
-          {/* P13-RT-14 / LV-15 / KM-04: the Claude↔Codex differences below are
-              deliberate, but they were undisclosed — a reader could only learn
-              them by running both backends and comparing. */}
-          <div className="mx-notes">
-            <h3>What differs between the two runtimes</h3>
-            <ul>
-              <li>
-                Delivery (push · open/merge PR) is <b>server-owned</b> and gated
-                server-side on the delivering profile's grant, enforced on both
-                backends. Withholding <b>Write to the repository</b> binds on
-                Claude, which drops the write tools. Codex runs are not OS-confined
-                (ruling 185), so there it is advisory: the prompt omits every delivery
-                step, and the row is tagged "advisory on Codex" above. The scoped
-                delivery commands bind only on Claude too, and the <b>server-side
-                delivery gate</b> is what constrains what ships on either backend. Web
-                egress stays gated on both.
-              </li>
-              <li>
-                {/* U12 residual: "specialist" is retired vocabulary (C11/FR14) —
-                    the rows of this very matrix are agent PROFILES, engaged per
-                    task as the delivering or a supporting agent. The word
-                    survived here because nothing rendered this modal's prose in
-                    a test; `retired-vocabulary.test.tsx` now does. */}
-                An agent profile running on <b>Claude</b> gets Claude Code's coding
-                harness underneath its persona; the same profile on <b>Codex</b>{" "}
-                gets the persona alone.
-              </li>
-              <li>
-                {/* F19-16 / ruling 51 (R18-5): the asymmetry is meant to be
-                    DISCLOSED, not silent — "Codex keeps prompt-text injection —
-                    the asymmetry is disclosed, not silent". It was disclosed
-                    nowhere in the UI, so a reader granting a long skill could
-                    only discover the Codex clipping by comparing two runs.
-                    Numbers come from `SKILL_INJECTION_BUDGET` (24 000 chars,
-                    shared across every declared skill) and the native mount in
-                    `specialist-run.server.ts` (`skills: [...]` on the SDK). */}
-                <b>Granted skills arrive differently.</b> On <b>Claude</b> they are
-                installed into the run's workspace and handed to the SDK as real
-                skills: the model sees each name and summary and loads the full
-                text only when it invokes one, with no length cap. <b>Codex</b> has
-                no such channel, so its skills are pasted into the prompt up front
-                under one shared 24,000-character budget. A long skill can arrive
-                clipped, and one that no longer fits is announced as omitted. A
-                Claude run that cannot install them (no checkout, or another live
-                run already holds this task's workspace) falls back to the same
-                prompt text. Keep a skill short if agents on both backends must
-                follow it.
-              </li>
-              <li>
-                <b>Post mid-run comments</b> has no Codex channel: granting it does
-                nothing there; a Codex agent's report always posts when the run ends.
-              </li>
-              <li>
-                <b>Ask the human a question</b> pauses a Claude run mid-flight; on Codex
-                the question arrives only when the run finishes.
-              </li>
-              <li>
-                Org MCP credentials stay in Viberr on both backends: a run reaches a
-                credentialed server through Viberr's gateway with a token that
-                works only while it runs.
-              </li>
-              <li>
-                {/* P14-LV-03: live, the same server answered `get-annotated-message`
-                    on Claude and `get_annotated_message` on Codex, and Claude
-                    listed one tool Codex never saw. The old copy covered only the
-                    SERVER segment, so a persona naming a tool still broke on one
-                    backend while this text implied it wouldn't. */}
-                <b>MCP tool names differ per backend.</b> Codex renames hyphens to
-                underscores in the whole tool id (server AND tool segment):{" "}
-                <code>mcp__everything-http__get-annotated-message</code> on Claude
-                is <code>mcp__everything_http__get_annotated_message</code> on
-                Codex. The two clients can also expose different tool SETS from one
-                server. Never name an MCP tool literally in a persona or skill, and
-                read any tool count Viberr shows as what its OWN probe client saw,
-                not as what a given run will get.
-              </li>
-              <li>
-                {/* R16-5 (owner ruling, 2026-08-04): MCP stays outside the matrix
-                    BY DESIGN — the owner's call, not an oversight. The old copy
-                    named only the actions an MCP tool must not take, which read
-                    as if the matrix still bounded its powers. It does not, and
-                    the consequence belongs in the disclosure: a granted server
-                    is its own grant. Pinned by specialist-tool-policy.test.ts.
-                    Ruling 176 amends it: the tools an admin MARKS are the one
-                    exception, and the copy says which tools that covers. */}
-                <b>MCP tools sit outside this matrix, with one exception.</b> Viberr
-                can't know what a third-party tool does, so a granted server's tools are
-                not restricted by any row here: granting a server IS the grant. The
-                exception is the tools an admin marks as <b>write tools</b> on the
-                server (Settings → MCP servers). Those are removed from every run whose
-                agent withholds <b>Write to the repository</b>, and from every
-                operator run, on Claude and Codex. A server's unmarked tools keep the
-                rule stated in the run's system prompt: an MCP tool may never merge,
-                close a task, or change policy. Grant MCP servers as deliberately as
-                you grant a capability.
-              </li>
-              <li>
-                Both operators can reach the web (WebFetch/WebSearch) when
-                <b> Search &amp; fetch from the web</b> is granted. The Codex
-                operator's web search follows the grant the same way an agent's
-                does; a withheld grant disables it on either backend.
-              </li>
-              <li>
-                A browser screenshot returns to the model as an image on Claude
-                (the agent can see the page), but not on Codex. A Codex agent with
-                <b> Drive a live web browser</b> can drive and read a page's text
-                and accessibility tree, and its screenshots still save for humans
-                on the task page, but it cannot visually see what it captured.
-              </li>
-            </ul>
-          </div>
+          <RuntimeDifferences />
         </div>
       </div>
     </dialog>
+  );
+}
+
+/**
+ * The runtime notes under the grid, hook-free (ruling 700(e) moved them
+ * out of the modal's body unchanged).
+ *
+ * P13-RT-14 / LV-15 / KM-04: the Claude↔Codex differences below are
+ * deliberate, but they were undisclosed — a reader could only learn
+ * them by running both backends and comparing.
+ */
+function RuntimeDifferences() {
+  return (
+    <div className="mx-notes">
+      <h3>What differs between the two runtimes</h3>
+      <ul>
+        <li>
+          Delivery (push · open/merge PR) is <b>server-owned</b> and gated
+          server-side on the delivering profile's grant, enforced on both
+          backends. Withholding <b>Write to the repository</b> binds on
+          Claude, which drops the write tools. Codex runs are not OS-confined
+          (ruling 185), so there it is advisory: the prompt omits every delivery
+          step, and the row is tagged "advisory on Codex" above. The scoped
+          delivery commands bind only on Claude too, and the <b>server-side
+          delivery gate</b> is what constrains what ships on either backend. Web
+          egress stays gated on both.
+        </li>
+        <li>
+          {/* U12 residual: "specialist" is retired vocabulary (C11/FR14) —
+              the rows of this very matrix are agent PROFILES, engaged per
+              task as the delivering or a supporting agent. The word
+              survived here because nothing rendered this modal's prose in
+              a test; `retired-vocabulary.test.tsx` now does. */}
+          An agent profile running on <b>Claude</b> gets Claude Code's coding
+          harness underneath its persona; the same profile on <b>Codex</b>{" "}
+          gets the persona alone.
+        </li>
+        <li>
+          {/* F19-16 / ruling 51 (R18-5): the asymmetry is meant to be
+              DISCLOSED, not silent — "Codex keeps prompt-text injection —
+              the asymmetry is disclosed, not silent". It was disclosed
+              nowhere in the UI, so a reader granting a long skill could
+              only discover the Codex clipping by comparing two runs.
+              Numbers come from `SKILL_INJECTION_BUDGET` (24 000 chars,
+              shared across every declared skill) and the native mount in
+              `specialist-run.server.ts` (`skills: [...]` on the SDK). */}
+          <b>Granted skills arrive differently.</b> On <b>Claude</b> they are
+          installed into the run's workspace and handed to the SDK as real
+          skills: the model sees each name and summary and loads the full
+          text only when it invokes one, with no length cap. <b>Codex</b> has
+          no such channel, so its skills are pasted into the prompt up front
+          under one shared 24,000-character budget. A long skill can arrive
+          clipped, and one that no longer fits is announced as omitted. A
+          Claude run that cannot install them (no checkout, or another live
+          run already holds this task's workspace) falls back to the same
+          prompt text. Keep a skill short if agents on both backends must
+          follow it.
+        </li>
+        <li>
+          <b>Post mid-run comments</b> has no Codex channel: granting it does
+          nothing there; a Codex agent's report always posts when the run ends.
+        </li>
+        <li>
+          <b>Ask the human a question</b> pauses a Claude run mid-flight; on Codex
+          the question arrives only when the run finishes.
+        </li>
+        <li>
+          Org MCP credentials stay in Viberr on both backends: a run reaches a
+          credentialed server through Viberr's gateway with a token that
+          works only while it runs.
+        </li>
+        <li>
+          {/* P14-LV-03: live, the same server answered `get-annotated-message`
+              on Claude and `get_annotated_message` on Codex, and Claude
+              listed one tool Codex never saw. The old copy covered only the
+              SERVER segment, so a persona naming a tool still broke on one
+              backend while this text implied it wouldn't. */}
+          <b>MCP tool names differ per backend.</b> Codex renames hyphens to
+          underscores in the whole tool id (server AND tool segment):{" "}
+          <code>mcp__everything-http__get-annotated-message</code> on Claude
+          is <code>mcp__everything_http__get_annotated_message</code> on
+          Codex. The two clients can also expose different tool SETS from one
+          server. Never name an MCP tool literally in a persona or skill, and
+          read any tool count Viberr shows as what its OWN probe client saw,
+          not as what a given run will get.
+        </li>
+        <li>
+          {/* R16-5 (owner ruling, 2026-08-04): MCP stays outside the matrix
+              BY DESIGN — the owner's call, not an oversight. The old copy
+              named only the actions an MCP tool must not take, which read
+              as if the matrix still bounded its powers. It does not, and
+              the consequence belongs in the disclosure: a granted server
+              is its own grant. Pinned by specialist-tool-policy.test.ts.
+              Ruling 176 amends it: the tools an admin MARKS are the one
+              exception, and the copy says which tools that covers. */}
+          <b>MCP tools sit outside this matrix, with one exception.</b> Viberr
+          can't know what a third-party tool does, so a granted server's tools are
+          not restricted by any row here: granting a server IS the grant. The
+          exception is the tools an admin marks as <b>write tools</b> on the
+          server (Settings → MCP servers). Those are removed from every run whose
+          agent withholds <b>Write to the repository</b>, and from every
+          operator run, on Claude and Codex. A server's unmarked tools keep the
+          rule stated in the run's system prompt: an MCP tool may never merge,
+          close a task, or change policy. Grant MCP servers as deliberately as
+          you grant a capability.
+        </li>
+        <li>
+          Both operators can reach the web (WebFetch/WebSearch) when
+          <b> Search &amp; fetch from the web</b> is granted. The Codex
+          operator's web search follows the grant the same way an agent's
+          does; a withheld grant disables it on either backend.
+        </li>
+        <li>
+          A browser screenshot returns to the model as an image on Claude
+          (the agent can see the page), but not on Codex. A Codex agent with
+          <b> Drive a live web browser</b> can drive and read a page's text
+          and accessibility tree, and its screenshots still save for humans
+          on the task page, but it cannot visually see what it captured.
+        </li>
+      </ul>
+    </div>
   );
 }

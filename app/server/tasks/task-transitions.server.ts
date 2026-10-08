@@ -481,8 +481,8 @@ export async function transitionStage(
     // causes lands above it. `event` was built before the lock; the note is
     // stamped inside `withdrawAcceptanceOffers`, so it is always the newer of
     // the two. Unshifting the move last put the OLDER event on top, which is
-    // how viberr's own `timeline_not_strictly_newest_first` diagnostic came to
-    // fire on AX-9 over a one-millisecond pair — and it read backwards besides,
+    // how viberr's own `timeline.out_of_order` diagnostic came to fire on
+    // AX-9 over a one-millisecond pair — and it read backwards besides,
     // showing a consequence below its cause in a newest-first list.
     parsed.timeline.unshift(event);
     if (moveCause) {

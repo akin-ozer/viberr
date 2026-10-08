@@ -111,7 +111,7 @@ export const RELAY_FIELD_NOTE =
 
 /**
  * JSON schema for the Codex `outputSchema` transport. MUST satisfy OpenAI's
- * STRICT structured-output rules (the same ones OPERATOR_PLAN_SCHEMA follows,
+ * STRICT structured-output rules (the same ones `buildOperatorPlanSchema` follows,
  * enforced by `codex_output_schema`): EVERY property appears in `required`, and
  * optional fields are expressed as NULLABLE types (`["string","null"]`,
  * `enum:[…, null]`) — never by omission. Getting this wrong makes the API

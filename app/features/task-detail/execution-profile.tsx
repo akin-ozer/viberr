@@ -6,17 +6,19 @@ import { Avatar } from "~/ui/avatar";
 import { ConfirmDialog } from "~/ui/confirm-dialog";
 import { GlyphSwap } from "~/ui/copy-glyph";
 import { Icon } from "~/ui/icon";
-import { holdEntriesSentence, holdRefusal, type DependencyRender } from "~/shared/dependencies";
+import type { DependencyRender } from "~/shared/dependencies";
 import { AgentGlyph } from "~/ui/identity";
 import { LocalDayDotTime } from "~/ui/local-time";
 import { Pill } from "~/ui/pill";
 import { AgentSelect } from "./agent-select";
 import {
-  resolveDeclaredStages,
-  stageEligible,
-  stageIneligibilitySentence,
-} from "~/shared/workflow/stage-eligibility";
-import { stageName } from "~/shared/workflow/stage-roles";
+  agentDispatch,
+  humanOwner,
+  operatorRunHold,
+  operatorRunTitle,
+  runButtonLabel,
+} from "./execution-profile-derive";
+import { isClosedForWork } from "./task-detail-derive";
 import {
   backendLabelOf,
   backendRunRefusal,
@@ -141,7 +143,7 @@ function OwnerControl({
   busy: boolean;
   onOwner: (action: OwnerAction, member?: TaskMemberView) => void;
 }) {
-  const o = task.owner && task.owner.kind === "human" ? task.owner : null;
+  const o = humanOwner(task);
   // Q5 tiering (XS-12): only contributor+ may take ownership — a viewer is
   // read + comment only, so its take button would just 403. Gate the control
   // the same way the server does rather than render a button that fails.
@@ -154,10 +156,7 @@ function OwnerControl({
     // D32-16: an archived task's owner seat is frozen (setOwner refuses), so
     // the control is withheld like every other runtime action on it. E32-9:
     // a CLOSED task's seat is frozen the same way.
-    const closed =
-      task.displayReadiness === "accepted" ||
-      task.displayReadiness === "merged" ||
-      task.archived;
+    const closed = isClosedForWork(task, task.archived);
     // Ruling 118: an admin may still reassign a CLOSED (not archived) seat for
     // the record — the same tier that releases any owner.
     const adminSeat = !task.archived && roleCan(asProjectRole(myRole), "release-any-ownership");
@@ -388,12 +387,6 @@ function PromptInput({
  * (R22: the fired run resolves the live deployed profile). Full autonomy
  * still announces itself (F20-9's mirror); supervised is the quiet default.
  */
-/** Ruling 131(d): the run control's hold copy. */
-function holdNoteFor(entries: readonly DependencyRender[]): string {
-  // Ruling 356: a done entry reads as done, not as still waited on.
-  return `Waiting on other work (${holdEntriesSentence(entries)}). A manual run still answers you; the operator will not advance the task or dispatch delivery while it waits.`;
-}
-
 function OperatorRunControl({
   inFlight,
   disabled,
@@ -518,25 +511,14 @@ function OperatorRunControl({
         disabled={off}
         aria-busy={busy || undefined}
         onClick={run}
-        title={
-          blockedReason ??
-          (delay === "now"
-            ? "Run the operator to coordinate this task"
-            : "Schedule this operator run")
-        }
+        title={operatorRunTitle(blockedReason, delay)}
       >
         {/* Ruling 459 over ruling 368: the resting mark trades for the clock
             when the when-picker leaves Now, and that whole cell trades for
             the spinning loader while this control's own request is in flight
             (GlyphSwap's `busy`). */}
         <GlyphSwap rest="shield" alt="clock" on={delay !== "now"} busy={busy} />
-        {inFlight === "schedule"
-          ? "Scheduling…"
-          : inFlight === "run"
-            ? "Starting…"
-            : delay === "now"
-              ? "Run operator"
-              : "Schedule"}
+        {runButtonLabel(inFlight, delay, "Run operator")}
       </button>
       {runRefusal && (
         // P11-41's honesty without a picker: the run would fail fast, so say
@@ -702,50 +684,24 @@ function AgentRunControl({
   }
 
   const selected = agents.find((a) => a.id === selectedId) ?? null;
-  const selectedRunning =
-    !!selectedId && delay === "now" && activeProfileIds.includes(selectedId);
-  // Ruling 127: the picked profile runs on ITS backend, billed to the task
-  // owner — so the refusal is per-pick, not per-page. Same split the operator
-  // control makes: a run NOW is refused, a SCHEDULED one is not (the owner can
-  // connect the backend, or the seat can change hands, before it fires).
-  // U36-10 (pass 36): eligibility is resolved here, from the same predicate
-  // the dispatch gate applies, so the refusal a person would meet after the
-  // click is the one they read before it.
-  const ineligible =
-    selected &&
-    selected.stages !== undefined &&
-    !stageEligible({ stages: selected.stages, spanAll: selected.spanAll ?? false }, stage, stages, workflow)
-      ? stageIneligibilitySentence(
-          selected.name,
-          stageName(stages, stage),
-          resolveDeclaredStages(selected.stages, stages, workflow)
-            .map((id) => stageName(stages, id))
-            .join(", "),
-        )
-      : null;
-  // Ruling 186 (pass 37, F37-2): a held task refuses EVERY dispatch server-side,
-  // so the control says so before the click. Unlike the per-pick refusals this
-  // one does not depend on which agent is chosen — the hold is a fact about the
-  // task — so it stands even with nothing picked.
-  const held =
-    blockedBy.length > 0
-      ? // Rulings 355 and 356: the entries carry their states, so the sentence
-        // names a dead one as dead and a done one as done.
-        holdRefusal(taskKey, blockedBy, "running an agent on it")
-      : null;
-  const runRefusal = selected
-    ? (held ?? ineligible ?? backendRunRefusal(runPrincipal, selected.backend, meId))
-    : held;
-  // Ruling 147(a): only AVAILABILITY disables the start — a run in flight, a
-  // live run on this very profile, or the owner-credential refusal (ruling 127),
-  // each of which renders its own reason. An empty pick is validation, so it is
-  // refused on the click instead (147(b)); `selectedRunning` and `runRefusal`
-  // are both false with nothing picked, so this collapses to `busy` there.
-  // `held` rides `runRefusal`, which only bites for a run NOW: a hold can clear
-  // on its own (Viberr releases it when the entries finish), so a SCHEDULED run
-  // stays offerable exactly as it does for an unconnected backend. If the hold
-  // still stands when it fires, `startAgentRun` refuses it there.
-  const off = busy || selectedRunning || (delay === "now" && !!runRefusal) || !!ineligible;
+  // The pick's refusal, availability (ruling 147(a)), posture and title, from
+  // the same facts the dispatch gate answers (`execution-profile-derive.ts`).
+  const { runRefusal, off, posture, title } = agentDispatch({
+    selected,
+    selectedId,
+    delay,
+    busy,
+    taskKey,
+    blockedBy,
+    stage,
+    stages,
+    workflow,
+    activeProfileIds,
+    runPrincipal,
+    meId,
+    deliveringProfileId,
+    engagedSupportingIds,
+  });
   const pickRefused = refused > 0 && !selected;
   const run = () => {
     if (off) return;
@@ -760,30 +716,6 @@ function AgentRunControl({
     setPrompt("");
     setDelay("now");
   };
-  // What the dispatch will make of the pick — said BEFORE the run is spent.
-  // An EXISTING engagement keeps its shape server-side, so it decides first
-  // (hunt 2026-08-29); capability derivation covers only the unengaged case.
-  const posture = !selected
-    ? null
-    : ineligible
-      ? null
-      : selected.id === deliveringProfileId
-      ? // Ruling 665: a deliverer that cannot write the repository owns no
-        // branch. Its delivery is the files it saves (ruling 535).
-        selected.capabilities?.delivery === false
-        ? "Runs as the delivering agent: its delivery is the files it saves on the task."
-        : "Runs as the delivering agent: it owns the branch and PR."
-      : engagedSupportingIds.includes(selected.id)
-        ? selected.capabilities?.verdict
-          ? "Runs as a reviewer (already engaged): its verdict gates acceptance."
-          : "Runs as a supporting agent (already engaged)."
-        : selected.capabilities?.delivery === false || selected.requiredReviewer
-          ? selected.capabilities?.verdict
-            ? "Runs as a reviewer: its verdict gates acceptance."
-            : "Runs as a supporting agent (no repo write)."
-          : deliveringProfileId === null
-            ? "Runs as the delivering agent: it owns the branch and PR."
-            : "Runs as a supporting agent (another agent owns delivery).";
 
   return (
     <span className="op-run agent-run">
@@ -819,28 +751,14 @@ function AgentRunControl({
         disabled={off}
         aria-busy={busy || undefined}
         onClick={run}
-        title={
-          !selected
-            ? "Choose an agent first"
-            : selectedRunning
-              ? "This agent already has a run in progress on this task"
-              : delay === "now"
-                ? runRefusal ?? `Run ${selected.name} on this task`
-                : `Schedule ${selected.name} on this task`
-        }
+        title={title}
       >
         {/* Ruling 459 over ruling 368: the resting mark trades for the clock
             when the when-picker leaves Now, and that whole cell trades for
             the spinning loader while this control's own request is in flight
             (GlyphSwap's `busy`). */}
         <GlyphSwap rest="bolt" alt="clock" on={delay !== "now"} busy={busy} />
-        {inFlight === "schedule"
-          ? "Scheduling…"
-          : inFlight === "run"
-            ? "Starting…"
-            : delay === "now"
-              ? "Run"
-              : "Schedule"}
+        {runButtonLabel(inFlight, delay, "Run")}
       </button>
       {pickRefused && (
         // Ruling 147: the start stays ENABLED with nothing picked and answers
@@ -1091,19 +1009,15 @@ export function ExecutionProfile({
   // The run control gates on "has a live run at all" (F10-04); queued or
   // running makes no difference to a duplicate Now-run refusal.
   const activeAgentProfileIds = liveAgentRuns.map((r) => r.profileId);
-  const o = task.owner && task.owner.kind === "human" ? task.owner : null;
+  const o = humanOwner(task);
   const mine = !!(o && o.userId === meId);
   // G9: a task at the terminal (Done) stage is closed — its runtime action
   // controls are disabled so a closed task doesn't advertise live controls.
   // F15-11: an ARCHIVED task is out of the flow too.
-  const closed =
-    task.displayReadiness === "accepted" ||
-    task.displayReadiness === "merged" ||
-    task.archived;
-  // F20-5 (R20-1): the server refuses a MANUAL operator run while a decision
-  // packet is open — coordination is paused by the packet, so a run would burn
-  // several turns and take no action.
-  const packetOpen = !!task.packet;
+  const closed = isClosedForWork(task, task.archived);
+  // F20-5 / ruling 131(d): an open packet refuses the operator's manual run, a
+  // hold only notes it (`operatorRunHold`).
+  const operatorHold = operatorRunHold(task, closed);
   const operatorSchedules = schedules.filter((s) => s.action !== "run-agent");
   const agentSchedules = schedules.filter((s) => s.action === "run-agent");
   return (
@@ -1152,15 +1066,7 @@ export function ExecutionProfile({
               <OperatorRunControl
                 inFlight={operatorInFlight}
                 disabled={closed}
-                {...(packetOpen && !closed
-                  ? {
-                      blockedReason:
-                        "Open decision. Resolve it before running the operator.",
-                    }
-                  : {})}
-                {...(!packetOpen && !closed && task.blockedBy.length > 0
-                  ? { holdNote: holdNoteFor(task.blockedBy) }
-                  : {})}
+                {...operatorHold}
                 defaultBackend={operatorBackend}
                 configuredAutonomy={operatorAutonomy}
                 acceptsDirectly={acceptsDirectly}

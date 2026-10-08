@@ -1,45 +1,26 @@
-import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Link, useFetcher, useLocation, useNavigate, useSearchParams } from "react-router";
+import { memo, useMemo, useState } from "react";
+import { useSearchParams } from "react-router";
 import type { TimelineEventRender } from "~/shared/mapping/task-event.server";
 import type { TaskLinks } from "~/shared/task-key-links";
-import {
-  hashTarget,
-  KB_CORRECTIONS_ANCHOR,
-  KB_PROPOSALS_ANCHOR,
-  TASK_TIMELINE_ANCHOR,
-  timelineEventAnchor,
-  timelineEventTime,
-} from "~/shared/page-anchors";
-import { useHashTarget } from "~/ui/use-hash-target";
-import { useCsrfToken } from "~/ui/csrf-input";
-import { gatesPill } from "~/features/github/github-pills";
+import { TASK_TIMELINE_ANCHOR, timelineEventAnchor } from "~/shared/page-anchors";
 import type { GateNoteState } from "~/shared/project-gates";
 import { Icon, type IconName } from "~/ui/icon";
-import { LocalDayDotTime, useHydrated } from "~/ui/local-time";
-import { Markdown } from "~/ui/markdown";
-import { Collapsible, FoldToggle, useFirstRow, type Hidden } from "~/ui/collapsible";
-import { AttachmentThumb } from "./attachment-image";
-import { GateResults } from "./gate-results";
-import { fileExtension, fileFamily } from "./attachment-kind";
+import { FoldToggle, useFirstRow, type Hidden } from "~/ui/collapsible";
 import { useAttachmentLightbox } from "./attachment-lightbox";
-import { Pill } from "~/ui/pill";
 import { useModifierHint } from "~/ui/use-shortcut-hint";
-import { useToast } from "~/ui/toast";
-import { useFetcherResult } from "~/ui/use-fetcher-result";
-import { AttachButton, AttachTray, useFileDrop } from "~/ui/attach-files";
-import { addPickedFiles, filesFromPaste, IMAGE_RE } from "~/ui/picked-files";
-import { MESSAGE_BATCH } from "~/shared/attachment-kinds";
+import { AttachButton, AttachTray } from "~/ui/attach-files";
+import { filesFromPaste, IMAGE_RE } from "~/ui/picked-files";
 import { useStableRows, useStableValue } from "~/ui/use-stable-rows";
 import type { VerdictNoteView } from "~/shared/verdict-note";
-import { eventMeta, typedKind } from "./event-meta";
-import { citedFiles, EvidenceList, VerdictCard } from "./evidence-list";
+import { eventMeta } from "./event-meta";
+import { citedFiles } from "./cited-files";
 import type { Mentionables } from "~/server/tasks/mention-suggestions.server";
 import type { TaskRunPrincipalView } from "./run-principal-view";
 import { mentionNamesFor } from "./mention-autocomplete";
-import {
-  CommentComposer,
-  type CommentComposerHandle,
-} from "./comment-composer-slot";
+import { CommentComposer } from "./comment-composer-slot";
+import { useCommentPost, useTimelineTab } from "./timeline-actions";
+import { emptyTimelineText, shownBy } from "./timeline-derive";
+import { TimelineEntryBody, TimelineEntryFiles, TimelineEntryMeta } from "./timeline-entry";
 
 /**
  * Unified timeline — 1:1 port of Timeline/TimelineItem (task.jsx §4.6/§4.7):
@@ -54,6 +35,14 @@ import {
  * long histories are served as a bounded newest-first slice with a
  * "Show older" affordance driving the `?events=` param (progressive
  * disclosure — the first payload never ships the full history).
+ *
+ * Ruling 700(e) split the two components along the task page's recipe, a
+ * pure structural refactor: the comment post and the filter tab with its
+ * landing are hooks in `timeline-actions.ts`, called where their hooks always
+ * ran; what the list reads off its tab is pure functions in
+ * `timeline-derive.ts`; an entry's meta row, body and files are hook-free
+ * parts in `timeline-entry.tsx`, while `TimelineItem` keeps its hooks and the
+ * fold's state.
  */
 
 const TL_FILTERS = [
@@ -63,79 +52,6 @@ const TL_FILTERS = [
 ] as const;
 
 export type TimelineFilterId = (typeof TL_FILTERS)[number]["id"];
-
-/** Whether the filter tab `f` shows `ev`. */
-function shownBy(f: TimelineFilterId, ev: Pick<TimelineEventRender, "type">): boolean {
-  return f === "all" ? true : f === "comment" ? ev.type === "comment" : ev.type !== "comment";
-}
-
-/** Ruling 497: a notification about an event links to it (`#event-<time>`). */
-function isEventAnchor(id: string): boolean {
-  return timelineEventTime(id) !== null;
-}
-
-/**
- * Ruling 478(f) (F40-35): every entry sits under the Timeline's own h2, so the
- * top heading its author wrote renders one level below it, and deeper levels
- * follow (`~/ui/markdown.tsx`).
- */
-const ENTRY_HEADING_BASE = 3;
-
-/**
- * A comment body that clamps when it's very tall (long agent replies) so a
- * single answer can't dominate the timeline: `Collapsible` (`~/ui/collapsible`)
- * measures it and folds it behind Show more / Show less, the fold the
- * attachments panel shares (ruling 510). Ruling 522: the pictures under the
- * card fold with it, so the item holds the fold's state and says what they
- * hide (`more`).
- */
-function CollapsibleComment({
-  text,
-  mentionNames,
-  attachmentNames,
-  attachmentsBase,
-  taskLinks,
-  open,
-  onOpenChange,
-  more,
-}: {
-  text: string;
-  mentionNames?: string[];
-  /** U39-31: the other tasks the text names, key to path. */
-  taskLinks?: TaskLinks;
-  /** The task's real attachment filenames + serving base, so an agent-written
-   *  workspace-relative attachment link in the body resolves (markdown.tsx
-   *  `repairAttachmentHref`). */
-  attachmentNames?: ReadonlySet<string>;
-  attachmentsBase?: string;
-  open: boolean;
-  onOpenChange: (open: boolean) => void;
-  more: Hidden | null;
-}) {
-  // Embedded attachment images in the body open the same lightbox the
-  // thumbnail strip uses (no provider ⇒ the factory is inert, embeds stay
-  // plain images).
-  const lightbox = useAttachmentLightbox();
-  return (
-    <Collapsible
-      className="tl-text md-body"
-      contentKey={text}
-      open={open}
-      onOpenChange={onOpenChange}
-      more={more}
-    >
-      <Markdown
-        text={text}
-        mentionNames={mentionNames}
-        headingBase={ENTRY_HEADING_BASE}
-        {...(taskLinks ? { taskLinks } : {})}
-        {...(attachmentNames ? { attachmentNames } : {})}
-        {...(attachmentsBase ? { attachmentsBase } : {})}
-        onAttachmentOpen={lightbox}
-      />
-    </Collapsible>
-  );
-}
 
 /**
  * Ruling 493: a gate run's note takes its ending's mark on the rail and its
@@ -228,9 +144,7 @@ export const TimelineItem = memo(function TimelineItem({
     : verdict
       ? VERDICT_META[verdict.result]
       : eventMeta(ev.type);
-  const actor = ev.actor;
   const isTyped = ev.type !== "comment";
-  const guest = actor.kind === "human" && "guest" in actor && actor.guest;
   // Image evidence pops the in-app lightbox on a plain click; the anchors stay
   // real links so modified clicks and no-provider renders keep the raw tab.
   const lightbox = useAttachmentLightbox();
@@ -263,205 +177,30 @@ export const TimelineItem = memo(function TimelineItem({
         <div className="tl-line" />
       </div>
       <div className="tl-body">
-        <div className="tl-meta">
-          {/* Identity is the actor's NAME only — for agents that is the
-              agent's own name (e.g. "Reviewer"), never the runtime label or a
-              trailing role. */}
-          <span className="tl-actor">{actor.name}</span>
-          {isTyped && (
-            <Pill kind={gates ? gatesPill(gates.state).kind : typedKind(ev.type)} sm>
-              {meta.label}
-            </Pill>
-          )}
-          {gates?.sha && (
-            <span className="tl-gate-rev">
-              on <code>{gates.sha}</code>
-            </span>
-          )}
-          {/* The "agent" badge marks a COMMENT written by an agent — the one
-              place it adds signal (agent- vs human-authored message). A typed
-              event is already an agent/system action (colored node + category
-              pill), so the badge there was redundant noise that made an event
-              look identical to a comment (NEW-6). */}
-          {!isTyped && actor.kind === "agent" && (
-            <Pill kind="agent" sm>
-              agent
-            </Pill>
-          )}
-          {/* E1: this pill dates from app-wide commenting, and read "app user ·
-              not in project" as if outsiders could post here. They cannot — a
-              signed-in non-member 404s on the task and on the comment POST. The
-              flag survives because membership is read at PROJECTION time, so it
-              now marks exactly one thing: the author has since left the project.
-              (`actor.server.ts` derives it; the wording is this surface's.) */}
-          {guest && (
-            <Pill kind="neutral" sm>
-              no longer a member
-            </Pill>
-          )}
-          <span className="tl-time">
-            <LocalDayDotTime iso={ev.occurredAt} />
-          </span>
-        </div>
-
-        {ev.type === "comment" ? (
-          <div className={"comment-card" + (ev.toAgent ? " toagent" : "")}>
-            {/* Comments (agent replies AND user comments) are real multi-line
-                markdown — render with the GFM renderer. Long replies clamp
-                behind a Show more toggle so one answer can't swallow the
-                timeline. */}
-            <CollapsibleComment
-              text={ev.text}
-              mentionNames={mentionNames}
-              {...(taskLinks ? { taskLinks } : {})}
-              {...(attachmentNames ? { attachmentNames } : {})}
-              {...(attachmentsBase ? { attachmentsBase } : {})}
-              open={open}
-              onOpenChange={setOpen}
-              more={more}
-            />
-          </div>
-        ) : gates ? (
-          <>
-            {/* Ruling 493: the header already says how the run ended and on
-                which revision, and the table holds each gate with its log, so
-                the note's own sentence is not said again. A run that could not
-                execute keeps its reason. */}
-            {gates.detail && (
-              <div className="tl-text md-body">
-                <Markdown
-                  text={gates.detail}
-                  headingBase={ENTRY_HEADING_BASE}
-                  {...(taskLinks ? { taskLinks } : {})}
-                />
-              </div>
-            )}
-            {gates.rows.length > 0 && (
-              <GateResults rows={gates.rows} attachmentsBase={attachmentsBase ?? null} openLog={lightbox} />
-            )}
-          </>
-        ) : verdict ? (
-          <VerdictCard
-            title={ev.title ?? ""}
-            verdict={verdict}
-            rows={ev.evidence}
-            attachments={attachmentNames}
-            base={attachmentsBase}
-            openFile={lightbox}
-            mentionNames={mentionNames}
-            headingBase={ENTRY_HEADING_BASE}
-            {...(taskLinks ? { taskLinks } : {})}
-          />
-        ) : (
-          <>
-            {ev.title && (
-              <div className="tl-text">
-                <strong>{ev.title}</strong>
-              </div>
-            )}
-            {/* Ruling 586: a long entry folds like a comment, behind its own
-                Show more (a decision now carries the card it answered). */}
-            <Collapsible className="tl-text md-body" contentKey={ev.text}>
-              {/* Ruling 478(a) (F40-30): typed-event text is markdown too. Its
-                  writers put the tool's own words in a fenced block ("What the
-                  checkout reported", "What the push reported") and separate
-                  paragraphs with blank lines; the inline-only RichText printed
-                  the fence as literal backticks, ran the lines together and
-                  let a long path widen the page on a phone. The GFM renderer
-                  gives the block its own scroller and breaks inline code.
-                  F20: mentions go through the SAME known-name filter the
-                  comment bodies use — a bare `@nobody` in a system-written
-                  line routes nowhere, so it must not look like a live tag. */}
-              <Markdown
-                text={ev.text}
-                mentionNames={mentionNames}
-                headingBase={ENTRY_HEADING_BASE}
-                {...(taskLinks ? { taskLinks } : {})}
-                {...(attachmentNames ? { attachmentNames } : {})}
-                {...(attachmentsBase ? { attachmentsBase } : {})}
-                onAttachmentOpen={lightbox}
-              />
-            </Collapsible>
-            {/* Ruling 483 (F40-59): a proposal is a decision a person owes, and
-                the project's Controller page is where it is promoted or
-                dismissed and where its document opens. Ruling 498: a
-                correction an agent wrote is reviewed and undone there; a
-                person's undo (the one `kb_correction` a person writes) owes
-                nothing. A plain string prop, never `useParams`: a router hook
-                re-renders every memoised row on each router change (ruling
-                457, CS-3). */}
-            {knowledgeHref &&
-              (ev.type === "proposal" || (ev.type === "kb_correction" && ev.actor.kind !== "human")) && (
-                <Link
-                  className="linkish tl-proposal-link"
-                  to={`${knowledgeHref}#${ev.type === "proposal" ? KB_PROPOSALS_ANCHOR : KB_CORRECTIONS_ANCHOR}`}
-                >
-                  {ev.type === "proposal" ? "Open proposals" : "Review or undo"}
-                </Link>
-              )}
-            {ev.evidence && (
-              <EvidenceList
-                rows={ev.evidence}
-                attachments={attachmentNames}
-                base={attachmentsBase}
-                openFile={lightbox}
-              />
-            )}
-          </>
-        )}
+        <TimelineEntryMeta ev={ev} isTyped={isTyped} label={meta.label} />
+        <TimelineEntryBody
+          ev={ev}
+          mentionNames={mentionNames}
+          taskLinks={taskLinks}
+          attachmentNames={attachmentNames}
+          attachmentsBase={attachmentsBase}
+          knowledgeHref={knowledgeHref}
+          lightbox={lightbox}
+          open={open}
+          onOpenChange={setOpen}
+          more={more}
+        />
         {/* Files this event's run saved (attachments panel shows the same names
             with "added by …") — the producing message names its own files.
             Chips need the serving base; without it (bare renders, withheld
             lists) the names stay off rather than rendering dead links. */}
         {files.length > 0 && (
-          <div className="tl-attach" ref={firstRow.ref}>
-            {/* An image the run captured IS the deliverable on a screenshot
-                task — it renders as the picture, right on the producing
-                message (the owner's ask, 2026-08-20: chips alone made the
-                human open the side panel to see what the agent "posted").
-                Any other file is the same tile, a page carrying its
-                extension in the picture's place (owner ask 2026-09-25); the
-                route serves whitelisted image types inline, sandboxed,
-                member-only. */}
-            {shown.map((name) => {
-              const href = `${attachmentsBase}/${encodeURIComponent(name)}`;
-              if (IMAGE_RE.test(name)) {
-                return (
-                  <AttachmentThumb
-                    key={name}
-                    variant="timeline"
-                    href={href}
-                    name={name}
-                    openLabel={`Open attachment ${name}`}
-                    onOpen={lightbox({ name, url: href })}
-                  >
-                    <span className="nm">{name}</span>
-                  </AttachmentThumb>
-                );
-              }
-              const ext = fileExtension(name);
-              const label = ext.length > 0 && ext.length <= 5;
-              return (
-                // Ruling 105 (+ addendum): a text-typed file opens the in-app
-                // read-only viewer; any other kind the no-preview card with
-                // its Download button.
-                <a
-                  key={name}
-                  className="tl-attach-file"
-                  href={href}
-                  target="_blank"
-                  rel="noreferrer"
-                  onClick={lightbox({ name, url: href })}
-                >
-                  <span className="tl-attach-glyph" data-kind={fileFamily(name)} aria-hidden="true">
-                    <Icon name={label ? "page" : "file"} />
-                    {label && <span className="tl-attach-ext">{ext}</span>}
-                  </span>
-                  <span className="nm">{name}</span>
-                </a>
-              );
-            })}
-          </div>
+          <TimelineEntryFiles
+            names={shown}
+            attachmentsBase={attachmentsBase}
+            rowRef={firstRow.ref}
+            lightbox={lightbox}
+          />
         )}
         {/* Ruling 522: a comment's toggle stands at the foot of its card; a
             typed event has no card, so its pictures' toggle follows them. */}
@@ -493,7 +232,8 @@ export function Timeline({
   /** Newest-first bounded slice from the loader. */
   events: TimelineEventRender[];
   /** Ruling 547: a link to a decision or to the recommendations landed here,
-   *  because they are gone from the page (the task page's `regionPlace`). */
+   *  because they are gone from the page (`regionPlace` in
+   *  task-detail-actions.tsx). */
   landed?: boolean;
   /** Rulings 483 and 498: the project's Controller page, which a `proposal` or
    *  `kb_correction` event links. */
@@ -534,16 +274,9 @@ export function Timeline({
    *  task not archived). Absent ⇒ the composer takes words only. */
   canAttach?: boolean;
 }) {
-  const [f, setF] = useState<TimelineFilterId>(tlDefault);
-  // The raw draft, synced synchronously from the editor. A ref, not state:
-  // nothing renders from it (the editor owns the draft UI), and send() must
-  // read the exact current text — not a value one batch behind the keystroke.
-  const draftRef = useRef("");
   // P13-D-39: the send handler below accepts either modifier, so the hint has to
   // name the one the viewer's keyboard actually has (UI-55's rule).
   const sendHint = useModifierHint("↵");
-  const composerRef = useRef<CommentComposerHandle>(null);
-  const composerBoxRef = useRef<HTMLDivElement>(null);
   // Ruling 457 (CS-3 / TASK-4): every revalidation decodes new objects for
   // all of these; kept while their content is the same, so the memoised items
   // below re-render only for an event that changed.
@@ -559,71 +292,28 @@ export function Timeline({
     () => (fileNames?.length ? new Set(fileNames) : null),
     [fileNames],
   );
-  const seenAsk = useRef(ask);
   const [, setSearchParams] = useSearchParams();
-  const fetcher = useFetcher<{
-    ok: boolean;
-    toast?: string;
-    error?: string;
-    logThreadId?: string | null;
-  }>();
-  const csrf = useCsrfToken();
-  const push = useToast();
-  const busy = fetcher.state !== "idle";
-
-  // "Ask operator" (spec §4.2): prefill only a blank draft, scroll + focus.
-  useEffect(() => {
-    if (ask && ask !== seenAsk.current) {
-      seenAsk.current = ask;
-      composerRef.current?.prefillIfEmpty("@operator ");
-      composerBoxRef.current?.scrollIntoView?.({ behavior: "smooth", block: "center" });
-      composerRef.current?.focus();
-    }
-  }, [ask]);
-
-  // Comment result: success clears the draft + toasts (server copy);
-  // failure keeps the draft and shows the inline error below.
-  // Ruling 573: the files going with the comment, and the first refused.
-  const [files, setFiles] = useState<File[]>([]);
-  const [fileProblem, setFileProblem] = useState<string | null>(null);
-  // Stable, so the memoised paperclip and tray skip a revalidation's render
-  // (ruling 457); the ref holds the picks the next add builds on.
-  const filesNow = useRef<File[]>(files);
-  filesNow.current = files;
-  const addFiles = useCallback((incoming: File[]) => {
-    const next = addPickedFiles(filesNow.current, incoming, MESSAGE_BATCH);
-    filesNow.current = next.files;
-    setFiles(next.files);
-    setFileProblem(next.problem);
-  }, []);
-  const removeFile = useCallback((name: string) => {
-    setFiles((cur) => cur.filter((file) => file.name !== name));
-    setFileProblem(null);
-  }, []);
-  const { dropping, dropProps } = useFileDrop(addFiles, !canAttach);
-  const pendingFiles = useRef<readonly File[]>([]);
-  useFetcherResult(fetcher, (data) => {
-    const sentFiles = pendingFiles.current;
-    pendingFiles.current = [];
-    if (data.ok) {
-      // Ruling 573: the files that went out leave the tray; a failure keeps them.
-      setFiles((cur) => cur.filter((file) => !sentFiles.includes(file)));
-      setFileProblem(null);
-      draftRef.current = "";
-      // Clear the editor AND its undo history — ⌘Z must not resurrect a
-      // posted comment. A failure runs neither: the draft stays as typed.
-      composerRef.current?.clearAfterSuccess();
-      if (data.toast) push(data.toast);
-      // BUG 3: hand the grouped Agent-logs id up so the page selects + scrolls
-      // to the mentioned agent's live output.
-      if (data.logThreadId && onAgentLog) onAgentLog(data.logThreadId);
-    }
-  });
-
-  const commentError =
-    fetcher.state === "idle" && fetcher.data && !fetcher.data.ok
-      ? fetcher.data.error
-      : null;
+  // The comment the composer sends, its files and the "Ask operator" prefill
+  // (`useCommentPost`, timeline-actions.ts).
+  const {
+    composerRef,
+    composerBoxRef,
+    busy,
+    commentError,
+    files,
+    fileProblem,
+    addFiles,
+    removeFile,
+    dropping,
+    dropProps,
+    send,
+    submitDraft,
+    keepDraft,
+  } = useCommentPost({ ask, canAttach, onAgentLog });
+  // The filter tab, which a link to an event opens to All (ruling 497), the
+  // event it marks and, ruling 523, the one it keeps focusable
+  // (`useTimelineTab`, timeline-actions.ts).
+  const { f, setF, targeted, arrived } = useTimelineTab({ tlDefault, rows, hasMore, nextLimit });
 
   const items = useMemo(() => rows.filter((e) => shownBy(f, e)), [rows, f]);
   // Ruling 497: the first of the events that share a time is the one its
@@ -639,66 +329,6 @@ export function Timeline({
     return byEvent;
   }, [items]);
 
-  // Ruling 497: a notification about an event opens it here. A filter tab that
-  // hides it opens to All, older events load until it is among them, and it
-  // comes into view, marked (`useHashTarget`). Each step happens once for the
-  // navigation that named the event, so the person can switch tabs after.
-  const location = useLocation();
-  const navigate = useNavigate();
-  // After hydration only, as `useHashTarget` reads it: the server never sees it.
-  const targetTime = useHydrated() ? timelineEventTime(hashTarget(location.hash)) : null;
-  const target = targetTime ? (rows.find((e) => e.occurredAt === targetTime) ?? null) : null;
-  const targeted = useHashTarget(isEventAnchor, target !== null && shownBy(f, target));
-  // Ruling 523: the event the latest link named, still focusable after the
-  // person's next press ends its mark.
-  const [arrived, setArrived] = useState<string | null>(null);
-  if (targeted !== null && targeted !== arrived) setArrived(targeted);
-  const steppedFor = useRef<string | null>(null);
-  useEffect(() => {
-    if (!targetTime || steppedFor.current === location.key) return;
-    if (target) {
-      if (shownBy(f, target)) return;
-      steppedFor.current = location.key;
-      setF("all");
-      return;
-    }
-    // Newest first: when the oldest event loaded is older than the target,
-    // the target would be among them, so this timeline no longer holds it.
-    const oldest = rows.at(-1);
-    if (!hasMore || (oldest && oldest.occurredAt < targetTime)) return;
-    steppedFor.current = location.key;
-    const search = new URLSearchParams(location.search);
-    search.set("events", String(nextLimit));
-    void navigate(
-      { pathname: location.pathname, search: `?${search}`, hash: location.hash },
-      { replace: true, preventScrollReset: true },
-    );
-  }, [targetTime, target, f, rows, hasMore, nextLimit, location, navigate]);
-
-  const send = () => {
-    const text = draftRef.current.trim();
-    // Ruling 573: files alone are a comment.
-    if ((!text && files.length === 0) || busy) return;
-    const fd = new FormData();
-    fd.set("_csrf", csrf);
-    fd.set("intent", "comment");
-    fd.set("text", text);
-    for (const file of files) fd.append("files", file);
-    pendingFiles.current = files;
-    fetcher.submit(fd, files.length > 0 ? { method: "post", encType: "multipart/form-data" } : { method: "post" });
-  };
-  // Ruling 457 (CS-7): the composer is memoised, so what it is handed holds
-  // still while nothing it draws changed: a revalidation or a fetcher state
-  // re-renders this timeline, not the editor. ⌘↵ reaches the latest `send`
-  // through a ref kept current in an effect.
-  const sendRef = useRef(send);
-  useEffect(() => {
-    sendRef.current = send;
-  });
-  const submitDraft = useCallback(() => sendRef.current(), []);
-  const keepDraft = useCallback((raw: string) => {
-    draftRef.current = raw;
-  }, []);
   const principal = useStableValue(runPrincipal);
 
   const showOlder = () => {
@@ -831,23 +461,7 @@ export function Timeline({
             history whenever the active tab matched nothing — with "Show older
             events · N more" rendered directly beneath it. */}
         {items.length === 0 ? (
-          <div className="empty">
-            {events.length === 0
-              ? runLive
-                ? // U33-1: the loop HAS started — the Live-run strip on this
-                  //  same page is showing its progress. Saying "hasn't started"
-                  //  here contradicted it, and contradicted ruling 87(b)'s whole
-                  //  point (a healthy pre-run phase must be distinguishable from
-                  //  a wedged one). An empty timeline under a live run is the
-                  //  normal first seconds: the run has not reported yet.
-                  "The loop has started. Its first events land here as the live run above reports in."
-                : "No activity yet. This task hasn't started its operator loop."
-              : f === "comment"
-                ? "No comments in the loaded history. Switch to All, or load older events."
-                : // F18-14: "governance" is a banned UI word (copy-ban.test.ts);
-                  // this is the "Important" filter's empty state, so name that tab.
-                  "No important events in the loaded history. Switch to All, or load older events."}
-          </div>
+          <div className="empty">{emptyTimelineText(events.length, runLive, f)}</div>
         ) : (
           items.map((ev) => (
             <TimelineItem

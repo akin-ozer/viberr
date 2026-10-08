@@ -15,10 +15,10 @@
  * ships as its own chunk, and the task page and the controller page load it
  * from none of their other modules, so importing it there adds ~100 B gzip to
  * two budgets that have no room: the run console (`runs-panels.tsx`,
- * `runs-helpers.ts`, `log-noise.ts`), the label field (`ui/label-input.tsx`)
- * and the two withdrawn-recommendation lists (`decision-packet.tsx`,
- * `archive-confirm.tsx`) spell it inline. So does `shared/revision-drift.ts`,
- * for the closed dock's module count.
+ * `runs-panels-derive.ts`, `runs-helpers.ts`, `log-noise.ts`), the label field
+ * (`ui/label-input.tsx`) and the two withdrawn-recommendation lists
+ * (`decision-packet-derive.ts`, `archive-confirm.tsx`) spell it inline. So does
+ * `shared/revision-drift.ts`, for the closed dock's module count.
  */
 
 /** The NOUN alone, agreeing with `count` — for copy that renders the number

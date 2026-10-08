@@ -145,7 +145,7 @@ describe("listAgentDeployments", () => {
     // The `developer` profile still deploys on Claude (the other tests pin its
     // live backend to claude), but a "Retry on the other backend" resolution
     // PINNED this engagement to Codex (F27-B1). The per-task chip here must
-    // follow the pin — exactly as the task page's `withLiveAgentBackends` does —
+    // follow the pin — exactly as the task page's `withLiveAgentIdentities` does —
     // not the live Claude deployment the retry moved away from. Before F28-P2
     // this private copy of the live-overlay ignored the pin and contradicted
     // the task page.

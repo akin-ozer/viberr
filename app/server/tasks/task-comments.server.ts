@@ -431,7 +431,9 @@ export interface CommentToAgentResult extends AppendCommentResult {
   /**
    * Why an @operator mention did NOT start a run even though the commenter could
    * trigger one: `open-packet` (a decision packet is awaiting the human — resolve
-   * it first) or `terminal-stage` (the task is Done — reopen it). Null when the
+   * it first) or `closed` (ruling 177: the task is archived or at its terminal
+   * stage — restore or reopen it). `blocked-by` is in the type because it is
+   * `runOperator`'s, but a manual trigger never meets it. Null when the
    * operator run started normally or no operator was mentioned. Without this the
    * operator branch reported `triggered: "started"` on a refused run, so the route
    * toasted "@Operator is picking it up" while nothing ran (the reply never came).
@@ -1112,7 +1114,7 @@ export async function commentToAgent(
   }
 
   // 5. Install THE canonical completion handler (reply → reconcile → verdict →
-  //    react). A FRESH run's start fn (startSpecialistRun/startReviewerRun)
+  //    react). A FRESH run's start fn (startAgentRun)
   //    already registered it with the real workspace dir; a RESUMED session
   //    (resumeRun ran no start fn) registers it here. An @mention carries no
   //    operator run in ctx, so completion begins a FRESH react chain against the

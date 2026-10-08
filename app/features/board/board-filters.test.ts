@@ -54,10 +54,7 @@ describe("matchesBoardFilter", () => {
     expect(
       matchesBoardFilter({ ...base, readiness: "input_required" }, "risk"),
     ).toBe(true);
-    // …and it is not a blanket match: an ordinary in-flight task stays out.
-    expect(
-      matchesBoardFilter({ ...base, readiness: "in_review" }, "risk"),
-    ).toBe(false);
+    // …and it is not a blanket match: an ordinary ready task stays out.
     expect(matchesBoardFilter({ ...base, readiness: "ready" }, "risk")).toBe(false);
     // Archived still wins over every signal (R14-3).
     expect(
@@ -124,8 +121,6 @@ describe("matchesBoardFilter", () => {
     // finds it here too (their "Waiting on me" chip does not select it).
     expect(matchesBoardFilter({ ...web3, waitingOnMe: false }, "risk")).toBe(true);
     expect(matchesBoardFilter({ ...web3, waitingOnMe: false }, "human")).toBe(false);
-    // The same packet on a task in review holds it just the same.
-    expect(matchesBoardFilter({ ...web3, readiness: "in_review" }, "risk")).toBe(true);
     // Ruling 91 stands: an agent carrying the task is not stuck.
     expect(matchesBoardFilter({ ...web3, waiting: "agent" }, "risk")).toBe(false);
     // And a ready human-next task with no question open is not held by one.
@@ -136,12 +131,15 @@ describe("matchesBoardFilter", () => {
 
   // P14-WL-03: live, PST-5's PR was closed without merging — the review queue
   // filed it under "Decision required" and the board's own "Blocked or waiting"
-  // filter hid it, because a rejected PR leaves readiness `in_review`,
-  // validation healthy and urgent off. None of the four old signals fire.
+  // filter hid it, because a rejected PR leaves readiness where it was (`ready`
+  // on a delivered task; the reconciler writes no readiness), validation
+  // healthy and urgent off. None of the four old signals fire.
+  // CANARY: drop the risk filter's `task.pr?.state === "closed"` arm and
+  // `rejected` is hidden.
   it('"risk" counts a PR closed without merging — the review queue calls it a decision', () => {
     const rejected: FilterableTask = {
       ...base,
-      readiness: "in_review",
+      readiness: "ready",
       validation: "healthy",
       pr: { state: "closed" },
     };

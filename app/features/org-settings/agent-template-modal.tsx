@@ -1,139 +1,26 @@
-import { useId, useState, type ReactNode } from "react";
+import { useState } from "react";
 import type { GagentView } from "~/server/org/gagents.server";
 import type { ProjectCustomStages } from "~/server/org/org-view.server";
 import type { KbView, McpView, SkillView } from "~/server/org/resources.server";
 import type { StageDef } from "~/schemas/project-file.schema";
 import { Icon } from "~/ui/icon";
 import { AgentGlyph } from "~/ui/identity";
-import { Pagination } from "~/ui/pagination";
 import { countLabel } from "~/shared/text/plural";
+import { BackendField, EligibleStagesField, LoadableContextField } from "./agent-template-fields";
+import { useContextGrants, useProfileFields, useStageEligibility } from "./agent-template-draft";
 import { MiniModal } from "./mini-modal";
 import { useModalAction } from "./resource-helpers";
 
 /**
- * The global agent-TEMPLATE editor for the Agent-resources tab, with its
- * resource-grant chip helpers. Split out of `resources-panel.tsx` (pass 16,
- * pure structural refactor — no behaviour or copy change); it is the largest
- * and least-shared of the four editors, so it gets its own file.
+ * The global agent-TEMPLATE editor for the Agent-resources tab. Split out of
+ * `resources-panel.tsx` (pass 16, pure structural refactor — no behaviour or
+ * copy change); it is the largest and least-shared of the four editors, so it
+ * gets its own file. Ruling 700(e) split it again along the task-page recipe:
+ * its draft lives in `agent-template-draft.ts` (hooks), what it reads off its
+ * props in `agent-template-derive.ts`, and the fields that carry logic (the
+ * backend pick, the eligible stages, the loadable context with its missing
+ * chips) in `agent-template-fields.tsx`.
  */
-
-const match = (list: string[], names: string[]) => {
-  const set = new Set(names);
-  return list.filter((x) => set.has(x));
-};
-const unmatched = (list: string[], names: string[]) => {
-  const set = new Set(names);
-  return list.filter((x) => !set.has(x));
-};
-
-/**
- * KB grants are stored by store DIR. Older profiles (and anything written by the
- * pre-P13-KM-01 editor) carry the DISPLAY NAME, which resolves to nothing at run
- * time. Rewrite what we can recognize, so opening and saving a profile repairs
- * it instead of preserving an unresolvable string forever. Exported for the
- * controller settings panel, whose KB grants follow the same dir/name split
- * (ruling 106) — the param is the structural pick both callers have.
- */
-export const kbDirsOf = (
-  list: string[],
-  kbs: readonly { dir: string; name: string }[],
-) => {
-  const byDir = new Set(kbs.map((k) => k.dir));
-  const nameToDir = new Map(kbs.map((k) => [k.name, k.dir]));
-  const out: string[] = [];
-  for (const entry of list) {
-    const dir = byDir.has(entry) ? entry : nameToDir.get(entry);
-    if (dir && !out.includes(dir)) out.push(dir);
-  }
-  return out;
-};
-
-/** Grants that match neither a dir nor a display name — preserved untouched. */
-export const kbLegacyOf = (
-  list: string[],
-  kbs: readonly { dir: string; name: string }[],
-) => {
-  const known = new Set([...kbs.map((k) => k.dir), ...kbs.map((k) => k.name)]);
-  return list.filter((x) => !known.has(x));
-};
-const toggle = (list: string[], set: (v: string[]) => void, id: string) =>
-  set(list.includes(id) ? list.filter((x) => x !== id) : [...list, id]);
-
-/** Ruling 618: the Custom stages list pages through projects this many at a
- *  time. */
-const PROJECTS_PER_PAGE = 3;
-
-/** Ruling 618: one row of the Custom stages list, a project's own stages under
- *  its name and task key, or the stored ids no board has. The row is a named
- *  group, so a chip that reads "To do" is heard with the project it is on. */
-function StageRow({
-  label,
-  tag,
-  on,
-  children,
-}: {
-  label: string;
-  /** The project's task key; absent on the stored-ids row. */
-  tag?: string;
-  /** How many of the row's stages the profile names. */
-  on: number;
-  children: ReactNode;
-}) {
-  const labelId = useId();
-  return (
-    <div className="elig-proj" role="group" aria-labelledby={labelId}>
-      <div className="elig-proj-head">
-        <span className="elig-proj-name" id={labelId}>
-          {label}
-        </span>
-        {tag && <span className="elig-proj-key">{tag}</span>}
-        {on > 0 && <span className="elig-count">{on} selected</span>}
-      </div>
-      <div className="pick-chips">{children}</div>
-    </div>
-  );
-}
-
-/** Grants pointing at a resource this org no longer has, rendered removable —
- *  the same red `missing` chip the project profile modal uses (P14-KM-10).
- *  Exported for the controller settings panel (ruling 106), so the missing
- *  treatment — class, copy, a11y state — has ONE implementation here.
- *
- *  F19-5: a missing chip only renders BECAUSE the id is still in the grant list,
- *  so it is by construction a granted toggle — `aria-pressed` is hardcoded true.
- *  Without it a screen reader announced a dangling grant identically to an
- *  ungranted resource, while its six sibling chip groups in this file all
- *  reported their state. */
-export function MissingChips({
-  ids,
-  mono,
-  onDrop,
-}: {
-  ids: string[];
-  mono?: boolean;
-  onDrop: (id: string) => void;
-}) {
-  return (
-    <>
-      {ids.map((id) => (
-        <button
-          type="button"
-          key={id}
-          className={"pick-chip missing on" + (mono ? " mono" : "")}
-          aria-pressed={true}
-          title="No longer in the store. Click to remove this grant"
-          onClick={() => onDrop(id)}
-        >
-          {/* Interface review 2026-09-24 (acce-33): the amber alone was the
-              only cue; the icon and word are the profile page's res-chip ones. */}
-          <Icon name="alert" />
-          {id}
-          <span className="res-chip-note">missing</span>
-        </button>
-      ))}
-    </>
-  );
-}
 
 export function AgentModal({
   initial,
@@ -153,96 +40,23 @@ export function AgentModal({
   skills: SkillView[];
   onClose: () => void;
 }) {
-  const skillNames = skills.map((s) => s.name);
-  const mcpNames = mcps.map((m) => m.name);
-  // P13-KM-01: a KB grant is stored — and resolved at run time — by its store
-  // DIRECTORY (`readKbIndexDetailed` reads `${DATA_ROOT}/kb/<dir>`). This
-  // picker used to key on the display NAME, so granting "P13 facts" wrote
-  // `kb: ["P13 facts"]` and every run silently got zero bytes while both UIs
-  // showed it attached.
-  // `kbDirsOf` also repairs an existing display-name grant on open.
-
-  const [name, setName] = useState(initial ? initial.name : "");
-  const [backend, setBackend] = useState<"codex" | "claude">(
-    initial ? initial.backend : "codex",
-  );
-  const [summary, setSummary] = useState(initial ? initial.summary : "");
-  // D32-7 (pass 32): the role line, the way the project editor asks for it.
-  // A stored role that merely repeats the name is the pre-pass-32 default, so
-  // it prefills EMPTY to invite a real one (the card falls back to "Agent
-  // profile" for such a role either way — agent-types.ts profileRoleLabel).
-  const storedRoleRepeatsName =
-    !!initial && initial.role.trim().toLowerCase() === initial.name.trim().toLowerCase();
-  const [role, setRole] = useState(
-    initial && !storedRoleRepeatsName ? initial.role : "",
-  );
-  // P13-AP-01: the persona (the agent's system prompt) is edited on its own,
-  // separately from the one-line blurb the operator reads. Editing the blurb no
-  // longer flattens the persona.
-  const [persona, setPersona] = useState(initial ? initial.persona : "");
-  // P11-47: default a new profile's eligible stages to a real work stage that
-  // exists, not a hardcoded "impl" that silently references nothing if the org
-  // stage template renames/removes it. Prefer a stage literally named "impl",
-  // else the middle non-terminal stage, else the first.
-  const workStages = stages.filter((s) => s.id !== "done");
-  const defaultStage =
-    workStages.find((s) => s.id === "impl")?.id ??
-    workStages[Math.floor(workStages.length / 2)]?.id ??
-    workStages[0]?.id;
-  const [selStages, setSelStages] = useState<string[]>(
-    initial ? initial.stages : defaultStage ? [defaultStage] : [],
-  );
-  // Ruling 479(h): a stored stage the chips below do not offer (a project's own
-  // `build`, carried into the template) had no chip, so it could be neither
-  // seen nor removed and every save kept it. Held from the open, so a chip
-  // pressed off stays on screen to be pressed back on. Ruling 618: a stage a
-  // live project's board has is offered in that project's row, so this is
-  // only what no board has any more (a project archived, a stage renamed).
-  const [storedOnlyStages] = useState<string[]>(() =>
-    initial
-      ? initial.stages.filter(
-          (id) =>
-            !workStages.some((s) => s.id === id) &&
-            !projectStages.some((p) => p.stages.some((s) => s.id === id)),
-        )
-      : [],
-  );
-  // Ruling 618: the projects whose stages the profile already names lead, so
-  // what it stores is on the first page. Ordered once, at the open, so a press
-  // never moves a row to another page.
-  const [projects] = useState<ProjectCustomStages[]>(() => {
-    const named = new Set(initial ? initial.stages : []);
-    const namesOne = (p: ProjectCustomStages) => p.stages.some((s) => named.has(s.id));
-    return [...projectStages.filter(namesOne), ...projectStages.filter((p) => !namesOne(p))];
-  });
-  const [page, setPage] = useState(1);
-  const defaultLabelId = useId();
-  const customLabelId = useId();
-  const [selSkills, setSelSkills] = useState<string[]>(
-    initial ? match(initial.skills, skillNames) : [],
-  );
-  const [selMcps, setSelMcps] = useState<string[]>(
-    initial ? match(initial.mcps, mcpNames) : [],
-  );
-  const [selKbs, setSelKbs] = useState<string[]>(
-    initial ? kbDirsOf(initial.kbs, kbs) : [],
-  );
-  // P14-KM-10: grants that match no org resource used to be preserved on save
-  // and rendered NOWHERE, so an orphan — the standing residue of a rename or a
-  // disk-side delete — was invisible and unremovable from org settings while
-  // the project modal showed the same thing as a removable red chip. They are
-  // state now, so they render and can be dropped.
-  const [legacySkills, setLegacySkills] = useState<string[]>(
-    initial ? unmatched(initial.skills, skillNames) : [],
-  );
-  const [legacyMcps, setLegacyMcps] = useState<string[]>(
-    initial ? unmatched(initial.mcps, mcpNames) : [],
-  );
-  const [legacyKbs, setLegacyKbs] = useState<string[]>(
-    initial ? kbLegacyOf(initial.kbs, kbs) : [],
-  );
-  const drop = (list: string[], set: (v: string[]) => void, id: string) =>
-    set(list.filter((x) => x !== id));
+  const {
+    name,
+    setName,
+    backend,
+    setBackend,
+    summary,
+    setSummary,
+    storedRoleRepeatsName,
+    role,
+    setRole,
+    persona,
+    setPersona,
+  } = useProfileFields(initial);
+  const eligibility = useStageEligibility(initial, stages, projectStages);
+  const grants = useContextGrants(initial, kbs, mcps, skills);
+  const { selStages } = eligibility;
+  const { selSkills, selMcps, selKbs, legacySkills, legacyMcps, legacyKbs } = grants;
   // Ruling 156 (pass 35, F35-7): a project's deployment is its own COPY of the
   // grants, taken at deploy time, so an edit here never reached an adopted
   // project and the old foot hint pointed at "re-adopt", a door the deploy
@@ -253,32 +67,8 @@ export function AgentModal({
   const [done, setDone] = useState(false);
   const { action, err, setErr } = useModalAction(() => setDone(true));
 
-  const stageOpts = stages.filter((s) => s.id !== "done");
   const canSave =
     name.trim().length > 1 && role.trim().length > 0 && selStages.length > 0;
-  const selStageSet = new Set(selStages);
-  const offeredByDefault = new Set(stageOpts.map((s) => s.id));
-  const customOn = selStages.filter((id) => !offeredByDefault.has(id)).length;
-  const pages = Math.max(1, Math.ceil(projects.length / PROJECTS_PER_PAGE));
-  const pageStart = (page - 1) * PROJECTS_PER_PAGE;
-  const pageProjects = projects.slice(pageStart, pageStart + PROJECTS_PER_PAGE);
-  const pageEnd = pageStart + pageProjects.length;
-  const stageChip = (s: StageDef, title?: string) => (
-    <button
-      type="button"
-      key={s.id}
-      className={"pick-chip" + (selStageSet.has(s.id) ? " on" : "")}
-      aria-pressed={selStageSet.has(s.id)}
-      title={title}
-      onClick={() => toggle(selStages, setSelStages, s.id)}
-    >
-      <span className="sdot" data-stage-color={s.color}></span>
-      {s.name}
-    </button>
-  );
-  const selSkillSet = new Set(selSkills);
-  const selMcpSet = new Set(selMcps);
-  const selKbSet = new Set(selKbs);
 
   return (
     <MiniModal
@@ -360,39 +150,7 @@ export function AgentModal({
           </span>
         )}
       </div>
-      <div className="field">
-        <span className="flabel">Backend</span>
-        <div className="be-pick">
-          <button
-            type="button"
-            className={"be-opt" + (backend === "codex" ? " on" : "")}
-            onClick={() => setBackend("codex")}
-            aria-pressed={backend === "codex"}
-          >
-            <AgentGlyph backend="codex" decorative />
-            <span>
-              <span className="bnm">Codex</span>
-            </span>
-            <span className="bcheck">
-              <Icon name="check" />
-            </span>
-          </button>
-          <button
-            type="button"
-            className={"be-opt" + (backend === "claude" ? " on" : "")}
-            onClick={() => setBackend("claude")}
-            aria-pressed={backend === "claude"}
-          >
-            <AgentGlyph backend="claude" decorative />
-            <span>
-              <span className="bnm">Claude</span>
-            </span>
-            <span className="bcheck">
-              <Icon name="check" />
-            </span>
-          </button>
-        </div>
-      </div>
+      <BackendField backend={backend} onPick={setBackend} />
       <div className="field">
         <label className="flabel" htmlFor="ga-sum">
           Role summary{" "}
@@ -430,176 +188,8 @@ export function AgentModal({
           onChange={(e) => setPersona(e.target.value)}
         />
       </div>
-      <div className="field">
-        <span className="flabel">
-          Default eligible stages<span className="req">*</span>{" "}
-          {/* P13-D-9: "always" was an over-promise. No AGENT profile can ever
-              transition a task to Done — that part holds for everything this
-              org-level editor creates — but a project's operator can, under the
-              auto preset with an explicit grant. This panel is org-scoped and
-              cannot know a project's policy, so it states the guarantee it
-              actually makes rather than one it cannot. */}
-          <span className="fhint">Done is closed by a human, never by an agent</span>
-        </span>
-        {/* Ruling 618 (2026-10-01): the stages a project's own board
-            adds were echoed only once a profile already stored one, as a
-            pressed chip after the defaults that repeated "not in the default
-            workflow". They are offered now, grouped by the project whose board
-            has them and paged three projects at a time. */}
-        <div className="elig-groups">
-          <div className="elig-group" role="group" aria-labelledby={defaultLabelId}>
-            <span className="ctx-lbl" id={defaultLabelId}>
-              Default workflow
-            </span>
-            <div className="pick-chips">{stageOpts.map((s) => stageChip(s))}</div>
-          </div>
-          <div className="elig-group" role="group" aria-labelledby={customLabelId}>
-            <div className="elig-head">
-              <span className="ctx-lbl" id={customLabelId}>
-                Custom stages
-              </span>
-              {customOn > 0 && <span className="elig-count">{customOn} selected</span>}
-            </div>
-            {projects.length === 0 && storedOnlyStages.length === 0 ? (
-              <span className="ctx-none">No project&apos;s board adds a stage of its own.</span>
-            ) : (
-              <p className="elig-note">
-                From each project&apos;s own board. A profile names stages by id, so a
-                stage counts on every board that has it.
-              </p>
-            )}
-            {storedOnlyStages.length > 0 && (
-              <div className="elig-stray">
-                <StageRow
-                  label="On no project's board"
-                  on={storedOnlyStages.filter((id) => selStageSet.has(id)).length}
-                >
-                  {storedOnlyStages.map((id) => {
-                    const known = stages.find((s) => s.id === id);
-                    const on = selStageSet.has(id);
-                    return (
-                      <button
-                        type="button"
-                        key={id}
-                        className={"pick-chip" + (known ? "" : " mono") + (on ? " on" : "")}
-                        aria-pressed={on}
-                        title={`This profile names the stage “${id}”, which neither the default workflow nor any project's own stages offer. A board with a stage of this id, or one in the same role, reads it. Press to ${on ? "remove" : "keep"} it.`}
-                        onClick={() => toggle(selStages, setSelStages, id)}
-                      >
-                        <span className="sdot" data-stage-color={known?.color}></span>
-                        {known ? known.name : id}
-                      </button>
-                    );
-                  })}
-                </StageRow>
-              </div>
-            )}
-            {pageProjects.length > 0 && (
-              <div className="elig-projs">
-                {pageProjects.map((p) => (
-                  <StageRow
-                    key={p.slug}
-                    label={p.name}
-                    tag={p.prefix}
-                    on={p.stages.filter((s) => selStageSet.has(s.id)).length}
-                  >
-                    {p.stages.map((s) => stageChip(s, `“${s.id}” on ${p.name}'s board`))}
-                  </StageRow>
-                ))}
-              </div>
-            )}
-            {pages > 1 && (
-              <div className="elig-foot">
-                <span className="elig-range" aria-live="polite">
-                  {pageEnd - pageStart === 1
-                    ? `Project ${pageEnd} of ${projects.length}`
-                    : `Projects ${pageStart + 1} to ${pageEnd} of ${projects.length}`}
-                </span>
-                <Pagination page={page} pages={pages} label="Custom stage pages" onPage={setPage} />
-              </div>
-            )}
-          </div>
-        </div>
-      </div>
-      <div className="field">
-        <span className="flabel">
-          Loadable context <span className="fhint">what this profile may pull into a run</span>
-        </span>
-        <div className="ctx-groups">
-          <div className="ctx-group">
-            <span className="ctx-lbl">Skills</span>
-            <div className="pick-chips">
-              {skills.map((s) => (
-                <button
-                  type="button"
-                  key={s.id}
-                  className={"pick-chip mono" + (selSkillSet.has(s.name) ? " on" : "")}
-                  aria-pressed={selSkillSet.has(s.name)}
-                  onClick={() => toggle(selSkills, setSelSkills, s.name)}
-                >
-                  {s.name}
-                </button>
-              ))}
-              <MissingChips
-                ids={legacySkills}
-                mono
-                onDrop={(id) => drop(legacySkills, setLegacySkills, id)}
-              />
-              {skills.length === 0 && legacySkills.length === 0 && (
-                <span className="ctx-none">none defined</span>
-              )}
-            </div>
-          </div>
-          <div className="ctx-group">
-            <span className="ctx-lbl">MCP servers</span>
-            <div className="pick-chips">
-              {mcps.map((m) => (
-                <button
-                  type="button"
-                  key={m.id}
-                  className={"pick-chip mono" + (selMcpSet.has(m.name) ? " on" : "")}
-                  aria-pressed={selMcpSet.has(m.name)}
-                  onClick={() => toggle(selMcps, setSelMcps, m.name)}
-                >
-                  {m.name}
-                </button>
-              ))}
-              <MissingChips
-                ids={legacyMcps}
-                mono
-                onDrop={(id) => drop(legacyMcps, setLegacyMcps, id)}
-              />
-              {mcps.length === 0 && legacyMcps.length === 0 && (
-                <span className="ctx-none">none defined</span>
-              )}
-            </div>
-          </div>
-          <div className="ctx-group">
-            <span className="ctx-lbl">Knowledge bases</span>
-            <div className="pick-chips">
-              {kbs.map((k) => (
-                <button
-                  type="button"
-                  key={k.id}
-                  className={"pick-chip" + (selKbSet.has(k.dir) ? " on" : "")}
-                  aria-pressed={selKbSet.has(k.dir)}
-                  onClick={() => toggle(selKbs, setSelKbs, k.dir)}
-                  title={k.uri + "/"}
-                >
-                  {k.name}
-                </button>
-              ))}
-              <MissingChips
-                ids={legacyKbs}
-                onDrop={(id) => drop(legacyKbs, setLegacyKbs, id)}
-              />
-              {kbs.length === 0 && legacyKbs.length === 0 && (
-                <span className="ctx-none">none defined</span>
-              )}
-            </div>
-          </div>
-        </div>
-      </div>
+      <EligibleStagesField stages={stages} eligibility={eligibility} />
+      <LoadableContextField skills={skills} mcps={mcps} kbs={kbs} grants={grants} />
       {initial && initial.used > 0 && (
         <div className="field">
           <label className="flabel" htmlFor="ga-propagate">

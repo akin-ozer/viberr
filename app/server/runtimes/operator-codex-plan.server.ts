@@ -542,10 +542,10 @@ function buildOperatorPlanSchema(tools: readonly OperatorPlanTool[]) {
 }
 
 /**
- * Runtime mirror of OPERATOR_PLAN_SCHEMA. Structured output constrains the
- * model, but persisted/provider output still crosses a trust boundary: reject
- * missing nullable fields, unknown tools, wrong types, and extra properties
- * before any governed action can run.
+ * Runtime mirror of the schema `buildOperatorPlanSchema` emits. Structured
+ * output constrains the model, but persisted/provider output still crosses a
+ * trust boundary: reject missing nullable fields, unknown tools, wrong types,
+ * and extra properties before any governed action can run.
  */
 const operatorPlanActionSchema = z.strictObject({
   tool: z.enum(OPERATOR_PLAN_TOOLS),

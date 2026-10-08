@@ -65,7 +65,7 @@ function revealKnowledge(id: string): HTMLElement | null {
 }
 
 /** The request each proposal button sends, in the words the controller acts on. */
-export function proposalRequest(
+function proposalRequest(
   action: "promote" | "dismiss",
   p: Pick<KbProposalView, "id" | "kb" | "doc">,
 ): string {
@@ -75,7 +75,7 @@ export function proposalRequest(
 }
 
 /** Ruling 498: the one request that clears the proposals filed before it. */
-export function promoteAllRequest(count: number): string {
+function promoteAllRequest(count: number): string {
   return (
     `Promote all ${count} open knowledge-base proposals on this board (get_project lists them in openProposals). ` +
     "For each: read its document, write the correction into its settled text in place of the line it corrects, and close it with resolve_kb_proposal. " +
@@ -252,7 +252,6 @@ export function KnowledgePanel({
             body.set("id", confirmUndo.id);
             if (reason.trim()) body.set("reason", reason.trim());
             undo.submit(body, { method: "post" });
-            setConfirmUndo(null);
           }}
         >
           <label className="field confirm-reason">
@@ -421,10 +420,7 @@ function LegacyProposals({
           cancelLabel="Keep it"
           busy={sending}
           onCancel={() => setConfirmDismiss(null)}
-          onConfirm={() => {
-            ask("dismiss", confirmDismiss);
-            setConfirmDismiss(null);
-          }}
+          onConfirm={() => ask("dismiss", confirmDismiss)}
         />
       )}
     </div>

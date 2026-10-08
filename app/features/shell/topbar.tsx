@@ -51,8 +51,8 @@ export const WORKSPACE_PAUSED_SENTENCE =
 
 /**
  * Workspace topbar (shell spec §4.2): brand → Home, crumbs (CSS truncation
- * tiers ported verbatim in viberr.css), the ⌘K palette trigger, bell popover,
- * account menu.
+ * tiers ported verbatim from the mock's viberr.css into app.css), the ⌘K
+ * palette trigger, bell popover, account menu.
  *
  * R15-5: the trigger used to be an input that filtered the OPEN BOARD via `?q=`
  * while promising a global "tasks, branches, agents" search. It opens the real

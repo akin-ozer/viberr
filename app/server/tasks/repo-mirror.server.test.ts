@@ -395,8 +395,9 @@ describe("cloneWorkspaceRepo — the per-project repository mirror cache", () =>
     // `git clone <ref-less repo>` warns and exits 0, so this arm used to report
     // success while handing a specialist a tree with no history and no
     // `origin/<base>` — the shape VIB-1's delivering agent committed a
-    // parentless commit into. Canary: drop the `mirrorHasRefs` guard and the
-    // README assertion fails on an empty workspace.
+    // parentless commit into. Canary: drop the `mirrorCanCheckOut` guard and
+    // the clone cuts an empty workspace from the mirror: no warning, and no
+    // README.
     await makeOrigin();
     await withLocalGithub(origins, () => clone("a"));
     // Strip every ref and break the remote, so the refresh cannot quietly put

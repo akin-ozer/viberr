@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useMemo, useRef, useState } from "react";
 import { useLiveUpdates } from "~/features/live-updates/use-live-updates";
 import { sseScopes } from "~/features/live-updates/event-types";
 import { useSearchParams } from "react-router";
@@ -398,6 +398,21 @@ const S3_UNMET = {
   secret: "Enter the secret access key.",
 } satisfies Record<S3Field, string>;
 
+/** Ruling 147: the first field a save still lacks, in the form's order (the
+ *  secret only until one is on file), or null once the target is complete.
+ *  Ruling 700(e): read off the modal's fields as a pure function, so the
+ *  modal itself holds no chain of conditions. */
+function missingS3Field(
+  fields: Record<S3Field, string>,
+  configured: boolean,
+): S3Field | null {
+  if (!fields.bucket.trim()) return "bucket";
+  if (!fields.region.trim()) return "region";
+  if (!fields.accessKeyId.trim()) return "accessKeyId";
+  if (!configured && !fields.secret.trim()) return "secret";
+  return null;
+}
+
 /**
  * Ruling 148(b): the S3 target is a button that opens a modal, never a form
  * served inline. Six fields (one of them a secret) for a target set once per
@@ -432,15 +447,7 @@ function S3TargetModal({
   // changes no summary field, so the card's remount key cannot see it.
   const [done, setDone] = useState(false);
   const { action: { submit, busy }, err, setErr } = useModalAction(() => setDone(true));
-  const missing: S3Field | null = !bucket.trim()
-    ? "bucket"
-    : !region.trim()
-      ? "region"
-      : !accessKeyId.trim()
-        ? "accessKeyId"
-        : !configured && !secret.trim()
-          ? "secret"
-          : null;
+  const missing = missingS3Field({ bucket, region, accessKeyId, secret }, configured);
   const refs = {
     bucket: useRef<HTMLInputElement>(null),
     region: useRef<HTMLInputElement>(null),
@@ -741,10 +748,13 @@ function RunConcurrencyControl({
   const capRef = useRef<HTMLInputElement>(null);
   // Re-seed the field when the server value changes (a save round-trips a fresh
   // loader value through this prop), and drop any standing refusal with it.
-  useEffect(() => {
+  // During render, so the field never paints the old value against the new cap.
+  const [seededCap, setSeededCap] = useState(runConcurrency.cap);
+  if (seededCap !== runConcurrency.cap) {
+    setSeededCap(runConcurrency.cap);
     setValue(String(runConcurrency.cap));
     setRefused(0);
-  }, [runConcurrency.cap]);
+  }
   // Ruling 147(d): nothing-changed is the ONLY gate that keeps Save disabled.
   // Validity used to be folded into `dirty`, so a typed "-1", "1.5" or an
   // emptied box was a changed value that left Save dead with no explanation.
@@ -853,10 +863,12 @@ function RunSpendCapControl({ spendCapUsd }: { spendCapUsd: number | null }) {
   // Ruling 451(g): the box shakes once per refusal, not on each mount.
   const refusalShake = useRefusalShake(refused);
   const capRef = useRef<HTMLInputElement>(null);
-  useEffect(() => {
+  const [seeded, setSeeded] = useState(current);
+  if (seeded !== current) {
+    setSeeded(current);
     setValue(current);
     setRefused(0);
-  }, [current]);
+  }
   const trimmed = value.trim();
   const valid = spendCapEntryValid(trimmed);
   const changed = trimmed !== current;

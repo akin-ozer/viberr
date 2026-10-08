@@ -359,7 +359,7 @@ export interface TaskSummary {
    * Ruling 53 + ruling 88 — the DELIVERED revision's head sha, or null before
    * delivery.
    *
-   * The board's acceptance ceremony (board-page.tsx `AcceptOnBoardConfirm`) is
+   * The board's acceptance ceremony (board-accept-confirm.tsx `AcceptOnBoardConfirm`) is
    * the same dialog the task page renders, and ruling 53 requires it to disclose
    * what it accepts; ruling 88 then makes the confirmed click echo that
    * disclosure back for the server to compare against the live task. A board

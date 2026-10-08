@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
-import { Calendar, fromISODate } from "./calendar";
+import { Calendar } from "./calendar";
+import { fromISODate } from "./iso-date";
 import { Icon } from "./icon";
 import { useDismiss } from "./use-dismiss";
 

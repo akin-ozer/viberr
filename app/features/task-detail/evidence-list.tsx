@@ -6,6 +6,7 @@ import type { VerdictNoteView } from "~/shared/verdict-note";
 import { Icon, type IconName } from "~/ui/icon";
 import { Markdown } from "~/ui/markdown";
 import type { useAttachmentLightbox } from "./attachment-lightbox";
+import { citedName } from "./cited-files";
 
 /**
  * Ruling 526: an outcome's evidence as a checklist, and a reviewer's verdict
@@ -30,31 +31,8 @@ const MARK_WORD = { pass: "Passed: ", fail: "Failed: ", info: "" } as const sati
 
 const ORDER = { fail: 0, pass: 1, info: 2 } as const satisfies Record<EvidenceStatus, number>;
 
-/** A label token that names one of the task's files: the token less the
- *  quotes, brackets and trailing punctuation a sentence puts around it. */
-function citedName(token: string, attachments: ReadonlySet<string>): string | null {
-  const clean = token.replace(/^[`"'([]+|[`"'),.;:\]]+$/g, "");
-  return clean && attachments.has(clean) ? clean : null;
-}
-
-/** The task's files the rows' labels name, so the event's own strip does not
- *  show a second copy of one a row already opens. */
-export function citedFiles(
-  rows: readonly EvidenceRowRender[],
-  attachments: ReadonlySet<string>,
-): Set<string> {
-  const cited = new Set<string>();
-  for (const row of rows) {
-    for (const token of row.label.split(/\s+/)) {
-      const name = citedName(token, attachments);
-      if (name) cited.add(name);
-    }
-  }
-  return cited;
-}
-
 /** "2 of 4 checks failed", "4 checks passed", or null when no row is a check. */
-export function evidenceTally(rows: readonly EvidenceRowRender[]): string | null {
+function evidenceTally(rows: readonly EvidenceRowRender[]): string | null {
   const failed = rows.filter((row) => row.status === "fail").length;
   const checks = failed + rows.filter((row) => row.status === "pass").length;
   if (checks === 0) return null;

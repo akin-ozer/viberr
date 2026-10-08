@@ -85,7 +85,7 @@ type EpicRow = {
  * it and ranked a just-archived task FIRST (updated_at DESC), indistinguishable
  * from live work. It is not excluded — the palette is a legitimate way back to
  * archived work, the same reason the board keeps its Archived filter
- * (`FILTERS` in board-page.tsx) — it is LABELLED, with the board's own word.
+ * (`FILTERS` in board-page-derive.ts) — it is LABELLED, with the board's own word.
  */
 function archivedSub(sub: string, row: TaskRow): string {
   return withArchived(sub, row.archived !== 0);
@@ -268,7 +268,7 @@ export function searchWorkspace(
         sub: `${agent.role} · ${project.name}`,
         // F19-16: this used to link to the bare roster, so picking "Reviewer
         // Bot" landed on the Agents page with the OPERATOR's detail pane open
-        // (`sel = searchParams.get("profile") ?? "operator"`, agents-page.tsx)
+        // (`searchParams.get("profile") ?? "operator"`, agents-page-selection.ts)
         // and nothing naming what was searched for — deterministically the
         // wrong agent, on every agent hit. `agent.id` is `resolved.profileId`
         // (`listDeployedSpecialists`, specialist-roster.server.ts), the same key

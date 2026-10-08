@@ -1524,7 +1524,7 @@ function assembleClaudeOptions(
     ),
     // The controller shares the operator's no-write posture and goes
     // further (no filesystem reads either); its extra denies arrive via
-    // spec.disallowedTools from buildControllerRun.
+    // spec.disallowedTools from `startTurnRun` (controller-run.server.ts).
     ...(spec.kind === "operator" || spec.kind === "controller"
       ? OPERATOR_READ_ONLY_DENIED_TOOLS
       : []),

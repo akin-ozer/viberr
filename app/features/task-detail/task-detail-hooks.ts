@@ -12,7 +12,9 @@ import type { TaskRunPrincipalView } from "./run-principal-view";
  * fetchers reads (each toasts it through the shared `useActionToast`), the run
  * controls, and the log-panel selection. Split out of `task-detail-page.tsx`
  * (pass 16 — the file was 1811 lines and the most conflict-prone in the tree);
- * a pure structural refactor, no behaviour or copy change.
+ * a pure structural refactor, no behaviour or copy change. The page's own
+ * posts, each with its fetcher and confirm, are in `task-detail-actions.tsx`
+ * (ruling 700(d)); `useRunConsole` there calls the two hooks below.
  */
 
 export type ActionResult =

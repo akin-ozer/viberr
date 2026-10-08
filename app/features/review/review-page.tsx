@@ -93,6 +93,119 @@ function OverlapChip({ overlaps }: { overlaps: PrOverlap[] }) {
   );
 }
 
+/**
+ * A row's PR chip (ruling 700(e), the split of `RQRow`: hook-free, in the slot
+ * the row's `t.pr &&` held). Nothing without a PR.
+ *
+ * UXA-2: this queue carried its OWN pr-state colour map, so a closed-unmerged
+ * (rejected) PR rendered neutral grey here while the canonical `prStatePill`
+ * (ruling 12) renders it `risk` on the board, task detail and the GitHub page —
+ * and `closed` is a first-class row state in this very queue, with rose-toned
+ * rework/archive copy in its subline. Same defect UI-36 fixed on task detail.
+ * Use the one map.
+ *
+ * F19-32: the label rides along for every state the pill's colour alone cannot
+ * carry — `closed` (rejected) and `accepted` ("merge pending", R16-6/ruling
+ * 40, which the projection used to coerce to "review" before it ever reached
+ * this map). `merged` and `review` stay bare: the subline says both in words
+ * one line above, and the queue's density rule is the board card's (only
+ * ACTIONABLE state earns a second label).
+ */
+function RQPrPill({ pr }: { pr: ReviewRowView["pr"] }) {
+  if (!pr) return null;
+  return (
+    <Pill
+      kind={prStatePill(pr.state).kind}
+      sm
+      // Design pass 2026-09-08: the same pair goes QUIET. An open review
+      // PR is the normal condition of everything in this queue, so its
+      // fill differentiated nothing — and it was the loudest chip on a
+      // row whose real state (awaiting verdict) sits in the quiet tier.
+      // `closed` and `merge pending` keep the fill with their word.
+      quiet={pr.state === "merged" || pr.state === "review"}
+    >
+      PR #{pr.number}
+      {pr.state === "merged" || pr.state === "review"
+        ? ""
+        : ` · ${prStatePill(pr.state).label}`}
+    </Pill>
+  );
+}
+
+/**
+ * A row's wait tag (ruling 700(e), the split of `RQRow`: hook-free, in the
+ * slot the row's ternary held).
+ *
+ * writ-3: the board's test (card-status.ts): human-waiting AND `waitingOnMe`.
+ * `ready` already implies both. Ruling 625: the board card's status chip
+ * (`.chip.st`), so a task reads the same in the queue as on the board one
+ * click away.
+ *
+ * F19-31: the last branch used to be a bare `else`, which collapsed "agent"
+ * and "none". `review + none` is a LEGAL stored combination
+ * (review-queue.server.ts lists it in "Still in review"), and for it the
+ * board card's status chip names no wait at all (`cardStatus`, card-status.ts,
+ * drawn by `StatusChip` in board-page.tsx, gives the seat to the readiness
+ * word) while this row rendered the pulsing "agent working": one stored value
+ * making opposite claims one click apart, the exact defect R8-3 fixed for
+ * "human". No wait is the board's answer, so it is this row's too; the
+ * subline carries the fact in words (review-helpers.ts).
+ */
+function RQWaitTag({
+  waiting,
+  resumesAt,
+  ready,
+  waitingOnMe,
+}: {
+  waiting: ReviewRowView["waiting"];
+  resumesAt: ReviewRowView["resumesAt"];
+  ready?: boolean;
+  waitingOnMe?: boolean;
+}) {
+  if (ready || (waiting === "human" && waitingOnMe)) {
+    return (
+      <span className="chip st you">
+        <Icon name="hand" />
+        waiting on you
+      </span>
+    );
+  }
+  if (waiting === "human") {
+    // Human-waiting, but nothing here is THIS viewer's move (R8-3) — a
+    // human still needs to act, so never the false "agent working".
+    return (
+      <span className="chip st human">
+        <Icon name="hand" />
+        waiting on a human
+      </span>
+    );
+  }
+  if (waiting === "schedule") {
+    // Ruling 225: resting on a clock. Not a person, and not a run.
+    return (
+      <span className="chip st scheduled">
+        <Icon name="clock" />
+        {resumesAt ? (
+          <>
+            resumes <LocalDayDotTime iso={resumesAt} />
+          </>
+        ) : (
+          "resumes on its own"
+        )}
+      </span>
+    );
+  }
+  if (waiting === "agent") {
+    return (
+      <span className="chip st agent">
+        <span className="working" />
+        agent working
+      </span>
+    );
+  }
+  return null;
+}
+
 function RQRow({
   t,
   href,
@@ -142,36 +255,7 @@ function RQRow({
         </div>
       </div>
       <span className="rq-meta">
-        {/* UXA-2: this queue carried its OWN pr-state colour map, so a
-            closed-unmerged (rejected) PR rendered neutral grey here while the
-            canonical `prStatePill` (ruling 12) renders it `risk` on the board,
-            task detail and the GitHub page — and `closed` is a first-class row
-            state in this very queue, with rose-toned rework/archive copy in its
-            subline. Same defect UI-36 fixed on task detail. Use the one map. */}
-        {/* F19-32: the label rides along for every state the pill's colour
-            alone cannot carry — `closed` (rejected) and `accepted`
-            ("merge pending", R16-6/ruling 40, which the projection used to
-            coerce to "review" before it ever reached this map). `merged` and
-            `review` stay bare: the subline says both in words one line above,
-            and the queue's density rule is the board card's (only ACTIONABLE
-            state earns a second label). */}
-        {t.pr && (
-          <Pill
-            kind={prStatePill(t.pr.state).kind}
-            sm
-            // Design pass 2026-09-08: the same pair goes QUIET. An open review
-            // PR is the normal condition of everything in this queue, so its
-            // fill differentiated nothing — and it was the loudest chip on a
-            // row whose real state (awaiting verdict) sits in the quiet tier.
-            // `closed` and `merge pending` keep the fill with their word.
-            quiet={t.pr.state === "merged" || t.pr.state === "review"}
-          >
-            PR #{t.pr.number}
-            {t.pr.state === "merged" || t.pr.state === "review"
-              ? ""
-              : ` · ${prStatePill(t.pr.state).label}`}
-          </Pill>
-        )}
+        <RQPrPill pr={t.pr} />
         {/* Ruling 236 (owner, 2026-09-14): which OTHER open PRs this one's diff
             collides with. Read-only and quiet by design: it orders nothing and
             blocks nothing, it only stops the queue presenting collisions as
@@ -213,11 +297,13 @@ function RQRow({
             </Pill>
           </span>
         )}
-        {/* D4: the same continuity cue the board card carries (ContinuityTag,
-            board-page.tsx) — one vocabulary, one tone (risk), one glyph — so a
-            supervisor at the acceptance boundary sees the lost provider session
-            too, not only on the task page's Continuity Recovery panel. The row
-            has room for the tooltip the dense card cannot carry. */}
+        {/* D4: the same continuity cue the board card carries (its "degraded
+            continuity" problem chip: `cardProblems`, card-status.ts, drawn by
+            `ProblemChips` in board-page.tsx) — one vocabulary, one ink (the
+            `.chip.pb` problem chip's), one glyph — so a supervisor at the
+            acceptance boundary sees the lost provider session too, not only on
+            the task page's Continuity Recovery panel. The row has room for the
+            tooltip the dense card cannot carry. */}
         {t.continuity === "degraded" && (
           <span
             className="chip pb"
@@ -227,48 +313,12 @@ function RQRow({
             degraded continuity
           </span>
         )}
-        {/* writ-3: the board's test (card-status.ts): human-waiting AND
-            `waitingOnMe`. `ready` already implies both. */}
-        {/* Ruling 625: the board card's status chip (`.chip.st`), so a task
-            reads the same in the queue as on the board one click away. */}
-        {ready || (t.waiting === "human" && waitingOnMe) ? (
-          <span className="chip st you">
-            <Icon name="hand" />
-            waiting on you
-          </span>
-        ) : t.waiting === "human" ? (
-          // Human-waiting, but nothing here is THIS viewer's move (R8-3) — a
-          // human still needs to act, so never the false "agent working".
-          <span className="chip st human">
-            <Icon name="hand" />
-            waiting on a human
-          </span>
-        ) : t.waiting === "schedule" ? (
-          // Ruling 225: resting on a clock. Not a person, and not a run.
-          <span className="chip st scheduled">
-            <Icon name="clock" />
-            {t.resumesAt ? (
-              <>
-                resumes <LocalDayDotTime iso={t.resumesAt} />
-              </>
-            ) : (
-              "resumes on its own"
-            )}
-          </span>
-        ) : t.waiting === "agent" ? (
-          <span className="chip st agent">
-            <span className="working" />
-            agent working
-          </span>
-        ) : null}
-        {/* F19-31: the branch above used to be a bare `else`, which collapsed
-            "agent" and "none". `review + none` is a LEGAL stored combination
-            (review-queue.server.ts lists it in "Still in review"), and for it
-            the board's WaitTag renders nothing at all (board-page.tsx) while
-            this row rendered the pulsing "agent working" — one stored value
-            making opposite claims one click apart, the exact defect R8-3 fixed
-            for "human". Silence is the board's answer, so it is this row's too;
-            the subline carries the fact in words (review-helpers.ts). */}
+        <RQWaitTag
+          waiting={t.waiting}
+          resumesAt={t.resumesAt}
+          ready={ready}
+          waitingOnMe={waitingOnMe}
+        />
       </span>
       {/* Design pass 2026-09-08: the action holds one right edge on every
           row; the chips wrap behind it instead of pushing it around. Not

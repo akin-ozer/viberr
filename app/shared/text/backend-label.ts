@@ -15,9 +15,9 @@
  * Ruling 457 keeps the task page and the controller page off it. This module
  * ships as its own chunk, and importing it from a module those pages load adds
  * ~70 B gzip to two budgets that have no room. So the run console
- * (`runs-panels.tsx`) spells the two labels itself, and the task page's run
- * controls (`execution-profile.tsx`, `agent-select.tsx`,
- * `continuity-recovery.tsx`) read them through `run-principal-view.ts`'s
- * `backendLabelOf`, the task page's one copy.
+ * (`runs-panels.tsx`, `runs-panels-derive.ts`) spells the two labels itself,
+ * and the task page's run controls (`execution-profile.tsx`,
+ * `agent-select.tsx`, `continuity-loss.ts`) read them through
+ * `run-principal-view.ts`'s `backendLabelOf`, the task page's one copy.
  */
 export const BACKEND_LABEL = { claude: "Claude", codex: "Codex" } as const;

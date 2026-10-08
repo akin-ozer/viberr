@@ -28,8 +28,9 @@ import { useNavigation } from "react-router";
 
 /** Long enough that an ordinary client navigation completes unannounced.
  *  Exported with no importer on purpose: exported, the build inlines it at its
- *  one use; module-local, it ships as a variable, 8 B more on every route
- *  closure the ruling-457 ratchet budgets (measured for ruling 458(g)). */
+ *  one use; module-local, it ships as a variable, 6 B more raw and 1 to 9 B
+ *  more gzip on every route closure the ruling-457 ratchet budgets (first
+ *  measured for ruling 458(g); re-measured 2026-10-08). */
 export const ROUTE_PENDING_DELAY_MS = 220;
 
 export function RoutePendingBar({

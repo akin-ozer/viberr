@@ -124,8 +124,9 @@ describe("laneAt", () => {
 describe("slotInLane", () => {
   const GAP = 12;
   type Card = { key: string; height: number };
-  /** Lay the lane out top to bottom with the drop preview (`previewBefore`:
-   *  undefined = no preview, null = at the end) inserted the way `Column` does. */
+  /** Lay the lane out top to bottom with the drop preview (`preview`
+   *  undefined = no preview, `preview.before` null = at the end) inserted the
+   *  way `Column` does. */
   function layout(
     cards: Card[],
     preview: { height: number; before: string | null } | undefined,

@@ -1,6 +1,7 @@
 // @vitest-environment jsdom
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { act, cleanup, fireEvent, render, waitFor } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, waitFor, within } from "@testing-library/react";
+import { useState } from "react";
 import { createRoutesStub } from "react-router";
 import type {
   DeployedSpecialistView,
@@ -17,6 +18,7 @@ import type {
 import type { PacketRender } from "~/shared/mapping/task.server";
 import type { AcceptanceAffordance } from "~/server/tasks/task-acceptance.server";
 import type { CompletionView } from "~/server/tasks/completion-packet.server";
+import type { TaskChangesView } from "~/server/github/task-changes.server";
 import type { TookCard } from "~/server/tasks/what-it-took.server";
 import { ToastProvider } from "~/ui/toast";
 import { AcceptConfirm } from "./accept-confirm";
@@ -91,6 +93,8 @@ function renderPage(props: {
   baseBehindBy?: number | null;
   /** Ruling 484: the Changes panel's read. */
   changesUrl?: string | null;
+  /** Ruling 484: what the reader reads at `changesUrl`. */
+  changes?: TaskChangesView;
   /** Ruling 497: where the page opens (a notification's `#decision`). */
   entry?: string;
   /** Ruling 521: the completion packet as the loader read it. */
@@ -101,45 +105,51 @@ function renderPage(props: {
   filesDeliveredAt?: string | null;
 }) {
   const submitted: Record<string, string>[] = [];
+  // A revalidation that hands the mounted page a new read of the task.
+  let revalidateWith: (task: Partial<TaskDetail>) => void = () => {};
   const Stub = createRoutesStub([
     {
       path: "/",
-      Component: () => (
-        <ToastProvider>
-          <TaskDetailPage
-            task={detail(props.task ?? {})}
-            runtime={props.runtime ?? []}
-            deployedSpecialists={props.deployedSpecialists ?? []}
-            operatorBackend="claude"
-            operatorAutonomy="supervised"
-            runPrincipal={CONNECTED_PRINCIPAL}
-            liveAgentRuns={props.liveAgentRuns ?? []}
-            timelineHasMore={false}
-            timelineRemaining={0}
-            timelineNextLimit={50}
-            tlDefault="all"
-            members={[
-              { userId: "u-arda", role: "admin", user: { name: "Arda Kaya", initials: "AK", tone: "" } },
-              { userId: "u-selin", role: "contributor", user: { name: "Selin Aksoy", initials: "SA", tone: "" } },
-            ]}
-            me={{ id: props.meId ?? "u-arda", name: "Arda Kaya" }}
-            myRole={props.myRole ?? "admin"}
-            mentionables={{ agents: [], users: [], reserved: [] }}
-            recommendations={props.recommendations ?? []}
-            schedules={props.schedules ?? []}
-            archived={props.archived ?? false}
-            acceptance={{ ...ACCEPTANCE, ...props.acceptance }}
-            githubHost="https://github.com"
-            workRevisionSha={props.workRevisionSha ?? null}
-            canDeliver={props.canDeliver ?? false}
-            baseBehindBy={props.baseBehindBy ?? null}
-            changesUrl={props.changesUrl ?? null}
-            completion={props.completion ?? null}
-            whatItTook={props.whatItTook ?? null}
-            filesDeliveredAt={props.filesDeliveredAt ?? null}
-          />
-        </ToastProvider>
-      ),
+      Component: function Page() {
+        const [task, setTask] = useState(props.task ?? {});
+        revalidateWith = setTask;
+        return (
+          <ToastProvider>
+            <TaskDetailPage
+              task={detail(task)}
+              runtime={props.runtime ?? []}
+              deployedSpecialists={props.deployedSpecialists ?? []}
+              operatorBackend="claude"
+              operatorAutonomy="supervised"
+              runPrincipal={CONNECTED_PRINCIPAL}
+              liveAgentRuns={props.liveAgentRuns ?? []}
+              timelineHasMore={false}
+              timelineRemaining={0}
+              timelineNextLimit={50}
+              tlDefault="all"
+              members={[
+                { userId: "u-arda", role: "admin", user: { name: "Arda Kaya", initials: "AK", tone: "" } },
+                { userId: "u-selin", role: "contributor", user: { name: "Selin Aksoy", initials: "SA", tone: "" } },
+              ]}
+              me={{ id: props.meId ?? "u-arda", name: "Arda Kaya" }}
+              myRole={props.myRole ?? "admin"}
+              mentionables={{ agents: [], users: [], reserved: [] }}
+              recommendations={props.recommendations ?? []}
+              schedules={props.schedules ?? []}
+              archived={props.archived ?? false}
+              acceptance={{ ...ACCEPTANCE, ...props.acceptance }}
+              githubHost="https://github.com"
+              workRevisionSha={props.workRevisionSha ?? null}
+              canDeliver={props.canDeliver ?? false}
+              baseBehindBy={props.baseBehindBy ?? null}
+              changesUrl={props.changesUrl ?? null}
+              completion={props.completion ?? null}
+              whatItTook={props.whatItTook ?? null}
+              filesDeliveredAt={props.filesDeliveredAt ?? null}
+            />
+          </ToastProvider>
+        );
+      },
       action: async ({ request }) => {
         const fd = await request.formData();
         const row: Record<string, string> = {};
@@ -149,9 +159,13 @@ function renderPage(props: {
         return { ok: true, intent: row.intent, toast: "done" };
       },
     },
+    ...(props.changesUrl && props.changes
+      ? [{ path: props.changesUrl, loader: () => props.changes }]
+      : []),
   ]);
   const utils = render(<Stub initialEntries={[props.entry ?? "/"]} />);
-  return { ...utils, submitted };
+  const revalidate = (task: Partial<TaskDetail>) => act(() => revalidateWith(task));
+  return { ...utils, submitted, revalidate };
 }
 
 /**
@@ -247,6 +261,55 @@ describe("ruling 521: the completion packet stands with the offer to accept", ()
     expect(changesPanel(container)).toBe(false);
   });
 
+  it("F10-09: keeps its reader, the notes in it and the person's focus when the decision is replaced", async () => {
+    // CANARY: key the page's DecisionPacket on its packet id again, or
+    // re-seed the card by remounting it, and the replacement remounts the
+    // reader closed with the unsent note gone, and focus falls to <body>.
+    const { container, revalidate } = renderPage({
+      task: { pr: openPr, packet: { ...decision, id: "pkt-a" } },
+      workRevisionSha: "5d1f0e2c0ffee",
+      changesUrl: "/projects/viberr-core/tasks/VIB-151/changes",
+      changes: {
+        ok: true,
+        prNumber: 3,
+        repo: "akin-ozer/viberr",
+        headSha: "5d1f0e2c0ffee",
+        files: [
+          {
+            path: "app/timeline.tsx",
+            status: "modified",
+            additions: 1,
+            deletions: 0,
+            patch: "@@ -1 +1,2 @@\n keep\n+fold",
+            patchOmitted: null,
+          },
+        ],
+        moreFiles: false,
+        truncated: false,
+        recipient: { name: "Developer", handle: "developer" },
+      },
+      completion: COMPLETION,
+    });
+    const card = within(container.querySelector<HTMLElement>(".detail-packet .packet")!);
+    fireEvent.click(card.getByRole("button", { name: "Show the diff" }));
+    // The reader's chunk loads, then its read goes through the router and
+    // redraws the whole page (test-support/setup-dom.ts sizes the wait).
+    const line = { name: "Add a note on app/timeline.tsx line 2" };
+    fireEvent.click(await card.findByRole("button", line));
+    fireEvent.change(card.getByRole("textbox", { name: "Note on app/timeline.tsx line 2" }), {
+      target: { value: "Name the quiet stretch." },
+    });
+    fireEvent.click(card.getByRole("button", { name: "Add note" }));
+    const box = container.querySelector<HTMLTextAreaElement>("#pkt-note")!;
+    box.focus();
+
+    revalidate({ pr: openPr, packet: { ...decision, id: "pkt-b", title: "VIB-151 ready to accept again" } });
+    expect(container.textContent).toContain("VIB-151 ready to accept again");
+    expect(findButton(container, "Hide the diff")).toBeDefined();
+    expect(container.querySelector(".chg-note")?.textContent).toContain("Name the quiet stretch.");
+    expect(document.activeElement).toBe(box);
+  });
+
   it("stands on its own card beside an acceptance recommendation or at the boundary once written, and nowhere else", () => {
     // CANARY: drop the recommendation arm of `completionShown` and the
     // supervised operator's offer reaches a person without its packet.
@@ -306,9 +369,9 @@ describe("ruling 521: the completion packet stands with the offer to accept", ()
   });
 
   it("ruling 693: hands what the task took to the card, as the offer and as the result", () => {
-    // CANARY: drop `took={whatItTook}` from the page's `<CompletionPacket>`
-    // and the loader's figure is read, sent and never drawn (ruling 320's
-    // shape: both ends default to nothing, so nothing fails).
+    // CANARY: drop `took={took}` from TaskDecisionRegion's `<CompletionPacket>`
+    // (task-detail-regions.tsx) and the loader's figure is read, sent and never
+    // drawn (ruling 320's shape: both ends default to nothing, so nothing fails).
     const whatItTook: TookCard = { facts: ["2 runs, 40m of agent time"], notes: [] };
     const merged: PrRef = { number: 3, state: "merged", title: "Notes" };
     const rows: Parameters<typeof renderPage>[0][] = [
@@ -374,8 +437,9 @@ describe("ruling 529: a question asked while an agent works reads as not blockin
   };
 
   it("takes the quiet surface and says so only beside a working agent, and never on a block", () => {
-    // CANARY: drop either half of the page's `aside` condition and a block, or
-    // a question the task does wait on, tells its owner the work goes on.
+    // CANARY: drop either half of the `aside` condition in TaskDecisionRegion
+    // (task-detail-regions.tsx) and a block, or a question the task does wait
+    // on, tells its owner the work goes on.
     const rows: [Partial<TaskDetail>, boolean][] = [
       [{ packet: question, waiting: "agent" }, true],
       [{ packet: question, waiting: "human" }, false],
@@ -390,6 +454,159 @@ describe("ruling 529: a question asked while an agent works reads as not blockin
       );
       unmount();
     }
+  });
+});
+
+/**
+ * F10-09: the operator can replace an open packet, and the revalidation that
+ * follows hands the mounted page the new packet in place of the old one.
+ */
+describe("F10-09: a replacement packet opens as a fresh card", () => {
+  const first: PacketRender = {
+    id: "pkt-first",
+    type: "input",
+    kind: "Decision required",
+    from: "Operator",
+    title: "Which estimate shape should the research recommend?",
+    body: "",
+    observations: [],
+    options: [
+      { kind: "request_edit", t: "Adopt B", d: "", rec: true },
+      { kind: "request_edit", t: "Adopt A", d: "", rec: false },
+    ],
+  };
+  const replacement: PacketRender = {
+    ...first,
+    id: "pkt-replacement",
+    title: "Which backend should the follow-up run on?",
+    options: [
+      { kind: "request_edit", t: "Keep Claude", d: "", rec: true },
+      { kind: "request_edit", t: "Switch to Codex", d: "", rec: false },
+    ],
+  };
+  const checked = (container: HTMLElement) =>
+    Array.from(container.querySelectorAll('.detail-packet [role="radio"]'))
+      .filter((o) => o.getAttribute("aria-checked") === "true")
+      .map((o) => o.textContent);
+
+  it("keeps nothing the person chose or typed on the packet it replaced", () => {
+    // CANARY: drop the card's re-seed on a new packet id (`seededFrom` in
+    // `usePacketChoice`, decision-packet-actions.ts) and the replacement opens
+    // with the old card's second choice selected (here "Switch to Codex",
+    // which nobody picked) and its note typed.
+    const { container, revalidate } = renderPage({ task: { packet: first } });
+    fireEvent.click(findButton(container, "Adopt A")!);
+    const note = container.querySelector<HTMLTextAreaElement>("#pkt-note")!;
+    fireEvent.change(note, { target: { value: "One estimate per service." } });
+    expect(checked(container)).toEqual([expect.stringContaining("Adopt A")]);
+
+    revalidate({ packet: replacement });
+    expect(container.textContent).toContain(replacement.title);
+    expect(checked(container)).toEqual([expect.stringContaining("Keep Claude")]);
+    expect(container.querySelector<HTMLTextAreaElement>("#pkt-note")!.value).toBe("");
+  });
+
+  const box = (container: HTMLElement, id: string) =>
+    container.querySelector<HTMLTextAreaElement>(`#${id}`)!;
+  const archiveDialog = (container: HTMLElement) =>
+    container.ownerDocument.querySelector('dialog[data-screen-label="Packet archive dialog"]');
+  /** The packet with an `archive_task` second, so both hold it at one index. */
+  const archiving = (packet: PacketRender, t: string): PacketRender => ({
+    ...packet,
+    options: [packet.options[0]!, { kind: "archive_task", t, d: "", rec: false }],
+  });
+  /** The packet as ruling 672's repository question, naming `repo`. */
+  const askingRepository = (packet: PacketRender, repo: string): PacketRender => ({
+    ...packet,
+    options: [
+      { kind: "connect_repository", t: "Connect a repository", d: "", rec: true, reply: true, repo },
+      { kind: "keep_without_repository", t: "Keep this board without one", d: "", rec: false },
+    ],
+  });
+  const asking = (packet: PacketRender): PacketRender => ({ ...packet, answerTo: "Workflow Researcher" });
+
+  // What the person leaves standing on the old card, then what the
+  // replacement shows instead: a row per piece the re-seed covers, and one
+  // for the focus a re-seed can take away.
+  it.each<[string, PacketRender, PacketRender, (c: HTMLElement) => void, (c: HTMLElement) => void]>([
+    [
+      // CANARY: drop `setPendingConfirm(null)` from the re-seed and the
+      // archive ceremony stays open over the replacement, and its Archive
+      // button answers the replacement's `archive_task`, which nobody read.
+      "closes the ask-first step left open",
+      archiving(first, "Archive the research"),
+      archiving(replacement, "Archive the follow-up"),
+      (c) => {
+        fireEvent.click(findButton(c, "Archive the research")!);
+        fireEvent.click(findButton(c, "Confirm decision")!);
+        expect(archiveDialog(c)).not.toBeNull();
+      },
+      (c) => expect(archiveDialog(c)).toBeNull(),
+    ],
+    [
+      // CANARY: drop `setCustomText("")` from the re-seed and the directive
+      // written for the old packet is back, ready to send, the moment the
+      // person chooses to write their own on the replacement.
+      "keeps no directive written for the packet it replaced",
+      first,
+      replacement,
+      (c) => {
+        fireEvent.click(findButton(c, "Write your own directive")!);
+        fireEvent.change(box(c, "pkt-custom"), { target: { value: "Run it on Codex." } });
+        expect(box(c, "pkt-custom").value).toBe("Run it on Codex.");
+      },
+      (c) => {
+        fireEvent.click(findButton(c, "Write your own directive")!);
+        expect(box(c, "pkt-custom").value).toBe("");
+      },
+    ],
+    [
+      // CANARY: drop `setRefused(0)` from the re-seed and an agent's new
+      // question opens refusing a Confirm nobody pressed on it.
+      "drops a refusal met on the packet it replaced",
+      asking(first),
+      asking(replacement),
+      (c) => {
+        fireEvent.click(findButton(c, "Confirm decision")!);
+        expect(c.textContent).toContain("Choose an answer above first.");
+      },
+      (c) => expect(c.textContent).not.toContain("Choose an answer above first."),
+    ],
+    [
+      // CANARY: drop `setRepository(initialRepository(p))` from the re-seed
+      // (`usePacketChoice`, decision-packet-actions.ts) and the replacement's
+      // box keeps the repository typed for the old question instead of the
+      // one the new question names.
+      "opens the repository box on the repository the replacement names",
+      askingRepository(first, "acme/site"),
+      askingRepository(replacement, "acme/storefront"),
+      (c) => {
+        fireEvent.change(box(c, "pkt-note"), { target: { value: "acme/checkout" } });
+        expect(box(c, "pkt-note").value).toBe("acme/checkout");
+      },
+      (c) => expect(box(c, "pkt-note").value).toBe("acme/storefront"),
+    ],
+    [
+      // CANARY: drop the focus hand-back after a re-seed (`focusSeed` in
+      // `usePacketChoice`, decision-packet-actions.ts), or key the card on its
+      // packet again, and focus falls to <body> with the directive box that
+      // held it.
+      "hands the focus to its choices when the re-seed takes the focused box away",
+      first,
+      replacement,
+      (c) => {
+        fireEvent.click(findButton(c, "Write your own directive")!);
+        box(c, "pkt-custom").focus();
+        expect(document.activeElement).toBe(box(c, "pkt-custom"));
+      },
+      (c) => expect(document.activeElement).toBe(findButton(c, "Keep Claude")),
+    ],
+  ])("%s", (_, old, next, leave, check) => {
+    const { container, revalidate } = renderPage({ task: { packet: old } });
+    leave(container);
+    revalidate({ packet: next });
+    expect(container.textContent).toContain(next.title);
+    check(container);
   });
 });
 
@@ -451,8 +668,8 @@ describe("P14-LV-06: the acceptance affordance", () => {
       baseBehindBy: 2,
     });
     fireEvent.click(findButton(container, "Accept completion → Done")!);
-    // CANARY: stop passing `onRefreshFirst` from the page and the dialog has
-    // no safe path to offer.
+    // CANARY: stop passing `onRefreshFirst` from TaskAcceptConfirm
+    // (task-detail-regions.tsx) and the dialog has no safe path to offer.
     fireEvent.click(findButton(container, "Update the branch and re-review first")!);
     await waitFor(() => expect(submitted).toHaveLength(1));
     expect(submitted[0]!.intent).toBe("refresh-and-review");
@@ -497,8 +714,9 @@ describe("P14-LV-06: the acceptance affordance", () => {
         ?.textContent ?? "";
 
     it("Accept reads Answers with the plain door's option", () => {
-      // CANARY: stop passing `answersWith` from the page and this reads
-      // "Withdraws … closes unanswered".
+      // CANARY: stop passing `answersWith` from TaskAcceptConfirm
+      // (task-detail-regions.tsx) and this reads "Withdraws … closes
+      // unanswered".
       const { container } = renderPage({
         task: { packet: decision({ acceptAnswersWith: "Accept VIB-151", forceAnswersWith: "Force-accept VIB-151" }) },
       });
@@ -2146,9 +2364,9 @@ describe("V1: the page hands the collision ceremony the unowned PR", () => {
     });
     fireEvent.click(findButton(container, "Confirm decision")!);
     const text = collisionDialog(container)!.textContent!;
-    // Canary: drop `unownedPr: task.unownedPr` from the page's
-    // `archiveDisclosure` literal and both of these go red, which is exactly
-    // the state that shipped.
+    // Canary: drop `unownedPr: task.unownedPr` from `packetArchiveDisclosure`
+    // (task-detail-derive.ts) and both of these go red, which is exactly the
+    // state that shipped.
     expect(text).toContain("closes its pull request");
     expect(text).toContain("#232");
     // The deletes/keeps split it sits inside is still intact.
@@ -2649,9 +2867,9 @@ describe("C3: the collision confirm describes the right branch, and warns before
   });
 
   it("an OPEN pull request of this task's own says what the ceremony really does, read off the task", () => {
-    // Canary: hardcode `openPr: null` in the page's archiveDisclosure literal
-    // (or drop the row) — the person is told nothing about the PR the
-    // ceremony is actually about.
+    // Canary: hardcode `openPr: null` in `packetArchiveDisclosure`
+    // (task-detail-derive.ts) (or drop the row) — the person is told nothing
+    // about the PR the ceremony is actually about.
     // Pass 34 review: the row used to promise a refusal, which ruling 136(b)
     // replaced with a real delivery to that same PR.
     const { container } = renderPage({
@@ -2733,7 +2951,8 @@ describe("C3: the archive dialog's open-PR row tells the truth about what still 
  * started it — the loader spinning where the glyph was, a label naming the
  * work — while the sibling control only waits. The accept confirm has closed
  * by then, and a card that merely dimmed read as refused. Canary: pass
- * `inFlight={null}` from the page and the busy label never appears.
+ * `inFlight={null}` to OperatorRecommendations in task-main-column.tsx and
+ * the busy label never appears.
  */
 describe("ruling 368: a recommendation's request in flight", () => {
   const card = (kind: RecommendationView["kind"]): RecommendationView => {

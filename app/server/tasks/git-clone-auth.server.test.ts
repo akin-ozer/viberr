@@ -169,7 +169,8 @@ describe("cloneFailureLogDetails", () => {
     // Defence in depth for the case the by-value layer cannot cover: a
     // credential nobody here supplied (a legacy origin URL, a PAT the repo's
     // own hooks echoed).
-    // Canary: drop TOKEN_SHAPE_SOURCE from redactGitOutput → the token survives.
+    // Canary: drop the layer-3 `TOKEN_PATTERN_SOURCE` replace from
+    // redactGitOutput → the token survives.
     const token = "github_pat_11AAAAAAA0aaaaaaaaaaaaaaaaaaaaaaaaaaaa";
     const details = cloneFailureLogDetails(
       Object.assign(new Error("fatal: clone failed"), {
