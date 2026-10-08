@@ -418,8 +418,9 @@ export async function operatorTransitionStage(
   // Ruling 702: a move made to reach a delivering agent ends at the hand-off,
   // not at the next boundary. The forward sentence told an operator that had
   // just walked the task back to continue forward "when nothing here needs an
-  // agent", and a run without `delivers: true` engages a supporting agent,
-  // which leaves the task where it was: with nobody delivering it.
+  // agent", and a run without `delivers: true` engages an agent that holds no
+  // repo-write grant as a supporting one, which leaves the task where it was:
+  // with nobody delivering it.
   const next = folded
     ? folded.message
     : rework?.engage

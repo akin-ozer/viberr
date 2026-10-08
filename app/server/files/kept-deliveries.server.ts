@@ -30,6 +30,7 @@ import { pageCapturesAmong } from "~/shared/page-capture";
 import {
   resolveStoreSegment,
   resolveStoredSegment,
+  storedNameAmong,
   taskAttachmentsDir,
   taskDir,
 } from "./file-store-root.server";
@@ -156,8 +157,14 @@ function sameBytes(a: string, b: string): boolean {
   } catch {
     return false;
   } finally {
-    if (fa !== null) closeSync(fa);
-    if (fb !== null) closeSync(fb);
+    for (const fd of [fa, fb]) {
+      if (fd === null) continue;
+      try {
+        closeSync(fd);
+      } catch {
+        // Nothing to do for a descriptor that will not close; the answer stands.
+      }
+    }
   }
 }
 
@@ -177,8 +184,9 @@ function sameBytes(a: string, b: string): boolean {
  * at every delivery, and the note is about the files, not about Viberr's own
  * pictures of them.
  *
- * One file stored under two Unicode forms of its name is one file (ruling
- * 675), named as the folder has it now.
+ * A name is paired with its kept file by ruling 675's rule (`storedNameAmong`):
+ * one file stored under two Unicode forms of its name is one file, named as
+ * the folder has it now, and two files a folder holds apart stay two.
  */
 export function changesSinceKeptDelivery(
   slug: string,
@@ -197,22 +205,24 @@ export function changesSinceKeptDelivery(
     return null;
   }
   const own = pageCapturesAmong(listed);
-  const composed = (name: string) => name.normalize("NFC");
-  const before = new Map(
-    listed.filter((name) => !own.has(name) && !leftOut(name)).map((name) => [composed(name), name]),
-  );
-  const after = new Map(now.map((name) => [composed(name), name]));
+  const kept = listed.filter((name) => !own.has(name) && !leftOut(name));
   const attachments = taskAttachmentsDir(slug, key, dataRoot);
   const changes: KeptDeliveryChanges = { changed: [], added: [], removed: [], same: [] };
-  for (const [id, name] of [...after].sort(([a], [b]) => a.localeCompare(b))) {
-    const kept = before.get(id);
-    if (kept === undefined) changes.added.push(name);
-    else if (sameBytes(path.join(dir, kept), path.join(attachments, name))) changes.same.push(name);
+  const paired = new Set<string>();
+  // Code-unit order, so the lists read the same on every machine.
+  for (const name of [...now].sort()) {
+    // Ruling 675's rule: the kept file of exactly this name, else the single
+    // one that composes to it. Twins a folder holds apart stay apart.
+    const was = storedNameAmong(kept, name);
+    if (was === null || paired.has(was)) {
+      changes.added.push(name);
+      continue;
+    }
+    paired.add(was);
+    if (sameBytes(path.join(dir, was), path.join(attachments, name))) changes.same.push(name);
     else changes.changed.push(name);
   }
-  for (const [id, name] of [...before].sort(([a], [b]) => a.localeCompare(b))) {
-    if (!after.has(id)) changes.removed.push(name);
-  }
+  changes.removed = kept.filter((name) => !paired.has(name)).sort();
   return changes;
 }
 

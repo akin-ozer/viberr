@@ -193,20 +193,21 @@ export async function transitionStage(
   // Ruling 702: a task that has no delivering agent and has delivered nothing
   // may go back to a stage where one can be engaged: ruling 133 judges an
   // unengaged profile by its declared stages, so the agent the task needs may
-  // not be one that can be engaged where it stands. Read for the operator's
-  // backward moves only: it is the operator's move, and the refusal below
-  // names these stages to nobody else.
+  // not be one that can be engaged where it stands. Read for every backward
+  // move that is not a person's own, because the refusal below says whether a
+  // deliverer can run; the stages are the operator's alone, as the move is.
   const engage =
-    backward && ctx.operatorAuthorized === true
+    backward && input.manual !== true
       ? await engageStagesOf(ctx, input.projectSlug, project, existing.parsed.frontmatter)
       : null;
+  const engageStages = ctx.operatorAuthorized === true ? (engage?.stages ?? []) : [];
   const isReworkMove =
     input.rework === true &&
     ctx.operatorAuthorized === true &&
     backward &&
     (existing.parsed.frontmatter.validation === "failing" ||
       (changedReworkTarget !== null && input.toStageId === changedReworkTarget) ||
-      (engage?.stages.some((e) => e.stageId === input.toStageId) ?? false));
+      engageStages.some((e) => e.stageId === input.toStageId));
   const movingBack = input.manual === true && backward && !ctx.operatorAuthorized;
   if (!boundary && !input.manual && !isReworkMove) {
     // F19-39: this string is RENDERED to a human (an `AppError` message becomes
@@ -248,14 +249,12 @@ export async function transitionStage(
     // on a task with no deliverer too, and on one whose deliverer is no
     // longer deployed. A task the operator may take back to engage one is
     // told where, and who.
-    const hasDeliverer =
-      engage?.deliverer ?? existing.parsed.frontmatter.engagements.some((e) => e.delivers);
     const wayOut = !backward
       ? ""
-      : hasDeliverer
+      : engage?.deliverer === true
         ? " The engaged deliverer runs at every stage (ruling 133), so dispatch it here instead of moving the task."
-        : engage && engage.stages.length > 0
-          ? ` It has no delivering agent and has delivered nothing, so the backward moves open to the operator are into a stage where one can be engaged: ${engage.stages
+        : engageStages.length > 0
+          ? ` It has no delivering agent and has delivered nothing, so the backward moves open to the operator are into a stage where one can be engaged: ${engageStages
               .map((e) => `${stageName(project, e.stageId)} (${e.agents.map((a) => a.name).join(", ")})`)
               .join(", ")}. Move it there, then hand delivery to that agent.`
           : "";

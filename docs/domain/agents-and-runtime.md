@@ -1521,16 +1521,21 @@ no such note. When its newest verdict was on a files delivery Viberr kept (rulin
 second note follows it (`rereviewChangesNote`, ruling 703): the delivery the reviewer
 judged, and the task's files as they stand now set against it, byte for byte, as four
 lists (changed, new, gone, unchanged; `changesSinceJudged`). The lists read the task's
-folder, which is what the reviewer opens, and leave out Viberr's own page pictures and the
-files only reviewers saved; each name is printed as one bounded line with no backtick. The
-note then says what the lists are worth: a check a file passed, resting on that file
-alone, still holds and is restated without being made again; everything the reviewer sent
-back is checked again wherever its fix was made; and the changed and new files, what a
-change makes untrue elsewhere, and whatever its earlier report does not show are still
-owed. A run that holds the board readers (ruling 594) is also told that
-`read_task_attachment` with `delivery` returns a file as it was judged. A commit on either
-side, or a judged delivery that was not kept, adds nothing, and a review asked for again
-by a comment resumes the reviewer's session and carries neither note.
+folder, which is what the reviewer opens, and leave out the browser's working files,
+Viberr's own page pictures and the files this reviewer's own timeline entries name and
+nobody else's do; each name is printed as one bounded line with no backtick, and only the
+unchanged list is counted past forty names. The note then says what the lists are worth:
+a check a file passed, resting on that file alone, still holds and is restated without
+being made again; everything the reviewer sent back is checked again wherever its fix was
+made; and the changed and new files, what a change makes untrue elsewhere, whatever its
+earlier report does not show and whatever the run's directive asks for are still owed. A
+run that holds the board readers (ruling 594) is also told that `read_task_attachment`
+with `delivery` returns a file as it was judged. Nothing is added for a commit on either
+side, for a judged delivery that was not kept, or when the delivery judged is still the
+one under review and no file differs (ruling 410's question is about what the reviewer has
+not said yet); a delivery kept before ruling 610 holds its deliverer's files alone, so the
+others read as new; and a review asked for again by a comment resumes the reviewer's
+session and carries neither note. Building the note never stops the review.
 
 The outcome is the first envelope a run reports. The already-staged check reads the
 in-process map and the persisted row, so an envelope staged before a restart still stands

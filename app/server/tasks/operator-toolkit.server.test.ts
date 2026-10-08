@@ -364,14 +364,15 @@ describe("buildOperatorToolkit ↔ operatorPlanToolsFor governed-action parity (
     // person for the move.
     const tool = build(withPolicy(uniform("direct"))).tools.find((t) => t.name === "transition_stage")!;
     const desc = tool.description;
-    expect(desc).toContain("Backwards is also allowed on a task that has NO delivering agent and has delivered nothing, when the agent its remaining work needs cannot be engaged where the task stands");
+    expect(desc).toContain("Backwards is also allowed on a task that has NO delivering agent you can run (one whose profile is no longer deployed counts as none) and has delivered nothing, when the agent its remaining work needs cannot be engaged where the task stands");
     expect(desc).toContain("each with `engage` naming the agents (`id` and `name`)");
     // An entry is on every such task past a scoped agent's stages, so the
     // text has to say it is not an instruction. Canary: drop the sentence.
     expect(desc).toContain("An `engage` entry is an offer and never a reason to move: use it only when work remains for an agent it names.");
-    // A run without the flag engages a supporting agent, and the task still
-    // has nobody delivering it. Canary: drop `delivers: true`.
-    expect(desc).toContain("hand delivery over with run_agent and `delivers: true`");
+    // Without the flag an agent that holds no repo-write grant is engaged as a
+    // supporting one, and the task still has nobody delivering it.
+    // Canary: drop `delivers: true`, or say every agent is engaged that way.
+    expect(desc).toContain("hand delivery over with run_agent and `delivers: true` (without it an agent that holds no repo-write grant is engaged as a supporting agent, and the task still has nobody delivering it)");
     expect(desc).toContain("and never ask a person for that move");
     expect(desc).not.toContain("populated only while validation is failing");
     expect(desc).not.toContain("to send failed work back");

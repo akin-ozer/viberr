@@ -5762,7 +5762,7 @@ describe("pass 35 S15: rulings 162 and 163 at the merge stage", () => {
 
   it("ruling 702: the move is the operator's: the same call without its authority is refused and is told no stage", async () => {
     // Canary: drop `ctx.operatorAuthorized === true` from `isReworkMove`, or
-    // read the stages for every caller.
+    // name the stages to every caller.
     const store = setupProjectedStore(ctx);
     withScopedDeveloper(store);
     seedUndelivered(store, "merge");
@@ -5770,6 +5770,22 @@ describe("pass 35 S15: rulings 162 and 163 at the merge stage", () => {
       `No allowed transition from Merge to In Progress. ${NEITHER}`,
     );
     expect(taskFile(store).frontmatter.stage).toBe("merge");
+  });
+
+  it("ruling 702: whoever the caller, the deliverer is named when it can run and not when it cannot", async () => {
+    // Canary: name the deliverer to a caller without operator authority from
+    // the engagement alone, or never name it to that caller.
+    const store = setupProjectedStore(ctx);
+    withScopedDeveloper(store);
+    seedUndelivered(store, "merge", { engagements: [DEV_ENGAGEMENT, REVIEWER_ENGAGEMENT] });
+    expect(await refusal(store, "impl", "person")).toBe(
+      `No allowed transition from Merge to In Progress. ${NEITHER}${DELIVERER_RUNS}`,
+    );
+    const gone: Engagement = { ...DEV_ENGAGEMENT, profileId: "old-developer" };
+    seedUndelivered(store, "merge", { engagements: [gone, REVIEWER_ENGAGEMENT] });
+    expect(await refusal(store, "triage", "person")).toBe(
+      `No allowed transition from Merge to Triage. ${NEITHER}`,
+    );
   });
 
   it("ruling 702: where no earlier stage has an agent to engage, the refusal names no way out it does not have", async () => {

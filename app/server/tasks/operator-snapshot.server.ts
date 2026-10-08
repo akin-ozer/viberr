@@ -77,7 +77,7 @@ import {
   type GatesState,
   projectGatesView,
 } from "~/shared/project-gates";
-import type { OperatorAuthority, OperatorAutonomy } from "./operator-authority.server";
+import { gate, type OperatorAuthority, type OperatorAutonomy } from "./operator-authority.server";
 import { packetIsOperators } from "./operator-packets.server";
 
 export interface OperatorTaskSnapshot {
@@ -1058,12 +1058,17 @@ export function operatorSnapshot(
   // may also go back to a stage where one can be engaged, and the entry says
   // whom the move is for. It never meets the two licenses above: both need
   // something delivered.
+  // An operator whose policy withholds stage transitions is offered none: it
+  // holds no tool to make the move, and asking a person is then right.
   const engageAt = new Map(
-    engageStagesFor(
-      { stages, workflow },
-      fm,
-      deployed,
-      project.parsed.frontmatter.requiredReviewers,
+    (gate(authority, "stage-transitions") === "deny"
+      ? []
+      : engageStagesFor(
+          { stages, workflow },
+          fm,
+          deployed,
+          project.parsed.frontmatter.requiredReviewers,
+        )
     ).map((e) => [e.stageId, e.agents]),
   );
   // A stage this board does not have is before nothing.

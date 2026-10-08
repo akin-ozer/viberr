@@ -52,6 +52,7 @@ function task(stage: string, patch: Partial<EngageTaskState> = {}): EngageTaskSt
       { profileId: "cover-designer", delivers: false },
     ],
     blockedBy: [],
+    recommendations: [],
     workRevision: null,
     deliveredAt: null,
     ...patch,
@@ -84,6 +85,19 @@ describe("ruling 702: the stages a task with no delivering agent may go back to"
       sourceProfileId: null,
     };
     expect(at("cover", { workRevision: revision })).toEqual([]);
+    // A revision that was discarded is under nobody's review (ruling 161):
+    // the task has delivered nothing again. Canary: read `workRevision`
+    // without asking whether it is still active.
+    const discarded: WorkRevision = { ...revision, kind: "discarded" };
+    expect(at("cover", { workRevision: discarded }).map((s) => s.stageId)).toEqual(["brief", "writing", "diagrams"]);
+  });
+
+  it("offers nothing while an acceptance offer stands: a task can be acceptable with nothing delivered", () => {
+    // The move would withdraw the offer a person is being asked about.
+    // Canary: drop the `recommendations` guard.
+    expect(at("cover", { recommendations: [{ kind: "accept_completion" }] })).toEqual([]);
+    // Any other pending card is no reason to hold the entries back.
+    expect(at("cover", { recommendations: [{ kind: "transition_stage" }] })).toHaveLength(3);
   });
 
   it("offers nothing while the task is held on other work: the hand-off would be refused", () => {
@@ -151,7 +165,7 @@ describe("ruling 702: the stages a task with no delivering agent may go back to"
     // Canary: match declared ids literally instead of through `stageEligible`.
     const commits = { delivery: true, postsFiles: false };
     const dev = [{ id: "developer", name: "Dev", stages: ["impl"], spanAll: false, capabilities: commits }];
-    const nobody = { stage: "review", engagements: [], blockedBy: [], workRevision: null, deliveredAt: null };
+    const nobody = { stage: "review", engagements: [], blockedBy: [], recommendations: [], workRevision: null, deliveredAt: null };
     const literal = {
       stages: [{ id: "triage" }, { id: "impl" }, { id: "review" }, { id: "done" }],
       workflow: [

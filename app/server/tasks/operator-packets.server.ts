@@ -997,6 +997,7 @@ export async function operatorOpenPacket(
           "and its resolution reads no stage.",
       };
     }
+    const recommendedOption = rawOptions.find((o) => o.recommended === true) ?? rawOptions[0];
     for (const o of rawOptions) {
       if (o.kind !== "move_stage") continue;
       const target = moveStageTarget(o, projectStages, input.taskKey);
@@ -1022,7 +1023,15 @@ export async function operatorOpenPacket(
       // operator makes itself is not blocked. On BLOG-8 that packet was the
       // whole dead end: "Writer cannot be engaged at Cover: move BLOG-8 back
       // to Writing?", with the move recommended and a person waited on.
-      if (input.packetType === "blocked" && o.recommended === true) {
+      // "Recommended" is the option the card will carry as such: the one
+      // flagged, or the first when none is (the writer below does the same).
+      // An operator whose policy withholds stage transitions cannot make the
+      // move, so for it the card is the way.
+      if (
+        input.packetType === "blocked" &&
+        o === recommendedOption &&
+        gate(authority, "stage-transitions") !== "deny"
+      ) {
         const project = readProjectFile({ projectSlug: input.projectSlug, dataRoot: ctx.dataRoot });
         const engage = project
           ? engageStagesFor(

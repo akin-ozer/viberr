@@ -15,6 +15,7 @@ export interface EngageTaskState {
   stage: string;
   engagements: readonly { profileId: string; delivers: boolean }[];
   blockedBy: readonly unknown[];
+  recommendations: readonly { kind: string }[];
   workRevision: WorkRevision | null;
   deliveredAt?: string | null;
 }
@@ -29,9 +30,9 @@ export interface EngageCandidate {
 }
 
 /**
- * True when the task has a delivering engagement that can still run: its
- * profile is deployed on the board. An engagement whose profile was removed
- * names an agent nobody can dispatch.
+ * True when the task has a delivering engagement the operator can still run:
+ * its profile is deployed on the board. An engagement whose profile was
+ * removed names an agent `run_agent` refuses ("No deployed agent").
  */
 export function hasDeliveringAgent(
   fm: Pick<EngageTaskState, "engagements">,
@@ -57,6 +58,8 @@ export function hasDeliveringAgent(
  *  - once the task has delivered anything (a revision or a files delivery):
  *    from then on a review's verdict decides the way back (R7-4, ruling 163),
  *    and a task waiting to be accepted is not walked away from its offer;
+ *  - while an acceptance offer stands on it for any other reason: a task can
+ *    be acceptable with nothing delivered, and the move would withdraw it;
  *  - while the task is held on other work: the hand-off would be refused;
  *  - while a delivering agent that can run is engaged: it runs where the task
  *    stands;
@@ -68,9 +71,10 @@ export function hasDeliveringAgent(
  * files, ruling 535, and not one of the project's required reviewers, ruling
  * 556) and that cannot be engaged where the task stands, with those agents.
  *
- * Three callers share this one answer, the way they share `verdictStageFor`:
+ * Four callers share this one answer, the way three share `verdictStageFor`:
  * what the operator's snapshot offers (`reworkStages`), what its move claims
- * (`operatorTransitionStage`) and what `transitionStage` re-vets.
+ * (`operatorTransitionStage`), what `transitionStage` re-vets, and the packet
+ * door, which refuses to ask a person for a move the operator makes itself.
  *
  * Pure: the caller supplies the deployed profiles and the project's rules.
  */
@@ -84,6 +88,7 @@ export function engageStagesFor(
   requiredReviewers: readonly { profileId: string }[],
 ): EngageStage[] {
   if (reviewSubjectId(fm) !== null) return [];
+  if (fm.recommendations.some((r) => r.kind === "accept_completion")) return [];
   if (fm.blockedBy.length > 0) return [];
   if (hasDeliveringAgent(fm, deployed)) return [];
   const stages = board.stages;

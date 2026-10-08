@@ -56,9 +56,10 @@ describe("ruling 703: the task's files set against the delivery a reviewer judge
     save("diagram.svg", "<svg><text>the file's text</text></svg>");
     save("cover.png", "cover bytes");
     save("draft.md", "an early draft");
+    save("aside.md", "a second file that will go");
     // Same length as its rework below: the size says nothing here.
     save("notes.md", "words: 629");
-    keep(JUDGED, ["post.md", "diagram.svg", "cover.png", "draft.md", "notes.md"]);
+    keep(JUDGED, ["post.md", "diagram.svg", "cover.png", "draft.md", "aside.md", "notes.md"]);
 
     save("post.md", "The copy tool asks whether the template's text holds a placeholder.");
     save("diagram.svg", "<svg><text>the template's text</text></svg>");
@@ -68,7 +69,7 @@ describe("ruling 703: the task's files set against the delivery a reviewer judge
     expect(changes(JUDGED, ["post.md", "diagram.svg", "cover.png", "notes.md", "sources.md"])).toEqual({
       changed: ["diagram.svg", "notes.md", "post.md"],
       added: ["sources.md"],
-      removed: ["draft.md"],
+      removed: ["aside.md", "draft.md"],
       same: ["cover.png"],
     });
   });
@@ -126,6 +127,17 @@ describe("ruling 703: the task's files set against the delivery a reviewer judge
     writeFileSync(path.join(attachments, decomposed), "the offer");
     keep(JUDGED, [decomposed]);
     expect(changes(JUDGED, [composed])).toEqual({ changed: [], added: [], removed: [], same: [composed] });
+    // A folder that holds both forms as two files keeps them apart: the kept
+    // file answers for one of them, and the other is a file it does not hold.
+    // Canary: let two names claim the one kept file, and three names in come
+    // out as two.
+    expect(changes(JUDGED, [composed, decomposed, "other.md"])).toEqual({
+      changed: [],
+      // Code-unit order: the composed capital sorts after every ASCII name.
+      added: ["other.md", composed],
+      removed: [],
+      same: [decomposed],
+    });
   });
 
   it("compares files larger than one read in pieces, to the last byte", () => {
