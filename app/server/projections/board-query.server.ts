@@ -186,9 +186,6 @@ export function listProjectTasks(
      *  view asks for them. Every other read model (board columns, review queue,
      *  home counts) inherits the exclusion by going through here. */
     includeArchived?: boolean;
-    /** Gap-10: the instant "has this gone quiet?" is asked against. Injectable
-     *  for tests only; every caller in the app takes the default. */
-    now?: Date;
     /** Data root for the live-backend overlay — tests only (production
      *  defaults to the env root, same as every file accessor). */
     dataRoot?: string;
@@ -291,9 +288,6 @@ function mapProjectTasks(
       // Ruling 225: the clock a schedule-resting task is measured against.
       resumesAt: summary.resumesAt ?? null,
     };
-    // Injected only when a caller supplied it — `isQuiet` reads the CURRENT
-    // instant when the key is absent, and a `now: undefined` would not be.
-    if (opts.now) quietAt.now = opts.now;
     return {
       ...summary,
       lastActivityAt: facts.lastActivityAt,

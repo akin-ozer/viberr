@@ -44,7 +44,7 @@ import type { Waiting } from "~/schemas/task-file.schema";
  * is for: an operator turn that ended without queuing anything, a run that
  * errored after the task file was written, an agent nobody re-engaged.
  */
-export const QUIET_AFTER_AGENT_MS = 60 * 60_000;
+const QUIET_AFTER_AGENT_MS = 60 * 60_000;
 
 /**
  * A task waiting on a HUMAN gets three days, not one hour.
@@ -55,7 +55,7 @@ export const QUIET_AFTER_AGENT_MS = 60 * 60_000;
  * picked up Monday morning is ~60h of silence. Past three days, a decision
  * nobody has made is a decision nobody remembers.
  */
-export const QUIET_AFTER_HUMAN_MS = 72 * 60 * 60_000;
+const QUIET_AFTER_HUMAN_MS = 72 * 60 * 60_000;
 
 export interface TaskActivityFacts {
   /** ISO stamp of the newest timeline event; null when the timeline is empty. */
@@ -158,12 +158,10 @@ export interface QuietCheck {
    *  instant that clock fires. Idle time is measured from THERE, not from the
    *  last timeline event — see `isQuiet`. */
   resumesAt?: string | null;
-  /** Omitted outside tests — the real clock answers the question. */
-  now?: Date;
 }
 
 /**
- * Has this task gone quiet? Pure, so both read models and the tests agree.
+ * Has this task gone quiet? One predicate, so both read models agree.
  *
  * Deliberately conservative on four counts, because a cue that fires on healthy
  * work is worse than no cue:
@@ -183,7 +181,7 @@ export function isQuiet(input: QuietCheck): boolean {
   if (!input.lastActivityAt) return false;
   const at = Date.parse(input.lastActivityAt);
   if (!Number.isFinite(at)) return false;
-  const now = (input.now ?? new Date()).getTime();
+  const now = Date.now();
   // Ruling 225 (F37-45): a task resting on a clock has not stopped moving —
   // it is between two moves, on purpose, and the gap can be hours (a quota
   // window). Measuring from its last timeline event would light the "no

@@ -196,8 +196,6 @@ export function getReviewQueue(
   opts: {
     viewerUserId: string;
     dataRoot?: string;
-    /** Gap-10: the instant "has this gone quiet?" is asked against (tests only). */
-    now?: Date;
     /**
      * Ruling 457: the project's LIVE tasks (archived ones dropped) in
      * `listProjectTasks` order, when the caller already built them — the
@@ -246,9 +244,7 @@ export function getReviewQueue(
     );
   };
   const inReview = reviewId
-    ? (opts.tasks ?? listProjectTasks(db, slug, opts.now ? { now: opts.now } : {})).filter(
-        isReviewWork,
-      )
+    ? (opts.tasks ?? listProjectTasks(db, slug)).filter(isReviewWork)
     : [];
 
   // F10-11/F10-15: acceptance readiness comes from the revision-bound review
