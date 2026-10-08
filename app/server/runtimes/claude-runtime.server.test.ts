@@ -15,12 +15,9 @@ import {
   type RunSteering,
 } from "./adapter.server";
 import {
-  AUTO_MEMORY_OFF_ENV,
   createClaudeAdapter,
-  resetSessionTotalsForTests,
   INTERRUPT_ABORT_GRACE_MS,
   INTERRUPT_GRACE_MS,
-  resolveClaudeModel,
   type ClaudePreToolUseHook,
   type ClaudeQuery,
   type ClaudeQueryFn,
@@ -35,32 +32,6 @@ import type { JsonValue } from "~/features/runtime/runtime-types";
 
 const temp = createTempDirs();
 afterEach(temp.cleanup);
-
-describe("resolveClaudeModel", () => {
-  it("maps friendly family labels to CLI aliases", () => {
-    expect(resolveClaudeModel("claude-sonnet")).toBe("sonnet");
-    expect(resolveClaudeModel("claude-opus")).toBe("opus");
-    expect(resolveClaudeModel("claude-haiku")).toBe("haiku");
-  });
-  it("passes real dated ids through unchanged", () => {
-    expect(resolveClaudeModel("claude-sonnet-4-5")).toBe("claude-sonnet-4-5");
-  });
-  it("returns undefined for unknown/empty so the SDK uses its default", () => {
-    expect(resolveClaudeModel("")).toBeUndefined();
-    expect(resolveClaudeModel(undefined)).toBeUndefined();
-    expect(resolveClaudeModel("codex-large")).toBeUndefined();
-  });
-
-  it("pass 34 (F34-7): a bracketed context-window variant is split off first and re-appended verbatim", () => {
-    // Live: the JC-2 operator's run row said `opus[1m]` and the SDK got `opus`.
-    // Canary: put `if (m.includes("opus")) return "opus"` ahead of the split.
-    expect(resolveClaudeModel("opus[1m]")).toBe("opus[1m]");
-    expect(resolveClaudeModel("claude-opus[1m]")).toBe("opus[1m]");
-    expect(resolveClaudeModel("claude-sonnet-4-5[1m]")).toBe("claude-sonnet-4-5[1m]");
-    expect(resolveClaudeModel("sonnet")).toBe("sonnet");
-    expect(resolveClaudeModel("codex-large[1m]")).toBeUndefined();
-  });
-});
 
 /** A fake Query: yields the given messages, records interrupt() calls.
  *  `rejectWith` fails the stream on its first pull, before any message — what
@@ -446,12 +417,28 @@ describe("claude adapter (SDK, injected fake query)", () => {
     expect((await started(effort === undefined ? SPEC : { ...SPEC, effort })).options.effort).toBe(expected);
   });
 
-  it("pass 34 (F34-7): the context-window variant reaches the SDK options verbatim", async () => {
-    // Canary: the same resolver edit as above; the run would start on `opus`.
-    // The spec names the family label, so an adapter that forwarded
-    // `spec.model` unresolved would start it on `claude-opus[1m]`.
-    const { options: captured } = await started({ ...SPEC, model: "claude-opus[1m]" });
-    expect(captured.model).toBe("opus[1m]");
+  // A profile's family label reaches the SDK as the CLI's alias and a dated id
+  // as itself; an unknown or empty one names no model, so the SDK and the
+  // subscription pick their default. Pass 34 (F34-7): a bracketed
+  // context-window variant is split off first and re-appended verbatim. Live:
+  // the JC-2 operator's run row said `opus[1m]` and the SDK got `opus`.
+  // Canary: put `if (m.includes("opus")) return "opus"` ahead of the split and
+  // the `claude-opus[1m]` row fails; forward `spec.model` unresolved and the
+  // family-label rows fail.
+  it.each([
+    ["claude-sonnet", "sonnet"],
+    ["claude-opus", "opus"],
+    ["claude-haiku", "haiku"],
+    ["claude-sonnet-4-5", "claude-sonnet-4-5"],
+    ["sonnet", "sonnet"],
+    ["opus[1m]", "opus[1m]"],
+    ["claude-opus[1m]", "opus[1m]"],
+    ["claude-sonnet-4-5[1m]", "claude-sonnet-4-5[1m]"],
+    ["", undefined],
+    ["codex-large", undefined],
+    ["codex-large[1m]", undefined],
+  ] as const)("model %j reaches options.model as %j", async (model, expected) => {
+    expect((await started({ ...SPEC, model })).options.model).toBe(expected);
   });
 
   it("isolates a run with NO granted skills from the host ~/.claude (settingSources + skills empty, strict MCP)", async () => {
@@ -2115,9 +2102,9 @@ describe("Claude Code's auto-memory (ruling 577)", () => {
     for (const spec of [SPEC, { ...SPEC, kind: "operator" as const }]) {
       const { options } = await started(
         { ...spec, env: { VIBERR_RUN_ID: "r1" } },
-        { env: { PATH: "/usr/bin", [AUTO_MEMORY_OFF_ENV]: "0" } },
+        { env: { PATH: "/usr/bin", CLAUDE_CODE_DISABLE_AUTO_MEMORY: "0" } },
       );
-      expect(options.env?.[AUTO_MEMORY_OFF_ENV]).toBe("1");
+      expect(options.env?.CLAUDE_CODE_DISABLE_AUTO_MEMORY).toBe("1");
       expect(options.env?.PATH).toBe("/usr/bin");
       expect(options.env?.VIBERR_RUN_ID).toBe("r1");
     }
@@ -2493,7 +2480,7 @@ describe("claude adapter compact() (ruling 376)", () => {
     // The epilogue's own marker: the run's settle sweep reaps `r1`, not this.
     expect(captured!.options.env?.VIBERR_RUN_ID).toBe("r1:compaction");
     // Ruling 577: the compaction builds its options as the run did.
-    expect(captured!.options.env?.[AUTO_MEMORY_OFF_ENV]).toBe("1");
+    expect(captured!.options.env?.CLAUDE_CODE_DISABLE_AUTO_MEMORY).toBe("1");
     // The same system prompt shape the run used: the preset with the static append.
     expect(captured!.options.systemPrompt).toMatchObject({ type: "preset", preset: "claude_code", append: "persona" });
     const prompt = await readPrompt(captured!.prompt);
@@ -2584,7 +2571,6 @@ describe("claude adapter compact() (ruling 376)", () => {
     // state on resume.
     // CANARY: project the resumed result without the session's totals
     // (`projectEnvelope(..., null)`) and the turn records the first one again.
-    resetSessionTotalsForTests();
     const opus = (inputTokens: number, outputTokens: number, cacheRead: number, cacheWrite: number, costUSD: number) => ({
       "claude-opus-5-5[1m]": { inputTokens, outputTokens, cacheReadInputTokens: cacheRead, cacheCreationInputTokens: cacheWrite, costUSD },
     });
@@ -2628,7 +2614,6 @@ describe("claude adapter compact() (ruling 376)", () => {
     // deploy recorded $3.36, the whole session's spend, because the restart
     // had emptied the adapter's memory of the session. CANARY: drop
     // `recallReported(spec)` in start() and the turn records $2.51 again.
-    resetSessionTotalsForTests();
     const opus = (inputTokens: number, outputTokens: number, cacheRead: number, cacheWrite: number, costUSD: number) => ({
       "claude-opus-5-5[1m]": { inputTokens, outputTokens, cacheReadInputTokens: cacheRead, cacheCreationInputTokens: cacheWrite, costUSD },
     });
@@ -2672,7 +2657,6 @@ describe("claude adapter compact() (ruling 376)", () => {
     // cap raised by the session's old spend was spend the run could overrun
     // by. CANARY: raise the cap whenever the session has totals, and this
     // reads 5 + 1.9779.
-    resetSessionTotalsForTests();
     const before = claudeReportedTotals({
       type: "result", subtype: "success", is_error: false, num_turns: 60, duration_ms: 331_000,
       usage: { input_tokens: 60, output_tokens: 28_716 }, total_cost_usd: 1.9779, modelUsage: {},
