@@ -309,7 +309,7 @@ const dueRowSchema = z.object({
   archived: z.number(),
   schedules_json: z.string(),
 });
-export type DueRow = z.infer<typeof dueRowSchema>;
+type DueRow = z.infer<typeof dueRowSchema>;
 
 /**
  * Tasks holding an UNRESOLVED schedule occurrence (`pending` or `claimed`) —
@@ -322,7 +322,7 @@ export type DueRow = z.infer<typeof dueRowSchema>;
  * candidate. `json_each` reads the array element-wise, so an element's own
  * `status` is what selects the row.
  */
-export function tasksWithUnresolvedSchedules(db: DatabaseSync): DueRow[] {
+function tasksWithUnresolvedSchedules(db: DatabaseSync): DueRow[] {
   return z.array(dueRowSchema).parse(
     db
       .prepare(

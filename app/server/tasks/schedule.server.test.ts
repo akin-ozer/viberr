@@ -36,7 +36,6 @@ import {
   cancelScheduledAction,
   fireDueSchedules,
   scheduleTaskAction,
-  tasksWithUnresolvedSchedules,
 } from "./schedule.server";
 
 let ctx: TestDbContext;
@@ -576,6 +575,31 @@ describe("fireDueSchedules", () => {
     expect((await fireDueSchedules(store.db, dctx())).fired).toBe(0);
   });
 
+  it("B-WF5: a due occurrence fires whatever the formatting of the projected JSON", async () => {
+    // The candidate scan used to match the literal bytes `"status":"pending"`,
+    // so one space after a colon silently dropped a due schedule from every
+    // tick: it never fired and was never reported. CANARY: select candidates
+    // with `schedules_json LIKE '%"status":"pending"%'` again and nothing fires.
+    writeTask(store.dataRoot, store.slug, {
+      frontmatter: baseTaskFrontmatter("VIB-5", {
+        ownerUserId: store.users.arda.id,
+        stage: "impl",
+        schedules: [rawSchedule({ id: "sch_pending" })],
+      }),
+    });
+    rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
+    // SAFETY: as above — one NOT NULL column, on a task the rebuild projected.
+    const raw = store.db
+      .prepare(`SELECT schedules_json FROM task_projections WHERE task_key = 'VIB-5'`)
+      .get() as { schedules_json: string };
+    store.db
+      .prepare(`UPDATE task_projections SET schedules_json = ? WHERE task_key = 'VIB-5'`)
+      .run(JSON.stringify(JSON.parse(raw.schedules_json), null, 2));
+
+    expect((await fireDueSchedules(store.db, dctx())).fired).toBe(1);
+    await waitForSchedule("VIB-5", "sch_pending", "fired");
+  });
+
   /**
    * T17 (pass 31) — the claim protocol's whole reason for existing is that two
    * ticks can be in flight at once (the boot pass and the interval; an HMR
@@ -1044,59 +1068,6 @@ describe("fireDueSchedules", () => {
     const note = timeline.find((e) => /Scheduled action skipped/.test(e.text ?? ""))?.text ?? "";
     expect(note).toContain("has been archived");
     expect(note).not.toContain("is already Done");
-  });
-});
-
-describe("tasksWithUnresolvedSchedules (B-WF5)", () => {
-  it("selects on the schedule's own status, whatever the JSON formatting", () => {
-    // A fired occurrence is not a candidate; a pending one is.
-    writeTask(store.dataRoot, store.slug, {
-      frontmatter: baseTaskFrontmatter("VIB-4", {
-        ownerUserId: store.users.arda.id,
-        stage: "impl",
-        schedules: [
-          rawSchedule({
-            id: "sch_fired",
-            status: "fired",
-            firedAt: new Date().toISOString(),
-          }),
-        ],
-      }),
-    });
-    writeTask(store.dataRoot, store.slug, {
-      frontmatter: baseTaskFrontmatter("VIB-5", {
-        ownerUserId: store.users.arda.id,
-        stage: "impl",
-        schedules: [rawSchedule({ id: "sch_pending" })],
-      }),
-    });
-    rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
-    expect(tasksWithUnresolvedSchedules(store.db).map((r) => r.task_key)).toEqual([
-      "VIB-5",
-    ]);
-
-    // Same data, formatted differently. The old scan matched the literal bytes
-    // `"status":"pending"`, so one space after a colon silently dropped a due
-    // schedule from every tick — it would never fire and never be reported.
-    // SAFETY: as above — one NOT NULL column, on a task the rebuild projected.
-    const raw = store.db
-      .prepare(`SELECT schedules_json FROM task_projections WHERE task_key = 'VIB-5'`)
-      .get() as { schedules_json: string };
-    store.db
-      .prepare(`UPDATE task_projections SET schedules_json = ? WHERE task_key = 'VIB-5'`)
-      .run(JSON.stringify(JSON.parse(raw.schedules_json), null, 2));
-
-    expect(tasksWithUnresolvedSchedules(store.db).map((r) => r.task_key)).toEqual([
-      "VIB-5",
-    ]);
-  });
-
-  it("ignores a task with no schedules at all", () => {
-    writeTask(store.dataRoot, store.slug, {
-      frontmatter: baseTaskFrontmatter("VIB-6", { ownerUserId: store.users.arda.id, stage: "impl" }),
-    });
-    rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
-    expect(tasksWithUnresolvedSchedules(store.db)).toEqual([]);
   });
 });
 
