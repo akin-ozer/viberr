@@ -599,9 +599,12 @@ describe("list_decisions briefs the person and decides nothing (ruling 251)", ()
   });
 
   it("a non-member is refused without learning the project exists", async () => {
-    await expect(
-      call(ids.nonMember, "list_decisions", { projectSlug: SLUG }, null),
-    ).resolves.toMatch(/\[denied\]/);
+    // CANARY: gate on `assertProjectAction` itself and the real project
+    // answers "Only project members can …" while an invented one is "not found".
+    const real = await call(ids.nonMember, "list_decisions", { projectSlug: SLUG }, null);
+    const invented = await call(ids.nonMember, "list_decisions", { projectSlug: "no-such-project" }, null);
+    expect(real).toBe(`[denied] No project "${SLUG}" is visible to you.`);
+    expect(real.replace(SLUG, "X")).toBe(invented.replace("no-such-project", "X"));
   });
 
   /**
@@ -1667,6 +1670,8 @@ describe("ruling 463: list_github_connections", () => {
       { fetchImpl: gh.fetchImpl },
     );
     expect(saved.status).toBe("saved");
+    // And one saved before the read existed, which holds no reach.
+    await connectOwner("unread-owner", "ghp_ctlunread0000000000000000000000000463");
 
     // deniz: an org MEMBER with no project at all, the same person the New
     // project dialog shows these connections to.
@@ -1706,8 +1711,7 @@ describe("ruling 463: list_github_connections", () => {
       },
     });
     // A connection saved before the read existed says how it gets one.
-    const unread = listed.connections.find((c) => c.owner !== "reach-owner");
-    if (unread) expect(unread.reach.status).toBe("not_read");
+    expect(listed.connections.find((c) => c.owner === "unread-owner")?.reach.status).toBe("not_read");
   });
 
   it("create_project's description sends the controller to list_github_connections first", async () => {
@@ -3476,12 +3480,14 @@ describe("update_agent_deployment refuses catalogued values by name (ruling 139)
   }
   async function refused(args: Record<string, JsonValue>): Promise<string> {
     const before = await projectMd();
-    const audits = listAuditEvents(app.db).length;
+    // The newest row, never a count: `listAuditEvents` reads at most 100 rows,
+    // and this file has written more than that before it gets here.
+    const newest = listAuditEvents(app.db, { limit: 1 })[0]?.id;
     const reply = await call(ids.projectAdmin, "update_agent_deployment", args);
     expect(reply.startsWith("[error] ")).toBe(true);
     expect(reply).toContain("Nothing was written");
     expect(await projectMd()).toBe(before);
-    expect(listAuditEvents(app.db)).toHaveLength(audits);
+    expect(listAuditEvents(app.db, { limit: 1 })[0]?.id).toBe(newest);
     return reply;
   }
 
@@ -3869,7 +3875,7 @@ describe("update_agent_deployment sets a deployment's persona (ruling 467)", () 
       profileId: "developer",
       persona: "A contributor's persona.",
     });
-    expect(contributor.startsWith("[error]") || contributor.startsWith("[denied]")).toBe(true);
+    expect(contributor).toBe("[denied] Only project admins can change agent capability policy.");
     expect(await personaOf("developer")).toBe(second);
 
     // CANARY: drop the empty check and "   " reads as "keep", answering [done].
