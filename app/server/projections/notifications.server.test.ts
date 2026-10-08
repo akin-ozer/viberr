@@ -34,7 +34,6 @@ import {
   markTaskNotificationsSeen,
   markTaskPacketApprovalRead,
   projectGithubLink,
-  proposalLink,
   taskDecisionLink,
   taskEventLink,
   taskRecommendationsLink,
@@ -586,7 +585,8 @@ describe("notification destinations + acceptance decisions (B-FD5/B-FD6)", () =>
     row("event", 9, taskEventLink(slug, "VIB-1", "2026-07-01T02:59:00.123Z"));
     row("decision", 8, taskDecisionLink(slug, "VIB-1"));
     row("recs", 7, taskRecommendationsLink(slug, "VIB-1"));
-    row("proposal", 6, proposalLink(slug, "kp-0123456789"));
+    // A proposal's row from before ruling 498 (no writer files one now).
+    row("proposal", 6, `/projects/${slug}/controller#proposal-kp-0123456789`);
     row("github", 5, projectGithubLink(slug), { taskKey: null });
     // Ruling 503: an epic's page, where the goal-chain anchor used to go.
     row("epic", 4, epicLink(slug, "epic-2"), { kind: "epic", taskKey: null });

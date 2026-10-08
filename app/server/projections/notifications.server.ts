@@ -20,7 +20,6 @@ import { isDocumentNavigation } from "~/server/http/single-fetch.server";
 import { decisionsRequiring } from "~/server/projections/decisions.server";
 import {
   decisionAnchor,
-  proposalAnchor,
   TASK_DECISION_ANCHOR,
   TASK_RECOMMENDATIONS_ANCHOR,
   timelineEventAnchor,
@@ -218,12 +217,6 @@ export function followEditedComment(
 /** The task's pending recommendations, each a decision to apply. */
 export function taskRecommendationsLink(projectSlug: string, taskKey: string): string {
   return `${taskPath(projectSlug, taskKey)}#${TASK_RECOMMENDATIONS_ANCHOR}`;
-}
-
-/** A knowledge-base proposal's entry on the project Controller page, where it
- *  is promoted or dismissed (ruling 483). */
-export function proposalLink(projectSlug: string, proposalId: string): string {
-  return `${projectPath(projectSlug)}/controller#${proposalAnchor(proposalId)}`;
 }
 
 /** The project's GitHub page: its connection, credential and pull requests. */
