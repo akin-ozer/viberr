@@ -6,11 +6,7 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { createTestDbContext } from "../../../test-support/test-db";
 import { listAuditEvents } from "../../../test-support/audit-log";
 import { insertUser } from "~/server/auth/user-store.server";
-import {
-  SEALED_STORES,
-  resealSecrets,
-  secretKeyRotationStatus,
-} from "./key-rotation.server";
+import { resealSecrets, secretKeyRotationStatus } from "./key-rotation.server";
 import { openSecret, sealSecret } from "./secret-box.server";
 
 /**
@@ -236,13 +232,14 @@ describe("SEALED_STORES covers every sealed store", () => {
       // …and this module, which re-seals all of them.
       "server/secrets/key-rotation.server.ts",
     ].sort());
-    expect(SEALED_STORES.map((s) => s.table).sort()).toEqual([
+    // The stores the operator's report counts (`npm run keys -- status`).
+    expect(secretKeyRotationStatus(ctx.makeDb()).stores.map((s) => s.store).sort()).toEqual([
       "github_pats",
       // R19-16: sign-in client secrets rotate with everything else — an
       // unregistered store would silently outlive a key rotation.
       "oauth_providers",
-      "org_mcp_servers",
-      // Ruling 469: `org_mcp_servers` twice — `cred_ref` and `oauth_ref`.
+      // Ruling 469: `org_mcp_servers` twice — `oauth_ref` and `cred_ref`.
+      "org_mcp_oauth",
       "org_mcp_servers",
       // Pass-25: the S3 audit-export secret access key.
       "s3_audit_config",
