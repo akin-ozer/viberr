@@ -480,7 +480,6 @@ describe("sessionContextTokens and codexRolloutRunStats", () => {
       compactions: 1,
       compactionEvents: [{ preTokens: 30_000, postTokens: null }],
     });
-    expect(codexRolloutRunStats(OWNER, older, null)!.compactionEvents[0]!.postTokens).not.toBe(0);
     // A compaction that is the run's LAST event (ruling 376): the request's
     // own line carries no prompt, but its total is the compacted context —
     // the post size and what the next resume replays.
