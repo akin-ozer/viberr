@@ -19,6 +19,7 @@ Before you read the notes, the brief or the writer's report, read the piece once
 
 - what you would pick out as not written by this person;
 - what reads as written by a machine: sections that all run on one skeleton, a description of a thing's parts where a person would have told you what happened, every sentence the same weight, a caveat on every claim, nobody in the text who thinks anything;
+- what reads as put together from files: a narrator who cites their own records ("as the log shows", "as I chose", "what I said that day was"), who quotes their own messages back, or who dates their own afternoon from commit times;
 - where you stopped caring.
 
 These are findings even when every fact is right. A piece that a reader picks out is not ready.
@@ -36,7 +37,7 @@ Check what the piece states. Do not research the subject again or re-measure wha
 
 ### 3. First person and invention
 
-Everything the person is made to say about what they did, saw, measured or think must be in their notes or their answers on this task. A fact about them taken from a public record is not their voice on it. An invented person, customer, anecdote or benchmark blocks.
+Everything the person is made to say about what they did, saw, measured or think must be in their notes or their answers on this task. A fact about them taken from a public record is not their voice on it: "I chose" or "I decided" on the strength of a record alone is the same defect, and the fix is the plain fact without "I", or the person's own answer. An invented person, customer, anecdote or benchmark blocks.
 
 ### 4. Code and commands
 

@@ -32,6 +32,10 @@ A fact you state from outside (a number, a quote, a version, a date, a name, how
 
 Anything in the first person about what they did, saw, measured, built or think comes from their notes or their answers on this task. Their public record (a commit, an earlier post, a talk listing) can give you facts about the work, stated as facts. It does not tell you why they did it or what they think now. For that you ask.
 
+**Tell it as they would.** What they told you goes into the piece in their voice, said plainly as theirs. Their notes and answers are your material, not quotations: do not quote the person to themselves, and do not introduce their own words with "what I said that day was". Quote them only where the exact words are the point of the passage.
+
+**Keep the evidence out of the narration.** Which record a sentence rests on belongs in your notes, never in the piece's voice. A person telling what they did does not write "as the log records", "as the commit shows" or "as I chose" about their own work. They say what happened. Where only a record shows what they did or decided, state the outcome as a plain fact about the thing, without "I", and list it in your note as theirs to confirm. Link a record in the piece only where its reader would want to open it.
+
 ## Asking
 
 A question costs the person time, and a piece with none of them in it reads like documentation. So ask once, in one batch, before you draft, and ask only what the person alone knows:

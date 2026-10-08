@@ -8,7 +8,7 @@ import { readProjectFile } from "~/server/files/project-writer.server";
 import { serializeProjectFile } from "~/server/files/project-file.server";
 import { rebuildPath } from "~/server/projections/rebuilder.server";
 import { runDemoSeed } from "../../../test-support/demo-seed";
-import { seedDefaultAgentAssets } from "./default-assets.server";
+import { seedDefaultAgentAssets, shippedCopyIsUnedited } from "./default-assets.server";
 import { ensureBaseAgentsDeployed } from "./ensure-base-agents.server";
 import {
   baseAgentDeployments,
@@ -221,6 +221,23 @@ describe("ruling 692: the library ships a Writer and an Editor", () => {
     // for a picture nobody could take.
     expect(editor).toContain("do not block on a picture nobody could take");
     expect(writer).toContain("Where you could not look, say so in your note.");
+    // Ruling 695: three readers out of three picked a piece whose facts all
+    // held, for a narrator who cited his own log and quoted his own messages.
+    // CANARY: drop either paragraph from the Writer's manual, or the cold
+    // read's line from the Editor's.
+    expect(writer).toContain("Their notes and answers are your material, not quotations: do not quote the person to themselves");
+    expect(writer).toContain("Which record a sentence rests on belongs in your notes, never in the piece's voice.");
+    expect(writer).toContain("state the outcome as a plain fact about the thing, without \"I\", and list it in your note as theirs to confirm");
+    expect(editor).toContain("what reads as put together from files: a narrator who cites their own records");
+    expect(editor).toContain("\"I chose\" or \"I decided\" on the strength of a record alone is the same defect");
+    // A store whose copy nobody edited takes the new text at its next boot.
+    // CANARY: remove either outgoing hash.
+    expect(
+      shippedCopyIsUnedited("skills/writer-expertise/SKILL.md", "7f3e87f2478e5c2b798d2b45884ff95f9e62f81f25faa5cefc92161bd1166244", {}),
+    ).toBe(true);
+    expect(
+      shippedCopyIsUnedited("skills/editor-expertise/SKILL.md", "26b0210af906fd9b5495af1f5b343654422cee54986f86808e6285c3508cf253", {}),
+    ).toBe(true);
     // Neither manual is about one kind of writing.
     expect(writer + editor).not.toMatch(/\bblog\b/i);
   });
