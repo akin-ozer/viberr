@@ -79,10 +79,10 @@ import { publishResourceUpdated } from "./resource-events.server";
  */
 
 /** How long a started sign-in waits for its callback. */
-export const MCP_OAUTH_PENDING_TTL_MS = 10 * 60_000;
+const MCP_OAUTH_PENDING_TTL_MS = 10 * 60_000;
 
 /** Where the authorization server sends the browser back (`app/routes.ts`). */
-export const MCP_OAUTH_CALLBACK_PATH = "/resources/mcp-oauth/callback";
+const MCP_OAUTH_CALLBACK_PATH = "/resources/mcp-oauth/callback";
 
 /**
  * The redirect URI this instance registers and sends: its public origin as

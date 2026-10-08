@@ -40,7 +40,7 @@ import type { McpFetch } from "./upstream.server";
  */
 
 /** How long one request to an authorization server may take. */
-export const OAUTH_REQUEST_TIMEOUT_MS = 15_000;
+const OAUTH_REQUEST_TIMEOUT_MS = 15_000;
 
 /** What Viberr keeps of an authorization server's metadata: the endpoints it
  *  calls and the capabilities it checked. */
@@ -92,7 +92,7 @@ export interface McpOAuthDiscovery {
 }
 
 /** A sign-in refused or failed, with the reason in words an admin can act on. */
-export class McpOAuthError extends Error {
+class McpOAuthError extends Error {
   readonly reason: string;
   /** False for a failure worth retrying as is: the authorization server was
    *  unreachable, slow or answered 5xx, so a refresh token may still be good. */

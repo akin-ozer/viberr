@@ -42,7 +42,7 @@ import { KB_REFRESH_MODES, type KbRefreshMode } from "./resources.server";
  */
 
 /** board.md's `format`: the file's kind and the version of its keys. */
-export const BOARD_FILE_FORMAT = "viberr-board/1";
+const BOARD_FILE_FORMAT = "viberr-board/1";
 /** What an export is named after its board: `release-train.viberr-board.zip`. */
 export const BOARD_FILE_EXTENSION = ".viberr-board.zip";
 /** The zip as uploaded. */

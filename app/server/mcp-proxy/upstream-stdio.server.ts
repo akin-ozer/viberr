@@ -24,7 +24,7 @@ import {
 } from "./upstream.server";
 
 /** The longest single JSON-RPC line a stdio server may print (10 MiB). */
-export const MCP_STDIO_MAX_LINE_BYTES = STDIO_DEFAULT_MAX_BUFFER_SIZE;
+const MCP_STDIO_MAX_LINE_BYTES = STDIO_DEFAULT_MAX_BUFFER_SIZE;
 
 /**
  * Ruling 461: a credentialed STDIO org server is started by the SERVER, never
@@ -48,7 +48,7 @@ export const MCP_STDIO_MAX_LINE_BYTES = STDIO_DEFAULT_MAX_BUFFER_SIZE;
  * of the listener: a line over the stdio limit stops that process, as the
  * SDK's own transport does, and fails its calls with the reason.
  */
-export class McpChildTransport implements Transport {
+class McpChildTransport implements Transport {
   onclose?: () => void;
   onerror?: (error: Error) => void;
   onmessage?: <T extends JSONRPCMessage>(message: T) => void;

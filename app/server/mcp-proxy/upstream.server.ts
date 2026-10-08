@@ -155,7 +155,7 @@ export class UpstreamReconnectNeeded extends UpstreamConnectError {
  * examples answer 400, and a legacy SSE server refuses a POST to its forgotten
  * session URL the same way.
  */
-export class UpstreamSessionLost extends UpstreamReconnectNeeded {
+class UpstreamSessionLost extends UpstreamReconnectNeeded {
   constructor(status: number) {
     super(`the server ended its MCP session (HTTP ${status})`);
     this.name = "UpstreamSessionLost";
