@@ -11,6 +11,7 @@ import {
 import type { FileActorRef } from "~/schemas/task-file.schema";
 import { readProjectFile } from "~/server/files/project-writer.server";
 import { readTaskFile } from "~/server/files/task-writer.server";
+import { upsertRun } from "~/server/runtimes/run-store.server";
 import { rebuildAll } from "~/server/projections/rebuilder.server";
 import { recordAgentCompletion } from "./agent-completion.server";
 
@@ -84,14 +85,20 @@ describe("recordAgentCompletion notifies the humans the report @tags (P13-RT-01)
     const runId = "run_dedup";
     const startedAt = "2026-08-31T00:00:00.000Z";
     // A real run row so the mid-run-comment dedup can bound on started_at.
-    store.db
-      .prepare(
-        `INSERT INTO agent_runs (id, task_key, project_slug, thread_id, role, kind,
-           backend, model, state, started_at, created_at, updated_at, agent_profile_id)
-         VALUES (?, 'VIB-1', ?, 'th_dedup', 'Docs Writer', 'primary',
-           'codex', 'gpt-test', 'finished', ?, ?, ?, 'docs-writer')`,
-      )
-      .run(runId, store.slug, startedAt, startedAt, startedAt);
+    upsertRun(store.db, {
+      id: runId,
+      projectSlug: store.slug,
+      taskKey: "VIB-1",
+      threadId: "th_dedup",
+      role: "Docs Writer",
+      kind: "primary",
+      backend: "codex",
+      model: "gpt-test",
+      sdk: "codex",
+      agentProfileId: "docs-writer",
+      state: "finished",
+      startedAt,
+    });
 
     // The agent's mid-run comment — the body its report repeats. Tags NOBODY, so
     // the dispatch cc below is a genuinely NEW mention (not a re-notify).

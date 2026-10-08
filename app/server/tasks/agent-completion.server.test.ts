@@ -34,7 +34,13 @@ import { logger } from "~/server/logging/logger.server";
 import { listAuditEvents } from "../../../test-support/audit-log";
 import { rebuildAll } from "~/server/projections/rebuilder.server";
 import { startRun } from "~/server/runtimes/run-service.server";
-import { getRun, insertRunLine, patchRun, upsertRun } from "~/server/runtimes/run-store.server";
+import {
+  getRun,
+  insertRunLine,
+  patchRun,
+  upsertRun,
+  type InsertRunInput,
+} from "~/server/runtimes/run-store.server";
 import {
   drainRunCompletions,
   installFakeRuntime,
@@ -44,6 +50,7 @@ import { connectFakeBackend } from "../../../test-support/backend-credentials";
 import { pollUntil } from "../../../test-support/polling";
 import { diskFoldsUnicodeForms } from "../../../test-support/unicode-forms";
 import { emptyRunFailureFacts } from "~/shared/run-failure";
+import type { LogLine } from "~/features/runtime/runtime-types";
 import { stageOutcome } from "./agent-outcome.server";
 import { OPERATOR_NOTIFY_FROM } from "./task-mutation.server";
 import { relayToTask, takeFromTask, type RelayAuthor } from "./task-relay.server";
@@ -234,6 +241,37 @@ function complete(
     },
     { id: runId, state },
   );
+}
+
+/** A run row on VIB-1: by default the `developer` profile's Codex run that
+ *  ended in error; `over` changes what differs. */
+function runRow(id: string, over: Partial<InsertRunInput> = {}): void {
+  upsertRun(store.db, {
+    id,
+    projectSlug: store.slug,
+    taskKey: "VIB-1",
+    threadId: `t-${id}`,
+    role: "Developer",
+    kind: "primary",
+    backend: "codex",
+    model: "gpt-5.5",
+    sdk: "codex",
+    agentName: "dev",
+    agentProfileId: "developer",
+    state: "error",
+    ...over,
+  });
+}
+
+/** Log run `runId`'s one line: the error its failure is read from. */
+function endedWith(runId: string, display: Omit<LogLine, "t" | "ev">): void {
+  insertRunLine(store.db, {
+    runId,
+    seq: 0,
+    occurredAt: new Date().toISOString(),
+    raw: "",
+    display: { t: "00:00:00", ev: "err", ...display },
+  });
 }
 
 beforeEach(async () => {
@@ -1577,15 +1615,7 @@ describe("applyAgentCompletionEffects (the shared effects)", () => {
     const runId = await finishedRunWith(
       `Checked the live form; the field list is in \`${cited}\`.\nVerdict: approve — the rows match.`,
     );
-    const now = new Date().toISOString();
-    store.db
-      .prepare(
-        `INSERT INTO agent_runs (id, task_key, project_slug, thread_id, role, kind,
-           backend, model, state, started_at, created_at, updated_at, agent_profile_id)
-         VALUES ('run_sibling', 'VIB-1', ?, 'th_sibling', 'Developer', 'primary',
-           'claude', 'sonnet', 'running', ?, ?, ?, 'developer')`,
-      )
-      .run(store.slug, now, now, now);
+    insertSiblingRun("primary", null);
     const dir = saveInRunWindow(runId, [cited, uncited, screenshot]);
     await complete(runId);
     for (const name of [cited, uncited, screenshot]) expect(existsSync(path.join(dir, name))).toBe(true);
@@ -1598,15 +1628,15 @@ describe("applyAgentCompletionEffects (the shared effects)", () => {
 
   /** A sibling run row on VIB-1, of `kind`, live or finished at `finishedAt`. */
   function insertSiblingRun(kind: "primary" | "operator", finishedAt: string | null): void {
-    const now = new Date().toISOString();
-    store.db
-      .prepare(
-        `INSERT INTO agent_runs (id, task_key, project_slug, thread_id, role, kind,
-           backend, model, state, started_at, created_at, updated_at, agent_profile_id, finished_at)
-         VALUES ('run_sibling', 'VIB-1', ?, 'th_sibling', 'Workflow Researcher', ?,
-           'codex', 'gpt-6-luna', ?, ?, ?, ?, 'developer', ?)`,
-      )
-      .run(store.slug, kind, finishedAt ? "finished" : "running", now, now, now, finishedAt);
+    runRow("run_sibling", {
+      threadId: "th_sibling",
+      role: "Workflow Researcher",
+      kind,
+      model: "gpt-6-luna",
+      state: finishedAt ? "finished" : "running",
+      startedAt: new Date().toISOString(),
+      finishedAt,
+    });
   }
 
   it.each([
@@ -2534,17 +2564,10 @@ describe("applyAgentCompletionEffects (the shared effects)", () => {
     let delivererRuns = 0;
     const delivererRan = (): void => {
       delivererRuns += 1;
-      upsertRun(store.db, {
-        id: `run_dev_${delivererRuns}`,
-        projectSlug: store.slug,
-        taskKey: "VIB-1",
-        threadId: `dev-${delivererRuns}`,
-        role: "Developer",
-        kind: "primary",
+      runRow(`run_dev_${delivererRuns}`, {
         backend: "claude",
         model: "sonnet",
         sdk: "claude",
-        agentName: "dev",
         agentProfileId: "dev",
         state: "finished",
       });
@@ -2664,17 +2687,10 @@ describe("applyAgentCompletionEffects (the shared effects)", () => {
     let delivererRuns = 0;
     const rework = (): void => {
       delivererRuns += 1;
-      upsertRun(store.db, {
-        id: `run_rework_${delivererRuns}`,
-        projectSlug: store.slug,
-        taskKey: "VIB-1",
-        threadId: `rework-${delivererRuns}`,
-        role: "Developer",
-        kind: "primary",
+      runRow(`run_rework_${delivererRuns}`, {
         backend: "claude",
         model: "sonnet",
         sdk: "claude",
-        agentName: "dev",
         agentProfileId: "dev",
         state: "finished",
       });
@@ -2699,35 +2715,14 @@ describe("applyAgentCompletionEffects (the shared effects)", () => {
     const erroredRework = (kind: "quota" | "idle_timeout"): void => {
       delivererRuns += 1;
       const id = `run_rework_${delivererRuns}`;
-      upsertRun(store.db, {
-        id,
-        projectSlug: store.slug,
-        taskKey: "VIB-1",
-        threadId: `rework-${delivererRuns}`,
-        role: "Developer",
-        kind: "primary",
-        backend: "codex",
-        model: "gpt-5.6-luna",
-        sdk: "codex",
-        agentName: "dev",
-        agentProfileId: "dev",
-        state: "error",
-      });
-      insertRunLine(store.db, {
-        runId: id,
-        seq: 0,
-        occurredAt: new Date().toISOString(),
-        raw: "",
-        display: {
-          t: "00:00:01",
-          ev: "err",
-          tag: `run·error·${kind}`,
-          text:
-            kind === "quota"
-              ? "Codex refused the agent run: the account is over its usage limit."
-              : "The run produced nothing for the whole idle window.",
-          failure: emptyRunFailureFacts(kind),
-        },
+      runRow(id, { model: "gpt-5.6-luna", agentProfileId: "dev" });
+      endedWith(id, {
+        tag: `run·error·${kind}`,
+        text:
+          kind === "quota"
+            ? "Codex refused the agent run: the account is over its usage limit."
+            : "The run produced nothing for the whole idle window.",
+        failure: emptyRunFailureFacts(kind),
       });
     };
     /** A verdict with NO rework dispatched before it (`review` always reworks). */
@@ -3778,30 +3773,10 @@ describe("applyAgentCompletionEffects (the shared effects)", () => {
     // dropped the watcher notification. Here the run row + its error log line
     // exist before applyAgentCompletionEffects reads them.
     const runId = "run_f8_probe";
-    upsertRun(store.db, {
-      id: runId,
-      projectSlug: store.slug,
-      taskKey: "VIB-1",
-      threadId: "t-f8",
-      role: "Developer",
-      kind: "primary",
-      agentProfileId: "developer",
-      backend: "codex",
-      model: "gpt-5.5",
-      sdk: "codex",
-      state: "error",
-    });
-    insertRunLine(store.db, {
-      runId,
-      seq: 0,
-      occurredAt: "2026-07-12T10:00:00.000Z",
-      raw: JSON.stringify({ ev: "err", tag: "turn.failed" }),
-      display: {
-        t: "10:00:00",
-        ev: "err",
-        tag: "turn.failed",
-        text: "You've hit your usage limit. Upgrade to Plus to continue using Codex.",
-      },
+    runRow(runId);
+    endedWith(runId, {
+      tag: "turn.failed",
+      text: "You've hit your usage limit. Upgrade to Plus to continue using Codex.",
     });
     await markWaitingAgent(store.db, { dataRoot: store.dataRoot }, store.slug, "VIB-1");
     await complete(
@@ -3892,30 +3867,10 @@ describe("applyAgentCompletionEffects (the shared effects)", () => {
 
     deployOperator();
     const runId = "run_v2_prefsplit";
-    upsertRun(store.db, {
-      id: runId,
-      projectSlug: store.slug,
-      taskKey: "VIB-1",
-      threadId: "t-v2",
-      role: "Developer",
-      kind: "primary",
-      agentProfileId: "developer",
-      backend: "codex",
-      model: "gpt-5.5",
-      sdk: "codex",
-      state: "error",
-    });
-    insertRunLine(store.db, {
-      runId,
-      seq: 0,
-      occurredAt: "2026-07-12T10:00:00.000Z",
-      raw: JSON.stringify({ ev: "err", tag: "turn.failed" }),
-      display: {
-        t: "10:00:00",
-        ev: "err",
-        tag: "turn.failed",
-        text: "You've hit your usage limit. Upgrade to Plus to continue using Codex.",
-      },
+    runRow(runId);
+    endedWith(runId, {
+      tag: "turn.failed",
+      text: "You've hit your usage limit. Upgrade to Plus to continue using Codex.",
     });
     await markWaitingAgent(store.db, { dataRoot: store.dataRoot }, store.slug, "VIB-1");
     await complete(
@@ -3970,33 +3925,17 @@ describe("applyAgentCompletionEffects (the shared effects)", () => {
      */
     writeReviewTask({ validation: "changed" });
     const runId = "run_333_cut";
-    upsertRun(store.db, {
-      id: runId,
-      projectSlug: store.slug,
-      taskKey: "VIB-1",
-      threadId: "t-333",
-      role: "Developer",
-      kind: "primary",
-      agentProfileId: "developer",
+    runRow(runId, {
       backend: "claude",
       model: "opus",
       sdk: "claude",
-      state: "error",
       // The one fact the sentence contradicted, already on the row.
       turns: 48,
     });
-    insertRunLine(store.db, {
-      runId,
-      seq: 0,
-      occurredAt: "2026-09-07T10:00:00.000Z",
-      raw: JSON.stringify({ ev: "err", tag: "run·error·auth" }),
-      display: {
-        t: "10:00:00",
-        ev: "err",
-        tag: "run·error·auth",
-        text: "Claude refused the run: the provider rejected the credential.",
-        failure: { ...emptyRunFailureFacts("auth"), apiErrorStatus: 401 },
-      },
+    endedWith(runId, {
+      tag: "run·error·auth",
+      text: "Claude refused the run: the provider rejected the credential.",
+      failure: { ...emptyRunFailureFacts("auth"), apiErrorStatus: 401 },
     });
     await markWaitingAgent(store.db, { dataRoot: store.dataRoot }, store.slug, "VIB-1");
     await complete(
@@ -4025,36 +3964,16 @@ describe("applyAgentCompletionEffects (the shared effects)", () => {
     // `redirect` recommended returns (the option assertions fail).
     deployOperator();
     const runId = "run_130b_quota";
-    upsertRun(store.db, {
-      id: runId,
-      projectSlug: store.slug,
-      taskKey: "VIB-1",
-      threadId: "t-130b",
-      role: "Developer",
-      kind: "primary",
-      agentProfileId: "developer",
-      backend: "claude",
-      model: "opus",
-      sdk: "claude",
-      state: "error",
-    });
-    insertRunLine(store.db, {
-      runId,
-      seq: 0,
-      occurredAt: "2026-09-07T10:00:00.000Z",
-      raw: JSON.stringify({ ev: "err", tag: "run·error·quota" }),
-      display: {
-        t: "10:00:00",
-        ev: "err",
-        tag: "run·error·quota",
-        text: "Claude refused the run: the five-hour usage window is spent.",
-        failure: {
-          ...emptyRunFailureFacts("quota"),
-          windowRejected: true,
-          window: "five_hour",
-          resetsAt: "2026-09-07T11:50:00.000Z",
-          apiErrorStatus: 429,
-        },
+    runRow(runId, { backend: "claude", model: "opus", sdk: "claude" });
+    endedWith(runId, {
+      tag: "run·error·quota",
+      text: "Claude refused the run: the five-hour usage window is spent.",
+      failure: {
+        ...emptyRunFailureFacts("quota"),
+        windowRejected: true,
+        window: "five_hour",
+        resetsAt: "2026-09-07T11:50:00.000Z",
+        apiErrorStatus: 429,
       },
     });
     await markWaitingAgent(store.db, { dataRoot: store.dataRoot }, store.slug, "VIB-1");
@@ -4112,31 +4031,11 @@ describe("applyAgentCompletionEffects (the shared effects)", () => {
     // …" followed by "No changes were delivered." — a cap reads as a failure.
     deployOperator();
     const runId = "run_175_budget";
-    upsertRun(store.db, {
-      id: runId,
-      projectSlug: store.slug,
-      taskKey: "VIB-1",
-      threadId: "t-175",
-      role: "Developer",
-      kind: "primary",
-      agentProfileId: "developer",
-      backend: "claude",
-      model: "opus",
-      sdk: "claude",
-      state: "error",
-    });
-    insertRunLine(store.db, {
-      runId,
-      seq: 0,
-      occurredAt: "2026-09-11T10:00:00.000Z",
-      raw: JSON.stringify({ ev: "err", tag: "run·error·max_budget" }),
-      display: {
-        t: "10:00:00",
-        ev: "err",
-        tag: "run·error·max_budget",
-        text: "The run reached its $0.50 spending cap after spending $0.52 and was cut off.",
-        failure: { ...emptyRunFailureFacts("max_budget"), spendCapUsd: 0.5, spentUsd: 0.52 },
-      },
+    runRow(runId, { backend: "claude", model: "opus", sdk: "claude" });
+    endedWith(runId, {
+      tag: "run·error·max_budget",
+      text: "The run reached its $0.50 spending cap after spending $0.52 and was cut off.",
+      failure: { ...emptyRunFailureFacts("max_budget"), spendCapUsd: 0.5, spentUsd: 0.52 },
     });
     await markWaitingAgent(store.db, { dataRoot: store.dataRoot }, store.slug, "VIB-1");
     await complete(
@@ -4163,31 +4062,11 @@ describe("applyAgentCompletionEffects (the shared effects)", () => {
   it("ruling 595: a specialist run the idle guard stopped opens a stall packet that recommends running it again, in the leaf's words", async () => {
     deployOperator();
     const runId = "run_595_hung";
-    upsertRun(store.db, {
-      id: runId,
-      projectSlug: store.slug,
-      taskKey: "VIB-1",
-      threadId: "t-595",
-      role: "Developer",
-      kind: "primary",
-      agentProfileId: "developer",
-      backend: "codex",
-      model: "gpt-6-luna",
-      sdk: "codex",
-      state: "error",
-    });
-    insertRunLine(store.db, {
-      runId,
-      seq: 0,
-      occurredAt: "2026-09-29T19:40:56.000Z",
-      raw: JSON.stringify({ ev: "err", tag: "error·idle_timeout" }),
-      display: {
-        t: "19:40:56",
-        ev: "err",
-        tag: "error·idle_timeout",
-        text: "Codex stopped after 900000 ms without producing an event or writing to its session.",
-        failure: emptyRunFailureFacts("idle_timeout"),
-      },
+    runRow(runId, { model: "gpt-6-luna" });
+    endedWith(runId, {
+      tag: "error·idle_timeout",
+      text: "Codex stopped after 900000 ms without producing an event or writing to its session.",
+      failure: emptyRunFailureFacts("idle_timeout"),
     });
     await markWaitingAgent(store.db, { dataRoot: store.dataRoot }, store.slug, "VIB-1");
     await complete(
@@ -4226,28 +4105,10 @@ describe("applyAgentCompletionEffects (the shared effects)", () => {
     // re-run and the loop comes back.
     deployOperator();
     const runId = "run_598_loop";
-    upsertRun(store.db, {
-      id: runId,
-      projectSlug: store.slug,
-      taskKey: "VIB-1",
-      threadId: "t-598",
-      role: "Developer",
-      kind: "primary",
-      agentProfileId: "developer",
-      backend: "codex",
-      model: "gpt-6-luna",
-      sdk: "codex",
-      state: "error",
-    });
+    runRow(runId, { model: "gpt-6-luna" });
     const sentence =
       'Viberr stopped the run: it sent `correct_knowledge_doc` (viberr_knowledge) with the same arguments 100 times in 2 s and got the same answer each time: "[noop] The passage you sent as `replaces` stands 3 times in golden/sample-03.md. Nothing was written. Send more of it, so it stands once." Sending it again cannot change the answer; the call has to change.';
-    insertRunLine(store.db, {
-      runId,
-      seq: 0,
-      occurredAt: "2026-09-30T04:16:40.000Z",
-      raw: JSON.stringify({ type: "error", source: "viberr", reason: "tool_loop", message: sentence }),
-      display: { t: "04:16:40", ev: "err", tag: "run·error·tool_loop", text: sentence, failure: emptyRunFailureFacts("tool_loop") },
-    });
+    endedWith(runId, { tag: "run·error·tool_loop", text: sentence, failure: emptyRunFailureFacts("tool_loop") });
     await markWaitingAgent(store.db, { dataRoot: store.dataRoot }, store.slug, "VIB-1");
     await complete(
       runId,
@@ -4277,30 +4138,10 @@ describe("applyAgentCompletionEffects (the shared effects)", () => {
     // NO operator deployed on this project (unlike the test above), so
     // `operatorOpenPacket` refuses and no packet notification is written.
     const runId = "run_t13_nopacket";
-    upsertRun(store.db, {
-      id: runId,
-      projectSlug: store.slug,
-      taskKey: "VIB-1",
-      threadId: "t-t13",
-      role: "Developer",
-      kind: "primary",
-      agentProfileId: "developer",
-      backend: "codex",
-      model: "gpt-5.5",
-      sdk: "codex",
-      state: "error",
-    });
-    insertRunLine(store.db, {
-      runId,
-      seq: 0,
-      occurredAt: "2026-07-12T10:00:00.000Z",
-      raw: JSON.stringify({ ev: "err", tag: "turn.failed" }),
-      display: {
-        t: "10:00:00",
-        ev: "err",
-        tag: "turn.failed",
-        text: "You've hit your usage limit. Upgrade to Plus to continue using Codex.",
-      },
+    runRow(runId);
+    endedWith(runId, {
+      tag: "turn.failed",
+      text: "You've hit your usage limit. Upgrade to Plus to continue using Codex.",
     });
     await markWaitingAgent(store.db, { dataRoot: store.dataRoot }, store.slug, "VIB-1");
     await complete(
@@ -4737,33 +4578,16 @@ describe("a refusal in a window the owner already decided (ruling 602)", () => {
   function refusedRun(taskKey: string): string {
     seq += 1;
     const id = `run_refused_${seq}`;
-    upsertRun(store.db, {
-      id,
-      projectSlug: store.slug,
+    runRow(id, {
       taskKey,
-      threadId: `refused-${seq}`,
-      role: "Developer",
-      kind: "primary",
-      backend: "codex",
       model: "gpt-5.6-luna",
-      sdk: "codex",
-      agentName: "dev",
       agentProfileId: "dev",
-      state: "error",
       credentialUserId: store.users.arda.id,
     });
-    insertRunLine(store.db, {
-      runId: id,
-      seq: 0,
-      occurredAt: new Date().toISOString(),
-      raw: "",
-      display: {
-        t: "00:00:01",
-        ev: "err",
-        tag: "run·error·quota",
-        text: "Codex refused the agent run: the account is over its usage limit.",
-        failure: { ...emptyRunFailureFacts("quota"), resetsAt },
-      },
+    endedWith(id, {
+      tag: "run·error·quota",
+      text: "Codex refused the agent run: the account is over its usage limit.",
+      failure: { ...emptyRunFailureFacts("quota"), resetsAt },
     });
     return id;
   }
