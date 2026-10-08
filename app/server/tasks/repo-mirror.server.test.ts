@@ -554,10 +554,14 @@ describe("mirrorGitEnv", () => {
     try {
       expect(anonymous.env.GIT_ASKPASS).toBeUndefined();
       expect(anonymous.env.SSH_ASKPASS).toBeUndefined();
-      // The rest of the hardening the manual object carried is still there.
+      // The rest of the hardening the manual object carried is still there,
+      // after whatever GIT_CONFIG_* entries the host carries.
       expect(anonymous.env.GIT_TERMINAL_PROMPT).toBe("0");
-      expect(anonymous.env.GIT_CONFIG_KEY_0).toBe("credential.helper");
-      expect(anonymous.env.GIT_CONFIG_VALUE_0).toBe("");
+      const n = Number(anonymous.env.GIT_CONFIG_COUNT);
+      expect([anonymous.env[`GIT_CONFIG_KEY_${n - 3}`], anonymous.env[`GIT_CONFIG_VALUE_${n - 3}`]]).toEqual([
+        "credential.helper",
+        "",
+      ]);
     } finally {
       anonymous.dispose();
     }

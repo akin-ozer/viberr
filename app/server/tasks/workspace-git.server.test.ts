@@ -422,6 +422,9 @@ describe("the environment of the server's git (R-seams-1)", () => {
     // Canary: build `serverGitEnv` on `process.env` and the secret survives.
     const secret = process.env.VIBERR_SECRET_ENCRYPTION_KEY;
     expect(secret).toBeTruthy();
+    // The server's entries ride after whatever GIT_CONFIG_* entries the host exports.
+    const inherited = Number(process.env.GIT_CONFIG_COUNT ?? 0);
+    const hostKeys = Object.keys(process.env).filter((k) => k.startsWith("GIT_CONFIG_")).sort();
     const env = serverGitEnv();
     expect(env.VIBERR_SECRET_ENCRYPTION_KEY).toBeUndefined();
     expect(Object.values(env)).not.toContain(secret);
@@ -431,20 +434,20 @@ describe("the environment of the server's git (R-seams-1)", () => {
     );
     expect(config).toMatchObject({ "core.hooksPath": "/dev/null", "core.fsmonitor": "false" });
     // Only the server's git gets them: an agent's own base keeps its hooks.
-    expect(process.env.GIT_CONFIG_COUNT).toBeUndefined();
-    expect(Object.keys(filteredSpawnEnv()).filter((k) => k.startsWith("GIT_CONFIG_"))).toEqual([]);
+    expect(Number(process.env.GIT_CONFIG_COUNT ?? 0)).toBe(inherited);
+    expect(Object.keys(filteredSpawnEnv()).filter((k) => k.startsWith("GIT_CONFIG_")).sort()).toEqual(hostKeys);
 
     // The credentialed git keeps the helper reset first and adds the same two.
     const askpass = createGitHubAskpassEnv({ token: TOKEN });
     try {
       expect(askpass.env.VIBERR_SECRET_ENCRYPTION_KEY).toBeUndefined();
-      expect(askpass.env.GIT_CONFIG_KEY_0).toBe("credential.helper");
-      expect(askpass.env.GIT_CONFIG_VALUE_0).toBe("");
-      expect(askpass.env.GIT_CONFIG_COUNT).toBe("3");
-      expect([askpass.env.GIT_CONFIG_KEY_1, askpass.env.GIT_CONFIG_KEY_2]).toEqual([
+      expect(askpass.env.GIT_CONFIG_COUNT).toBe(String(inherited + 3));
+      expect([0, 1, 2].map((i) => askpass.env[`GIT_CONFIG_KEY_${inherited + i}`])).toEqual([
+        "credential.helper",
         "core.hooksPath",
         "core.fsmonitor",
       ]);
+      expect(askpass.env[`GIT_CONFIG_VALUE_${inherited}`]).toBe("");
     } finally {
       askpass.dispose();
     }
