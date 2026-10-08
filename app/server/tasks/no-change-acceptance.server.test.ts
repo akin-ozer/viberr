@@ -54,7 +54,6 @@ import { resolveOperatorAuthority } from "./operator-authority.server";
 // the acceptance merge is a typed double injected through the ctx `deps` bag.
 import type {
   mergeTaskPr,
-  MergeTaskPrResult,
 } from "~/server/github/github-reconciler.server";
 import { createPat, setProjectCredential } from "~/server/secrets/pat-store.server";
 
@@ -281,7 +280,7 @@ beforeEach(() => {
   // only the fields of the arm it lands in (task-acceptance.server.ts) — the
   // `no_pr` arm's `taskKey` is never read, so it is left off deliberately: the
   // no-merge case below compares this whole recorded value.
-  mergeMock.mockResolvedValue({ status: "no_pr" } as MergeTaskPrResult);
+  mergeMock.mockResolvedValue({ status: "no_pr" } as Awaited<ReturnType<typeof mergeTaskPr>>);
   remote();
   installFakeRuntime();
 });

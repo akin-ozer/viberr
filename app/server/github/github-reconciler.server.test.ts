@@ -53,7 +53,7 @@ import {
   reconcileProject,
   reconcileTask,
   resolveRemoteBranchCollision,
-  type OperatorWake,
+  type GithubActionContext,
 } from "./github-reconciler.server";
 
 const ctx = createTestDbContext();
@@ -3411,7 +3411,13 @@ describe("ruling 475 (F40-55): a merge re-checks its siblings, and a flip to con
   /** One recorded wake: which task, which trigger. */
   function wakeRecorder() {
     const wakes: string[] = [];
-    const wakeOperator: OperatorWake = async (_db, _ctx, _slug, taskKey, trigger) => {
+    const wakeOperator: NonNullable<GithubActionContext["wakeOperator"]> = async (
+      _db,
+      _ctx,
+      _slug,
+      taskKey,
+      trigger,
+    ) => {
       wakes.push(`${taskKey}:${trigger}`);
     };
     return { wakes, wakeOperator };

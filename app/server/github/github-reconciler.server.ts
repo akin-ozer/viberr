@@ -136,7 +136,7 @@ import { countLabel } from "~/shared/text/plural";
  * an open PR to conflicting). Typed here rather than imported so the
  * task-action-core dependency stays the runtime-only dynamic import it already is.
  */
-export type OperatorWake = (
+type OperatorWake = (
   db: DatabaseSync,
   ctx: { dataRoot?: string },
   projectSlug: string,
@@ -2090,7 +2090,7 @@ export async function reconcileProject(
 
 // ------------------------------------------------------------------ merge
 
-export type MergeTaskPrResult =
+type MergeTaskPrResult =
   | { status: "merged"; prNumber: number; sha: string | null }
   | { status: "task_not_found"; taskKey: string }
   | { status: "no_pr"; taskKey: string }
