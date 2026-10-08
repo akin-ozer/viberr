@@ -791,8 +791,8 @@ describe("openTaskPr", () => {
     expect(gh.callsTo(`POST ${REPO_PATH}/pulls`)).toHaveLength(0);
   });
 
-  /** Ruling 160 (pass 35, F35-11): a closed-unmerged cache, with or without a
-   *  person's answer on it. The three tests below share this seed. */
+  /** Ruling 160 (pass 35, F35-11): a closed-unmerged cache, with an unanswered
+   *  closure record or none. The two tests below share this seed. */
   function seedClosedCache(closure: NonNullable<PrRef["closure"]> | null) {
     const store = setupTestStore(ctx);
     const pr: NonNullable<TaskFrontmatter["pr"]> = {
@@ -892,27 +892,6 @@ describe("openTaskPr", () => {
     expect(again).toEqual({ status: "closed_by_human", prNumber: 7, closedBy: "akin-ozer" });
     expect(gh.calls).toHaveLength(before);
     expect(divergence()).toHaveLength(1);
-  });
-
-  it("ruling 160: a closed cache whose closure a person ANSWERED clears the way for a fresh PR", async () => {
-    const store = seedClosedCache({
-      at: "2026-09-06T19:33:19.000Z",
-      by: "akin-ozer",
-      answered: { at: "2026-09-06T19:40:00.000Z", byUserId: "u_arda" },
-    });
-    const gh = fakeGithubFetch({
-      [`GET ${REPO_PATH}/pulls`]: { body: [] },
-      [`POST ${REPO_PATH}/pulls`]: {
-        status: 201,
-        body: { number: 43, html_url: "https://github.com/akin-ozer/viberr/pull/43", title: "[VIB-201] Attach execution workspace to task runtime", state: "open" },
-      },
-    });
-    const res = await openPr(store, gh);
-    expect(res).toMatchObject({ status: "ok", prNumber: 43, created: true });
-    const fm = readTaskFile({ projectSlug: store.slug, taskKey: "VIB-201", dataRoot: store.dataRoot })!.parsed.frontmatter;
-    // A different PR never inherits the old one's closure.
-    expect(fm.pr).toMatchObject({ number: 43, state: "review" });
-    expect(fm.pr?.closure).toBeUndefined();
   });
 
   it("ruling 160: a cached 'review' PR that GitHub reports CLOSED unmerged is a person's decision: recorded through the reconciler, surfaced once, no fresh PR", async () => {
@@ -1115,47 +1094,6 @@ describe("openTaskPr", () => {
     });
   });
 
-  it("P13-D-28: a DIFFERENT (freshly opened) PR starts with no checks and no review", async () => {
-    const store = setupWithBranch();
-    writeTask(store.dataRoot, store.slug, {
-      frontmatter: baseTaskFrontmatter("VIB-201", {
-        title: "Attach execution workspace to task runtime",
-        stage: "review",
-        branch: BRANCH,
-        pr: {
-          number: 42,
-          state: "merged",
-          title: "old merged PR",
-          checks: { total: 3, passing: 3, failing: 0, pending: 0 },
-          review: "approved",
-        },
-      }),
-    });
-    rebuildAll(store.db, { dataRoot: store.dataRoot });
-    const gh = fakeGithubFetch({
-      [`GET ${REPO_PATH}/pulls`]: { body: [] },
-      [`POST ${REPO_PATH}/pulls`]: {
-        status: 201,
-        body: {
-          number: 51,
-          html_url: "https://github.com/akin-ozer/viberr/pull/51",
-          title: "[VIB-201] Attach execution workspace to task runtime",
-          state: "open",
-        },
-      },
-    });
-    await openPr(store, gh);
-    const fm = readTaskFile({
-      projectSlug: store.slug,
-      taskKey: "VIB-201",
-      dataRoot: store.dataRoot,
-    })!.parsed.frontmatter;
-    // Ruling 474: the one thing a fresh PR does start with is the record of
-    // the body it was opened with.
-    expect(Object.keys(fm.pr!)).toEqual(["number", "state", "title", "bodyWritten"]);
-    expect(fm.pr).toMatchObject({ number: 51, state: "review" });
-  });
-
   it("passes the project's context failure through when no PAT is bound (no throw, typed result)", async () => {
     const store = setupTestStore(ctx);
     writeTask(store.dataRoot, store.slug, {
@@ -1206,7 +1144,7 @@ describe("ruling 135: writePrToTask and the PR head", () => {
     expect(fm.pr).toEqual({ number: 42, state: "review", title: "new title", headSha: "9".repeat(40) });
   });
 
-  it("a DIFFERENT PR does not inherit the old head", async () => {
+  it("a DIFFERENT PR inherits nothing from the old record: head, closure, checks or review (rulings 135, 160; P13-D-28)", async () => {
     const store = setupWithBranch();
     writeTask(store.dataRoot, store.slug, {
       frontmatter: baseTaskFrontmatter("VIB-201", {
@@ -1214,12 +1152,15 @@ describe("ruling 135: writePrToTask and the PR head", () => {
         stage: "review",
         branch: BRANCH,
         // Ruling 160: a closed cache clears the way only once a person has
-        // answered the closure; the fresh PR inherits neither the head nor it.
+        // answered the closure. The fresh PR inherits none of the old record:
+        // not the head, the closure, or the reconciler-owned checks and review.
         pr: {
           number: 7,
           state: "closed",
           title: "[VIB-201] abandoned",
           headSha: "1".repeat(40),
+          checks: { total: 3, passing: 3, failing: 0, pending: 0 },
+          review: "approved",
           closure: { at: "2026-09-06T19:33:19.000Z", by: "akin-ozer", answered: { at: "2026-09-06T19:40:00.000Z", byUserId: "u_arda" } },
         },
       }),
