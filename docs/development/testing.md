@@ -317,10 +317,9 @@ Every test under `app/shared/docs/`, and the ones elsewhere that read a doc or a
   entry; the `## Packet` section enumerates `PACKET_OPTION_KINDS` in schema order under a
   "The N kinds:" marker, and every count it states (outside quotation marks) equals the
   schema's length.
-- `app/shared/docs/rulings-supersession.test.ts` (ruling 341):
-  `docs/architecture/decisions.md` still states its own supersession convention, and
-  every ruling that a later one says it supersedes, replaces, retires, reverses or
-  narrows carries a marker in its own text.
+- `app/shared/docs/rulings-supersession.test.ts` (ruling 341): every ruling in
+  `docs/architecture/decisions.md` that a later one says it supersedes, replaces,
+  retires, reverses or narrows carries a marker in its own text.
 - `app/shared/docs/runbook-db-read.test.ts` (ruling 158): `docs/operations/runbook.md`
   and `docs/operations/deployment.md` never run `sqlite3` against
   `state/projection.sqlite` or open it with `DatabaseSync(` in a bash block; the runbook
@@ -603,20 +602,20 @@ comment quotes the same title).
 
 | Spec | Tests | Covers |
 |---|---|---|
-| `01-home-board.spec.ts` | 6 | board columns and a real click through to VIB-142, drag-and-drop reorder and cross-stage moves (the solid lifted card, the hole it leaves and the one preview, told apart by dnd-kit's `data-dnd-*` attributes; the column read after a drop counts real `a.card`s, never the landing preview; a same-lane reorder held in flight with `page.route` draws its landing preview in the requested slot, and every commit until the answer draws the card exactly once), Escape cancels, a Done-stage drop asks first (dismissing writes nothing) and confirming still meets the verdict gate |
+| `01-home-board.spec.ts` | 7 | board columns and a real click through to VIB-142, a lane that scrolls only while its cards overflow it and then reserves the dock's reach (ruling 661), drag-and-drop reorder and cross-stage moves (the solid lifted card, the hole it leaves and the one preview, told apart by dnd-kit's `data-dnd-*` attributes; the column read after a drop counts real `a.card`s, never the landing preview; a same-lane reorder held in flight with `page.route` draws its landing preview in the requested slot, and every commit until the answer draws the card exactly once), Escape cancels, a Done-stage drop asks first (dismissing writes nothing) and confirming still meets the verdict gate |
 | `02-feeds-profile.spec.ts` | 3 | mark-all-read (which leaves 07 a fully read inbox to audit), the theme cookie surviving a reload, Agent accounts with both backends unconnected |
 | `03-org-settings-store.spec.ts` | 3 | each instance settings tab renders its own panel, heading scope (R15-13), the instance pages under the app header (ruling 145) |
 | `04-palette-mobile.spec.ts` | 3 | at 375 px: the rail collapses behind a toggle with no sideways scroll, Home keeps a way into the palette, and the workspace palette trigger is a real touch target |
-| `05-task-comment-composer.spec.ts` | 5 | the Lexical composer in a real browser: a plain post, Enter versus Ctrl/Meta+Enter, @-mention by keyboard and by click (the posted bytes carry the mention), undo cannot resurrect a sent comment, zero page errors |
+| `05-task-comment-composer.spec.ts` | 6 | the Lexical composer in a real browser: a plain post, Enter versus Ctrl/Meta+Enter, the one line break typed just before the editor arrives, @-mention by keyboard and by click (the posted bytes carry the mention), undo cannot resurrect a sent comment, zero page errors |
 | `06-activity-hydration.spec.ts` | 2 | clean hydration in `Pacific/Auckland`: the activity page and the task page (VIB-142 with its open accept card); both assert zero `pageerror` and a timestamp-only SSR first pass |
-| `07-accessibility.spec.ts` | 37 generated | axe WCAG 2.2 AA on 13 surfaces and 4 dialogs × 2 themes, plus the mobile rail overlay and login in both themes |
+| `07-accessibility.spec.ts` | 39 generated | axe WCAG 2.2 AA on 14 surfaces and 4 dialogs × 2 themes, plus the mobile rail overlay and login in both themes |
 | `08-controller-dock.spec.ts` | 4 | the dock follows the surface you stand on and stays off the controller pages; at 375 px it is a bottom sheet with no sideways scroll; a dock the tab remembers open comes back after a reload without its entrance; a click on the trigger while the dock closes turns it back open |
-| `09-epics.spec.ts` | 5 | a new epic opens on its own page (the chain's first test creates `epic-1`), tasks join and leave it from its page and from their own, the epic page reads in one column at 375 px (ruling 560), and the epic page and its dialogs pass axe (ruling 503) |
+| `09-epics.spec.ts` | 6 | a new epic opens on its own page (the chain's first test creates `epic-1`), tasks join and leave it from its page and from their own, the epic page reads in one column at 375 px (ruling 560), a task under a long-named epic does not scroll sideways at 375 px (ruling 666), and the epic page and its dialogs pass axe (ruling 503) |
 | `10-notification-anchors.spec.ts` | 1 | with Chrome's scroll anchoring off, a notification about an event on another task lands on it in view after the page's long comments fold (rulings 497, 547) |
 | `11-label-editor-press.spec.ts` | 2 | one press on the Labels editor's Save, made where Save stood with the label list open, saves: after a pick and with a label half typed (ruling 561) |
 
-The tree holds 71 tests plus the setup project (counted from the spec files on
-2026-09-28; Playwright counts the setup itself, so its own total reads 72). `npm run e2e`
+The tree holds 76 tests plus the setup project (counted from the spec files on
+2026-10-08; Playwright counts the setup itself, so its own total reads 77). `npm run e2e`
 on 2026-09-27 read `68 passed (43.8s)`, 64 s end to end with the image build.
 Two gates run a real CLI entrypoint: e2e runs `npm run seed:demo`, and
 `app/server/seed/default-assets.server.test.ts` runs `npm run seed` inside `npm test`.

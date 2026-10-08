@@ -812,9 +812,9 @@ export async function executeCodexPlan(
     taskKey: input.taskKey,
     details: { runId },
   });
-  // This is machine-readable control data, not a timeline preview: use the
-  // complete reply. replyTextForRun intentionally truncates at 1,200 chars and
-  // appends prose, which corrupts otherwise-valid larger JSON plans.
+  // This is machine-readable control data, not a timeline preview: read the
+  // complete reply, since a cut one would corrupt an otherwise-valid larger
+  // JSON plan.
   const text = fullReplyTextForRun(db, runId);
   const plan = text ? parseOperatorPlan(text) : null;
   if (!plan) {
