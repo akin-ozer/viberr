@@ -580,7 +580,9 @@ describe("StoreBrowser document editor", () => {
   // taking the card back. A browser refuses typing into a read-only field and
   // `fireEvent` does not, so the rows read the lock itself. CANARY: drop the
   // lock and the draft a success closes takes typing (the second row), as does
-  // a New document a refusal then replaces; keep it past the answer and the
+  // a New document a refusal then replaces; lock only a new draft and the
+  // opened document's raw text takes typing a refusal then overwrites (the
+  // row that opens another document); keep it past the answer and the
   // refused draft cannot be fixed; leave a refusal off the draft it saved and
   // the first row says nothing; settle the answer against the open draft (drop
   // the opening `openNew` or `openExisting` counts) and the newer draft is
@@ -680,7 +682,13 @@ describe("StoreBrowser document editor", () => {
     {
       answer: "a save refused after another document opened",
       settles: "brings the draft back over it",
-      meanwhile: openOverview,
+      meanwhile: async (view: View, read: HeldRead) => {
+        await openOverview(view, read);
+        fireEvent.click(view.getByRole("button", { name: "Raw" }));
+        expect(control(view.getByLabelText("Document contents"), HTMLTextAreaElement).readOnly).toBe(
+          true,
+        );
+      },
       reply: { ok: false, error: REFUSED },
       after: keptWithReason,
     },
