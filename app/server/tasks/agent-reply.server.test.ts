@@ -53,6 +53,7 @@ import {
   unreachedAgentNote,
   runFailureReason,
 } from "./agent-reply.server";
+import { buildAgentQuestionPacket } from "./agent-outcome.server";
 import { resolveResumeConfinement, startAgentRun } from "./specialist-run.server";
 import { commentToAgent } from "./task-comments.server";
 import { deliverDeferredMention } from "./agent-completion.server";
@@ -1180,20 +1181,14 @@ describe("ruling 133: the @mention resume door is stage-gated like every other d
           { profileId: "rev", backend: "claude", role: "reviewer", delivers: false, verdictCapable: true },
         ],
       }),
-      packet: {
-        id: "pkt_562",
-        type: "input",
-        kind: "Agent question",
-        from: "agent:claude/rev (reviewer)",
-        askedBy: "rev",
-        title: "Keep the proposed defaults?",
-        body: "The mapping applies defaults for the gaps.",
-        observations: [],
-        options: [
-          { kind: "custom", t: "Keep the defaults", d: "", rec: true },
-          { kind: "custom", t: "Send corrections", d: "", rec: false },
-        ],
-      },
+      packet: buildAgentQuestionPacket(
+        { kind: "agent", backend: "claude", profileId: "rev", roleHint: "reviewer" },
+        {
+          title: "Keep the proposed defaults?",
+          body: "The mapping applies defaults for the gaps.",
+          options: [{ title: "Keep the defaults (Recommended)" }, { title: "Send corrections" }],
+        },
+      ),
     });
     rebuildAll(store.db, { dataRoot: store.dataRoot });
     sessionRow("run_rev_562", "rev", "reviewer");
@@ -1240,20 +1235,14 @@ describe("ruling 133: the @mention resume door is stage-gated like every other d
           { profileId: "rev", backend: "claude", role: "reviewer", delivers: false, verdictCapable: false },
         ],
       }),
-      packet: {
-        id: "pkt_565",
-        type: "input",
-        kind: "Agent question",
-        from: "agent:claude/rev (reviewer)",
-        askedBy: "rev",
-        title: "Which instance class?",
-        body: "The mapping keeps the default until you answer.",
-        observations: [],
-        options: [
-          { kind: "custom", t: "Keep the default", d: "", rec: true },
-          { kind: "custom", t: "Take the cheaper one", d: "", rec: false },
-        ],
-      },
+      packet: buildAgentQuestionPacket(
+        { kind: "agent", backend: "claude", profileId: "rev", roleHint: "reviewer" },
+        {
+          title: "Which instance class?",
+          body: "The mapping keeps the default until you answer.",
+          options: [{ title: "Keep the default (Recommended)" }, { title: "Take the cheaper one" }],
+        },
+      ),
     });
     rebuildAll(store.db, { dataRoot: store.dataRoot });
     const startedAt = new Date(Date.now() - 60_000).toISOString();
@@ -2117,20 +2106,14 @@ describe("commentToAgent", () => {
     })!;
     writeTask(store.dataRoot, store.slug, {
       ...existing.parsed,
-      packet: {
-        id: "pkt_r1514",
-        type: "input",
-        kind: "Agent question",
-        from: "agent:claude/dev (developer)",
-        askedBy: "dev",
-        title: "Which config should I target?",
-        body: "Ambiguous scope.",
-        observations: [],
-        options: [
-          { kind: "custom", t: "Target the staging config", d: "", rec: true },
-          { kind: "custom", t: "Target production", d: "", rec: false },
-        ],
-      },
+      packet: buildAgentQuestionPacket(
+        { kind: "agent", backend: "claude", profileId: "dev", roleHint: "developer" },
+        {
+          title: "Which config should I target?",
+          body: "Ambiguous scope.",
+          options: [{ title: "Target the staging config (Recommended)" }, { title: "Target production" }],
+        },
+      ),
     });
     rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
 
@@ -2240,20 +2223,14 @@ describe("commentToAgent", () => {
     const existing = readTaskFile({ projectSlug: store.slug, taskKey: "VIB-1", dataRoot: store.dataRoot })!;
     writeTask(store.dataRoot, store.slug, {
       ...existing.parsed,
-      packet: {
-        id: "pkt_r447",
-        type: "input",
-        kind: "Agent question",
-        from: "agent:claude/dev (developer)",
-        askedBy: "dev",
-        title: "Synchronize VIB-1 with current main?",
-        body: "The branch is behind.",
-        observations: [],
-        options: [
-          { kind: "custom", t: "Synchronize now", d: "", rec: true },
-          { kind: "custom", t: "Leave it", d: "", rec: false },
-        ],
-      },
+      packet: buildAgentQuestionPacket(
+        { kind: "agent", backend: "claude", profileId: "dev", roleHint: "developer" },
+        {
+          title: "Synchronize VIB-1 with current main?",
+          body: "The branch is behind.",
+          options: [{ title: "Synchronize now (Recommended)" }, { title: "Leave it" }],
+        },
+      ),
     });
     rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
     const { resolvePacket } = await import("./packet-resolution.server");
@@ -2307,25 +2284,20 @@ describe("commentToAgent", () => {
     const existing = readTaskFile({ projectSlug: store.slug, taskKey: "VIB-1", dataRoot: store.dataRoot })!;
     writeTask(store.dataRoot, store.slug, {
       ...existing.parsed,
-      packet: {
-        id: "pkt_r447_desc",
-        type: "input",
-        kind: "Agent question",
-        from: "agent:claude/dev (developer)",
-        askedBy: "dev",
-        title: "Keep the retry loop?",
-        body: "It doubles the test time.",
-        observations: [],
-        options: [
-          {
-            kind: "custom",
-            t: "Keep it",
-            d: "I finish the loop here and the operator then moves the task to Verify.",
-            rec: true,
-          },
-          { kind: "custom", t: "Drop it", d: "", rec: false },
-        ],
-      },
+      packet: buildAgentQuestionPacket(
+        { kind: "agent", backend: "claude", profileId: "dev", roleHint: "developer" },
+        {
+          title: "Keep the retry loop?",
+          body: "It doubles the test time.",
+          options: [
+            {
+              title: "Keep it (Recommended)",
+              detail: "I finish the loop here and the operator then moves the task to Verify.",
+            },
+            { title: "Drop it" },
+          ],
+        },
+      ),
     });
     rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
     const { resolvePacket } = await import("./packet-resolution.server");
@@ -2933,21 +2905,15 @@ describe("comment routing: agent handles engage agents, teammate handles never d
     })!;
     writeTask(store.dataRoot, store.slug, {
       ...existing.parsed,
-      packet: {
-        id: "pkt_gone",
-        type: "input",
-        kind: "Agent question",
-        from: "agent:claude/ghost-writer (documentation)",
-        // The profile that asked has since been removed from the project.
-        askedBy: "ghost-writer",
-        title: "Which config should I target?",
-        body: "Ambiguous scope.",
-        observations: [],
-        options: [
-          { kind: "custom", t: "Target the staging config", d: "", rec: true },
-          { kind: "custom", t: "Target production", d: "", rec: false },
-        ],
-      },
+      // The profile that asked has since been removed from the project.
+      packet: buildAgentQuestionPacket(
+        { kind: "agent", backend: "claude", profileId: "ghost-writer", roleHint: "documentation" },
+        {
+          title: "Which config should I target?",
+          body: "Ambiguous scope.",
+          options: [{ title: "Target the staging config (Recommended)" }, { title: "Target production" }],
+        },
+      ),
     });
     rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
 
