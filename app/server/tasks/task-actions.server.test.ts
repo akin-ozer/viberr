@@ -111,6 +111,12 @@ function deliveryCtx(store: TestStore): TaskActionContext {
 
 const ctx = createTestDbContext();
 afterEach(ctx.cleanup);
+// The push double and the canned transport are module-level: every test
+// starts with no queued push answer and no reachable GitHub.
+afterEach(() => {
+  pushMock.mockReset();
+  github = null;
+});
 
 /**
  * sqlite hands its rows back as untyped cells, so every read below names the
@@ -2273,10 +2279,6 @@ describe("F19-21: a verification-only task reaches the no-change completion", ()
     );
   }
 
-  afterEach(() => {
-    github = null;
-  });
-
   it("records the verified zero-diff and mints the base-anchored revision", async () => {
     const store = setupProjectedStore(ctx);
     seedVerifyOnly(store);
@@ -2603,12 +2605,6 @@ describe("R15-1: `noChanges` bypasses the verdict gate ONLY where there is no PR
       actorOf(store.users.arda),
       deliveryCtx(store),
     );
-
-  // Drop the canned transport after any test opts into a reachable GitHub
-  // (there is no auto-reset between tests in this file).
-  afterEach(() => {
-    github = null;
-  });
 
   it("refuses a task with an OPEN PR that no verdict approved", async () => {
     const store = setupProjectedStore(ctx);
@@ -3853,7 +3849,6 @@ describe("ruling 128: performDelivery bootstraps the base before the first push"
   // successful push of workflow files resolves it. Canaries: route
   // `push_refused_scope` into the `push_failed` arm; drop the resolve.
   it("ruling 144: a refused workflow push opens the violation with the remedy, and no PR", async () => {
-    pushMock.mockClear();
     const store = setupProjectedStore(ctx);
     seedDeliverable(store);
     github = fakeGithubFetch({
@@ -3916,7 +3911,6 @@ describe("ruling 128: performDelivery bootstraps the base before the first push"
    * and the paths vanish).
    */
   it("ruling 159: a push refused for the store layout names the paths, opens no PR", async () => {
-    pushMock.mockClear();
     const store = setupProjectedStore(ctx);
     seedDeliverable(store);
     github = fakeGithubFetch({
@@ -3966,7 +3960,6 @@ describe("ruling 128: performDelivery bootstraps the base before the first push"
   it("bootstraps `main` before the first push and records it (the bootstrap line is timeline[1], under the PR event)", async () => {
     // Canary: gate the bootstrap on the absence of the `pushWorkspaceBranch`
     // dep (skip it when a dep is injected) and the PUT never runs here.
-    pushMock.mockClear();
     const store = setupProjectedStore(ctx);
     seedDeliverable(store);
     let bootstrapped = false;
@@ -4015,7 +4008,6 @@ describe("ruling 128: performDelivery bootstraps the base before the first push"
     // moves the project onto it. CANARY: refuse an adopted base and nothing is
     // pushed; open the pull request against the branch read before the gate
     // and GitHub answers 422 `base: invalid`.
-    pushMock.mockClear();
     const store = setupProjectedStore(ctx);
     seedDeliverable(store);
     github = fakeGithubFetch({
@@ -4036,7 +4028,6 @@ describe("ruling 128: performDelivery bootstraps the base before the first push"
   it("refuses to push when the base cannot be CREATED, and pushes anyway when the probe merely could not be READ", async () => {
     // Canary: route `network_unavailable` into the refusing arm and the second
     // half fails (no push, and a sentence claiming the base is missing).
-    pushMock.mockClear();
     const store = setupProjectedStore(ctx);
     seedDeliverable(store);
     github = fakeGithubFetch({
@@ -4081,7 +4072,6 @@ describe("ruling 128: performDelivery bootstraps the base before the first push"
 describe("ruling 134: the pushed-head event on a reused PR", () => {
   it("writes `Pushed <sha> to PR #N (was <old>)` attributed to the human who delivered, and records the head on the PR", async () => {
     const REPO_PATH = "/repos/akin-ozer/viberr";
-    pushMock.mockClear();
     const store = setupProjectedStore(ctx);
     writeTask(store.dataRoot, store.slug, {
       frontmatter: baseTaskFrontmatter("VIB-1", {
@@ -5613,7 +5603,6 @@ describe("pass 35 S15: rulings 162 and 163 at the merge stage", () => {
   it("ruling 163 (c): delivering a changed revision at Merge records the transition back to Review", async () => {
     // Canary: drop the `returnChangedRevisionToReview` call in performDelivery.
     const REPO_PATH = "/repos/akin-ozer/viberr";
-    pushMock.mockClear();
     const store = setupProjectedStore(ctx);
     withMergeBoard(store);
     seedChangedAt(store, "merge", {
@@ -5647,7 +5636,6 @@ describe("pass 35 S15: rulings 162 and 163 at the merge stage", () => {
       actorOf(store.users.arda),
       deliveryCtx(store),
     );
-    github = null;
     expect(outcome).toMatchObject({ status: "delivered", moved: true });
     const parsed = taskFile(store);
     expect(parsed.frontmatter.stage).toBe("review");
