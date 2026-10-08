@@ -433,9 +433,10 @@ function DisconnectConfirm({
       busy={card.request.busy}
       onCancel={() => card.setConfirmDisconnect(null)}
       onConfirm={() => {
-        // Close any paste form the card was showing before this
-        // connection existed, so disconnecting does not re-reveal a
-        // half-typed key field.
+        // Close the key form "Add another account" may have open beside
+        // the dialog, leaving that section on its ways to connect. A key
+        // form from before an account was connected is gone already: it
+        // went with the region it sat in (AgentAccountCard).
         card.setPaste(null);
         card.setRenaming(null);
         card.submit({ intent: "backend-disconnect", backend: card.backend, account: account.id });
