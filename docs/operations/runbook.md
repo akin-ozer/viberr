@@ -530,7 +530,8 @@ history opens with "Converted from goal-N …", and the project's Activity colum
   with the task, the file and the reason, and `page captures made` with the counts and
   the wall time; audit `task.pages.captured` carries who it ran as. The reasons: "the
   render ran past 25 seconds" (a script that never finishes or a page that never finishes
-  loading; the job as a whole is stopped at 10 s plus 25 s a page), "the browser ended
+  loading; the job as a whole is stopped at 10 s plus 25 s a page, 70 s for an HTML page,
+  which is also measured, ruling 328), "the browser ended
   before the page was pictured", "the task has no owner to render it as" (isolation is on
   and the task has no owner: give it one and the next delivery is pictured), "the pinned
   browser executable (VIBERR_BROWSER_EXECUTABLE) is not on disk" (health's `browser` says
@@ -566,6 +567,23 @@ history opens with "Converted from goal-N …", and the project's Activity colum
   loses that delivery's pictures: the next delivery is pictured, and an agent can look
   with `capture_page` meanwhile. `docker compose exec -T app sh
   scripts/check-page-capture.sh` checks the renderer against the image's own browser.
+- **A delivered page was pictured and not measured, or one check did not run** (ruling
+  328). The "Page captures" note says which: "the accessibility checks did not run (no
+  accessibility engine is installed)" means the deployment holds no
+  `node_modules/axe-core/axe.min.js` (the image installs it with the runtime
+  dependencies; a host install needs `npm ci`), and every other figure is still taken;
+  "Its load time could not be measured" means the page never finished loading on the
+  slow line inside its limit. `measured` is absent from a page's entry of `pageCaptures`
+  when the render ended before it measured anything, and the page's pictures stand.
+- **`keep_page_look` could not picture an address** (ruling 327). It is the one render with
+  the network open: it runs in the same browser as every other, as the task owner's agent
+  user, so the address must be reachable from the container as that user. The answer
+  carries the browser's own word ("the page did not load (net::ERR_NAME_NOT_RESOLVED)"),
+  and the server logs `a page on the web could not be pictured` with the task and the
+  reason. A site that answers a headless browser with a challenge page is pictured as
+  that challenge: the pictures are kept as sources on the task
+  (`read_task_source` lists them), where a person can see what was kept. A look is one
+  job of up to 150 s, and an agent's other captures answer `[busy]` meanwhile.
 
 ## Auth / access
 

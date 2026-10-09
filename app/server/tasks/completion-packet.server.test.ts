@@ -730,9 +730,11 @@ describe("ruling 316: Viberr's own pictures of a delivered page", () => {
     ]);
     // The operator is told the same, so it names none of them and can say
     // why a page has no picture.
+    // (`measured` is the line of a page that was measured as it was
+    // pictured, ruling 328; the capture suite reads it off a real render.)
     expect(fact().pageCaptures).toEqual([
-      { file: "post.html", pictures: PICTURES, problem: null },
-      { file: "notes.md", pictures: [], problem: "the render ran past 25 seconds" },
+      { file: "post.html", pictures: PICTURES, problem: null, measured: null },
+      { file: "notes.md", pictures: [], problem: "the render ran past 25 seconds", measured: null },
     ]);
 
     // A rework is delivered and summarized again before its own render has
