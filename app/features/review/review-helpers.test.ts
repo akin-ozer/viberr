@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { describeRevisionDrift } from "~/shared/revision-drift";
-import { reviewRowSub, type ReviewRowView } from "./review-helpers";
+import { decisionRowSub, reviewRowSub, type ReviewRowView } from "./review-helpers";
 
 const base: ReviewRowView = {
   key: "VIB-1",
@@ -12,6 +12,7 @@ const base: ReviewRowView = {
   dueDate: null,
   waiting: "agent",
   packet: null,
+  recommendations: 0,
   goalEditPending: false,
   latestEventText: null,
   pr: null,
@@ -65,6 +66,7 @@ describe("reviewRowSub live PR state (P14-LV-05)", () => {
     const sub = reviewRowSub({
       ...base,
       pr: { number: 103, state: "review" },
+      recommendations: 0,
       goalEditPending: false,
       latestEventText:
         "**Divergence:** PR #103 was closed on GitHub without merging, but VM-4 is still active.",
@@ -136,6 +138,7 @@ describe("reviewRowSub live PR state (P14-LV-05)", () => {
       reviewRowSub({
         ...base,
         pr: { number: 311, state: "merged" },
+        recommendations: 0,
         goalEditPending: false,
         latestEventText: "**Transition request:** move on",
       }),
@@ -226,6 +229,7 @@ describe("ruling 63: reviewRowSub on a decided edit_goal packet", () => {
       key: "VIB-9",
       waiting: "human",
       packet: { kind: "Blocked decision", title: "Scope needed" },
+      recommendations: 0,
       goalEditPending: true,
     };
     expect(reviewRowSub(decided)).toBe("Goal edit pending: save the edited goal to clear the decision packet.");
@@ -328,5 +332,24 @@ describe("U35-5: reviewRowSub for review work before the boundary", () => {
     ).toBe(
       "Review in progress at Validation · PR #8 is open. 2 authored commits since review merge unreviewed.",
     );
+  });
+});
+
+/**
+ * Ruling 304: an "Open decisions" row names the decision it opens. A packet
+ * names its question wherever the task stands; with no packet, the operator's
+ * recommendations waiting on the task are the decision, counted, before any
+ * fact about the task's review.
+ */
+describe("ruling 304: decisionRowSub", () => {
+  it.each([
+    [{ packet: { kind: "Blocked decision", title: "Pick a path" }, blockReason: "Not yet." }, "Blocked decision: Pick a path"],
+    [{ recommendations: 1 }, "Operator recommendation: apply or dismiss it."],
+    // CANARY: drop the recommendation sentences and a recommended task's row
+    // reads its PR, with nothing about what to decide.
+    [{ recommendations: 2, pr: { number: 7, state: "review" as const } }, "2 operator recommendations: apply or dismiss them."],
+    [{ recommendations: 1, packet: { kind: "Decision required", title: "Which?" } }, "Decision required: Which?"],
+  ])("%o reads %s", (patch, sentence) => {
+    expect(decisionRowSub({ ...base, ...patch })).toBe(sentence);
   });
 });

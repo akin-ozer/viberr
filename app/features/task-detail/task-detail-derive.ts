@@ -204,6 +204,25 @@ export function completionPlacement(
   return { acceptanceDecision, resultShown, card: completionShown ? completion : null };
 }
 
+/**
+ * Ruling 304: the Review queue's decision dialog draws the page's own Accept
+ * while the task stands at the boundary and neither an option of the decision
+ * nor an operator recommendation card offers the acceptance itself, so each
+ * outcome has one control there.
+ */
+export function dialogOffersAccept(
+  acceptance: AcceptanceAffordance,
+  placement: CompletionPlacement,
+  recommendations: RecommendationView[],
+  terminalStageId: string | null,
+): boolean {
+  return (
+    acceptance.atBoundary &&
+    !placement.acceptanceDecision &&
+    !recommendations.some((r) => reachesAcceptance(r, terminalStageId))
+  );
+}
+
 /** The Changes panel's reader rides inside the packet while it shows, so the
  *  page carries one reader (and one set of unsent notes), not two. */
 export function completionReader(

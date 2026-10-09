@@ -30,24 +30,26 @@ import { prPathOverlaps, type PrDiffPaths, type PrOverlap } from "~/shared/pr-ov
 /**
  * Review-queue read model (review-queue.md §1/§3, Phase 9C).
  *
- * Ruling 304 (owner, 2026-10-09): the queue is its viewer's own. A row is a
- * task the viewer OWNS (the human owner seat, held with `own-task`, the owner
- * exception's own condition), whatever their project role, and a task owned by
- * anybody else is never a row, a maintainer's included. Each row stands in one
- * of three panels:
+ * Ruling 304 (owner, 2026-10-09): the queue is its viewer's own, and it holds
+ * only what waits on their decision. A row is a task the viewer OWNS (the
+ * human owner seat, held with `own-task`, the owner exception's own
+ * condition), whatever their project role, that holds a decision: an open
+ * packet, an acceptance nothing refuses, or a pending operator recommendation.
+ * A task owned by anybody else is never a row, a maintainer's included, and
+ * work with nothing to decide is not listed (the board shows it). One row per
+ * task, in one of two panels:
  *
  * - `completions` ("Waiting on your acceptance"): the decision moves the task
- *   to the terminal stage. Either an open packet offers `accept_completion`,
- *   or, with no packet open, the task stands at the acceptance boundary waiting
- *   on its owner and nothing refuses the acceptance (`isReady` below).
- * - `decisions` ("Open decisions"): an open decision packet that asks anything
- *   else, at any stage. One open packet per task, so one row.
- * - `working` ("Still in review"): review work with nothing for the owner to
- *   decide yet.
+ *   to the terminal stage. An open packet offers `accept_completion`; or, with
+ *   no packet open, nothing refuses the acceptance (`isReady` below), or the
+ *   operator recommends accepting the completion and the gate allows it.
+ * - `decisions` ("Open decisions"): any other open packet, at any stage, or
+ *   the operator's other recommendations.
  *
- * REVIEW WORK (U35-5, pass 35) is what the board defines by engagements and
- * verdicts, not by one stage id. A non-archived, non-terminal task is review
- * work when ANY of these holds:
+ * REVIEW WORK (U35-5, pass 35) decides which tasks may be offered for
+ * acceptance; the board defines it by engagements and verdicts, not by one
+ * stage id. A non-archived, non-terminal task is review work when ANY of these
+ * holds:
  *   (a) it sits at the RESOLVED review stage (the stage with a workflow edge
  *       into the terminal stage — `resolveStageRoles().reviewId`, NOT the
  *       literal id "review");
@@ -63,7 +65,8 @@ import { prPathOverlaps, type PrDiffPaths, type PrOverlap } from "~/shared/pr-ov
  * `total` counts every row and is what the workspace rail badge shows
  * (routes/project.tsx reads this queue's `total`), so the two cannot drift —
  * a literal-"review" filter once left this queue permanently empty while the
- * rail showed a count (pass-4 WI-1).
+ * rail showed a count (pass-4 WI-1). It counts decisions only, so the badge
+ * says how many things wait on the viewer.
  *
  * `acceptableKeys` is wider than the rows on purpose: every task this viewer
  * may accept now, theirs or not (maintainer+, the resolve-packet tier, or the
@@ -120,6 +123,9 @@ export interface ReviewQueueRow {
   resumesAt: string | null;
   /** Pending packet header only — the queue reads kind + title, nothing else. */
   packet: { kind: string; title: string } | null;
+  /** Ruling 304: how many operator recommendations wait on the task, which
+   *  the dialog draws with their Apply and Dismiss. */
+  recommendations: number;
   /** Ruling 63: an `edit_goal` decision was confirmed and the packet waits
    *  for the edited goal — the row's subline says so instead of re-offering
    *  the decision. */
@@ -189,17 +195,14 @@ export interface ReviewQueueRow {
 
 export interface ReviewQueueData {
   /** Ruling 304: the viewer's own tasks whose decision moves them to the
-   *  terminal stage — a packet offering `accept_completion`, or an acceptance
-   *  nothing refuses — panel 1, "Waiting on your acceptance". */
+   *  terminal stage — a packet offering `accept_completion`, an acceptance
+   *  nothing refuses, or the operator's recommendation of it — panel 1,
+   *  "Waiting on your acceptance". */
   completions: ReviewQueueRow[];
   /** Ruling 304: the viewer's own tasks with any other open decision packet,
-   *  at any stage — panel 2, "Open decisions". */
+   *  at any stage, or another pending recommendation — panel 2, "Open
+   *  decisions". */
   decisions: ReviewQueueRow[];
-  /** The viewer's own review work with nothing to decide yet: review-stage
-   *  tasks, and review work at any earlier stage (an open review PR, or a
-   *  required reviewer's verdict outstanding on the current revision) —
-   *  panel 3 (U35-5). */
-  working: ReviewQueueRow[];
   /** Every task this viewer may accept now, theirs or not (maintainer+, or
    *  the owner): the acceptance half of `waitingOnViewer` (UI-48), which the
    *  board, the epic pages and the rows' tags read. Wider than the rows. */
@@ -262,12 +265,13 @@ export function getReviewQueue(
       (t.validation === "changed" || t.validation === "failing")
     );
   };
-  // An archived project has no review boundary (D-1 above) and nothing on it
-  // anybody can act on (R6-3), so it lists nothing. A task in the terminal
-  // stage is an ending, not a decision or review work.
-  const live = reviewId
-    ? (opts.tasks ?? listProjectTasks(db, slug)).filter((t) => !isTerminalStage(t.stage, stages))
-    : [];
+  // An archived project has nothing on it anybody can act on (D-1 above,
+  // R6-3), so it lists nothing. A task in the terminal stage is an ending, not
+  // a decision or review work.
+  const live =
+    project && !project.archived
+      ? (opts.tasks ?? listProjectTasks(db, slug)).filter((t) => !isTerminalStage(t.stage, stages))
+      : [];
 
   // R8-3: acceptance is member-scoped by ACCEPTANCE AUTHORITY, not by
   // decision-object presence — a review-stage task waiting on a human can have
@@ -342,9 +346,19 @@ export function getReviewQueue(
     t.pr?.state !== "closed";
   const acceptableKeys = live.filter(isReady).map((t) => t.key);
   const acceptable = new Set(acceptableKeys);
-  // Ruling 304: the rows are the viewer's own tasks that carry an open packet,
-  // at any stage, or are review work.
-  const listed = live.filter((t) => isOwn(t) && (t.packet !== null || isReviewWork(t)));
+  // F37-71, as `decisionsRequiring` reads it: pending recommendations are a
+  // decision unless all they recommend is an acceptance the gate refuses, and
+  // the recommendation of an acceptance counts only while the gate allows it.
+  const recommendsAcceptance = (t: TaskActivitySummary): boolean =>
+    t.pendingRecommendations.kinds.includes("accept_completion") && !t.blockReason;
+  const recommends = (t: TaskActivitySummary): boolean => {
+    const { count, kinds } = t.pendingRecommendations;
+    return count > 0 && (recommendsAcceptance(t) || kinds.some((k) => k !== "accept_completion"));
+  };
+  // Ruling 304: the rows are the viewer's own tasks that hold a decision.
+  const listed = live.filter(
+    (t) => isOwn(t) && (t.packet !== null || acceptable.has(t.key) || recommends(t)),
+  );
 
   // Newest event per task in one shot (position 0 = newest, file order).
   const latestByKey = new Map<string, string>();
@@ -404,6 +418,7 @@ export function getReviewQueue(
       waiting: t.waiting,
       resumesAt: t.resumesAt ?? null,
       packet: t.packet ? { kind: t.packet.kind, title: t.packet.title } : null,
+      recommendations: t.pendingRecommendations.count,
       goalEditPending: t.packet?.awaiting === "goal_edit",
       latestEventText: latestByKey.get(t.key) ?? null,
       pr,
@@ -442,20 +457,17 @@ export function getReviewQueue(
   // task's decision wherever it stands; it moves the task to the terminal
   // stage when it offers `accept_completion` (a decided `edit_goal` offers
   // nothing: what it owes is the goal). With no packet open, an acceptance
-  // nothing refuses is the decision, and review work waits for one.
+  // nothing refuses, or the operator's recommendation of one, is a
+  // completion, and any other recommendation a decision.
   const completions: ReviewQueueRow[] = [];
   const decisions: ReviewQueueRow[] = [];
-  const working: ReviewQueueRow[] = [];
   for (const [i, row] of rows.entries()) {
-    const packet = listed[i].packet;
-    if (packet) {
-      const offersAcceptance =
-        packet.awaiting === undefined &&
-        packet.options.some((o) => o.kind === "accept_completion");
-      (offersAcceptance ? completions : decisions).push(row);
-    } else {
-      (acceptable.has(row.key) ? completions : working).push(row);
-    }
+    const t = listed[i];
+    const completes = t.packet
+      ? t.packet.awaiting === undefined &&
+        t.packet.options.some((o) => o.kind === "accept_completion")
+      : acceptable.has(row.key) || recommendsAcceptance(t);
+    (completes ? completions : decisions).push(row);
   }
-  return { completions, decisions, working, acceptableKeys, total: rows.length };
+  return { completions, decisions, acceptableKeys, total: rows.length };
 }

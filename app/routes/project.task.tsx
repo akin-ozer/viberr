@@ -89,7 +89,7 @@ import {
   latestTaskReconcileAt,
 } from "~/server/provenance/provenance-query.server";
 import { latestTaskReconcileCheckAt } from "~/server/audit/audit-query.server";
-import { taskDecisionReads } from "~/server/projections/task-decision.server";
+import { taskDecisionReads, taskRunPrincipal } from "~/server/projections/task-decision.server";
 import { interruptRun, listRunsForTask } from "~/server/runtimes/run-service.server";
 import { listRunsForTaskRows, liveRunStateByTask } from "~/server/runtimes/run-store.server";
 import { queuedRunWait, withLiveRun } from "~/shared/mapping/task.server";
@@ -97,9 +97,6 @@ import {
   runOperator,
   type RunOperatorInput,
 } from "~/server/runtimes/operator-run.server";
-import type { DatabaseSync } from "node:sqlite";
-import { userBackendHealth } from "~/server/runtimes/backend-credentials.server";
-import { findUserById } from "~/server/auth/user-store.server";
 import { unavailableModels } from "~/server/runtimes/model-availability.server";
 import {
   operatorAcceptsDirectly,
@@ -131,7 +128,6 @@ import {
   scheduleTaskAction,
 } from "~/server/tasks/schedule.server";
 import { TaskDetailPage } from "~/features/task-detail/task-detail-page";
-import type { TaskRunPrincipalView } from "~/features/task-detail/run-principal-view";
 import type {
   LiveAgentRun,
   TaskMemberView,
@@ -163,39 +159,6 @@ import { errorMessage, toError } from "~/shared/errors";
  *   run-interrupt · run-agent · release-agent · run-operator ·
  *   schedule-action · cancel-schedule · set-task-epic (ruling 272)
  */
-
-/**
- * Ruling 137: WHOSE accounts this task's agent runs would use, and what those
- * accounts can run. The page used to ship one deployment-wide "is this backend
- * configured" boolean; a run bills the task OWNER, so the honest answer is the
- * owner's own health, and the panels render copy that names them
- * (`app/features/task-detail/run-principal-view.ts`).
- *
- * `null` = nobody to bill: no owner, or a seat pointing at an account that is
- * disabled or gone. Never a secret and never a box: `available` plus the
- * store's own actionable sentence, which the page shows only to the owner.
- */
-function taskRunPrincipal(
-  db: DatabaseSync,
-  ownerUserId: string | null,
-): TaskRunPrincipalView | null {
-  if (!ownerUserId) return null;
-  const owner = findUserById(db, ownerUserId);
-  // A seat pointing at a deleted or disabled account is not an owner a run can
-  // bill, so it reads as unowned here — the same answer `resolveTaskRunPrincipal`
-  // gives the run service.
-  if (!owner || owner.disabled) return null;
-  const health = (backend: "claude" | "codex") => {
-    const h = userBackendHealth(db, ownerUserId, backend);
-    return { available: h.available, detail: h.detail };
-  };
-  return {
-    ownerUserId,
-    ownerName: owner.name,
-    claude: health("claude"),
-    codex: health("codex"),
-  };
-}
 
 export async function loader({ request, params }: Route.LoaderArgs) {
   const user = await requireUser(request);

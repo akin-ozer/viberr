@@ -19,9 +19,8 @@ export interface ReviewRowView {
   /** U35-5: the display name of the stage the task sits at; the subline names
    *  it for a row that is not at the review boundary. */
   stageName: string;
-  /** U35-5: at the project's resolved review stage (the acceptance boundary).
-   *  False for review work listed from an earlier stage: an open review PR, or
-   *  a required reviewer's verdict outstanding on the current revision. */
+  /** U35-5: at a stage acceptance is legal from (the acceptance boundary).
+   *  False for a decision on a task that stands earlier. */
   atAcceptanceBoundary: boolean;
   /** F26-14: the same lightweight triage metadata the board card shows, carried
    *  to the acceptance boundary (where a forgotten high/overdue task costs most).
@@ -38,6 +37,8 @@ export interface ReviewRowView {
    *  itself back up. */
   resumesAt?: string | null;
   packet: { kind: string; title: string } | null;
+  /** Ruling 304: the operator's recommendations waiting on the task. */
+  recommendations: number;
   /** Ruling 63: the packet is decided and waits for the edited goal. */
   goalEditPending: boolean;
   latestEventText: string | null;
@@ -66,7 +67,7 @@ export interface ReviewRowView {
   validation: ValidationValue;
   /** F10-11: why the current revision is NOT acceptance-ready (null when it is).
    *  A row the acceptance panel lists with no packet open always has none; a
-   *  packet's row and a "Still in review" row may. */
+   *  packet's row and a recommendation's row may. */
   blockReason: string | null;
   /** Gap-10: ISO of the newest timeline event (`occurred_at`); null when the
    *  timeline is empty. */
@@ -186,12 +187,18 @@ const GOAL_EDIT_PENDING_SUB =
 
 /**
  * Ruling 304: an "Open decisions" row names the decision it opens: the
- * packet's kind and its question, wherever the task stands. Its stage, PR and
- * verdict facts are the dialog's to show beside the options.
+ * packet's kind and its question, wherever the task stands, or the operator's
+ * recommendations waiting on it. Its stage, PR and verdict facts are the
+ * dialog's to show beside the choices.
  */
 export function decisionRowSub(t: ReviewRowView): string {
   if (t.goalEditPending) return GOAL_EDIT_PENDING_SUB;
-  return t.packet ? t.packet.kind + ": " + t.packet.title : reviewRowSub(t);
+  if (t.packet) return t.packet.kind + ": " + t.packet.title;
+  if (t.recommendations === 1) return "Operator recommendation: apply or dismiss it.";
+  if (t.recommendations > 1) {
+    return `${t.recommendations} operator recommendations: apply or dismiss them.`;
+  }
+  return reviewRowSub(t);
 }
 
 /** The subline stripper is the shared `plainText` helper (same regexes as

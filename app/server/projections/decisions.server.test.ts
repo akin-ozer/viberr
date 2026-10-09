@@ -409,12 +409,11 @@ describe("decisionsRequiring — acceptance-ready tasks (B-FD5)", () => {
       expect(decisionsRequiring(store.db, store.users.murat.id).mine).toHaveLength(0);
       const after = queue(store);
       expect(after.acceptableKeys).toHaveLength(0);
+      // Ruling 304: nothing on it is a decision anybody can make now, so the
+      // queue lists it no more than the inbox does (the projected reason itself
+      // is rebuilder.server.test.ts's).
       expect(after.completions).toHaveLength(0);
-      expect(after.working.map((r) => r.key)).toEqual(["VIB-320"]);
-      // And the projected reason NAMES the conflict on both surfaces.
-      expect(after.working[0]!.blockReason).toContain(
-        "conflicts with the base branch",
-      );
+      expect(after.decisions).toHaveLength(0);
     });
 
     /**

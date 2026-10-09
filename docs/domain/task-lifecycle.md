@@ -1274,38 +1274,40 @@ A person's acceptance is not refused: its dialog names the decision it withdraws
 refuses a goal for its words.
 
 **The review queue's membership** (`review-queue.server.ts`, ruling 304, U35-5) is the
-viewer's own tasks: a non-archived, non-terminal task whose owner seat holds the viewer,
-with a role that may own a task, whatever their project role; a task someone else owns is
-never a row. Such a task is a row when it carries an open packet, at any stage, or is
-review work, which the board defines by engagements and verdicts rather than by one stage
-id: it sits at the review stage, or carries a pull request open for review (`pr.state:
-review`), or has a required reviewer (`verdictCapable`) whose verdict on the current
-revision is missing (`validation: changed`) or is request_changes (`failing`). On the
-default board the review stage and the review work coincide at Review; on a board whose
-reviews happen at Validation and Review while the edge into Done leaves Merge, the last
-two rules are what list the work. A row stands in one of three panels, by what its
-decision does. "Waiting on your acceptance": an open packet offers `accept_completion`,
-or, with no packet open, the task stands at a stage acceptance is legal from (the
-acceptance boundary the workflow graph declares, the same predicate the accept writer and
-the board gate use, so a board with several edges into the terminal stage keeps them
-all), waits on a human, and nothing in the stack above refuses its acceptance. "Open
-decisions": any other open packet, a goal edit still awaited included. "Still in review":
-review work with nothing to decide yet. The row names its stage ("Review in progress at
-Validation · PR #8 · awaiting verdict"), with a live pull-request fact taking the place of
-the verdict words when there is one ("Review in progress at Validation · PR #8 does not
-carry the delivered revision 385047c. Deliver the branch to push it." — ruling 243, and
-the same for a conflict or a drifted head), an open decision's row names the packet
-instead ("Blocked decision: Continuity degraded — pick a recovery path"), and a row whose
-open PR changes paths another open PR also changes, the viewer's or anybody's, carries a
-read-only "collides with <KEY>" chip (`pr.paths`, `prPathOverlaps`, rulings 242 and 116).
-A row of the first two panels opens its decision in a dialog that draws the task page's
-own decision card from the task page's own reads and posts every answer to the task
-page's action (ruling 304), so an acceptance there passes the same ceremony and the same
-stack. The header reads "Your tasks · N to decide · M still in review", and the workspace
-rail badge is the queue's `total`. What the board, the epic pages and the rows' tags call
-"waiting on you" keeps every acceptance the viewer may give, theirs or not
-(`acceptableKeys`, maintainer+ or the owner): only the queue's rows are the owner's alone.
-Nothing before the boundary is ever offered for acceptance.
+decisions waiting on the viewer, on their own tasks: a non-archived, non-terminal task
+whose owner seat holds the viewer, with a role that may own a task, whatever their
+project role, is a row while it holds a decision for them, and a task someone else owns
+never is. A decision is an open packet, at any stage; an acceptance nothing in the stack
+above refuses; or a pending operator recommendation, except one that only recommends an
+acceptance the gate refuses (F37-71, as `decisionsRequiring` reads it). Review work with
+nothing to decide is left to the board. One row per task, in one of two panels, by what
+its decision does. "Waiting on your acceptance": an open packet offers
+`accept_completion`; or, with no packet open, the task stands at a stage acceptance is
+legal from (the acceptance boundary the workflow graph declares, the same predicate the
+accept writer and the board gate use, so a board with several edges into the terminal
+stage keeps them all), waits on a human, and nothing refuses its acceptance; or the
+operator recommends accepting it and the gate allows it. "Open decisions": any other open
+packet, a goal edit still awaited included, and the operator's other recommendations. That
+acceptance is offered only to review work, which the board defines by engagements and
+verdicts rather than by one stage id: it sits at the review stage, or carries a pull
+request open for review (`pr.state: review`), or has a required reviewer
+(`verdictCapable`) whose verdict on the current revision is missing (`validation:
+changed`) or is request_changes (`failing`). An open decision's row names the packet
+("Blocked decision: Continuity degraded — pick a recovery path") or the recommendations
+waiting ("Operator recommendation: apply or dismiss it."); an acceptance's row states why
+the acceptance waits, or the live pull-request fact (ruling 243, and the same for a
+conflict or a drifted head), and a row before the boundary names its stage ("Review in
+progress at Validation · PR #8 · awaiting verdict"). A row whose open PR changes paths
+another open PR also changes, the viewer's or anybody's, carries a read-only "collides
+with <KEY>" chip (`pr.paths`, `prPathOverlaps`, rulings 242 and 116). A row opens its
+decision in a dialog that draws the task page's own decision card and recommendation cards
+from the task page's own reads and posts every answer, and a question to the operator, to
+the task page's action (ruling 304), so an acceptance there passes the same ceremony and
+the same stack. The header reads "Your tasks · N to decide", and the workspace rail badge
+is the queue's `total`. What the board, the epic pages and the rows' tags call "waiting on
+you" keeps every acceptance the viewer may give, theirs or not (`acceptableKeys`,
+maintainer+ or the owner): only the queue's rows are the owner's alone. Nothing before the
+boundary is ever offered for acceptance.
 
 ## 12. Archive and restore
 

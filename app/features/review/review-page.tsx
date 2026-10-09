@@ -11,19 +11,20 @@ import { preloadDecisionBody, ReviewDecisionDialog } from "./review-decision-dia
 import type { PrOverlap } from "~/shared/pr-overlaps";
 
 /**
- * Review queue — its viewer's own tasks, and each one's open decision
- * answered in place (ruling 304, owner 2026-10-09).
+ * Review queue — what waits on its viewer's decision, on their own tasks, and
+ * each decision answered in place (ruling 304, owner 2026-10-09).
  *
- * Three panels, all of the viewer's own tasks (the server lists nobody
- * else's): "Waiting on your acceptance" (a completion, or a packet offering
- * acceptance), "Open decisions" (any other open packet) and "Still in review"
- * (review work with nothing to decide). A row in the first two opens the
- * decision in `ReviewDecisionDialog`, which draws the task page's own decision
- * card and posts to the task page's own action; the page itself writes
- * nothing. Every row is still a link to its task (ruling 304: a modified click
- * opens it in a new tab, and the address can be copied), and the dialog
- * carries "Open task". Rows leave the queue live via the shell's SSE
- * revalidation (Phase 6), and an answered decision's dialog closes with them.
+ * Two panels, both of the viewer's own tasks (the server lists nobody else's,
+ * and no task with nothing to decide): "Waiting on your acceptance" (a
+ * completion, a packet offering acceptance, or the operator's recommendation
+ * of it) and "Open decisions" (any other open packet or recommendation). A
+ * row opens its decision in `ReviewDecisionDialog`, which draws the task
+ * page's own decision card and recommendation cards and posts to the task
+ * page's own action; the page itself writes nothing. Every row is still a
+ * link to its task (ruling 304: a modified click opens it in a new tab, and
+ * the address can be copied), and the dialog carries "Open task". Rows leave
+ * the queue live via the shell's SSE revalidation (Phase 6), and an answered
+ * decision's dialog closes with them.
  *
  * C4: the row WAIT-TAG uses the two canonical phrases the whole app shares —
  * "waiting on you" (viewer-scoped: this viewer can accept it, or owns an open
@@ -148,8 +149,8 @@ function RQPrPill({ pr }: { pr: ReviewRowView["pr"] }) {
  * click away.
  *
  * F19-31: the last branch used to be a bare `else`, which collapsed "agent"
- * and "none". `review + none` is a LEGAL stored combination
- * (review-queue.server.ts lists it in "Still in review"), and for it the
+ * and "none". `review + none` is a LEGAL stored combination (a task the
+ * operator recommends something on can hold it), and for it the
  * board card's status chip names no wait at all (`cardStatus`, card-status.ts,
  * drawn by `StatusChip` in board-page.tsx, gives the seat to the readiness
  * word) while this row rendered the pulsing "agent working": one stored value
@@ -246,37 +247,33 @@ function RQRow({
   /** writ-3: the board's `waitingOnMe` for this task (an open decision this
    *  viewer owns, or acceptance this viewer can give). */
   waitingOnMe?: boolean;
-  /** Ruling 304: the row holds a decision, so a plain click opens it in the
-   *  dialog instead of going to the task page. */
-  onOpen?: (t: ReviewRowView) => void;
+  /** Ruling 304: a plain click opens the row's decision in the dialog
+   *  instead of going to the task page. */
+  onOpen: (t: ReviewRowView) => void;
 }) {
   return (
     <Link
       className="rq-row"
       to={href}
-      aria-haspopup={onOpen ? "dialog" : undefined}
-      // The dialog's body is its own chunk (ruling 11): an intent on a row
-      // that opens it starts the fetch.
-      onPointerEnter={onOpen ? preloadDecisionBody : undefined}
-      onFocus={onOpen ? preloadDecisionBody : undefined}
-      onClick={
-        onOpen
-          ? (e) => {
-              if (!opensDialog(e)) return;
-              e.preventDefault();
-              onOpen(t);
-            }
-          : undefined
-      }
+      aria-haspopup="dialog"
+      // The dialog's body is the task page's chunk (ruling 11): an intent on
+      // a row starts the fetch.
+      onPointerEnter={preloadDecisionBody}
+      onFocus={preloadDecisionBody}
+      onClick={(e) => {
+        if (!opensDialog(e)) return;
+        e.preventDefault();
+        onOpen(t);
+      }}
       // Ruling 304 (F40-29): a LINK, because the row goes to a page. It was
       // a <button> calling navigate(), so the queue built for triaging many
       // tasks at once could not Cmd- or middle-click rows into tabs or copy a
       // row's address, a screen reader announced "button" for page navigation,
       // and `.rq-main` held <div>s inside a <button>. The board card, the list
-      // view and the Goals panel already link to the same pages. A decision's
-      // row keeps the link and takes the plain click for its dialog, which
-      // brings the decision's evidence (the packet, the verdicts, the diff) to
-      // the queue (ruling 304, owner 2026-10-09).
+      // view and the Goals panel already link to the same pages. The row
+      // keeps the link and takes the plain click for its dialog, which brings
+      // the decision's evidence (the packet, the verdicts, the diff) to the
+      // queue (ruling 304, owner 2026-10-09).
       // R15-11: the queue's whole job is deciding, yet the row was an unlabeled
       // clickable region — the surface read as actionless. The row NAMES what
       // it opens (the `.rq-go` "Review"). Deliberately "Review", not "Accept":
@@ -380,7 +377,6 @@ export function ReviewQueuePage({
   projectSlug,
   completions,
   decisions,
-  working,
   stageNames = { review: "Review", terminal: "Done" },
   acceptance = { operatorCanAccept: false, operatorName: "the operator" },
   waitingOnMe,
@@ -389,10 +385,9 @@ export function ReviewQueuePage({
   /** Ruling 304: the viewer's own tasks whose decision moves them to the
    *  terminal stage. */
   completions: ReviewRowView[];
-  /** Ruling 304: the viewer's own tasks with any other open packet. */
+  /** Ruling 304: the viewer's own tasks with any other open packet or
+   *  recommendation. */
   decisions: ReviewRowView[];
-  /** The viewer's own review work with nothing to decide yet. */
-  working: ReviewRowView[];
   /** writ-3: keys of the tasks the board marks `waitingOnMe` for this viewer
    *  (the workspace layout's flag). Absent means none, the conservative
    *  reading: a row then says "waiting on a human", never a false "you". */
@@ -414,17 +409,16 @@ export function ReviewQueuePage({
   const [opened, setOpened] = useState<ReviewRowView | null>(null);
   const listed =
     opened !== null && [...completions, ...decisions].some((r) => r.key === opened.key);
-  const toDecide = completions.length + decisions.length;
 
   return (
     <div className="board-wrap" data-screen-label="Review queue">
       <div className="board-head">
         <div>
           <h1>Review queue</h1>
-          {/* Ruling 304: the queue is the viewer's own tasks, so its count
-              says so; a member who owns none reads why it is empty here. */}
+          {/* Ruling 304: the queue is what waits on the viewer, on their own
+              tasks, so its count says so. */}
           <div className="sub">
-            Your tasks · {toDecide} to decide · {working.length} still in review
+            Your tasks · {completions.length + decisions.length} to decide
           </div>
         </div>
         <div className="board-tools">
@@ -518,8 +512,8 @@ export function ReviewQueuePage({
           </div>
         </div>
 
-        {/* Ruling 304: every other open packet on the viewer's tasks, at any
-            stage, answered in the same dialog. */}
+        {/* Ruling 304: every other open packet or operator recommendation on
+            the viewer's tasks, at any stage, answered in the same dialog. */}
         <div className={decisions.length ? "panel" : "panel quiet"}>
           <div className="panel-head">
             <Icon name="message" />
@@ -541,36 +535,8 @@ export function ReviewQueuePage({
             </div>
           ) : (
             <div className="empty sm">
-              No decision is open on your tasks. A question the operator or an
-              agent asks about a task you own lands here.
-            </div>
-          )}
-        </div>
-
-        <div className="panel">
-          <div className="panel-head">
-            <Icon name="activity" />
-            <h2>Still in review</h2>
-            <span className="right sub fine">{working.length}</span>
-          </div>
-          {working.length ? (
-            <div className="rq-list">
-              {working.map((t) => (
-                <RQRow
-                  key={t.key}
-                  t={t}
-                  href={taskHref(t.key)}
-                  sub={reviewRowSub(t)}
-                  waitingOnMe={waitingOnMe?.has(t.key)}
-                />
-              ))}
-            </div>
-          ) : (
-            // D8: absent → why it matters (P16), not a bare label.
-            <div className="empty">
-              None of your tasks is in review. A task you own that an agent is
-              revising in a review stage shows here until it reaches the
-              boundary and moves up.
+              No decision is open on your tasks. A question or a recommendation
+              the operator or an agent raises on a task you own lands here.
             </div>
           )}
         </div>

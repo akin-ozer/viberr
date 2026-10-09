@@ -528,6 +528,9 @@ export function useRecommendationActions(
   recommendations: RecommendationView[],
   terminalStageId: string | null,
   openCeremony: OpenCeremony,
+  /** Ruling 304: the task page's address, when the cards are drawn in the
+   *  Review queue's decision dialog. Absent: the route they are on. */
+  action?: string,
 ) {
   const [confirmDismiss, setConfirmDismiss] = useState<
     { recId: string; label: string } | null
@@ -558,7 +561,7 @@ export function useRecommendationActions(
     const fd = intentForm(csrf, "apply-recommendation");
     fd.set("recId", recId);
     setDisclosure(fd, disclosure);
-    recFetcher.submit(fd, { method: "post" });
+    recFetcher.submit(fd, { method: "post", action });
   };
   // F19-3 (live-proven: one Apply click merged an unreviewed head into main).
   // The confirmed action still posts `apply-recommendation`, NOT
@@ -577,7 +580,7 @@ export function useRecommendationActions(
     if (recBusy) return;
     const fd = intentForm(csrf, "dismiss-recommendation");
     fd.set("recId", recId);
-    recFetcher.submit(fd, { method: "post" });
+    recFetcher.submit(fd, { method: "post", action });
   };
   // D6: dismissing withdraws a pending operator recommendation — confirm it,
   // naming the recommendation. (Apply already routes through the accept confirm

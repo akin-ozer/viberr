@@ -55,7 +55,6 @@ describe("/projects/:slug/review", () => {
     const arda = await runLoader("viberr-core", (await app.cookieFor(ardaId)).cookie);
     expect(arda.completions.map((t) => t.key)).toEqual(["VIB-142"]);
     expect(arda.decisions).toEqual([]);
-    expect(arda.working).toEqual([]);
 
     const vib142 = arda.completions[0]!;
     expect(vib142.packet?.kind).toBe("Completion report");

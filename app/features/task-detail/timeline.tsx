@@ -18,7 +18,7 @@ import type { Mentionables } from "~/server/tasks/mention-suggestions.server";
 import type { TaskRunPrincipalView } from "./run-principal-view";
 import { mentionNamesFor } from "./mention-autocomplete";
 import { CommentComposer } from "./comment-composer-slot";
-import { useCommentPost, useTimelineTab } from "./timeline-actions";
+import { useCommentPost, useTimelineTab, type CommentPost } from "./timeline-actions";
 import { emptyTimelineText, shownBy } from "./timeline-derive";
 import { TimelineEntryBody, TimelineEntryFiles, TimelineEntryMeta } from "./timeline-entry";
 
@@ -273,9 +273,6 @@ export function Timeline({
    *  task not archived). Absent ⇒ the composer takes words only. */
   canAttach?: boolean;
 }) {
-  // P13-D-39: the send handler below accepts either modifier, so the hint has to
-  // name the one the viewer's keyboard actually has (UI-55's rule).
-  const sendHint = useModifierHint("↵");
   // Ruling 11 (CS-3 / TASK-4): every revalidation decodes new objects for
   // all of these; kept while their content is the same, so the memoised items
   // below re-render only for an event that changed.
@@ -294,21 +291,10 @@ export function Timeline({
   const [, setSearchParams] = useSearchParams();
   // The comment the composer sends, its files and the "Ask operator" prefill
   // (`useCommentPost`, timeline-actions.ts).
-  const {
-    composerRef,
-    composerBoxRef,
-    busy,
-    commentError,
-    files,
-    fileProblem,
-    addFiles,
-    removeFile,
-    dropping,
-    dropProps,
-    send,
-    submitDraft,
-    keepDraft,
-  } = useCommentPost({ ask, canAttach, onAgentLog });
+  const post = useCommentPost({ ask, canAttach, onAgentLog });
+  // P13-D-39: the send handler accepts either modifier, so the hint has to
+  // name the one the viewer's keyboard actually has (UI-55's rule).
+  const sendHint = useModifierHint("↵");
   // The filter tab, which a link to an event opens to All, the event it marks
   // and the one it keeps focusable (ruling 302; `useTimelineTab`,
   // timeline-actions.ts).
@@ -367,92 +353,14 @@ export function Timeline({
         </span>
       </div>
 
-      <div className="composer">
-        {/* R7-6: Done tasks stay commentable — one subtle line, no freeze. */}
-        {taskClosed && (
-          <div className="fine">
-            This task is closed. Comments are still recorded.
-          </div>
-        )}
-        <div
-          className="composer-box"
-          data-dropping={dropping ? "" : undefined}
-          {...(canAttach ? dropProps : {})}
-        >
-          {canAttach && (
-            <AttachTray
-              files={files}
-              problem={fileProblem}
-              disabled={busy}
-              onRemove={removeFile}
-            />
-          )}
-          <div
-            className="composer-input"
-            ref={composerBoxRef}
-            onPasteCapture={(e) => {
-              // Ruling 76: a bare screenshot joins the comment before the
-              // editor sees the paste; copied text stays the editor's.
-              if (!canAttach) return;
-              const pasted = filesFromPaste(e.clipboardData, true, files);
-              if (!pasted) return;
-              e.preventDefault();
-              e.stopPropagation();
-              addFiles(pasted);
-            }}
-          >
-            {/* Lexical plain-text editor: known @mentions highlight live as
-                character-editable text (no backdrop mirroring); the posted
-                value stays exactly the trimmed plain draft. Loaded lazily
-                behind a same-size stand-in (ruling 300). */}
-            <CommentComposer
-              ref={composerRef}
-              mentionables={directory}
-              runPrincipal={principal}
-              onChange={keepDraft}
-              onSubmit={submitDraft}
-            />
-          </div>
-          <div className="composer-foot">
-            {/* UXA-1: this read "Open to every registered user" — the same false
-                sentence the task page's Permissions panel (since removed, ruling 308) had dropped
-                under E1 ("false, and false on a surface whose whole job is
-                stating what the server enforces"). Membership is the gate:
-                R15-4 members-only was re-proven live this pass — a signed-in
-                non-member 404s on the page and on the comment POST. Say what
-                the server actually enforces, in the panel's own words. */}
-            <span className="att-lead">
-              {canAttach && <AttachButton onFiles={addFiles} disabled={busy} />}
-              <span className="fine dim">
-                Every project member can comment · @mentions route to agents
-              </span>
-            </span>
-            {commentError && (
-              <span className="composer-err" role="alert">
-                {commentError}
-              </span>
-            )}
-            {/* Ruling 319: the controller composer's hint, in its words and
-                its class: the body face (a key hint is not code), and gone
-                on a touch screen (ruling 319). */}
-            <span className="fine dim push kbd-hint" suppressHydrationWarning>
-              {sendHint} sends
-            </span>
-            {/* Ruling 313: the frame's one action, primary as the
-                controller composer's Send is. */}
-            <button
-              type="button"
-              className="btn primary sm"
-              onClick={send}
-              disabled={busy}
-              aria-busy={busy}
-            >
-              <Icon name="send" />
-              Comment
-            </button>
-          </div>
-        </div>
-      </div>
+      {commentBox({
+        post,
+        sendHint,
+        mentionables: directory,
+        runPrincipal: principal,
+        canAttach,
+        taskClosed,
+      })}
 
       <div className="timeline">
         {/* UI-40: `items` is the FILTERED view of an already-bounded slice, so
@@ -487,6 +395,136 @@ export function Timeline({
             Show older events · {remaining} more
           </button>
         )}
+      </div>
+    </div>
+  );
+}
+
+/**
+ * The task's comment composer: its frame, file tray, editor and send, all
+ * from one `useCommentPost`. The timeline draws it above its entries, and the
+ * Review queue's decision dialog draws it when its reader asks the operator
+ * (ruling 304), the post aimed at the task page's action, so the two are one
+ * composer. A function its callers call, not a component, so drawing it costs
+ * the timeline no render of its own (ruling 11).
+ */
+export function commentBox({
+  post,
+  sendHint,
+  mentionables,
+  runPrincipal,
+  canAttach,
+  taskClosed,
+}: {
+  post: CommentPost;
+  /** The send shortcut's hint (`useModifierHint`), from the caller. */
+  sendHint: string;
+  /** @-mention autocomplete directory, held still across revalidations. */
+  mentionables: Mentionables;
+  runPrincipal?: TaskRunPrincipalView | null;
+  canAttach: boolean;
+  taskClosed?: boolean;
+}) {
+  const {
+    composerRef,
+    composerBoxRef,
+    busy,
+    commentError,
+    files,
+    fileProblem,
+    addFiles,
+    removeFile,
+    dropping,
+    dropProps,
+    send,
+    submitDraft,
+    keepDraft,
+  } = post;
+  return (
+    <div className="composer">
+      {/* R7-6: Done tasks stay commentable — one subtle line, no freeze. */}
+      {taskClosed && (
+        <div className="fine">
+          This task is closed. Comments are still recorded.
+        </div>
+      )}
+      <div
+        className="composer-box"
+        data-dropping={dropping ? "" : undefined}
+        {...(canAttach ? dropProps : {})}
+      >
+        {canAttach && (
+          <AttachTray
+            files={files}
+            problem={fileProblem}
+            disabled={busy}
+            onRemove={removeFile}
+          />
+        )}
+        <div
+          className="composer-input"
+          ref={composerBoxRef}
+          onPasteCapture={(e) => {
+            // Ruling 76: a bare screenshot joins the comment before the
+            // editor sees the paste; copied text stays the editor's.
+            if (!canAttach) return;
+            const pasted = filesFromPaste(e.clipboardData, true, files);
+            if (!pasted) return;
+            e.preventDefault();
+            e.stopPropagation();
+            addFiles(pasted);
+          }}
+        >
+          {/* Lexical plain-text editor: known @mentions highlight live as
+              character-editable text (no backdrop mirroring); the posted
+              value stays exactly the trimmed plain draft. Loaded lazily
+              behind a same-size stand-in (ruling 300). */}
+          <CommentComposer
+            ref={composerRef}
+            mentionables={mentionables}
+            runPrincipal={runPrincipal}
+            onChange={keepDraft}
+            onSubmit={submitDraft}
+          />
+        </div>
+        <div className="composer-foot">
+          {/* UXA-1: this read "Open to every registered user" — the same false
+              sentence the task page's Permissions panel (since removed, ruling 308) had dropped
+              under E1 ("false, and false on a surface whose whole job is
+              stating what the server enforces"). Membership is the gate:
+              R15-4 members-only was re-proven live this pass — a signed-in
+              non-member 404s on the page and on the comment POST. Say what
+              the server actually enforces, in the panel's own words. */}
+          <span className="att-lead">
+            {canAttach && <AttachButton onFiles={addFiles} disabled={busy} />}
+            <span className="fine dim">
+              Every project member can comment · @mentions route to agents
+            </span>
+          </span>
+          {commentError && (
+            <span className="composer-err" role="alert">
+              {commentError}
+            </span>
+          )}
+          {/* Ruling 319: the controller composer's hint, in its words and
+              its class: the body face (a key hint is not code), and gone
+              on a touch screen (ruling 319). */}
+          <span className="fine dim push kbd-hint" suppressHydrationWarning>
+            {sendHint} sends
+          </span>
+          {/* Ruling 313: the frame's one action, primary as the
+              controller composer's Send is. */}
+          <button
+            type="button"
+            className="btn primary sm"
+            onClick={send}
+            disabled={busy}
+            aria-busy={busy}
+          >
+            <Icon name="send" />
+            Comment
+          </button>
+        </div>
       </div>
     </div>
   );

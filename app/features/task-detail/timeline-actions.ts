@@ -55,11 +55,17 @@ export function useCommentPost({
   ask,
   canAttach,
   onAgentLog,
+  action,
 }: {
   /** "Ask operator" counter — each bump prefills + focuses the composer. */
   ask: number;
   canAttach: boolean;
   onAgentLog: ((threadId: string) => void) | undefined;
+  /** Ruling 304: the task page's address, when the composer is drawn
+   *  elsewhere (the Review queue's decision dialog); the comment posts to
+   *  the task page's action either way. Absent: the route the composer is
+   *  on, the task page. */
+  action?: string;
 }): CommentPost {
   // The raw draft, synced synchronously from the editor. A ref, not state:
   // nothing renders from it (the editor owns the draft UI), and send() must
@@ -139,7 +145,12 @@ export function useCommentPost({
     fd.set("text", text);
     for (const file of files) fd.append("files", file);
     pendingFiles.current = files;
-    fetcher.submit(fd, files.length > 0 ? { method: "post", encType: "multipart/form-data" } : { method: "post" });
+    fetcher.submit(
+      fd,
+      files.length > 0
+        ? { method: "post", encType: "multipart/form-data", action }
+        : { method: "post", action },
+    );
   };
   // Ruling 11 (CS-7): the composer is memoised, so what it is handed holds
   // still while nothing it draws changed: a revalidation or a fetcher state

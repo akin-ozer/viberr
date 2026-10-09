@@ -16,7 +16,6 @@ import { getBoardWithTasks } from "./board-query.server";
 import { rebuildAll } from "./rebuilder.server";
 import { setupProjectedStore } from "../../../test-support/projected-store";
 import { getReviewQueue, type ReviewQueueData } from "./review-queue.server";
-import { reviewRowSub } from "~/features/review/review-helpers";
 
 const ctx = createTestDbContext();
 afterEach(ctx.cleanup);
@@ -36,8 +35,18 @@ function owned(
 
 /** Every row of the queue, whichever panel holds it. */
 function rowsOf(q: ReviewQueueData) {
-  return [...q.completions, ...q.decisions, ...q.working];
+  return [...q.completions, ...q.decisions];
 }
+
+/**
+ * Ruling 304: a pending operator recommendation, which makes its owner's task
+ * a row whatever the task's acceptance. The tests that read a row's fields off
+ * a task holding no other decision give it one.
+ */
+const RUN_DEVELOPER: TaskFrontmatter["recommendations"] = [
+  { id: "rec_run", kind: "run_agent", profileId: "developer", label: "Run Developer", detail: "" },
+];
+const RECOMMENDS: Partial<TaskFrontmatter> = { recommendations: RUN_DEVELOPER };
 
 function setup() {
   const store = setupTestStore(ctx);
@@ -77,9 +86,11 @@ function setup() {
     ],
   });
 
-  // Panel 3: review + waiting agent, no packet — subline = newest event.
+  // Panel 2: review + waiting agent, no packet, a pending recommendation —
+  // the row's subline source is the newest event.
   writeTask(store.dataRoot, store.slug, {
     frontmatter: owned(store, "VIB-102", {
+      ...RECOMMENDS,
       title: "SSE fan-out",
       stage: "review",
       waiting: "agent",
@@ -108,7 +119,8 @@ function setup() {
     ],
   });
 
-  // The review + none combination (contracts §2.2): still-with-agents.
+  // The review + none combination (contracts §2.2): review work with nothing
+  // to decide, so never a row.
   writeTask(store.dataRoot, store.slug, {
     frontmatter: owned(store, "VIB-103", {
       title: "Orphaned review task",
@@ -141,24 +153,23 @@ function setup() {
 }
 
 describe("getReviewQueue", () => {
-  it("ruling 304: splits the owner's tasks by their decision — review+none lands with review work", () => {
+  it("ruling 304: lists the owner's decisions by what they do, and no review work without one", () => {
     const store = setup();
     const queue = getReviewQueue(store.db, store.slug, {
       dataRoot: store.dataRoot,
       viewerUserId: store.users.arda.id,
     });
 
-    expect(queue.total).toBe(4);
     // A packet offering `accept_completion` is a completion.
     expect(queue.completions.map((t) => t.key)).toEqual(["VIB-101"]);
     // CANARY: list packets only on review work again and VIB-104, blocked at
     // Implementation, leaves its owner's queue.
-    expect(queue.decisions.map((t) => t.key)).toEqual(["VIB-104"]);
-    // waiting !== "human" — including the legal review+none combination.
-    expect(queue.working.map((t) => t.key)).toEqual(["VIB-102", "VIB-103"]);
-    expect(queue.working.find((t) => t.key === "VIB-103")?.waiting).toBe(
-      "none",
-    );
+    expect(queue.decisions.map((t) => t.key)).toEqual(["VIB-102", "VIB-104"]);
+    expect(queue.decisions[0]!.recommendations).toBe(1);
+    // CANARY: list review work again and VIB-103, at Review with nothing to
+    // decide, is a row the badge counts.
+    expect(rowsOf(queue).map((t) => t.key)).not.toContain("VIB-103");
+    expect(queue.total).toBe(3);
   });
 
   it("ruling 11: the board's own list gives the same queue, without a second task query", async () => {
@@ -181,7 +192,7 @@ describe("getReviewQueue", () => {
       }),
     );
     expect(shared).toEqual(own);
-    expect(shared.total).toBe(3);
+    expect(shared.total).toBe(2);
     expect(statementsMatching(tally, /FROM task_projections/)).toHaveLength(0);
   });
 
@@ -198,13 +209,13 @@ describe("getReviewQueue", () => {
       title: "Accept completion, or send back for one fix?",
     });
 
-    const withTimeline = queue.working.find((t) => t.key === "VIB-102")!;
+    const withTimeline = queue.decisions.find((t) => t.key === "VIB-102")!;
     expect(withTimeline.packet).toBeNull();
     // Newest-first: position 0 is the transition request, not the comment.
     expect(withTimeline.latestEventText).toContain("**Transition request:**");
 
-    const bare = queue.working.find((t) => t.key === "VIB-103")!;
-    expect(bare.packet).toBeNull();
+    // VIB-104 has a packet and no timeline.
+    const bare = queue.decisions.find((t) => t.key === "VIB-104")!;
     expect(bare.latestEventText).toBeNull();
   });
 
@@ -224,7 +235,7 @@ describe("getReviewQueue", () => {
     // pill. This test used to pin that passthrough. (The derivation's own
     // healthy/failing/changed coverage lives in rebuilder.server.test.ts.)
     expect(queue.completions[0]!.validation).toBe("none");
-    expect(queue.working[0]!.validation).toBe("none");
+    expect(queue.decisions[0]!.validation).toBe("none");
   });
 
   it("ruling 242: a conflict measured on an older head does not reach the row", () => {
@@ -235,6 +246,7 @@ describe("getReviewQueue", () => {
     const seed = (mergeableAt: string) => {
       writeTask(store.dataRoot, store.slug, {
         frontmatter: owned(store, "VIB-301", {
+          ...RECOMMENDS,
           title: "Refreshed after a conflict",
           stage: "review",
           waiting: "human",
@@ -265,7 +277,7 @@ describe("getReviewQueue", () => {
       dataRoot: store.dataRoot,
       viewerUserId: store.users.arda.id,
     });
-    expect(queue).toEqual({ completions: [], decisions: [], working: [], acceptableKeys: [], total: 0 });
+    expect(queue).toEqual({ completions: [], decisions: [], acceptableKeys: [], total: 0 });
   });
 
   it("D-1 (pass 24): an ARCHIVED project has an EMPTY review queue (parity with decisionsRequiring)", () => {
@@ -287,7 +299,7 @@ describe("getReviewQueue", () => {
       dataRoot: store.dataRoot,
       viewerUserId: store.users.arda.id,
     });
-    expect(queue).toEqual({ completions: [], decisions: [], working: [], acceptableKeys: [], total: 0 });
+    expect(queue).toEqual({ completions: [], decisions: [], acceptableKeys: [], total: 0 });
   });
 
   // WI-1: on a CUSTOM 3-stage board (todo/doing/done) the review role resolves
@@ -448,6 +460,7 @@ describe("F10-11: acceptance readiness is revision-bound, not just human-waiting
     };
     writeTask(store.dataRoot, store.slug, {
       frontmatter: owned(store, "VIB-9", {
+        ...RECOMMENDS,
         title: "Rejected work",
         stage: "review",
         waiting: "human",
@@ -477,8 +490,9 @@ describe("F10-11: acceptance readiness is revision-bound, not just human-waiting
       viewerUserId: store.users.arda.id,
     });
     // Human-waiting, but a required reviewer requested changes → NOT acceptable.
+    expect(q.acceptableKeys).not.toContain("VIB-9");
     expect(q.completions.map((t) => t.key)).not.toContain("VIB-9");
-    const row = q.working.find((t) => t.key === "VIB-9")!;
+    const row = q.decisions.find((t) => t.key === "VIB-9")!;
     expect(row.blockReason).toMatch(/requests changes/i);
   });
 
@@ -530,6 +544,7 @@ describe("F10-11: acceptance readiness is revision-bound, not just human-waiting
     const store = setupTestStore(ctx);
     writeTask(store.dataRoot, store.slug, {
       frontmatter: owned(store, "VIB-7", {
+        ...RECOMMENDS,
         title: "Rejected on GitHub",
         stage: "review",
         waiting: "human",
@@ -545,8 +560,9 @@ describe("F10-11: acceptance readiness is revision-bound, not just human-waiting
       viewerUserId: store.users.arda.id,
     });
     // Human-waiting + no blockReason, but the PR was rejected → NOT acceptance-ready.
+    expect(q.acceptableKeys).not.toContain("VIB-7");
     expect(q.completions.map((t) => t.key)).not.toContain("VIB-7");
-    const row = q.working.find((t) => t.key === "VIB-7")!;
+    const row = q.decisions.find((t) => t.key === "VIB-7")!;
     expect(row.pr).toEqual({ number: 77, state: "closed" }); // closed preserved, not coerced to "review"
   });
 });
@@ -574,6 +590,7 @@ describe("R15-1: the verdict gate reaches the queue through the projection", () 
   ) {
     writeTask(store.dataRoot, store.slug, {
       frontmatter: owned(store, key, {
+        ...RECOMMENDS,
         title: "Delivered, unreviewed",
         stage: "review",
         waiting: "human",
@@ -604,8 +621,8 @@ describe("R15-1: the verdict gate reaches the queue through the projection", () 
       dataRoot: store.dataRoot,
       viewerUserId: store.users.arda.id,
     });
-    expect(q.completions.map((t) => t.key)).not.toContain("VIB-6");
-    const row = q.working.find((t) => t.key === "VIB-6")!;
+    expect(q.acceptableKeys).not.toContain("VIB-6");
+    const row = q.decisions.find((t) => t.key === "VIB-6")!;
     expect(row.blockReason).toMatch(/no approving verdict yet/i);
   });
 
@@ -616,9 +633,9 @@ describe("R15-1: the verdict gate reaches the queue through the projection", () 
       dataRoot: store.dataRoot,
       viewerUserId: store.users.arda.id,
     });
-    expect(q.completions.map((t) => t.key)).not.toContain("VIB-5");
+    expect(q.acceptableKeys).not.toContain("VIB-5");
     expect(
-      q.working.find((t) => t.key === "VIB-5")!.blockReason,
+      q.decisions.find((t) => t.key === "VIB-5")!.blockReason,
     ).toMatch(/no review pull request/i);
   });
 
@@ -629,6 +646,7 @@ describe("R15-1: the verdict gate reaches the queue through the projection", () 
       dataRoot: store.dataRoot,
       viewerUserId: store.users.arda.id,
     });
+    expect(q.acceptableKeys).toContain("VIB-4");
     expect(q.completions.map((t) => t.key)).toContain("VIB-4");
     expect(q.completions.find((t) => t.key === "VIB-4")!.blockReason).toBeNull();
   });
@@ -651,6 +669,7 @@ describe("the row carries the canonical PR state, uncoerced", () => {
   ) {
     writeTask(store.dataRoot, store.slug, {
       frontmatter: owned(store, key, {
+        ...RECOMMENDS,
         title: `PR is ${state}`,
         stage: "review",
         waiting: "human",
@@ -745,6 +764,7 @@ describe("UX19-3: the acceptance panel asks the same questions the writer does",
     const store = setupTestStore(ctx);
     writeTask(store.dataRoot, store.slug, {
       frontmatter: owned(store, "VIB-32", {
+        ...RECOMMENDS,
         title: "Conflicting PR at the boundary",
         stage: "review",
         waiting: "human",
@@ -764,8 +784,9 @@ describe("UX19-3: the acceptance panel asks the same questions the writer does",
     });
     // GitHub cannot merge it, so the server refuses the accept — the panel that
     // names "your acceptance" must not claim otherwise.
+    expect(q.acceptableKeys).not.toContain("VIB-32");
     expect(q.completions.map((t) => t.key)).not.toContain("VIB-32");
-    const row = q.working.find((t) => t.key === "VIB-32")!;
+    const row = q.decisions.find((t) => t.key === "VIB-32")!;
     expect(row.pr!.mergeable).toBe("conflicting");
   });
 
@@ -836,6 +857,7 @@ describe("ruling 243: the queue row and the unpushed revision", () => {
     const record = { revisionSha: "9".repeat(40), prHeadSha: "1".repeat(40), relation: "behind" as const };
     writeTask(store.dataRoot, store.slug, {
       frontmatter: owned(store, "VIB-103", {
+        ...RECOMMENDS,
         title: "Unpushed rework",
         stage: "review",
         waiting: "human",
@@ -847,6 +869,7 @@ describe("ruling 243: the queue row and the unpushed revision", () => {
     // A stale record (older revision) reads as nothing.
     writeTask(store.dataRoot, store.slug, {
       frontmatter: owned(store, "VIB-104", {
+        ...RECOMMENDS,
         title: "Stale record",
         stage: "review",
         waiting: "human",
@@ -936,16 +959,14 @@ describe("ruling 63: the queue row flags a decided edit_goal packet", () => {
 });
 
 /**
- * U35-5 (pass 35): the `working` half keys on review WORK, not on the one stage
- * with an edge into Done. The live board (`triage, design, impl, validation,
- * review, merge, done`) resolves `reviewId` to Merge, so the old
- * `stage === reviewId` filter printed "0 tasks at the review boundary" while
- * eight tasks sat at Validation with open PRs and engaged reviewers.
- *
- * Canary: restore `t.stage === reviewId` as the membership filter for the
- * working half; KNC-8, KNC-9 and KNC-5 vanish and the first four cases go red.
+ * U35-5 (pass 35): the acceptance half keys on the graph's boundary, and review
+ * WORK is what the board defines by engagements and verdicts, not by the one
+ * stage with an edge into Done. The live board (`triage, design, impl,
+ * validation, review, merge, done`) resolves `reviewId` to Merge. Ruling 304:
+ * review work is a row only while it holds a decision; the rest is the
+ * board's to show.
  */
-describe("U35-5: review work before the boundary is listed on a custom board", () => {
+describe("U35-5: a custom board's boundary, and its review work", () => {
   const STAGES: StageDef[] = [
     { id: "triage", name: "Triage", color: "slate" },
     { id: "design", name: "Design", color: "teal" },
@@ -992,7 +1013,7 @@ describe("U35-5: review work before the boundary is listed on a custom board", (
     rounds: 1,
   });
 
-  function seed(workflow: typeof WORKFLOW = WORKFLOW) {
+  function seed(workflow: typeof WORKFLOW = WORKFLOW, recommendedTo: string[] = []) {
     const store = setupTestStore(ctx);
     writeProject(store.dataRoot, {
       name: "k9s clone",
@@ -1010,10 +1031,11 @@ describe("U35-5: review work before the boundary is listed on a custom board", (
       requiredReviewers: [],
     fileLeases: [],
     });
-    const write = (key: string, patch: Partial<TaskFrontmatter>) =>
-      writeTask(store.dataRoot, "k9c", {
-        frontmatter: owned(store, key, patch),
-      });
+    const write = (key: string, patch: Partial<TaskFrontmatter>) => {
+      const frontmatter = owned(store, key, patch);
+      if (recommendedTo.includes(key)) frontmatter.recommendations = RUN_DEVELOPER;
+      writeTask(store.dataRoot, "k9c", { frontmatter });
+    };
     // (c) + (b): at Validation, PR open, reviewer engaged, no verdict yet.
     write("KNC-8", {
       title: "Namespace picker",
@@ -1086,41 +1108,7 @@ describe("U35-5: review work before the boundary is listed on a custom board", (
     return store;
   }
 
-  it("lists the Validation task with an open PR and an outstanding verdict under `working`, naming both", () => {
-    const store = seed();
-    const q = getReviewQueue(store.db, "k9c", {
-      dataRoot: store.dataRoot,
-      viewerUserId: store.users.arda.id,
-    });
-    const row = q.working.find((t) => t.key === "KNC-8")!;
-    expect(row).toBeTruthy();
-    expect(row.stageName).toBe("Validation");
-    expect(row.atAcceptanceBoundary).toBe(false);
-    expect(row.pr).toMatchObject({ number: 8, state: "review" });
-    expect(row.validation).toBe("changed");
-    expect(reviewRowSub(row)).toBe(
-      "Review in progress at Validation · PR #8 · awaiting verdict",
-    );
-  });
-
-  it("a changes-requested revision reads so, and an open PR alone is enough", () => {
-    const store = seed();
-    const q = getReviewQueue(store.db, "k9c", {
-      dataRoot: store.dataRoot,
-      viewerUserId: store.users.arda.id,
-    });
-    expect(reviewRowSub(q.working.find((t) => t.key === "KNC-9")!)).toBe(
-      "Review in progress at Validation · PR #9 · changes requested",
-    );
-    expect(reviewRowSub(q.working.find((t) => t.key === "KNC-5")!)).toBe(
-      "Review in progress at Design · PR #5",
-    );
-    expect(reviewRowSub(q.working.find((t) => t.key === "KNC-7")!)).toBe(
-      "Review in progress at Implementation · awaiting verdict",
-    );
-  });
-
-  it("the Merge task with a healthy verdict is a completion; nothing before the boundary ever is", () => {
+  it("the Merge task with a healthy verdict is a completion; review work with nothing to decide is no row", () => {
     const store = seed();
     const q = getReviewQueue(store.db, "k9c", {
       dataRoot: store.dataRoot,
@@ -1129,7 +1117,25 @@ describe("U35-5: review work before the boundary is listed on a custom board", (
     expect(q.completions.map((t) => t.key)).toEqual(["KNC-3"]);
     expect(q.completions[0]!.atAcceptanceBoundary).toBe(true);
     expect(q.completions[0]!.stageName).toBe("Merge");
-    expect(q.working.map((t) => t.key)).toEqual(["KNC-5", "KNC-7", "KNC-8", "KNC-9"]);
+    // CANARY: list review work again and the Validation, Design and
+    // Implementation tasks, which wait on agents and reviewers, are rows.
+    expect(q.decisions).toEqual([]);
+    expect(q.total).toBe(1);
+  });
+
+  it("review work before the boundary is its owner's decision once it holds one, and the row says where it stands", () => {
+    const store = seed(WORKFLOW, ["KNC-8"]);
+    const q = getReviewQueue(store.db, "k9c", {
+      dataRoot: store.dataRoot,
+      viewerUserId: store.users.arda.id,
+    });
+    expect(q.decisions.map((t) => t.key)).toEqual(["KNC-8"]);
+    const row = q.decisions[0]!;
+    expect(row.stageName).toBe("Validation");
+    expect(row.atAcceptanceBoundary).toBe(false);
+    expect(row.pr).toMatchObject({ number: 8, state: "review" });
+    expect(row.validation).toBe("changed");
+    expect(row.recommendations).toBe(1);
   });
 
   it("the acceptance half is the graph's boundary, not the first stage with an edge into Done", () => {
@@ -1137,11 +1143,10 @@ describe("U35-5: review work before the boundary is listed on a custom board", (
     // writer allows every one of them (`acceptanceStageBlockedReason`), and the
     // board offers Accept on every one of them (`atAcceptanceBoundary`).
     // `resolveStageRoles` names only the FIRST as `reviewId`, so keying the
-    // queue's ready half on `stage === reviewId` filed a task the server would
-    // accept, and the board offers Accept on, under "Still in review" with a
-    // "Review in progress" subline.
+    // queue's ready half on `stage === reviewId` left out a task the server
+    // would accept, and the board offers Accept on.
     // CANARY: set the row's `atAcceptanceBoundary` from `t.stage === reviewId`
-    // again — KNC-3 drops out of the completions and reads as still in review.
+    // again — KNC-3 drops out of the completions.
     const store = seed([
       ...WORKFLOW.filter((w) => w.to !== "done"),
       edge("review", "done", "human"),
@@ -1153,7 +1158,75 @@ describe("U35-5: review work before the boundary is listed on a custom board", (
     });
     expect(q.completions.map((t) => t.key)).toEqual(["KNC-3"]);
     expect(q.completions[0]!.stageName).toBe("Merge");
-    expect(q.working.map((t) => t.key)).not.toContain("KNC-3");
+    expect(q.decisions.map((t) => t.key)).not.toContain("KNC-3");
+  });
+});
+
+/**
+ * Ruling 304 (owner, 2026-10-09): an operator recommendation waiting on its
+ * owner is a decision the queue lists, the one that recommends accepting the
+ * completion beside the other completions. F37-71's parity with
+ * `decisionsRequiring`: a recommendation of an acceptance the gate refuses is
+ * not a decision anybody can make, so alone it lists nothing.
+ */
+describe("ruling 304: the operator's pending recommendations are their owner's decisions", () => {
+  const recommend = (kind: "run_agent" | "transition" | "accept_completion"): Partial<TaskFrontmatter> => ({
+    recommendations: [
+      kind === "run_agent"
+        ? { id: "rec_1", kind, profileId: "developer", label: "Run Developer", detail: "" }
+        : kind === "transition"
+          ? { id: "rec_1", kind, toStageId: "review", label: "Move to Review", detail: "" }
+          : { id: "rec_1", kind, label: "Accept the completion", detail: "" },
+    ],
+  });
+
+  function seedRecommended(store: ReturnType<typeof setupTestStore>) {
+    // Waiting on agents at Implementation, the operator recommends a move.
+    writeTask(store.dataRoot, store.slug, {
+      frontmatter: owned(store, "VIB-501", { ...recommend("transition"), title: "Move it", stage: "impl", waiting: "agent" }),
+    });
+    // At the boundary, nothing refusing the acceptance it recommends.
+    writeTask(store.dataRoot, store.slug, {
+      frontmatter: owned(store, "VIB-502", { ...recommend("accept_completion"), title: "Accept it", stage: "review", waiting: "agent" }),
+    });
+    // The same recommendation, while a closed PR refuses the acceptance.
+    writeTask(store.dataRoot, store.slug, {
+      frontmatter: owned(store, "VIB-503", {
+        ...recommend("accept_completion"),
+        title: "Refused",
+        stage: "review",
+        waiting: "agent",
+        pr: { number: 503, state: "closed", title: "Refused" },
+      }),
+    });
+    // Another member's task with a recommendation is not arda's row.
+    writeTask(store.dataRoot, store.slug, {
+      frontmatter: owned(store, "VIB-504", {
+        ...recommend("run_agent"),
+        title: "Murat's",
+        stage: "impl",
+        waiting: "agent",
+        ownerUserId: store.users.murat.id,
+      }),
+    });
+    rebuildAll(store.db, { dataRoot: store.dataRoot });
+  }
+
+  it("lists the owner's recommended tasks, the recommended acceptance with the completions", () => {
+    const store = setupTestStore(ctx);
+    seedRecommended(store);
+    const q = getReviewQueue(store.db, store.slug, {
+      dataRoot: store.dataRoot,
+      viewerUserId: store.users.arda.id,
+    });
+    // CANARY: drop `recommends` from the listing and VIB-501 waits on its
+    // owner where nobody looks.
+    expect(q.decisions.map((t) => t.key)).toEqual(["VIB-501"]);
+    expect(q.decisions[0]!.recommendations).toBe(1);
+    expect(q.completions.map((t) => t.key)).toEqual(["VIB-502"]);
+    // F37-71: a recommended acceptance the gate refuses lists nothing alone.
+    expect(rowsOf(q).map((t) => t.key)).not.toContain("VIB-503");
+    expect(q.total).toBe(2);
   });
 });
 

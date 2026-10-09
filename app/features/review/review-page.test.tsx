@@ -27,6 +27,7 @@ const rowHuman: ReviewRowView = {
     kind: "Completion report",
     title: "Accept completion, or send back for one fix?",
   },
+  recommendations: 0,
   goalEditPending: false,
   latestEventText: null,
   pr: { number: 318, state: "review" },
@@ -47,6 +48,7 @@ const rowAgent: ReviewRowView = {
   dueDate: null,
   waiting: "agent",
   packet: null,
+  recommendations: 0,
   goalEditPending: false,
   latestEventText:
     "**Transition request:** move VIB-145 from In Progress to Review — evidence attached.",
@@ -69,6 +71,7 @@ const rowDecision: ReviewRowView = {
   dueDate: null,
   waiting: "human",
   packet: { kind: "Blocked decision", title: "Continuity degraded — pick a recovery path" },
+  recommendations: 0,
   goalEditPending: false,
   latestEventText: null,
   pr: null,
@@ -81,9 +84,8 @@ const rowDecision: ReviewRowView = {
 
 function renderQueue(
   completions: ReviewRowView[],
-  working: ReviewRowView[],
+  decisions: ReviewRowView[],
   opts: {
-    decisions?: ReviewRowView[];
     acceptance?: { operatorCanAccept: boolean; operatorName: string };
     waitingOnMe?: ReadonlySet<string>;
   } = {},
@@ -95,8 +97,7 @@ function renderQueue(
         <ReviewQueuePage
           projectSlug="viberr-core"
           completions={completions}
-          decisions={opts.decisions ?? []}
-          working={working}
+          decisions={decisions}
           acceptance={opts.acceptance}
           waitingOnMe={opts.waitingOnMe}
         />
@@ -107,16 +108,15 @@ function renderQueue(
 }
 
 describe("ReviewQueuePage", () => {
-  it("renders header counts, the policy chip, and the three panels", () => {
-    const { container, getByText, getByTitle } = renderQueue(
+  it("renders header counts, the policy chip, and the two panels", () => {
+    const { container, getByText, getByTitle, queryByText } = renderQueue(
       [rowHuman],
       [rowAgent],
     );
     expect(getByText("Review queue")).toBeTruthy();
-    // Ruling 304: the queue is the viewer's own tasks, and its count says so.
-    expect(
-      getByText("Your tasks · 1 to decide · 1 still in review"),
-    ).toBeTruthy();
+    // Ruling 304: the queue is what waits on the viewer, on their own tasks,
+    // and its count says so.
+    expect(getByText("Your tasks · 2 to decide")).toBeTruthy();
     // UI-27/UI-49: REWRITTEN. The chip used to be a `<button class="hero-file">`
     // — visually identical to the non-interactive `hero-file` spans elsewhere,
     // so nothing announced it navigates; it became a real button, and is a
@@ -130,10 +130,11 @@ describe("ReviewQueuePage", () => {
     // Panel heads, each with its own count.
     expect(getByText("Waiting on your acceptance")).toBeTruthy();
     expect(getByText("Open decisions")).toBeTruthy();
-    expect(getByText("Still in review")).toBeTruthy();
+    // CANARY: draw the review work panel again and the queue lists work with
+    // nothing to decide (ruling 304).
+    expect(queryByText("Still in review")).toBeNull();
     expect([...container.querySelectorAll(".panel-head .right")].map((c) => c.textContent)).toEqual([
       "1",
-      "0",
       "1",
     ]);
     // The pol-note acceptance explainer always renders.
@@ -275,8 +276,8 @@ describe("ReviewQueuePage", () => {
   });
 
   it("F19-31: a `waiting: none` row shows NO wait tag — the board's answer for the same value", () => {
-    // `review + none` is legal and listed (review-queue.server.ts puts it in
-    // "Still in review"). The wait-tag ladder used to end in a bare `else`, so
+    // `review + none` is legal, and a task holding a recommendation can be
+    // listed with it. The wait-tag ladder used to end in a bare `else`, so
     // this row rendered the pulsing "agent working" while the board card's
     // status chip (`cardStatus`) names no wait for the identical stored value —
     // the same defect R8-3 fixed for "human", one branch further down.
@@ -284,6 +285,7 @@ describe("ReviewQueuePage", () => {
       ...rowAgent,
       key: "VIB-160",
       waiting: "none",
+      recommendations: 0,
       goalEditPending: false,
       latestEventText: null,
       pr: null,
@@ -310,6 +312,7 @@ describe("ReviewQueuePage", () => {
       ...rowAgent,
       key: "VIB-170",
       waiting: "human",
+      recommendations: 0,
       goalEditPending: false,
       latestEventText: null,
       pr: { number: 420, state: "accepted" },
@@ -333,7 +336,7 @@ describe("ReviewQueuePage", () => {
     ).toBe("PR #420");
   });
 
-  it("renders the three empty states with exact copy (no all-empty hero)", () => {
+  it("renders the two empty states with exact copy (no all-empty hero)", () => {
     // Ruling 304: each sentence says the panel holds the viewer's own tasks,
     // so a member who owns none reads why the queue is empty.
     const { getByText } = renderQueue([], []);
@@ -344,16 +347,10 @@ describe("ReviewQueuePage", () => {
     ).toBeTruthy();
     expect(
       getByText(
-        "No decision is open on your tasks. A question the operator or an agent asks about a task you own lands here.",
+        "No decision is open on your tasks. A question or a recommendation the operator or an agent raises on a task you own lands here.",
       ),
     ).toBeTruthy();
-    expect(getByText(/None of your tasks is in review/)).toBeTruthy();
-    expect(getByText("Your tasks · 0 to decide · 0 still in review")).toBeTruthy();
-  });
-
-  it("header copy counts the decisions of both decision panels and carries no stage word (U35-5)", () => {
-    const { getByText } = renderQueue([rowHuman], [], { decisions: [rowDecision] });
-    expect(getByText("Your tasks · 2 to decide · 0 still in review")).toBeTruthy();
+    expect(getByText("Your tasks · 0 to decide")).toBeTruthy();
   });
 });
 
@@ -373,6 +370,7 @@ describe("R16-3: a closed PR is stated as the terminal fact it is", () => {
     dueDate: null,
     waiting: "human",
     packet: null,
+    recommendations: 0,
     goalEditPending: false,
     latestEventText: null,
     pr: { number: 124, state: "closed" },
@@ -498,29 +496,22 @@ describe("gap-10: a review row that has gone quiet says so", () => {
 
 /**
  * U35-5 (pass 35): the header used to read "N tasks at the review boundary",
- * naming the one stage every row shared. The rows are review work now,
- * wherever it sits, so the count says what it counts and nothing about a
- * stage. The live shape: eight tasks at Validation with open PRs under review
- * and no one owed an acceptance yet. Canary: restore the old sentence.
+ * naming the one stage every row shared. Ruling 304: it counts the decisions
+ * of both panels, wherever their tasks stand, and names no stage. Canary:
+ * restore the old sentence.
  */
-describe("U35-5: the header counts review work, not a stage", () => {
-  it("renders `Your tasks · 0 to decide · 8 still in review` for eight off-boundary rows", () => {
-    const working = Array.from({ length: 8 }, (_, i): ReviewRowView => ({
+describe("U35-5: the header counts decisions, not a stage", () => {
+  it("counts a packet and a recommendation before the boundary as decisions", () => {
+    const recommended: ReviewRowView = {
       ...rowAgent,
-      key: `KNC-${i + 8}`,
+      key: "VIB-181",
       stageName: "Validation",
       atAcceptanceBoundary: false,
-      pr: { number: i + 1, state: "review" },
-      validation: "changed",
-    }));
-    const { getByText, container } = renderQueue([], working);
-    expect(getByText("Your tasks · 0 to decide · 8 still in review")).toBeTruthy();
-    expect(container.textContent).not.toContain("at the review boundary");
-    expect(container.textContent).not.toContain("None of your tasks is in review");
-    // The rows say where they are.
-    expect(container.querySelector(".rq-row .sub")!.textContent).toBe(
-      "Review in progress at Validation · PR #1 · awaiting verdict",
-    );
+      recommendations: 2,
+    };
+    const { getByText, container } = renderQueue([rowHuman], [rowDecision, recommended]);
+    expect(getByText("Your tasks · 3 to decide")).toBeTruthy();
+    expect(container.textContent).not.toContain("tasks at the review boundary");
   });
 });
 
@@ -691,6 +682,8 @@ describe("ruling 304: the decision dialog", () => {
       defaultBranch: "main",
       mergeCollisions: [],
       completion: null,
+      mentionables: { agents: [], users: [], reserved: [] },
+      runPrincipal: null,
       ...patch,
     };
   }
@@ -714,7 +707,6 @@ describe("ruling 304: the decision dialog", () => {
                 projectSlug="viberr-core"
                 completions={listed(rows.completions)}
                 decisions={listed(rows.decisions)}
-                working={[]}
               />
             </ToastProvider>
           );
@@ -787,10 +779,95 @@ describe("ruling 304: the decision dialog", () => {
     ]);
     expect(options[0]!.querySelector(".rec-tag")!.textContent).toContain("operator pick");
     expect(options[1]!.querySelector(".rec-tag")).toBeNull();
-    // The task page's comment box is not here, so neither is "Ask operator".
-    // CANARY: hand the dialog's region an `onAsk` and it offers a question
-    // with nowhere to write it.
-    expect(buttonIn(dialog, "Ask operator")).toBeUndefined();
+  });
+
+  it("asks the operator in the task page's own composer, posting to the task page", async () => {
+    const { container, posted } = renderDialogQueue(decision(), { decisions: [rowDecision] });
+    fireEvent.click(rowOf(container, "VIB-160"), { button: 0 });
+    await waitFor(() => expect(dialogOf(container)?.textContent).toContain(PACKET.title));
+    const dialog = dialogOf(container)!;
+    // No composer until asked: the dialog is the decision's.
+    expect(dialog.querySelector(".composer")).toBeNull();
+    // CANARY: leave `onAsk` off the dialog's decision card and nothing asks.
+    fireEvent.click(buttonIn(dialog, "Ask operator")!);
+    const box = await waitFor(() => {
+      const found = dialog.querySelector<HTMLElement>(".composer-ce");
+      if (!found) throw new Error("the composer has not opened");
+      return found;
+    });
+    await waitFor(() => expect(box.textContent).toContain("@operator"));
+    box.textContent = "@operator Which path keeps the history?";
+    fireEvent.input(box);
+    fireEvent.click(buttonIn(dialog, "Comment")!);
+    await waitFor(() => expect(posted).toHaveLength(1));
+    expect(posted[0]).toMatchObject({
+      key: "VIB-160",
+      form: { intent: "comment", text: "@operator Which path keeps the history?" },
+    });
+  });
+
+  it("draws the operator's recommendation cards, dismissed or applied through the task page", async () => {
+    const view = decision({
+      task: taskDetail({ key: "VIB-161", title: "Rework the check", stage: "triage", waiting: "agent", owner: OWNER }),
+      recommendations: [
+        { id: "rec_1", kind: "run_agent", profileId: "developer", label: "Run Developer", detail: "Rework the failing check." },
+      ],
+    });
+    const recommended: ReviewRowView = { ...rowAgent, key: "VIB-161", recommendations: 1 };
+    const { container, posted } = renderDialogQueue(view, { decisions: [recommended] });
+    fireEvent.click(rowOf(container, "VIB-161"), { button: 0 });
+    await waitFor(() => expect(dialogOf(container)?.textContent).toContain("Run Developer"));
+    const dialog = dialogOf(container)!;
+    expect(dialog.textContent).toContain("Rework the failing check.");
+    // Dismissing asks first, as on the task page (D6).
+    fireEvent.click(buttonIn(dialog, "Dismiss")!);
+    const confirm = container.ownerDocument.querySelector(
+      'dialog[data-screen-label="Dismiss recommendation dialog"]',
+    )!;
+    fireEvent.click(buttonIn(confirm, "Dismiss recommendation")!);
+    await waitFor(() => expect(posted).toHaveLength(1));
+    // CANARY: drop `taskHref` from `useRecommendationActions` in the dialog's
+    // body and the cards post to the review route, which has no action.
+    expect(posted[0]).toMatchObject({
+      key: "VIB-161",
+      form: { intent: "dismiss-recommendation", recId: "rec_1" },
+    });
+    await waitFor(() => expect(buttonIn(dialog, "Apply")!.hasAttribute("disabled")).toBe(false));
+    fireEvent.click(buttonIn(dialog, "Apply")!);
+    await waitFor(() => expect(posted).toHaveLength(2));
+    expect(posted[1]).toMatchObject({
+      key: "VIB-161",
+      form: { intent: "apply-recommendation", recId: "rec_1" },
+    });
+  });
+
+  it("an acceptance card applies through the ceremony, and the page's own Accept stays away", async () => {
+    const view = decision({
+      task: taskDetail({ key: "VIB-142", title: rowHuman.title, waiting: "human", owner: OWNER }),
+      acceptance: acceptanceAffordance(),
+      completion: COMPLETION,
+      recommendations: [{ id: "rec_acc", kind: "accept_completion", label: "Accept the completion", detail: "" }],
+    });
+    const recommended: ReviewRowView = { ...rowHuman, packet: null, recommendations: 1 };
+    const { container, posted } = renderDialogQueue(view, { completions: [recommended] });
+    fireEvent.click(rowOf(container, "VIB-142"), { button: 0 });
+    await waitFor(() => expect(dialogOf(container)?.textContent).toContain(COMPLETION.packet!.summary));
+    const dialog = dialogOf(container)!;
+    // CANARY: drop the recommendation check from `dialogOffersAccept` and the
+    // dialog offers two controls for one acceptance.
+    expect(buttonIn(dialog, "Accept completion → Done")).toBeUndefined();
+    fireEvent.click(buttonIn(dialog, "Apply")!);
+    const ceremony = container.ownerDocument.querySelector(
+      'dialog[data-screen-label="Accept completion dialog"]',
+    )!;
+    expect(ceremony).toBeTruthy();
+    expect(posted).toHaveLength(0);
+    fireEvent.click(buttonIn(ceremony, "Apply → Done")!);
+    await waitFor(() => expect(posted).toHaveLength(1));
+    expect(posted[0]).toMatchObject({
+      key: "VIB-142",
+      form: { intent: "apply-recommendation", recId: "rec_acc" },
+    });
   });
 
   it("answers to the TASK page's action, never the queue's", async () => {

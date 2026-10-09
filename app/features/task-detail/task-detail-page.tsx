@@ -11,16 +11,19 @@ import type {
   LiveAgentRun,
   TaskMemberView,
 } from "./execution-profile";
-import type { RecommendationView } from "./operator-recommendations";
+import { OperatorRecommendations, type RecommendationView } from "./operator-recommendations";
 import type { TaskRunPrincipalView } from "./run-principal-view";
 import type { CompletionView } from "~/server/tasks/completion-packet.server";
 import type { TookCard } from "~/server/tasks/what-it-took.server";
 import type { TaskSourceRow } from "~/server/tasks/task-sources.server";
 import type { TaskAttachmentEntry } from "~/server/files/task-attachments.server";
-import type { TimelineFilterId } from "./timeline";
+import { commentBox, type TimelineFilterId } from "./timeline";
+import { useCommentPost } from "./timeline-actions";
+import { Icon } from "~/ui/icon";
+import { useModifierHint } from "~/ui/use-shortcut-hint";
 import type { Mentionables } from "~/server/tasks/mention-suggestions.server";
 import type { RunView } from "~/features/runtime/runtime-types";
-import { useStableRows } from "~/ui/use-stable-rows";
+import { useStableRows, useStableValue } from "~/ui/use-stable-rows";
 import type { PrOverlap } from "~/shared/pr-overlaps";
 import type { TaskDecisionView } from "~/routes/task-decision";
 import { acceptanceActs, CurrentStatePanel, GithubTrace } from "./task-side-panels";
@@ -44,6 +47,7 @@ import {
   changesPanelReader,
   completionPlacement,
   completionReader,
+  dialogOffersAccept,
   epicOf,
   filesDeliveryOf,
   githubTraceDoors,
@@ -540,10 +544,12 @@ export function TaskDetailPage({
 /**
  * Ruling 304: this page's decision as the Review queue's dialog draws it. The
  * same regions, hooks and acceptance ceremony as the page above, every post
- * aimed at this page's action (`taskHref`), with the page's own Accept while
- * the task stands at the boundary and no option offers the acceptance. It
- * leaves out what needs the rest of the page: "Ask operator" (the comment
- * box) and the goal editor.
+ * aimed at this page's action (`taskHref`): the decision card, the operator's
+ * recommendation cards with their Apply and Dismiss, the page's own Accept
+ * while the task stands at the boundary and nothing else offers the
+ * acceptance, and "Ask operator", which opens this page's comment composer
+ * with the operator named. It leaves out the goal editor, which needs the rest
+ * of the page.
  *
  * It lives here, with the page it is a view of, so the dialog fetches this
  * page's own chunk on intent (ruling 11): a home anywhere else cut the
@@ -559,9 +565,11 @@ export function TaskDecisionDialogBody({
 }) {
   const { viewer, task, archived, recommendations, acceptance, completion } = view;
   const csrf = useCsrfToken();
-  // The acceptance ceremony's pending door: the packet's accept option and the
-  // direct Accept open it instead of posting (ruling 97).
+  // The acceptance ceremony's pending door: the packet's accept option, an
+  // acceptance card's Apply and the direct Accept open it instead of posting
+  // (ruling 97).
   const [pendingAccept, setPendingAccept] = useState<PendingAccept | null>(null);
+  const terminalStageId = lastStageId(task);
   const resolution = usePacketResolution(csrf, task.packet, setPendingAccept, taskHref);
   const accept = useAcceptCompletion(csrf, taskHref);
   // F20-18: the escalation a stranded contributor-owner sends up.
@@ -570,6 +578,20 @@ export function TaskDecisionDialogBody({
     csrf,
     taskHref,
   );
+  const recs = useRecommendationActions(
+    csrf,
+    recommendations,
+    terminalStageId,
+    setPendingAccept,
+    taskHref,
+  );
+  // "Ask operator": the page's composer, drawn once asked and prefilled with
+  // the operator's name (`useCommentPost`).
+  const [ask, setAsk] = useState(0);
+  const onAsk = () => setAsk((n) => n + 1);
+  const comment = useCommentPost({ ask, canAttach: false, onAgentLog: undefined, action: taskHref });
+  const sendHint = useModifierHint("↵");
+  const mentionables = useStableValue(view.mentionables);
   const can = taskPermissions(viewer.role, task, viewer.userId, archived);
   const placement = completionPlacement(
     task,
@@ -577,7 +599,7 @@ export function TaskDecisionDialogBody({
     recommendations,
     acceptance,
     isClosedForWork(task, archived),
-    lastStageId(task),
+    terminalStageId,
   );
   const reader = completionReader(
     task,
@@ -587,19 +609,16 @@ export function TaskDecisionDialogBody({
     view.githubHost,
   );
   const decides = task.packet !== null || placement.card !== null;
-  // The page's Accept, while the task stands at the boundary and no option of
-  // the decision offers the acceptance itself.
-  const accepts =
-    acceptance.atBoundary && !placement.acceptanceDecision
-      ? acceptanceActs({
-          task,
-          archived,
-          acceptance,
-          acceptInFlight: accept.inFlight,
-          dispositionBusy: resolution.busy,
-          onAccept: () => setPendingAccept({ mode: "accept" }),
-        })
-      : null;
+  const accepts = dialogOffersAccept(acceptance, placement, recommendations, terminalStageId)
+    ? acceptanceActs({
+        task,
+        archived,
+        acceptance,
+        acceptInFlight: accept.inFlight,
+        dispositionBusy: resolution.busy,
+        onAccept: () => setPendingAccept({ mode: "accept" }),
+      })
+    : null;
   return (
     <AttachmentLightboxProvider attachmentsBase={`${taskHref}/attachments`}>
       {decides ? (
@@ -621,14 +640,45 @@ export function TaskDecisionDialogBody({
           pendingRecommendations={recommendations.length}
           onRequestMaintainer={onRequestMaintainer}
           escalateBusy={escalateBusy}
+          onAsk={onAsk}
         />
       ) : null}
+      <OperatorRecommendations
+        inFlight={recs.inFlight}
+        recommendations={recommendations}
+        canApply={can.canDecideOwned}
+        busy={recs.busy}
+        onApply={recs.onApply}
+        onDismiss={recs.onDismiss}
+        acceptanceRefusal={acceptance.blockedReason}
+        terminalStageId={terminalStageId}
+      />
       {accepts}
-      {decides || accepts ? null : (
+      {decides || accepts || recommendations.length > 0 ? null : (
         <p className="empty sm">
           Nothing on {task.key} waits on a decision now. The task page holds its record.
         </p>
       )}
+      {ask > 0 ? (
+        commentBox({
+          post: comment,
+          sendHint,
+          mentionables,
+          runPrincipal: view.runPrincipal,
+          canAttach: false,
+          taskClosed: isClosedForWork(task, archived),
+        })
+      ) : task.packet ? null : (
+        // The decision card carries its own "Ask operator"; without one, the
+        // dialog offers it here.
+        <div className="state-acts">
+          <button type="button" className="btn ghost sm" onClick={onAsk}>
+            <Icon name="message" />
+            Ask operator
+          </button>
+        </div>
+      )}
+      {recs.dismissDialog}
       {pendingAccept && (
         <TaskAcceptConfirm
           pending={pendingAccept}
@@ -641,10 +691,11 @@ export function TaskDecisionDialogBody({
           filesDeliveredAt={view.filesDeliveredAt ?? null}
           defaultBranch={view.defaultBranch}
           doors={{
-            busy: accept.busy || resolution.busy,
+            busy: accept.busy || resolution.busy || recs.busy,
             accept: accept.submitAccept,
             refreshFirst: accept.submitRefreshFirst,
             packet: resolution.submitResolve,
+            recommendation: recs.submitApply,
           }}
           onCancel={() => setPendingAccept(null)}
         />

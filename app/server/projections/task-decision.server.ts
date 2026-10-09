@@ -7,15 +7,18 @@ import {
 import { taskAttachmentExists } from "~/server/files/task-attachments.server";
 import { readTaskFile, type TaskFileReadResult } from "~/server/files/task-writer.server";
 import { readTaskSources, type TaskSourcesRead } from "~/server/files/task-sources.server";
+import { findUserById } from "~/server/auth/user-store.server";
 import { githubWebHost } from "~/server/github/github-client.server";
 import { logger } from "~/server/logging/logger.server";
 import { createReconcileBehindByLookup } from "~/server/provenance/provenance-query.server";
+import { userBackendHealth } from "~/server/runtimes/backend-credentials.server";
 import { listRunsForTaskRows } from "~/server/runtimes/run-store.server";
 import { completionView, sourcesRestedOn, type CompletionView } from "~/server/tasks/completion-packet.server";
 import {
   causeFanOutDisclosure,
   siblingPacketsSharingCause,
 } from "~/server/tasks/packet-fanout.server";
+import { getMentionables, type Mentionables } from "~/server/tasks/mention-suggestions.server";
 import { similarOpenTasks } from "~/server/tasks/similar-tasks.server";
 import { listDeployedSpecialists } from "~/server/tasks/specialist-roster.server";
 import {
@@ -27,6 +30,7 @@ import { whatItTook, type TookCard, type TookShipped } from "~/server/tasks/what
 import type { ProjectRecord } from "~/shared/mapping/project.server";
 import { toError } from "~/shared/errors";
 import type { PrOverlap } from "~/shared/pr-overlaps";
+import type { TaskRunPrincipalView } from "~/features/task-detail/run-principal-view";
 import type { ProjectRole } from "~/shared/rbac";
 import { stageName } from "~/shared/workflow/stage-roles";
 import { getProject, listProjectMembers } from "./board-query.server";
@@ -35,8 +39,9 @@ import { getTaskDetail, type TaskDetail } from "./task-query.server";
 
 /**
  * The open decision on one task, as a person reads it before they answer:
- * the packet's disclosures, the completion it offers, and the facts the
- * acceptance ceremony names. Two readers, one reading: the task page's loader
+ * the packet's disclosures, the completion it offers, the facts the
+ * acceptance ceremony names, and whose accounts the comment composer's agent
+ * mentions would bill. Two readers, one reading: the task page's loader
  * (`routes/project.task.tsx`) and the Review queue's decision dialog (ruling
  * 304, `routes/task-decision.ts`), so the dialog cannot show a decision the
  * task page would draw differently.
@@ -237,6 +242,40 @@ export function taskDecisionReads(
 }
 
 /**
+ * Ruling 137: WHOSE accounts this task's agent runs would use, and what those
+ * accounts can run. The page used to ship one deployment-wide "is this backend
+ * configured" boolean; a run bills the task OWNER, so the honest answer is the
+ * owner's own health, and the panels render copy that names them
+ * (`app/features/task-detail/run-principal-view.ts`).
+ *
+ * `null` = nobody to bill: no owner, or a seat pointing at an account that is
+ * disabled or gone. Never a secret and never a box: `available` plus the
+ * store's own actionable sentence, which the page shows only to the owner.
+ * Ruling 304: the queue's decision dialog reads it for the same composer.
+ */
+export function taskRunPrincipal(
+  db: DatabaseSync,
+  ownerUserId: string | null,
+): TaskRunPrincipalView | null {
+  if (!ownerUserId) return null;
+  const owner = findUserById(db, ownerUserId);
+  // A seat pointing at a deleted or disabled account is not an owner a run can
+  // bill, so it reads as unowned here — the same answer `resolveTaskRunPrincipal`
+  // gives the run service.
+  if (!owner || owner.disabled) return null;
+  const health = (backend: "claude" | "codex") => {
+    const h = userBackendHealth(db, ownerUserId, backend);
+    return { available: h.available, detail: h.detail };
+  };
+  return {
+    ownerUserId,
+    ownerName: owner.name,
+    claude: health("claude"),
+    codex: health("codex"),
+  };
+}
+
+/**
  * Ruling 304: the Review queue's decision dialog, one task's open decision as
  * its owner answers it without leaving the queue. The fields are the task
  * page's own, read the same way (`taskDecisionReads`), so the dialog draws the
@@ -269,6 +308,11 @@ export interface TaskDecision {
   mergeCollisions: PrOverlap[];
   completion: CompletionView | null;
   whatItTook?: TookCard;
+  /** Asking the operator from the dialog writes in the task page's own
+   *  composer: its @-mention directory, and whose accounts a mentioned agent's
+   *  run would bill (ruling 137). */
+  mentionables: Mentionables;
+  runPrincipal: TaskRunPrincipalView | null;
 }
 
 /** Ruling 304: the dialog's read, or null for a task the project lacks. The
@@ -319,5 +363,7 @@ export function readTaskDecision(
     mergeCollisions: reads.mergeCollisions,
     completion: reads.completion,
     ...reads.tookShipped,
+    mentionables: getMentionables(db, projectSlug),
+    runPrincipal: taskRunPrincipal(db, taskFile?.parsed.frontmatter.ownerUserId ?? null),
   };
 }

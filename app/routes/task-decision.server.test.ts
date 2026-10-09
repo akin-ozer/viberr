@@ -89,6 +89,9 @@ describe("ruling 304: the decision dialog's read", () => {
       mergeCollisions: d.mergeCollisions,
       baseBehindBy: d.baseBehindBy,
       githubHost: d.githubHost,
+      // What the composer the dialog opens for "Ask operator" names and bills.
+      mentionables: d.mentionables,
+      runPrincipal: d.runPrincipal,
     });
     expect(decided(view)).toEqual(decided(page));
     // Whose tiers the dialog states: the task page's layout role.

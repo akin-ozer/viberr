@@ -13,8 +13,8 @@ import { ReviewQueuePage } from "~/features/review/review-page";
 
 /**
  * /projects/:slug/review — the Review queue (Phase 9C, review-queue.md;
- * ruling 304: the viewer's own tasks, each open decision answered in a dialog
- * beside a link to its task). Read-only projection loader; the shell's SSE
+ * ruling 304: what waits on the viewer's decision on their own tasks, each
+ * answered in a dialog beside a link to its task). Read-only projection loader; the shell's SSE
  * revalidation (Phase 6) refreshes it live, so an answered decision leaves its
  * panel without any local state. The rail badge and this loader read the same
  * projection.
@@ -59,7 +59,6 @@ export async function loader({ request, params }: Route.LoaderArgs) {
     slug: params.slug,
     completions: queue.completions,
     decisions: queue.decisions,
-    working: queue.working,
     waitingOnMe,
     stageNames: {
       review: nameOf(roles.reviewId) ?? "the review stage",
@@ -70,14 +69,13 @@ export async function loader({ request, params }: Route.LoaderArgs) {
 }
 
 export default function ReviewView({ loaderData }: Route.ComponentProps) {
-  const { slug, completions, decisions, working, stageNames, acceptance } = loaderData;
+  const { slug, completions, decisions, stageNames, acceptance } = loaderData;
   const waitingOnMe = new Set(loaderData.waitingOnMe);
   return (
     <ReviewQueuePage
       projectSlug={slug}
       completions={completions}
       decisions={decisions}
-      working={working}
       stageNames={stageNames}
       acceptance={acceptance}
       waitingOnMe={waitingOnMe}
