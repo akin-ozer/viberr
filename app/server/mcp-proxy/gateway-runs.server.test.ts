@@ -56,6 +56,7 @@ const SECRET = "cf-api-token-sentinel-runs";
 const READS_ONLY = {
   keepsSources: false,
   webEgress: true,
+  browser: false,
   agent: { profileId: "workflow-researcher", roleHint: "Workflow Researcher" },
 };
 /** Ruling 158(b): one call with one answer, 100 times within 60 seconds. */
@@ -627,7 +628,7 @@ describe("ruling 82: a Codex run keeps and reads a task's sources through the bo
     // tools/list has no keep_source for the granted run.
     const agent = { profileId: "cost-researcher", roleHint: "Cost Researcher" };
     const startCodexRun = async (taskKey: string, keepsSources: boolean) => {
-      const mount = resolveBoardMcp({ backend: "codex", collaborates: true, keepsSources, webEgress: true, agent, dataRoot: store.dataRoot });
+      const mount = resolveBoardMcp({ backend: "codex", collaborates: true, keepsSources, webEgress: true, browser: false, agent, dataRoot: store.dataRoot });
       queueFakeRun({ lines: [{ t: "1", ev: "text", tag: "assistant", text: "pricing" }], sessionId: "s", backend: "codex", keepRunning: true }, "codex");
       const { runId } = await startRun(store.db, {
         projectSlug: store.slug,
@@ -749,6 +750,7 @@ describe("ruling 194: the gateway's board server pictures a page for a Codex run
       // A writer's run holds both: it looks at its page and keeps its sources.
       keepsSources: true,
       webEgress: true,
+      browser: false,
       agent: { profileId: "writer", roleHint: "Writer" },
       dataRoot: store.dataRoot,
     });

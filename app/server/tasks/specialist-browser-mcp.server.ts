@@ -178,6 +178,18 @@ export function browserRuntimeStatus(): BrowserRuntimeStatus {
  * that reads its screenshots from disk. The file lands in `attachments/` either
  * way.
  */
+/**
+ * Ruling 327: the run's profile holds the browser, and the web egress the
+ * browser is (ruling 193). What `keep_page_look` is offered on: the one other
+ * door through which a run has a browser open a page on the web.
+ */
+export function holdsBrowserGrant(grants: readonly CapabilityGrant[]): boolean {
+  return (
+    effectiveCollabMode(grants, "use-browser") === "direct" &&
+    effectiveCollabMode(grants, "use-web-search-fetch") === "direct"
+  );
+}
+
 export function resolveBrowserMcp(input: {
   grants: readonly CapabilityGrant[];
   attachmentsDir: string;

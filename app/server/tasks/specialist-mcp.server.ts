@@ -471,6 +471,8 @@ export function resolveBoardMcp(input: {
   collaborates: boolean;
   keepsSources: boolean;
   webEgress: boolean;
+  /** Ruling 327: the run holds the browser grant (`holdsBrowserGrant`). */
+  browser: boolean;
   agent: { profileId: string; roleHint: string | null };
   dataRoot?: string | undefined;
 }): HttpMcpServerConfig | null {
@@ -479,7 +481,10 @@ export function resolveBoardMcp(input: {
   if (!url) return null;
   const board: BoardMount = {};
   if (input.dataRoot) board.dataRoot = input.dataRoot;
-  if (input.keepsSources) board.sources = { agent: input.agent, web: input.webEgress };
+  if (input.keepsSources) {
+    board.sources = { agent: input.agent, web: input.webEgress };
+    if (input.browser) board.sources.browser = true;
+  }
   return { type: "http", url, board };
 }
 

@@ -96,7 +96,7 @@ import {
   verifyStdioMcpMountsForRun,
 } from "./specialist-mcp.server";
 import { pageCaptureStatus } from "./page-capture.server";
-import { BROWSER_MCP_NAME, resolveBrowserMcp } from "./specialist-browser-mcp.server";
+import { BROWSER_MCP_NAME, holdsBrowserGrant, resolveBrowserMcp } from "./specialist-browser-mcp.server";
 import { cloneProgressStep, cloneStepLabel, mirrorIsCold } from "./repo-mirror.server";
 // Values come from the leaf substrate, never the task-action modules, which
 // load THIS module when they run (see task-mutation.server.ts).
@@ -865,6 +865,7 @@ async function dispatchAgentRun(
         // fetching a page only to a run whose web grant stands.
         keepsSources: collab.evidence,
         webEgress,
+        browser: holdsBrowserGrant(resolved ? resolved.capabilities : withheldAgentGrants()),
         agent: { profileId: engagement.profileId, roleHint: engagement.role },
         dataRoot: ctx.dataRoot,
       })
@@ -1450,6 +1451,7 @@ async function dispatchAgentRun(
           // exactly what the index named and nothing else.
           kb,
           webEgress,
+          browser: holdsBrowserGrant(resolved ? resolved.capabilities : withheldAgentGrants()),
         })
       : null;
   // R19-19: the browser sits between the org grants and the toolkit — a registry
@@ -2265,6 +2267,7 @@ export async function resolveResumeConfinement(
       // Ruling 82: a resumed run keeps sources as the fresh one did.
       keepsSources: collab.evidence,
       webEgress: !webSearchWithheldFromDenylist(disallowedTools),
+      browser: holdsBrowserGrant(resolved.capabilities),
       agent: { profileId: input.profileId, roleHint: input.role ?? resolved.role },
       dataRoot: ctx.dataRoot,
     });
@@ -2354,6 +2357,7 @@ export async function resolveResumeConfinement(
         collab,
         kb,
         webEgress: !webSearchWithheldFromDenylist(disallowedTools),
+        browser: holdsBrowserGrant(resolved.capabilities),
       });
     } else if (
       input.backend === "codex" &&

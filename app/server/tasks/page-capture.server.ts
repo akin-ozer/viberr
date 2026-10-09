@@ -20,6 +20,7 @@ import { z } from "zod";
 import {
   deliveredAsFiles,
   type PageCaptures,
+  type PageMeasuredRecord,
   type TaskFileEvent,
   type TaskFrontmatter,
 } from "~/schemas/task-file.schema";
@@ -36,6 +37,7 @@ import {
   resolveTaskAttachment,
   writeTaskAttachment,
 } from "~/server/files/task-attachments.server";
+import { readProjectFile } from "~/server/files/project-writer.server";
 import { readTaskFile, updateTaskFile } from "~/server/files/task-writer.server";
 import { logger } from "~/server/logging/logger.server";
 import {
@@ -74,6 +76,8 @@ import {
   type PageCaptureViewId,
   type PageKind,
 } from "~/shared/page-capture";
+import { loadText, weightText } from "~/shared/page-measure";
+import { isTerminalStage } from "~/shared/workflow/stage-roles";
 import { noSuchAttachment } from "./board-read.server";
 import { recordRunLooks } from "./page-looks.server";
 import { reprojectTask, taskRef, type TaskMutationContext } from "./task-mutation.server";
@@ -142,10 +146,16 @@ import { isRelayComment } from "./task-relay.server";
 
 /** How long a completion waits for its delivery's pictures before the
  *  operator reacts; the render then finishes in the background. Measured in
- *  the image (Debian Chromium 154): 1.6 s for a page at both widths. */
-const PAGE_CAPTURE_WAIT_MS = 45_000;
+ *  the image (Debian Chromium 154): 1.6 s for a page at both widths, and a
+ *  page that is also measured (ruling 328) loads four more times, once of
+ *  them on a slow line. */
+const PAGE_CAPTURE_WAIT_MS = 120_000;
 /** One page's limit for both widths in one browser, as the child is told. */
 const PAGE_TIMEOUT_MS = 25_000;
+/** Ruling 328: the limit of a page that is also measured: two more loads at
+ *  each width (one with reduced motion asked for, one on a slow line) and
+ *  the checks themselves. */
+const MEASURED_PAGE_TIMEOUT_MS = 70_000;
 /** The job's own limit: this, plus the page limit for each page. */
 const JOB_BASE_MS = 10_000;
 /** How long an agent's ask waits for the renderer before it is told `busy`. */
@@ -344,12 +354,50 @@ interface ChildView {
   /** Set for a picture of an exact size: the viewport itself is the box, and
    *  `scale` is how many picture px draw one of its CSS px. */
   box?: { scale: number };
+  /** Ruling 327: picture the page from `from` down to its end, in up to
+   *  `stretches` stretches of `maxHeight`. */
+  whole?: boolean;
+  stretches?: number;
+  /** Ruling 194: ask for reduced motion before the page loads. */
+  reduce?: boolean;
+  /** Ruling 194: what to do to the loaded page before the screen is pictured
+   *  as it then stands. */
+  act?: ViewAct;
+  /** Ruling 194: picture the screen at `from` at three moments while it moves. */
+  moving?: boolean;
 }
 
-interface PageInput {
+/** Ruling 194: a state a page is put in before it is pictured. A control is
+ *  named by its visible words or by a CSS selector. */
+interface ViewAct {
+  tab?: number;
+  press?: string;
+  hover?: string;
+}
+
+/** Which of a view's pictures a shot is: a stretch of the page (a box too),
+ *  a frame of a screen while it moved, or the screen after an act. */
+type ShotKind = "stretch" | "frame" | "act";
+
+function viewKind(view: Pick<ChildView, "act" | "moving">): ShotKind {
+  return view.act ? "act" : view.moving ? "frame" : "stretch";
+}
+
+/** A page among a task's files, as a render is asked for it. */
+interface TaskPage {
   file: string;
   kind: PictureKind;
 }
+
+/** A page on the web (ruling 327): `file` is only the label the report uses,
+ *  and `url` is the address the renderer opens, with the network open to it. */
+interface WebPage {
+  file: string;
+  kind: "web";
+  url: string;
+}
+
+type PageInput = TaskPage | WebPage;
 
 /** The job the renderer child is handed. */
 interface ChildJob {
@@ -363,11 +411,19 @@ interface ChildJob {
   views: ChildView[];
   pageTimeoutMs: number;
   maxBytes: number;
+  /** Ruling 328: measure each page as it is pictured, with the accessibility
+   *  engine at `axe` when the deployment has one. */
+  measure?: boolean;
+  axe?: string;
 }
 
 /** One picture the renderer made, checked by its own header. */
 interface RenderedShot {
   view: PageCaptureViewId;
+  /** A stretch of the page, a frame while it moved, or the screen after an act. */
+  kind: ShotKind;
+  /** A frame: how many ms after the screen came into view. */
+  moment: number | null;
   bytes: Buffer;
   /** Where the renderer left it, for an agent's own image viewer. */
   path: string;
@@ -386,9 +442,22 @@ interface EndedView {
   pageHeight: number;
 }
 
+/** Ruling 194: what an act did to the page at one view, or why it could not. */
+interface RenderedAct {
+  view: PageCaptureViewId;
+  done: string | null;
+  error: string | null;
+}
+
 interface RenderedPage {
   file: string;
   shots: RenderedShot[];
+  /** One entry per view that carried an act. */
+  acts: RenderedAct[];
+  /** Ruling 327: what moved on the page, when the render read it. */
+  motion: PageMotion | null;
+  /** Ruling 328: what the render measured of the page, when it was asked to. */
+  measured: PageMeasured | null;
   /** The widths with nothing at `from`: no picture there, and no failure. */
   ended: EndedView[];
   /** How many script dialogs the page opened, each dismissed. */
@@ -405,7 +474,19 @@ interface RenderedPage {
 
 /** A page nothing was made of, and why. */
 function unpictured(file: string, error: string): RenderedPage {
-  return { file, shots: [], ended: [], dialogs: 0, asked: [], askedCount: 0, missing: [], error };
+  return {
+    file,
+    shots: [],
+    acts: [],
+    motion: null,
+    measured: null,
+    ended: [],
+    dialogs: 0,
+    asked: [],
+    askedCount: 0,
+    missing: [],
+    error,
+  };
 }
 
 interface Render {
@@ -423,7 +504,101 @@ const reportShotSchema = z.looseObject({
   contentWidth: z.number().int().nonnegative(),
   scale: z.number().positive(),
   cut: z.boolean(),
+  /** The picture's name in the renderer's `out`. Checked against the names a
+   *  render may write before anything is opened by it. */
+  file: z.string().optional(),
+  moment: z.number().nonnegative().optional(),
 });
+const reportActSchema = z.looseObject({
+  view: z.enum(["desktop", "phone"]),
+  done: z.string().nullable().catch(null),
+  error: z.string().nullable().catch(null),
+});
+
+/** A short piece of the page's own text in the report: one bounded line. */
+const reportWords = z.string().transform((text) => reportText(text, REPORT_NAME_MAX_CHARS));
+
+/** Ruling 327: what moved on a page, as the renderer read it. */
+const motionSchema = z.looseObject({
+  running: z
+    .array(
+      z.looseObject({
+        name: reportWords,
+        target: reportWords,
+        durationMs: z.number().nonnegative().nullable().catch(null),
+        loops: z.boolean().catch(false),
+      }),
+    )
+    .catch([]),
+  runningCount: z.number().int().nonnegative().catch(0),
+  videos: z
+    .array(
+      z.looseObject({
+        autoplay: z.boolean().catch(false),
+        loop: z.boolean().catch(false),
+        playing: z.boolean().catch(false),
+        width: z.number().nonnegative().catch(0),
+        height: z.number().nonnegative().catch(0),
+      }),
+    )
+    .catch([]),
+  sticky: z.looseObject({ what: reportWords, position: z.enum(["fixed", "sticky"]) }).nullable().catch(null),
+  onScroll: z.number().int().nonnegative().catch(0),
+  hover: z
+    .array(
+      z.looseObject({
+        what: reportWords,
+        changes: z.array(reportWords).catch([]),
+        durationMs: z.number().nonnegative().nullable().catch(null),
+      }),
+    )
+    .catch([]),
+});
+export type PageMotion = z.infer<typeof motionSchema>;
+
+/** Ruling 328: what the renderer measured of a page. */
+const measuredSchema = z.looseObject({
+  views: z
+    .array(
+      z.looseObject({
+        view: z.enum(["desktop", "phone"]),
+        faults: z.looseObject({
+          ran: z.boolean().catch(false),
+          why: z.string().nullable().catch(null),
+          kinds: z
+            .array(
+              z.looseObject({
+                id: reportWords,
+                impact: z.string().nullable().catch(null),
+                help: z.string().transform((text) => reportText(text)),
+                count: z.number().int().nonnegative().catch(0),
+                first: z.array(reportWords).catch([]),
+              }),
+            )
+            .catch([]),
+          worstContrast: z.looseObject({ ratio: z.number().positive(), text: reportWords }).nullable().catch(null),
+        }),
+        keyboard: z.looseObject({
+          controls: z.number().int().nonnegative().catch(0),
+          stops: z.number().int().nonnegative().catch(0),
+          unreached: z.array(reportWords).catch([]),
+          unmarked: z.array(reportWords).catch([]),
+        }),
+        reduced: z.looseObject({
+          runningCount: z.number().int().nonnegative().catch(0),
+          running: z
+            .array(z.looseObject({ name: reportWords, target: reportWords, loops: z.boolean().catch(false) }))
+            .catch([]),
+          videosPlaying: z.number().int().nonnegative().catch(0),
+        }),
+      }),
+    )
+    .catch([]),
+  weight: z.looseObject({ bytes: z.number().int().nonnegative(), files: z.number().int().nonnegative() }),
+  loadMs: z.number().nonnegative().nullable().catch(null),
+  line: z.string().transform((text) => reportText(text, REPORT_NAME_MAX_CHARS)).catch(""),
+});
+export type PageMeasured = z.infer<typeof measuredSchema>;
 const reportEndedSchema = z.looseObject({
   view: z.enum(["desktop", "phone"]),
   pageHeight: z.number().int().nonnegative(),
@@ -433,6 +608,9 @@ const reportSchema = z.looseObject({
     z.looseObject({
       file: z.string(),
       shots: z.array(reportShotSchema).catch([]),
+      acts: z.array(reportActSchema).catch([]),
+      motion: motionSchema.optional().catch(undefined),
+      measured: measuredSchema.optional().catch(undefined),
       ended: z.array(reportEndedSchema).catch([]),
       dialogs: z.number().int().nonnegative().catch(0),
       asked: z.array(z.string()).catch([]),
@@ -491,14 +669,28 @@ interface RenderRequest {
   launch: AgentLaunch | null;
   /** The folder the pages are served from: the attachments themselves, or a
    *  kept delivery, whose files are first copied where the person can read. */
-  source: { kind: "attachments" } | { kind: "kept"; dir: string };
+  source: { kind: "attachments" } | { kind: "kept"; dir: string } | { kind: "web" };
   pages: PageInput[];
   views: ChildView[];
   /** The run that asked, whose scratch this is until it ends; null for a
    *  delivery's own render. */
   runId: string | null;
+  /** Ruling 328: measure each page as it is pictured. */
+  measure?: boolean;
+  /** How long one page gets; {@link PAGE_TIMEOUT_MS} when absent. */
+  pageTimeoutMs?: number;
 }
 
+/**
+ * Ruling 328: the accessibility engine's script the renderer reads when it
+ * measures a page (`axe-core`, a runtime dependency for this alone), or null
+ * when the deployment does not hold it: that one check is then reported as
+ * not run, and everything else is still measured.
+ */
+function accessibilityEngine(): string | null {
+  const file = path.resolve(process.cwd(), "node_modules/axe-core/axe.min.js");
+  return existsSync(file) ? file : null;
+}
 
 /** One file's carry: its size, that it is past what a capture carries, or
  *  null when the kept delivery holds no regular file of that name. */
@@ -628,6 +820,7 @@ function runIsLive(db: DatabaseSync, runId: string): boolean {
  *  `error`. */
 async function render(request: RenderRequest): Promise<Render> {
   const { db, ctx, projectSlug, taskKey, launch, pages, views } = request;
+  const pageTimeoutMs = request.pageTimeoutMs ?? PAGE_TIMEOUT_MS;
   const captureId = newId("cap");
   const task = taskDir(projectSlug, taskKey, ctx.dataRoot);
   const capturesRoot = path.join(task, TASK_CAPTURE_SCRATCH_DIR);
@@ -672,12 +865,21 @@ async function render(request: RenderRequest): Promise<Render> {
     browser: request.renderer.browser,
     pages,
     views,
-    pageTimeoutMs: PAGE_TIMEOUT_MS,
+    pageTimeoutMs,
     maxBytes: IMAGE_READ_MAX_BYTES,
   };
+  if (request.measure) {
+    job.measure = true;
+    const axe = accessibilityEngine();
+    if (axe) job.axe = axe;
+  }
+  // Ruling 327: a page on the web is opened at its own address with the
+  // network open, so the renderer is handed no folder of the task to serve:
+  // its own empty scratch stands where the task's files would.
+  if (request.source.kind === "web") job.root = scratch;
   const inputRoot = path.join(task, TASK_CAPTURE_INPUT_DIR);
   let notCarried = new Set<string>();
-  const timeoutMs = JOB_BASE_MS + PAGE_TIMEOUT_MS * pages.length;
+  const timeoutMs = JOB_BASE_MS + pageTimeoutMs * pages.length;
   let outcome: Awaited<ReturnType<typeof runPersonCommand>>;
   try {
     if (request.source.kind === "kept") {
@@ -748,25 +950,31 @@ async function render(request: RenderRequest): Promise<Render> {
     const shots: RenderedShot[] = [];
     let error = said.error === null ? null : reportText(said.error);
     for (const shot of said.shots) {
-      const view = views.find((v) => v.id === shot.view);
-      if (!view) continue;
-      // By the server's own naming, never a path the report gives.
-      const file = path.join(out, `${index + 1}-${view.id}.png`);
+      // The name is the renderer's own to say only among the names a render
+      // of this page may write: never a path, and never another page's.
+      const named = pictureFileOf(index + 1, shot.view, shot.file);
+      const view = named ? views.find((v) => v.id === shot.view && viewKind(v) === named.kind) : undefined;
+      if (!named || !view) continue;
+      const file = path.join(out, named.name);
       const read = readAttachmentBytes(file, IMAGE_READ_MAX_BYTES);
       const header = read && "bytes" in read ? imageHeader(read.bytes) : null;
-      // A box has one size, to the px; a stretch has its width and a cap.
+      // A box has one size, to the px; a stretch has its width and a cap; a
+      // frame or the screen after an act is no taller than the screen.
       const exact = view.box ? boxPicture({ width: view.width, height: view.height, scale: view.box.scale }) : null;
+      const tallest = named.kind === "stretch" ? view.maxHeight : view.height;
       const sized =
         header !== null &&
         (exact
           ? header.width === exact.width && header.height === exact.height
-          : header.width === view.width && header.height >= 1 && header.height <= view.maxHeight);
+          : header.width === view.width && header.height >= 1 && header.height <= tallest);
       if (!read || !("bytes" in read) || !header || header.mimeType !== "image/png" || !sized) {
         error ??= `its ${exact ? "" : `${view.id} `}picture did not come back as a PNG of the size asked for`;
         continue;
       }
       shots.push({
         view: view.id,
+        kind: named.kind,
+        moment: named.kind === "frame" ? (shot.moment ?? null) : null,
         bytes: read.bytes,
         path: file,
         width: header.width,
@@ -778,9 +986,19 @@ async function render(request: RenderRequest): Promise<Render> {
         cut: shot.cut,
       });
     }
+    const acts = said.acts
+      .filter((act) => views.some((view) => view.id === act.view && view.act))
+      .map((act): RenderedAct => ({
+        view: act.view,
+        done: act.done === null ? null : reportText(act.done),
+        error: act.error === null ? null : reportText(act.error, ACT_ERROR_MAX_CHARS),
+      }));
     return {
       file: page.file,
       shots,
+      acts,
+      motion: said.motion ?? null,
+      measured: said.measured ?? null,
       ended: said.ended.filter((end) => views.some((view) => view.id === end.view)),
       dialogs: said.dialogs,
       asked: said.asked.slice(0, 12).map(reportName),
@@ -788,10 +1006,28 @@ async function render(request: RenderRequest): Promise<Render> {
       // As the renderer wrote them: a name is matched against the names a
       // capture did not carry before it is cut for print (`missingClauses`).
       missing: said.missing.slice(0, 12),
-      error: shots.length === 0 && error === null ? unreported : error,
+      // A view whose act found nothing has no picture and is no failure of
+      // the render: the act's own sentence says what happened.
+      error: shots.length === 0 && error === null && acts.every((act) => act.error === null) ? unreported : error,
     };
   });
   return { pages: rendered, scratch, notCarried };
+}
+
+/** How much of an act's failure a reply prints: it lists the controls a page
+ *  does have, which is the part an agent acts on. */
+const ACT_ERROR_MAX_CHARS = 900;
+
+/** The name a picture of page `n` at `view` is written under, and which of
+ *  the view's pictures it is; null for any other name. A report from before
+ *  several pictures a view names none, and means the first stretch. */
+function pictureFileOf(n: number, view: string, file: string | undefined): { name: string; kind: ShotKind } | null {
+  const first = `${n}-${view}.png`;
+  if (file === undefined || file === first) return { name: first, kind: "stretch" };
+  const rest = new RegExp(`^${n}-${view}-(s[1-9][0-9]?|m[1-9]|a)\\.png$`).exec(file);
+  if (!rest) return null;
+  const tag = rest[1]!;
+  return { name: file, kind: tag === "a" ? "act" : tag.startsWith("m") ? "frame" : "stretch" };
 }
 
 // ------------------------------------------------------------ what it says
@@ -879,8 +1115,18 @@ function pageRemarks(page: RenderedPage, notCarried: ReadonlySet<string>): strin
   return remarks;
 }
 
+/** Ruling 328: what was measured of one pictured page, for the note. */
+function measuredRemarks(page: RenderedPage, accepted: AcceptedFigures): string[] {
+  if (!page.measured) return [];
+  const lines = measuredSentences(page.measured);
+  const against = againstAccepted(page.measured, accepted);
+  return [`Measured of ${code(page.file)}: ${lines.join(" ")}${against ? ` ${against}` : ""}`];
+}
+
 /** What a delivery's note is written from. */
 interface CaptureNote {
+  /** Ruling 328: the board's accepted figures a measured page is set against. */
+  accepted: AcceptedFigures;
   pages: readonly RenderedPage[];
   /** How many pages past the cap were not pictured. */
   more: number;
@@ -890,7 +1136,7 @@ interface CaptureNote {
 }
 
 /** The timeline note a delivery's render writes. */
-function captureNoteText({ pages, more, notCarried, lookable }: CaptureNote): string {
+function captureNoteText({ pages, more, notCarried, lookable, accepted }: CaptureNote): string {
   const pictured = pages.filter((page) => page.shots.length > 0);
   const failed = pages.filter((page) => page.shots.length === 0);
   const parts: string[] = [];
@@ -902,6 +1148,7 @@ function captureNoteText({ pages, more, notCarried, lookable }: CaptureNote): st
         `(${px(phone!.width)} px). The pictures are attached and show beside each file on the result.`,
     );
     for (const page of pictured) parts.push(...pageRemarks(page, notCarried));
+    for (const page of pictured) parts.push(...measuredRemarks(page, accepted));
   }
   for (const page of failed) parts.push(`Viberr could not picture ${code(page.file)}: ${page.error ?? "it was not rendered"}.`);
   if (failed.length > 0) {
@@ -922,10 +1169,154 @@ function captureNoteText({ pages, more, notCarried, lookable }: CaptureNote): st
   return parts.join(" ");
 }
 
+// ------------------------------------------------------------ what was measured
+
+/** The figures of a measured page a task's record keeps (ruling 328). */
+function measuredRecord(measured: PageMeasured): PageMeasuredRecord {
+  return {
+    weightBytes: measured.weight.bytes,
+    files: measured.weight.files,
+    loadMs: measured.loadMs === null ? null : Math.round(measured.loadMs),
+    line: measured.line,
+    views: measured.views.map((view) => ({
+      view: view.view,
+      faultKinds: view.faults.ran ? view.faults.kinds.length : null,
+      faultElements: view.faults.kinds.reduce((sum, kind) => sum + kind.count, 0),
+      worstContrast: view.faults.worstContrast?.ratio ?? null,
+      controls: view.keyboard.controls,
+      unreached: view.keyboard.unreached.length,
+      unmarked: view.keyboard.unmarked.length,
+      stillMoving: view.reduced.runningCount + view.reduced.videosPlaying,
+    })),
+  };
+}
+
+const quoted = (names: readonly string[]): string => LIST_AND.format(names.map((name) => `\`${name}\``));
+
+/** What the checks found at one width, as sentences that name each thing. */
+function viewSentences(view: PageMeasured["views"][number]): string[] {
+  const at = `At ${pageCaptureView(view.view).width} px`;
+  const lines: string[] = [];
+  const { faults, keyboard, reduced } = view;
+  if (!faults.ran) {
+    lines.push(`${at} the accessibility checks did not run${faults.why ? ` (${faults.why})` : ""}.`);
+  } else if (faults.kinds.length === 0) {
+    lines.push(`${at} the accessibility checks (axe, WCAG 2.2 AA) found no fault.`);
+  } else {
+    const kinds = faults.kinds.map(
+      (kind) => `\`${kind.id}\` on ${kind.count} (${kind.help}${kind.first.length > 0 ? `; first: ${quoted(kind.first)}` : ""})`,
+    );
+    lines.push(
+      `${at} the accessibility checks (axe, WCAG 2.2 AA) found ${faults.kinds.length === 1 ? "1 kind" : `${faults.kinds.length} kinds`} of fault: ${kinds.join("; ")}.` +
+        (faults.worstContrast
+          ? ` The lowest contrast is ${faults.worstContrast.ratio.toFixed(2)} to 1, on "${faults.worstContrast.text}".`
+          : ""),
+    );
+  }
+  const reached = `Tab reaches ${keyboard.stops} of ${keyboard.controls} controls`;
+  if (keyboard.unreached.length === 0 && keyboard.unmarked.length === 0) {
+    lines.push(`${at} ${reached.charAt(0).toLowerCase()}${reached.slice(1)}, and each shows a change when it takes focus.`);
+  } else {
+    const parts: string[] = [];
+    if (keyboard.unreached.length > 0) parts.push(`never reached: ${quoted(keyboard.unreached)}`);
+    if (keyboard.unmarked.length > 0) parts.push(`looking the same with focus as at rest: ${quoted(keyboard.unmarked)}`);
+    lines.push(`${at} ${reached.charAt(0).toLowerCase()}${reached.slice(1)}; ${parts.join("; ")}.`);
+  }
+  if (reduced.runningCount === 0 && reduced.videosPlaying === 0) {
+    lines.push(`${at}, with reduced motion asked for, nothing still moves.`);
+  } else {
+    const moving = reduced.running.map((entry) => `\`${entry.name}\` on \`${entry.target}\`${entry.loops ? " (loops)" : ""}`);
+    const parts: string[] = [];
+    if (reduced.runningCount > 0) {
+      parts.push(
+        `${reduced.runningCount === 1 ? "1 animation still runs" : `${reduced.runningCount} animations still run`}` +
+          (moving.length > 0 ? `: ${moving.join(", ")}` : ""),
+      );
+    }
+    if (reduced.videosPlaying > 0) parts.push(`${reduced.videosPlaying === 1 ? "1 video still plays" : `${reduced.videosPlaying} videos still play`}`);
+    lines.push(`${at}, with reduced motion asked for, ${parts.join(", and ")}.`);
+  }
+  return lines;
+}
+
+/**
+ * Ruling 328: what was measured of a page, in the sentences a note and a
+ * reply print. The page's weight and load time first, then each width.
+ */
+function measuredSentences(measured: PageMeasured): string[] {
+  const lines = [
+    `It weighs ${weightText(measured.weight.bytes)}: the page and ${measured.weight.files <= 1 ? "nothing beside it" : `the ${measured.weight.files - 1} ${measured.weight.files === 2 ? "file" : "files"} it loads`}.` +
+      (measured.loadMs === null
+        ? " Its load time could not be measured."
+        : ` It finishes loading ${loadText(measured.loadMs)} after it is asked for, on a line held to ${measured.line}.`),
+  ];
+  for (const view of measured.views) lines.push(...viewSentences(view));
+  return lines;
+}
+
+/** The lowest figures among the pages a board has accepted (ruling 328). */
+interface AcceptedFigures {
+  weight: { bytes: number; taskKey: string } | null;
+  load: { ms: number; taskKey: string } | null;
+}
+
+/**
+ * Ruling 328: the lightest and the fastest page among the tasks this board
+ * has accepted, `taskKey` aside. A board's pages only get lighter and faster:
+ * the first accepted page sets the figures, and each later one is set against
+ * the lowest so far.
+ */
+function acceptedPageFigures(db: DatabaseSync, ctx: TaskMutationContext, projectSlug: string, taskKey: string): AcceptedFigures {
+  const figures: AcceptedFigures = { weight: null, load: null };
+  try {
+    const stages = readProjectFile(ctx.dataRoot ? { projectSlug, dataRoot: ctx.dataRoot } : { projectSlug })?.parsed.frontmatter.stages ?? [];
+    // SAFETY: the SELECT list is `task_key` and `stage`, both TEXT NOT NULL on
+    // `task_projections` in 0001_baseline.
+    const rows = db
+      .prepare(`SELECT task_key, stage FROM task_projections WHERE project_slug = ? AND archived = 0`)
+      .all(projectSlug) as { task_key: string; stage: string }[];
+    for (const row of rows) {
+      if (row.task_key === taskKey || !isTerminalStage(row.stage, stages)) continue;
+      const pages = readTaskFile(taskRef(ctx, projectSlug, row.task_key))?.parsed.frontmatter.pageCaptures?.pages ?? [];
+      for (const page of pages) {
+        const measured = page.measured;
+        if (!measured) continue;
+        if (!figures.weight || measured.weightBytes < figures.weight.bytes) {
+          figures.weight = { bytes: measured.weightBytes, taskKey: row.task_key };
+        }
+        if (measured.loadMs !== null && (!figures.load || measured.loadMs < figures.load.ms)) {
+          figures.load = { ms: measured.loadMs, taskKey: row.task_key };
+        }
+      }
+    }
+  } catch (error) {
+    logger.warn("a board's accepted page figures could not be read", { projectSlug, err: toError(error) });
+  }
+  return figures;
+}
+
+/** How a page's weight and load stand against the board's accepted pages, or
+ *  null when the board has accepted none that was measured. */
+function againstAccepted(measured: PageMeasured, accepted: AcceptedFigures): string | null {
+  const parts: string[] = [];
+  if (accepted.weight) {
+    const over = measured.weight.bytes > accepted.weight.bytes;
+    parts.push(
+      `${over ? "heavier than" : "no heavier than"} the lightest page this board has accepted (${weightText(accepted.weight.bytes)}, ${accepted.weight.taskKey})`,
+    );
+  }
+  if (accepted.load && measured.loadMs !== null) {
+    const over = measured.loadMs > accepted.load.ms;
+    parts.push(`${over ? "slower than" : "no slower than"} its fastest (${loadText(accepted.load.ms)}, ${accepted.load.taskKey})`);
+  }
+  if (parts.length === 0) return null;
+  return `That is ${parts.join(" and ")}. A board's pages only get lighter and faster.`;
+}
+
 // ------------------------------------------------------------ a delivery
 
 interface DeliveryPages {
-  pages: PageInput[];
+  pages: TaskPage[];
   /** The pages past the cap, in the same order: not pictured. */
   extra: string[];
 }
@@ -1006,9 +1397,9 @@ function keptPictureName(file: string): string | null {
  * that holds names byte for byte) share one pair of picture names. The page
  * spelled the way the store spells it keeps them.
  */
-function pictureNameClashes(pages: readonly PageInput[]): Map<string, string> {
+function pictureNameClashes(pages: readonly TaskPage[]): Map<string, string> {
   const keeper = new Map<string, string>();
-  const asStored = (page: PageInput): boolean => keptPictureName(page.file) === pageCaptureName(page.file, "desktop");
+  const asStored = (page: TaskPage): boolean => keptPictureName(page.file) === pageCaptureName(page.file, "desktop");
   const clashes = new Map<string, string>();
   for (const page of [...pages].sort((a, b) => Number(asStored(b)) - Number(asStored(a)))) {
     const kept = keptPictureName(page.file);
@@ -1112,19 +1503,56 @@ async function captureDelivery(
     if (!("browser" in found)) throw new Error(found.reason ?? "this server has no browser to render with");
     launch = taskOwnerLaunch(db, fm.ownerUserId, ctx.dataRoot, NO_OWNER);
     toolCanRender = true;
-    if (toRender.length > 0) {
-      rendered = await render({
-        db,
-        ctx,
-        projectSlug,
-        taskKey,
-        renderer: found,
-        launch,
-        source: { kind: "kept", dir: kept },
-        pages: toRender,
-        views: PAGE_CAPTURE_VIEWS.map((view) => ({ ...childView(view), from: 0 })),
-        runId: null,
-      });
+    // Ruling 328: a page its maker laid out is measured as it is pictured. A
+    // markdown file is set as an article in Viberr's own type, so there is
+    // nothing of its maker's to measure, and it is pictured alone.
+    const laidOut = toRender.filter((page) => page.kind === "html");
+    const setByViberr = toRender.filter((page) => page.kind !== "html");
+    const views = PAGE_CAPTURE_VIEWS.map((view): ChildView => ({ ...childView(view), from: 0 }));
+    const renders: Render[] = [];
+    if (laidOut.length > 0) {
+      renders.push(
+        await render({
+          db,
+          ctx,
+          projectSlug,
+          taskKey,
+          renderer: found,
+          launch,
+          source: { kind: "kept", dir: kept },
+          pages: laidOut,
+          views,
+          runId: null,
+          measure: true,
+          pageTimeoutMs: MEASURED_PAGE_TIMEOUT_MS,
+        }),
+      );
+    }
+    if (setByViberr.length > 0) {
+      // The pictures of the first render are in hand: its scratch goes before
+      // the second one starts in the same folder.
+      for (const first of renders) if (first.scratch) await removeScratch(first.scratch, launch);
+      renders.push(
+        await render({
+          db,
+          ctx,
+          projectSlug,
+          taskKey,
+          renderer: found,
+          launch,
+          source: { kind: "kept", dir: kept },
+          pages: setByViberr,
+          views,
+          runId: null,
+        }),
+      );
+    }
+    if (renders.length > 0) {
+      rendered = {
+        pages: renders.flatMap((one) => one.pages),
+        scratch: renders.at(-1)?.scratch ?? null,
+        notCarried: new Set(renders.flatMap((one) => [...one.notCarried])),
+      };
     }
   } catch (error) {
     // Whatever stopped the render is each page's reason; the delivery stands.
@@ -1141,6 +1569,9 @@ async function captureDelivery(
       byFile.get(page.file) ?? unpictured(page.file, refused.get(page.file)?.reason ?? "it was not rendered"),
   );
   const record: PageCaptures = { deliveredAt: stamp, at: new Date().toISOString(), pages: [] };
+  // Ruling 328: read before the lock, like the render: what this board has
+  // accepted does not change under one task's write.
+  const accepted = acceptedPageFigures(db, ctx, projectSlug, taskKey);
   const written: string[] = [];
   const failed: string[] = [];
   /** What the locked write below did: put the pictures down, or took an
@@ -1185,7 +1616,10 @@ async function captureDelivery(
           error ??= `its ${shot.view} picture could not be saved (${reportText(errorMessage(caught))})`;
         }
       }
-      record.pages.push({ file: page.file, shots, error });
+      const recorded: PageCaptures["pages"][number] = { file: page.file, shots, error };
+      // Ruling 328: what was measured stands with the pictures it was taken with.
+      if (page.measured && shots.length > 0) recorded.measured = measuredRecord(page.measured);
+      record.pages.push(recorded);
       if (shots.length === 0) failed.push(page.file);
       if (error) logger.warn("a page could not be captured", { taskKey, file: page.file, reason: error });
     }
@@ -1208,7 +1642,7 @@ async function captureDelivery(
       type: "note",
       actor: CAPTURE_ACTOR,
       title: PAGE_CAPTURE_NOTE_TITLE,
-      text: captureNoteText({ pages: noted, more: extra.length, notCarried: rendered.notCarried, lookable }),
+      text: captureNoteText({ pages: noted, more: extra.length, notCarried: rendered.notCarried, lookable, accepted }),
       toAgent: false,
       evidence: null,
     };
@@ -1361,6 +1795,17 @@ export interface PageCaptureAsk {
   height?: number | undefined;
   /** How many picture px draw one CSS px of the box; 1 when absent. */
   scale?: number | undefined;
+  /** Ruling 194: put the page in a state first, then picture the screen as it
+   *  stands: a control pressed or under the pointer (its visible words or a
+   *  CSS selector), or this many presses of Tab from the top. */
+  press?: string | undefined;
+  hover?: string | undefined;
+  tab?: number | undefined;
+  /** Ruling 194: `reduce` renders the page for a reader who asked for reduced
+   *  motion. */
+  motion?: "reduce" | undefined;
+  /** Ruling 194: three pictures of the screen at `from` while it moves. */
+  moving?: boolean | undefined;
   /** False for a run that holds the verdict: it judges pictures and makes
    *  none, so a sized reply does not tell it how one is kept on the task.
    *  Told, a reviewer is one copy away from replacing the file it was asked
@@ -1418,6 +1863,54 @@ function captureReplyText(name: string, page: RenderedPage, from: number, scratc
   for (const shot of page.shots) {
     const width = widthRemark(shot, "it");
     if (width) parts.push(width);
+  }
+  parts.push(...loadRemarks(page), scratchNote);
+  return parts.join(" ");
+}
+
+/** "at the phone width (390 px)". */
+const atWidth = (id: PageCaptureViewId): string => {
+  const view = pageCaptureView(id);
+  return `at the ${view.id} width (${view.width} px)`;
+};
+
+/** Said first in a reply about a page rendered for reduced motion. */
+const REDUCED = " with reduced motion asked for";
+
+/**
+ * Ruling 194: the reply to a page pictured in a state. One sentence per width:
+ * what the act did there and that the picture is the screen as it then
+ * stands, or why it did nothing, in the renderer's own words (which name the
+ * controls the page does have, so the next call can name one).
+ */
+function actReplyText(name: string, page: RenderedPage, reduce: boolean, scratchNote: string): string {
+  const pictured = page.shots.length > 0;
+  const parts = [
+    pictured
+      ? `[done] ${code(name)} in the state asked for${reduce ? REDUCED : ""}: each picture is one screen, as it stood after the act.`
+      : `[noop] ${code(name)} was not pictured: the act found nothing to act on.`,
+  ];
+  for (const act of page.acts) {
+    const where = atWidth(act.view);
+    if (act.error) parts.push(`${where.charAt(0).toUpperCase()}${where.slice(1)}: ${act.error}.`);
+    else if (act.done) parts.push(`${where.charAt(0).toUpperCase()}${where.slice(1)}: ${act.done}.`);
+  }
+  parts.push(...loadRemarks(page));
+  if (pictured) parts.push(scratchNote);
+  return parts.join(" ");
+}
+
+/** Ruling 194: the reply to a page pictured while it moves. */
+function movingReplyText(name: string, page: RenderedPage, from: number, reduce: boolean, scratchNote: string): string {
+  const parts = [
+    `[done] ${code(name)} while it moves${reduce ? REDUCED : ""}: the screen at ${px(from)} px, pictured more than once as the page ${from === 0 ? "loaded" : "was scrolled there"}. ` +
+      "What differs between two pictures of one width is what moved.",
+  ];
+  for (const view of PAGE_CAPTURE_VIEWS) {
+    const frames = page.shots.filter((shot) => shot.view === view.id);
+    if (frames.length === 0) continue;
+    const moments = frames.map((shot) => `${px(shot.moment ?? 0)} ms`);
+    parts.push(`${view.label}: ${frames.length === 1 ? "1 picture" : `${frames.length} pictures`}, about ${LIST_AND.format(moments)} after it came into view.`);
   }
   parts.push(...loadRemarks(page), scratchNote);
   return parts.join(" ");
@@ -1523,11 +2016,19 @@ async function capturePage(
     );
   }
   const from = ask.from ?? 0;
+  const reduce = ask.motion === "reduce";
+  const act = askedAct(ask);
   const views = box
     ? [boxView(box)]
-    : PAGE_CAPTURE_VIEWS.filter((view) => !ask.view || view.id === ask.view).map(
-        (view): ChildView => ({ ...childView(view), maxHeight: TOOL_STRETCH_PX, from }),
-      );
+    : PAGE_CAPTURE_VIEWS.filter((view) => !ask.view || view.id === ask.view).map((view): ChildView => {
+        // A state and a moving screen are each one screen tall; a stretch is
+        // cut to what a model reads.
+        const asked: ChildView = { ...childView(view), maxHeight: act || ask.moving ? view.height : TOOL_STRETCH_PX, from };
+        if (act) asked.act = act;
+        else if (ask.moving) asked.moving = true;
+        if (reduce) asked.reduce = true;
+        return asked;
+      });
   let rendered: Render;
   try {
     rendered = await render({
@@ -1558,6 +2059,10 @@ async function capturePage(
     // Asked for a stretch past the page's end at every width: nothing failed.
     return said(`[noop] ${code(name)} ${ends}, so nothing starts at ${px(from)} px.`);
   }
+  // An act that found nothing to act on is an answer, not a failed render.
+  if (page && act && page.shots.length === 0 && page.error === null && page.acts.length > 0) {
+    return said(actReplyText(name, page, reduce, ""));
+  }
   if (!page || page.shots.length === 0) {
     // A width that failed is the answer, whatever another width ended at.
     const reason = page?.error ?? "it was not rendered";
@@ -1573,8 +2078,9 @@ async function capturePage(
   logger.info("a page was captured for a run", { projectSlug, taskKey, file: name, views: page.shots.length });
   // Ruling 329: a stretch handed to the run is a look at that page, at that
   // width, over those px. A box is a picture of a size somebody chose and no
-  // reader's width, so it is not one.
-  if (!box) {
+  // reader's width, and a state, a moving screen or the page with reduced
+  // motion is not the page as it loads for every reader, so none is one.
+  if (!box && !act && !ask.moving && !reduce) {
     recordRunLooks(
       db,
       ask.runId,
@@ -1602,9 +2108,54 @@ async function capturePage(
   return {
     text: box
       ? boxReplyText(name, page, box, kept, ask.keeps !== false, shown)
-      : captureReplyText(name, page, from, kept),
+      : act
+        ? actReplyText(name, page, reduce, kept)
+        : ask.moving
+          ? movingReplyText(name, page, from, reduce, kept)
+          : captureReplyText(name, page, from, kept) + (reduce ? ` Rendered${REDUCED}.` : ""),
     images: shown ? page.shots.map((shot) => ({ data: shot.bytes.toString("base64"), mimeType: "image/png" })) : [],
   };
+}
+
+/** The act an ask names, or null when it names none. */
+function askedAct(ask: PageCaptureAsk): ViewAct | null {
+  const act: ViewAct = {};
+  const press = ask.press?.trim();
+  const hover = ask.hover?.trim();
+  if (ask.tab !== undefined) act.tab = ask.tab;
+  if (press) act.press = press;
+  if (hover) act.hover = hover;
+  return Object.keys(act).length > 0 ? act : null;
+}
+
+/**
+ * Ruling 194: what an ask for a state gets wrong, in a sentence that says
+ * what to change; null when it asks for none or asks well. A state pictures
+ * one screen of the page as a reader's browser lays it out, so it goes with
+ * no size, and an act with neither a place on the page nor a moving screen.
+ */
+function stateRefusal(ask: PageCaptureAsk, name: string, box: PictureBox | null): PageCaptureReply | null {
+  const refused = (why: string): PageCaptureReply => said(`[noop] ${code(name)} was not pictured: ${why}`);
+  const act = askedAct(ask);
+  const stated = act !== null || ask.moving === true || ask.motion !== undefined;
+  if (!stated) return null;
+  if (box) {
+    return refused(
+      "a size makes one picture of the page at rest, so it goes with none of `press`, `hover`, `tab`, `moving` and `motion`. " +
+        "Leave the size out to see the page in a state at a reader's width.",
+    );
+  }
+  if (act && ask.moving) {
+    return refused(
+      "`moving` pictures the screen while the page loads, before anything is pressed, so it goes with none of `press`, `hover` and `tab`. Ask for one of the two.",
+    );
+  }
+  if (act && ask.from !== undefined) {
+    return refused(
+      "`press`, `hover` and `tab` picture the screen where the act leaves it, so they go with no `from`. Leave `from` out.",
+    );
+  }
+  return null;
 }
 
 /**
@@ -1679,6 +2230,8 @@ export function captureTaskPage(
   // What the call itself gets wrong is said before any file is looked for.
   const box = askedBox(ask, name);
   if (box && "text" in box) return Promise.resolve(box);
+  const badState = stateRefusal(ask, name, box);
+  if (badState) return Promise.resolve(badState);
   let size: number | null = null;
   let stored = name;
   // A dot name is no file of the task to any reader, this one included: the
@@ -1742,6 +2295,274 @@ export function captureTaskPage(
     };
     // Not started in time: taken out of the queue, so the call answers well
     // inside a Codex tool call's 60 seconds.
+    const timer = setTimeout(() => {
+      const at = waiting.indexOf(job);
+      if (at < 0) return;
+      waiting.splice(at, 1);
+      job.drop();
+    }, TOOL_QUEUE_WAIT_MS);
+    timer.unref?.();
+    enqueue(job);
+  });
+}
+
+// ------------------------------------------------------------ a page measured
+
+export interface PageMeasureAsk {
+  projectSlug: string;
+  taskKey: string;
+  /** The page's name among the task's files. */
+  name: string;
+  /** The run that asks; null when the caller cannot name it. */
+  runId: string | null;
+}
+
+/**
+ * `measure_page` (ruling 328): what Viberr measures of every delivered page,
+ * measured now of a page on the run's task: its weight and load time, and at
+ * each width the accessibility checks, the keyboard's reach and what still
+ * moves with reduced motion asked for. Text only, and nothing is saved: the
+ * figures a task keeps are the ones taken of what it delivers.
+ */
+export function measureTaskPage(db: DatabaseSync, ctx: TaskMutationContext, ask: PageMeasureAsk): Promise<string> {
+  const found = renderer();
+  if (!("browser" in found)) return Promise.resolve("[error] This server has no browser to render a page with.");
+  const { projectSlug, taskKey } = ask;
+  const name = ask.name.trim();
+  let stored: string | null = null;
+  let size = 0;
+  if (!name.startsWith(".")) {
+    try {
+      const resolved = resolveTaskAttachment(projectSlug, taskKey, name, ctx.dataRoot);
+      const stat = statSync(resolved);
+      if (stat.isFile()) {
+        stored = path.basename(resolved);
+        size = stat.size;
+      }
+    } catch {
+      stored = null;
+    }
+  }
+  if (stored === null) return Promise.resolve(noSuchAttachment({ db, ctx, projectSlug }, taskKey, name));
+  if (pageKindOf(name) !== "html") {
+    return Promise.resolve(
+      `[noop] ${code(name)} is not a page somebody laid out. measure_page measures an .html or .htm file; ` +
+        "a markdown file is set as an article in Viberr's own type, so there is nothing of its writer's to measure.",
+    );
+  }
+  if (size > SOURCE_MAX_BYTES.html) {
+    return Promise.resolve(
+      `[noop] ${code(name)} is ${(size / 1024 / 1024).toFixed(0)} MB; measure_page measures a page of up to ${SOURCE_MAX_BYTES.html / 1024 / 1024} MB.`,
+    );
+  }
+  const file = stored;
+  const measure = async (): Promise<string> => {
+    const task = readTaskFile(taskRef(ctx, projectSlug, taskKey));
+    if (!task) return `[noop] ${code(name)} is not a page on ${taskKey}.`;
+    let launch: AgentLaunch | null;
+    try {
+      launch = taskOwnerLaunch(db, task.parsed.frontmatter.ownerUserId, ctx.dataRoot, NO_OWNER);
+    } catch (error) {
+      return `[error] ${code(name)} could not be measured. ${
+        task.parsed.frontmatter.ownerUserId === null
+          ? "This task has no owner to render it as, and a page renders as its person's agent user, never as the server."
+          : error instanceof AppError
+            ? error.userMessage
+            : "The renderer could not be started as the task owner's agent user."
+      }`;
+    }
+    let rendered: Render;
+    try {
+      rendered = await render({
+        db,
+        ctx,
+        projectSlug,
+        taskKey,
+        renderer: found,
+        launch,
+        source: { kind: "attachments" },
+        pages: [{ file, kind: "html" }],
+        views: PAGE_CAPTURE_VIEWS.map((view): ChildView => ({ ...childView(view), maxHeight: TOOL_STRETCH_PX, from: 0 })),
+        runId: ask.runId,
+        measure: true,
+        pageTimeoutMs: MEASURED_PAGE_TIMEOUT_MS,
+      });
+    } catch (error) {
+      const reason = error instanceof RenderRefused ? error.message : "the renderer could not be started";
+      return `[error] ${code(name)} could not be measured: ${reason}.`;
+    }
+    if (rendered.scratch) await removeScratch(rendered.scratch, launch);
+    const page = rendered.pages[0];
+    if (!page?.measured) {
+      const reason = page?.error ?? "the render ended before it was measured";
+      return `[error] ${code(name)} could not be measured: ${reason}.`;
+    }
+    const against = againstAccepted(page.measured, acceptedPageFigures(db, ctx, projectSlug, taskKey));
+    return [
+      `[done] ${code(name)} measured as Viberr measures a delivered page, at the desktop width (1280 px) and the phone width (390 px).`,
+      ...measuredSentences(page.measured),
+      ...page.shots.flatMap((shot) => widthRemark(shot, "it") ?? []),
+      ...loadRemarks(page),
+      ...(against ? [against] : []),
+      "Nothing was saved: these are the figures as the file stands now.",
+    ].join(" ");
+  };
+  return new Promise((resolve) => {
+    const job: QueuedJob = {
+      kind: "tool",
+      task: `${projectSlug}/${taskKey}`,
+      drop: () => resolve("[busy] The renderer is working on other pages. Call again in a moment."),
+      run: async () => {
+        clearTimeout(timer);
+        try {
+          resolve(await measure());
+        } catch (error) {
+          logger.warn("a page could not be measured", { taskKey, file: name, reason: errorMessage(error) });
+          resolve(`[error] ${code(name)} could not be measured: the renderer failed.`);
+        }
+      },
+    };
+    const timer = setTimeout(() => {
+      const at = waiting.indexOf(job);
+      if (at < 0) return;
+      waiting.splice(at, 1);
+      job.drop();
+    }, TOOL_QUEUE_WAIT_MS);
+    timer.unref?.();
+    enqueue(job);
+  });
+}
+
+// ------------------------------------------------------------ a page on the web
+
+/** Ruling 327: the most stretches one width of a look holds, each up to
+ *  {@link TOOL_STRETCH_PX} tall: a page longer than that is kept to there, and
+ *  the look says so. */
+const LOOK_STRETCHES_MAX = 12;
+/** How long a page on the web gets for both widths: it loads over the
+ *  network, is walked to its end and pictured whole, then again while it moves. */
+const WEB_PAGE_TIMEOUT_MS = 150_000;
+/** The name the render's report knows a web page by. */
+const WEB_PAGE_LABEL = "web-page";
+
+/** One picture of a page on the web. */
+export interface WebPagePicture {
+  view: PageCaptureViewId;
+  /** A stretch of the page, or a frame of its first screen while it moved. */
+  kind: "stretch" | "frame";
+  moment: number | null;
+  bytes: Buffer;
+  /** Where on the page the picture starts and ends, and the page's height at
+   *  this width, in px. */
+  from: number;
+  to: number;
+  pageHeight: number;
+  /** The page runs on below the last stretch kept of it. */
+  cut: boolean;
+}
+
+export type WebPageAnswer =
+  | { pictures: WebPagePicture[]; motion: PageMotion | null }
+  /** Why nothing was pictured, as a sentence a reply prints after "[error] ". */
+  | { refused: string }
+  | { busy: true };
+
+/**
+ * Ruling 327: picture one page on the web as a reader sees it today: whole,
+ * at the desktop and the phone width a delivered page is pictured at, then
+ * its first screen at three moments while it moves, with what the renderer
+ * read of its motion. The one render in Viberr with the network open, and it
+ * runs as the task owner's agent user like every other; the caller's door
+ * holds it to a run that holds the browser grant. Nothing is kept here: the
+ * pictures are handed back for the caller to keep as sources.
+ */
+export function pictureWebPage(
+  db: DatabaseSync,
+  ctx: TaskMutationContext,
+  input: { projectSlug: string; taskKey: string; url: string; runId: string | null },
+): Promise<WebPageAnswer> {
+  const found = renderer();
+  if (!("browser" in found)) return Promise.resolve({ refused: "this server has no browser to render a page with" });
+  const { projectSlug, taskKey } = input;
+  const picture = async (): Promise<WebPageAnswer> => {
+    const file = readTaskFile(taskRef(ctx, projectSlug, taskKey));
+    if (!file) return { refused: `there is no task ${taskKey} to keep the pictures on` };
+    let launch: AgentLaunch | null;
+    try {
+      launch = taskOwnerLaunch(db, file.parsed.frontmatter.ownerUserId, ctx.dataRoot, NO_OWNER);
+    } catch (error) {
+      return {
+        refused:
+          file.parsed.frontmatter.ownerUserId === null
+            ? "this task has no owner to render it as, and a page renders as its person's agent user, never as the server"
+            : error instanceof AppError
+              ? error.userMessage
+              : "the renderer could not be started as the task owner's agent user",
+      };
+    }
+    const views = PAGE_CAPTURE_VIEWS.flatMap((view): ChildView[] => [
+      { ...childView(view), maxHeight: TOOL_STRETCH_PX, from: 0, whole: true, stretches: LOOK_STRETCHES_MAX },
+      { ...childView(view), maxHeight: view.height, from: 0, moving: true },
+    ]);
+    let rendered: Render;
+    try {
+      rendered = await render({
+        db,
+        ctx,
+        projectSlug,
+        taskKey,
+        renderer: found,
+        launch,
+        source: { kind: "web" },
+        pages: [{ file: WEB_PAGE_LABEL, kind: "web", url: input.url }],
+        views,
+        runId: input.runId,
+        pageTimeoutMs: WEB_PAGE_TIMEOUT_MS,
+      });
+    } catch (error) {
+      logger.warn("a page on the web could not be pictured", { taskKey, reason: errorMessage(error) });
+      return { refused: error instanceof RenderRefused ? error.message : "the renderer could not be started" };
+    }
+    // The pictures are in hand: nothing of the render stays on disk.
+    if (rendered.scratch) await removeScratch(rendered.scratch, launch);
+    const page = rendered.pages[0];
+    const stretches = page?.shots.filter((shot) => shot.kind === "stretch") ?? [];
+    if (!page || stretches.length === 0) {
+      const reason = page?.error ?? "it was not rendered";
+      logger.warn("a page on the web could not be pictured", { taskKey, reason });
+      return { refused: reason };
+    }
+    return {
+      pictures: page.shots
+        .filter((shot) => shot.kind !== "act")
+        .map((shot) => ({
+          view: shot.view,
+          kind: shot.kind === "frame" ? "frame" : "stretch",
+          moment: shot.moment,
+          bytes: shot.bytes,
+          from: shot.from,
+          to: shot.from + shot.height,
+          pageHeight: Math.max(shot.contentHeight, shot.from + shot.height),
+          cut: shot.cut,
+        })),
+      motion: page.motion,
+    };
+  };
+  return new Promise((resolve) => {
+    const job: QueuedJob = {
+      kind: "tool",
+      task: `${projectSlug}/${taskKey}`,
+      drop: () => resolve({ busy: true }),
+      run: async () => {
+        clearTimeout(timer);
+        try {
+          resolve(await picture());
+        } catch (error) {
+          logger.warn("a page on the web could not be pictured", { taskKey, reason: errorMessage(error) });
+          resolve({ refused: "the renderer failed" });
+        }
+      },
+    };
     const timer = setTimeout(() => {
       const at = waiting.indexOf(job);
       if (at < 0) return;

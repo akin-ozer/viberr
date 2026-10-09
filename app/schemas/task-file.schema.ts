@@ -1345,6 +1345,35 @@ const pageCaptureShotSchema = z
   })
   .loose();
 
+/** Ruling 328: what the render measured of one page, per width and whole
+ *  (`PageMeasuredRecord` in `app/shared/page-measure.ts`). */
+const pageMeasuredSchema = z
+  .object({
+    weightBytes: z.number().int().nonnegative(),
+    files: z.number().int().nonnegative(),
+    loadMs: z.number().nonnegative().nullable().default(null),
+    line: z.string().default(""),
+    views: z
+      .array(
+        z
+          .object({
+            view: z.enum(["desktop", "phone"]),
+            faultKinds: z.number().int().nonnegative().nullable().default(null),
+            faultElements: z.number().int().nonnegative().default(0),
+            worstContrast: z.number().positive().nullable().default(null),
+            controls: z.number().int().nonnegative().default(0),
+            unreached: z.number().int().nonnegative().default(0),
+            unmarked: z.number().int().nonnegative().default(0),
+            stillMoving: z.number().int().nonnegative().default(0),
+          })
+          .loose(),
+      )
+      .default([]),
+  })
+  .loose();
+
+export type PageMeasuredRecord = z.infer<typeof pageMeasuredSchema>;
+
 /** One delivered page and the pictures made of it, or why there is none. */
 const pageCapturePageSchema = z
   .object({
@@ -1353,6 +1382,9 @@ const pageCapturePageSchema = z
     shots: z.array(pageCaptureShotSchema).default([]),
     /** Why the page could not be pictured; null when it was. */
     error: z.string().nullable().default(null),
+    /** Ruling 328: what was measured of the page as it was pictured; absent
+     *  when it was not measured. */
+    measured: pageMeasuredSchema.optional(),
   })
   .loose();
 

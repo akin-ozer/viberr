@@ -383,6 +383,7 @@ describe("report_outcome's evidence field (P13-D-26)", () => {
       collab: { ...collab, githubRead: collab.githubRead ?? false },
       kb: [],
       webEgress: true,
+      browser: false,
     })!;
     lastStore = store;
     return mountedTools.parse(built.mcpServers.viberr_agent);
@@ -409,6 +410,7 @@ describe("report_outcome's evidence field (P13-D-26)", () => {
       },
       kb: [],
       webEgress: true,
+      browser: false,
     })!;
     lastStore = store;
     return built.mcpServers.viberr_agent;
@@ -612,6 +614,7 @@ describe("report_outcome's evidence field (P13-D-26)", () => {
       collab: { comment: true, ask: true, verdict: true, evidence: true, githubRead: true },
       kb: [],
       webEgress: true,
+      browser: false,
     })!;
     const loading = toolLoading(built.mcpServers.viberr_agent);
     expect(loading.deferred).toEqual([]);
@@ -657,6 +660,7 @@ describe("report_outcome's evidence field (P13-D-26)", () => {
       },
       kb: ["shopify-clone-conventions"],
       webEgress: true,
+      browser: false,
     })!;
     const mounted = Object.keys(
       mountedTools.parse(built.mcpServers.viberr_agent),
@@ -2055,6 +2059,7 @@ describe("report_outcome's evidence field (P13-D-26)", () => {
           },
           kb: [],
           webEgress: true,
+          browser: false,
         }),
       ).toBeNull();
 
@@ -2088,6 +2093,7 @@ describe("report_outcome's evidence field (P13-D-26)", () => {
         },
         kb: ["shop-rulings"],
         webEgress: true,
+        browser: false,
       });
       expect(built).not.toBeNull();
       const names = mountedTools.parse(built!.mcpServers.viberr_agent);
@@ -2150,6 +2156,7 @@ describe("report_outcome's evidence field (P13-D-26)", () => {
         collab: { comment: true, ask: false, verdict: false, evidence: false, githubRead: false },
         kb: [kb.dir],
         webEgress: true,
+        browser: false,
       })!;
       const client = await connectedClient(built.mcpServers.viberr_agent);
       const textResult = z
@@ -2297,6 +2304,7 @@ describe("report_outcome's evidence field (P13-D-26)", () => {
         collab: { comment: false, ask: false, verdict: false, evidence: false, githubRead: true },
         kb: [],
         webEgress: true,
+        browser: false,
       })!;
       return { store, tools: mountedTools.parse(built.mcpServers.viberr_agent) };
     }
