@@ -6003,8 +6003,10 @@ describe("P19-G11 — the run records what it was given", () => {
       // What it is told, word for word.
       expect(reads).toContain(
         " A file here that is a page (.html, .htm, .md, .markdown) can be looked at as a reader sees it: " +
-          "`capture_page` with its name hands you the picture at a desktop and a phone width. " +
-          "Look before you deliver a page, and judge the picture as well as the source when you review one. " +
+          "`capture_page` with its name hands you the picture at a desktop width (1280 px) and a phone width (390 px), " +
+          "and shows a control pressed, under the pointer or holding focus, the page with reduced motion asked for, and its first screen while it moves. " +
+          "`measure_page` says what Viberr measures of every delivered page. " +
+          "Look and measure before you deliver a page, and judge the picture as well as the source when you review one. " +
           "A page must carry what it needs or point at files saved beside it: a capture loads nothing from the network.",
       );
       // A run with no collaboration grant holds no Viberr reader, this one included.

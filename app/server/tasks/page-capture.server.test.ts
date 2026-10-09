@@ -664,7 +664,7 @@ describe("a delivered page is pictured (ruling 86)", () => {
     expect(timeline().filter((event) => event.title === "Page captures")).toHaveLength(2);
   });
 
-  it("a render still running after 45 seconds no longer holds the operator, an ask that cannot start within 15 seconds is told the renderer is busy, and a render past its limit is stopped and said on the task", async () => {
+  it("a render still running after 120 seconds no longer holds the operator, an ask that cannot start within 15 seconds is told the renderer is busy, and a render past its limit is stopped and said on the task", async () => {
     deployBoard({ operator: true });
     const runOp = vi.fn<typeof runOperator>(async () => ({
       runId: null,
@@ -703,7 +703,9 @@ describe("a delivered page is pictured (ruling 86)", () => {
       // the render is stopped, past a Codex tool call's 60 seconds.
       await vi.advanceTimersByTimeAsync(1_000);
       expect(answer.text).toBe("[busy] The renderer is working on other pages. Call again in a moment.");
-      await vi.advanceTimersByTimeAsync(25_000); // 40 s in; the bound is 45 s (ruling 86)
+      // 115 s in; the bound is 120 s (ruling 86): a page that is measured as
+      // it is pictured (ruling 328) loads several times, once on a slow line.
+      await vi.advanceTimersByTimeAsync(100_000);
       expect(settled).toBe(false);
       // CANARY: await the capture promise without the bound in
       // applyAgentCompletionEffects and the operator's run never starts while
@@ -712,17 +714,18 @@ describe("a delivered page is pictured (ruling 86)", () => {
       await done;
       expect(runOp).toHaveBeenCalledTimes(1);
       expect(frontmatter().pageCaptures).toBeUndefined();
-      // The job's own limit, 10 s and 25 s a page: the render is stopped.
-      await vi.advanceTimersByTimeAsync(15_000);
+      // The job's own limit, 10 s and 70 s for each page that is measured:
+      // the render is stopped.
+      await vi.advanceTimersByTimeAsync(30_000);
       // Waited to its last write, so nothing of the job outlives the test.
       await vi.waitFor(() => expect(captureAudits()).toHaveLength(1), { timeout: 15_000 });
     });
     await effects;
     expect(frontmatter().pageCaptures!.pages).toEqual([
-      { file: "one.html", shots: [], error: "the render ran past 60 seconds" },
-      { file: "two.html", shots: [], error: "the render ran past 60 seconds" },
+      { file: "one.html", shots: [], error: "the render ran past 150 seconds" },
+      { file: "two.html", shots: [], error: "the render ran past 150 seconds" },
     ]);
-    expect(captureNote()!.text).toContain("Viberr could not picture `one.html`: the render ran past 60 seconds.");
+    expect(captureNote()!.text).toContain("Viberr could not picture `one.html`: the render ran past 150 seconds.");
     // The ask that was told `busy` never reached the renderer.
     expect(fake.launches()).toHaveLength(1);
   });
