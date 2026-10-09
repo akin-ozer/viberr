@@ -15,18 +15,37 @@ import { statementsMatching, tallyServerReads } from "../../../test-support/perf
 import { getBoardWithTasks } from "./board-query.server";
 import { rebuildAll } from "./rebuilder.server";
 import { setupProjectedStore } from "../../../test-support/projected-store";
-import { getReviewQueue } from "./review-queue.server";
+import { getReviewQueue, type ReviewQueueData } from "./review-queue.server";
 import { reviewRowSub } from "~/features/review/review-helpers";
 
 const ctx = createTestDbContext();
 afterEach(ctx.cleanup);
 
+/**
+ * Ruling 304: the queue lists only its viewer's own tasks. Every fixture task
+ * in this file is owned by arda (the store's project admin, who views it)
+ * unless a test names another owner in its patch.
+ */
+function owned(
+  store: { users: { arda: { id: string } } },
+  key: string,
+  patch: Partial<TaskFrontmatter> = {},
+): TaskFrontmatter {
+  return baseTaskFrontmatter(key, { ownerUserId: store.users.arda.id, ...patch });
+}
+
+/** Every row of the queue, whichever panel holds it. */
+function rowsOf(q: ReviewQueueData) {
+  return [...q.completions, ...q.decisions, ...q.working];
+}
+
 function setup() {
   const store = setupTestStore(ctx);
 
-  // Panel 1: review + waiting human, with a pending packet.
+  // Panel 1: review + waiting human, with a completion packet that offers
+  // the acceptance.
   writeTask(store.dataRoot, store.slug, {
-    frontmatter: baseTaskFrontmatter("VIB-101", {
+    frontmatter: owned(store, "VIB-101", {
       title: "Attach workspace",
       stage: "review",
       waiting: "human",
@@ -40,7 +59,10 @@ function setup() {
       title: "Accept completion, or send back for one fix?",
       body: "b",
       observations: [],
-      options: [],
+      options: [
+        { kind: "accept_completion", t: "Accept the completion", d: "", rec: true },
+        { kind: "request_edit", t: "Send back for one fix", d: "", rec: false },
+      ],
     },
     timeline: [
       {
@@ -55,9 +77,9 @@ function setup() {
     ],
   });
 
-  // Panel 2: review + waiting agent, no packet — subline = newest event.
+  // Panel 3: review + waiting agent, no packet — subline = newest event.
   writeTask(store.dataRoot, store.slug, {
-    frontmatter: baseTaskFrontmatter("VIB-102", {
+    frontmatter: owned(store, "VIB-102", {
       title: "SSE fan-out",
       stage: "review",
       waiting: "agent",
@@ -88,16 +110,17 @@ function setup() {
 
   // The review + none combination (contracts §2.2): still-with-agents.
   writeTask(store.dataRoot, store.slug, {
-    frontmatter: baseTaskFrontmatter("VIB-103", {
+    frontmatter: owned(store, "VIB-103", {
       title: "Orphaned review task",
       stage: "review",
       waiting: "none",
     }),
   });
 
-  // Non-review stages never qualify — packets elsewhere stay off-queue.
+  // Panel 2 (ruling 304): a packet before the review stages is still its
+  // owner's decision.
   writeTask(store.dataRoot, store.slug, {
-    frontmatter: baseTaskFrontmatter("VIB-104", {
+    frontmatter: owned(store, "VIB-104", {
       title: "Blocked in impl",
       stage: "impl",
       waiting: "human",
@@ -118,15 +141,19 @@ function setup() {
 }
 
 describe("getReviewQueue", () => {
-  it("splits review-stage tasks on waiting — review+none lands with agents", () => {
+  it("ruling 304: splits the owner's tasks by their decision — review+none lands with review work", () => {
     const store = setup();
     const queue = getReviewQueue(store.db, store.slug, {
       dataRoot: store.dataRoot,
       viewerUserId: store.users.arda.id,
     });
 
-    expect(queue.total).toBe(3);
-    expect(queue.ready.map((t) => t.key)).toEqual(["VIB-101"]);
+    expect(queue.total).toBe(4);
+    // A packet offering `accept_completion` is a completion.
+    expect(queue.completions.map((t) => t.key)).toEqual(["VIB-101"]);
+    // CANARY: list packets only on review work again and VIB-104, blocked at
+    // Implementation, leaves its owner's queue.
+    expect(queue.decisions.map((t) => t.key)).toEqual(["VIB-104"]);
     // waiting !== "human" — including the legal review+none combination.
     expect(queue.working.map((t) => t.key)).toEqual(["VIB-102", "VIB-103"]);
     expect(queue.working.find((t) => t.key === "VIB-103")?.waiting).toBe(
@@ -138,7 +165,7 @@ describe("getReviewQueue", () => {
     const store = setup();
     // An archived review task: on the board's list, never in the queue.
     writeTask(store.dataRoot, store.slug, {
-      frontmatter: baseTaskFrontmatter("VIB-104", { stage: "review", waiting: "human", archived: true }),
+      frontmatter: owned(store, "VIB-104", { stage: "review", waiting: "human", archived: true }),
     });
     rebuildAll(store.db, { dataRoot: store.dataRoot });
     const viewer = { dataRoot: store.dataRoot, viewerUserId: store.users.arda.id };
@@ -165,7 +192,7 @@ describe("getReviewQueue", () => {
       viewerUserId: store.users.arda.id,
     });
 
-    const withPacket = queue.ready[0]!;
+    const withPacket = queue.completions[0]!;
     expect(withPacket.packet).toEqual({
       kind: "Completion report",
       title: "Accept completion, or send back for one fix?",
@@ -187,7 +214,7 @@ describe("getReviewQueue", () => {
       dataRoot: store.dataRoot,
       viewerUserId: store.users.arda.id,
     });
-    expect(queue.ready[0]!.pr).toEqual({ number: 318, state: "review" });
+    expect(queue.completions[0]!.pr).toEqual({ number: 318, state: "review" });
     // UX19-3: `validation` is a DERIVED cache (task-file.schema.ts: "no longer
     // written as a source of truth"), and the projection now derives it from the
     // same `fm` snapshot that produces `blockReason` — so the row can no longer
@@ -196,7 +223,7 @@ describe("getReviewQueue", () => {
     // ("changed" / "healthy") are exactly the stale cache that must NOT reach the
     // pill. This test used to pin that passthrough. (The derivation's own
     // healthy/failing/changed coverage lives in rebuilder.server.test.ts.)
-    expect(queue.ready[0]!.validation).toBe("none");
+    expect(queue.completions[0]!.validation).toBe("none");
     expect(queue.working[0]!.validation).toBe("none");
   });
 
@@ -207,7 +234,7 @@ describe("getReviewQueue", () => {
     const store = setupTestStore(ctx);
     const seed = (mergeableAt: string) => {
       writeTask(store.dataRoot, store.slug, {
-        frontmatter: baseTaskFrontmatter("VIB-301", {
+        frontmatter: owned(store, "VIB-301", {
           title: "Refreshed after a conflict",
           stage: "review",
           waiting: "human",
@@ -226,7 +253,7 @@ describe("getReviewQueue", () => {
         dataRoot: store.dataRoot,
         viewerUserId: store.users.arda.id,
       });
-      return [...q.ready, ...q.working].find((t) => t.key === "VIB-301")!;
+      return rowsOf(q).find((t) => t.key === "VIB-301")!;
     };
     expect(seed("d20be152db4ba8b622ab3c99dd993a1375304998").pr?.mergeable).toBeUndefined();
     expect(seed("5241ef1ecb39682151e01884e00fe715b246d8be").pr?.mergeable).toBe("conflicting");
@@ -238,7 +265,7 @@ describe("getReviewQueue", () => {
       dataRoot: store.dataRoot,
       viewerUserId: store.users.arda.id,
     });
-    expect(queue).toEqual({ ready: [], working: [], total: 0 });
+    expect(queue).toEqual({ completions: [], decisions: [], working: [], acceptableKeys: [], total: 0 });
   });
 
   it("D-1 (pass 24): an ARCHIVED project has an EMPTY review queue (parity with decisionsRequiring)", () => {
@@ -260,7 +287,7 @@ describe("getReviewQueue", () => {
       dataRoot: store.dataRoot,
       viewerUserId: store.users.arda.id,
     });
-    expect(queue).toEqual({ ready: [], working: [], total: 0 });
+    expect(queue).toEqual({ completions: [], decisions: [], working: [], acceptableKeys: [], total: 0 });
   });
 
   // WI-1: on a CUSTOM 3-stage board (todo/doing/done) the review role resolves
@@ -287,7 +314,7 @@ describe("getReviewQueue", () => {
     fileLeases: [],
     });
     writeTask(store.dataRoot, "lite", {
-      frontmatter: baseTaskFrontmatter("LP-1", {
+      frontmatter: owned(store, "LP-1", {
         title: "In the review-role stage",
         stage: "doing",
         waiting: "human",
@@ -300,21 +327,27 @@ describe("getReviewQueue", () => {
       viewerUserId: store.users.arda.id,
     });
     expect(queue.total).toBe(1);
-    expect(queue.ready.map((t) => t.key)).toEqual(["LP-1"]);
+    expect(queue.completions.map((t) => t.key)).toEqual(["LP-1"]);
   });
 });
 
-describe("getReviewQueue member-scoping by acceptance authority (R8-3)", () => {
+/**
+ * Ruling 304 (owner, 2026-10-09): the queue's rows are its viewer's own tasks,
+ * whatever their role. R8-3 still scopes ACCEPTANCE by authority (maintainer+ /
+ * owner), and that wider answer is `acceptableKeys`, which the board and the
+ * rows' "waiting on you" tags read; it never makes another person's task a row.
+ */
+describe("getReviewQueue rows are the owner's; acceptance authority is R8-3's", () => {
   // A review-stage task waiting on a human with NO packet/recommendation (the
   // operator couldn't open a completion packet). It still needs a human to
-  // accept it, so the scoping must key on acceptance AUTHORITY (maintainer+ /
-  // owner), not on the presence of a decision object.
+  // accept it, so acceptance keys on AUTHORITY (maintainer+ / owner), not on
+  // the presence of a decision object.
   function seedBareHumanReview(
     store: ReturnType<typeof setupTestStore>,
     owner: string | null,
   ) {
     writeTask(store.dataRoot, store.slug, {
-      frontmatter: baseTaskFrontmatter("VIB-201", {
+      frontmatter: owned(store, "VIB-201", {
         title: "Bare human-waiting review",
         stage: "review",
         waiting: "human",
@@ -324,61 +357,55 @@ describe("getReviewQueue member-scoping by acceptance authority (R8-3)", () => {
     rebuildAll(store.db, { dataRoot: store.dataRoot });
   }
 
-  it("a maintainer sees a bare human-waiting review task in `ready`", () => {
-    const store = setupTestStore(ctx);
-    seedBareHumanReview(store, null);
-    const q = getReviewQueue(store.db, store.slug, {
-      dataRoot: store.dataRoot,
-      viewerUserId: store.users.murat.id,
-    });
-    expect(q.ready.map((t) => t.key)).toEqual(["VIB-201"]);
-  });
+  const queueFor = (store: ReturnType<typeof setupTestStore>, viewerUserId: string) =>
+    getReviewQueue(store.db, store.slug, { dataRoot: store.dataRoot, viewerUserId });
 
-  it("a viewer sees it in `working` but STILL flagged human-waiting (never 'agent working')", () => {
-    const store = setupTestStore(ctx);
-    seedBareHumanReview(store, null);
-    const q = getReviewQueue(store.db, store.slug, {
-      dataRoot: store.dataRoot,
-      viewerUserId: store.users.elif.id,
-    });
-    expect(q.ready).toHaveLength(0);
-    const row = q.working.find((t) => t.key === "VIB-201")!;
-    // waiting stays "human" → the page renders "waiting on a human", not the
-    // false "agent working" (the pre-fix regression).
-    expect(row.waiting).toBe("human");
-  });
-
-  it("a contributor OWNER sees their bare human-waiting review task in `ready` (owner exception)", () => {
+  it("a contributor OWNER has their bare human-waiting review task as a completion (owner exception)", () => {
     const store = setupTestStore(ctx);
     seedBareHumanReview(store, store.users.selin.id);
-    const q = getReviewQueue(store.db, store.slug, {
-      dataRoot: store.dataRoot,
-      viewerUserId: store.users.selin.id,
-    });
-    expect(q.ready.map((t) => t.key)).toEqual(["VIB-201"]);
+    const q = queueFor(store, store.users.selin.id);
+    expect(q.completions.map((t) => t.key)).toEqual(["VIB-201"]);
+    expect(q.acceptableKeys).toEqual(["VIB-201"]);
   });
 
-  it("a contributor NON-owner does not get it in `ready`", () => {
+  it("a maintainer may accept another member's task, but it is not a row of theirs", () => {
     const store = setupTestStore(ctx);
-    seedBareHumanReview(store, store.users.elif.id); // owned by someone else
-    const q = getReviewQueue(store.db, store.slug, {
-      dataRoot: store.dataRoot,
-      viewerUserId: store.users.selin.id,
-    });
-    expect(q.ready).toHaveLength(0);
-    expect(q.working.map((t) => t.key)).toEqual(["VIB-201"]);
+    seedBareHumanReview(store, store.users.selin.id);
+    const q = queueFor(store, store.users.murat.id);
+    // R8-3: the acceptance is his to give, so the board says "waiting on you".
+    expect(q.acceptableKeys).toEqual(["VIB-201"]);
+    // CANARY: drop `isOwn` from the listing and selin's task is murat's row.
+    expect(rowsOf(q)).toEqual([]);
+    expect(q.total).toBe(0);
   });
 
-  it("a NON-MEMBER viewer id gets nothing in `ready` — the task is still listed as in review", () => {
+  it("an unowned task is nobody's row, while the maintainer tier may still accept it", () => {
     const store = setupTestStore(ctx);
     seedBareHumanReview(store, null);
-    const q = getReviewQueue(store.db, store.slug, {
-      dataRoot: store.dataRoot,
-      viewerUserId: store.users.deniz.id, // no membership row at all
-    });
-    expect(q.ready).toHaveLength(0);
-    expect(q.working.map((t) => t.key)).toEqual(["VIB-201"]);
-    expect(q.total).toBe(1);
+    const { arda, murat, selin, elif } = store.users;
+    expect([arda, murat, selin, elif].map((u) => queueFor(store, u.id).total)).toEqual([0, 0, 0, 0]);
+    expect([arda, murat, selin, elif].map((u) => queueFor(store, u.id).acceptableKeys)).toEqual([
+      ["VIB-201"],
+      ["VIB-201"],
+      [],
+      [],
+    ]);
+  });
+
+  it("a VIEWER still holding the owner seat has no row and nothing to accept: the seat counts with `own-task`", () => {
+    const store = setupTestStore(ctx);
+    seedBareHumanReview(store, store.users.elif.id);
+    const q = queueFor(store, store.users.elif.id);
+    expect(q.total).toBe(0);
+    expect(q.acceptableKeys).toEqual([]);
+  });
+
+  it("a NON-MEMBER viewer id gets nothing, the seat named on the task included", () => {
+    const store = setupTestStore(ctx);
+    seedBareHumanReview(store, store.users.deniz.id); // no membership row at all
+    const q = queueFor(store, store.users.deniz.id);
+    expect(q.total).toBe(0);
+    expect(q.acceptableKeys).toEqual([]);
   });
 
   // E5: the predicate used to open with `if (viewerUserId === undefined) return
@@ -394,7 +421,7 @@ describe("getReviewQueue member-scoping by acceptance authority (R8-3)", () => {
     dataRoot: string;
   }
 
-  it("an absent viewer is fail-closed: nothing is acceptance-ready", () => {
+  it("an absent viewer is fail-closed: nothing is acceptance-ready and nothing is theirs", () => {
     const store = setupTestStore(ctx);
     seedBareHumanReview(store, null);
     // SAFETY: deliberately UNSOUND — `viewerUserId` is missing. That is the
@@ -403,13 +430,13 @@ describe("getReviewQueue member-scoping by acceptance authority (R8-3)", () => {
     const q = getReviewQueue(store.db, store.slug, {
       dataRoot: store.dataRoot,
     } as ReviewQueueOptions);
-    expect(q.ready).toHaveLength(0);
-    expect(q.working.map((t) => t.key)).toEqual(["VIB-201"]);
+    expect(q.acceptableKeys).toEqual([]);
+    expect(q.total).toBe(0);
   });
 });
 
 describe("F10-11: acceptance readiness is revision-bound, not just human-waiting", () => {
-  it("a failing task (request_changes on the current revision) is NOT in `ready`", () => {
+  it("a failing task (request_changes on the current revision) is NOT acceptable", () => {
     const store = setupTestStore(ctx);
     const rev = {
       id: "rev_1",
@@ -420,7 +447,7 @@ describe("F10-11: acceptance readiness is revision-bound, not just human-waiting
       sourceProfileId: "developer",
     };
     writeTask(store.dataRoot, store.slug, {
-      frontmatter: baseTaskFrontmatter("VIB-9", {
+      frontmatter: owned(store, "VIB-9", {
         title: "Rejected work",
         stage: "review",
         waiting: "human",
@@ -450,12 +477,12 @@ describe("F10-11: acceptance readiness is revision-bound, not just human-waiting
       viewerUserId: store.users.arda.id,
     });
     // Human-waiting, but a required reviewer requested changes → NOT acceptable.
-    expect(q.ready.map((t) => t.key)).not.toContain("VIB-9");
+    expect(q.completions.map((t) => t.key)).not.toContain("VIB-9");
     const row = q.working.find((t) => t.key === "VIB-9")!;
     expect(row.blockReason).toMatch(/requests changes/i);
   });
 
-  it("a task whose required reviewer approved the current revision IS in `ready`", () => {
+  it("a task whose required reviewer approved the current revision IS a completion", () => {
     const store = setupTestStore(ctx);
     const rev = {
       id: "rev_1",
@@ -466,7 +493,7 @@ describe("F10-11: acceptance readiness is revision-bound, not just human-waiting
       sourceProfileId: "developer",
     };
     writeTask(store.dataRoot, store.slug, {
-      frontmatter: baseTaskFrontmatter("VIB-8", {
+      frontmatter: owned(store, "VIB-8", {
         title: "Approved work",
         stage: "review",
         waiting: "human",
@@ -495,14 +522,14 @@ describe("F10-11: acceptance readiness is revision-bound, not just human-waiting
       dataRoot: store.dataRoot,
       viewerUserId: store.users.arda.id,
     });
-    expect(q.ready.map((t) => t.key)).toContain("VIB-8");
-    expect(q.ready.find((t) => t.key === "VIB-8")!.blockReason).toBeNull();
+    expect(q.completions.map((t) => t.key)).toContain("VIB-8");
+    expect(q.completions.find((t) => t.key === "VIB-8")!.blockReason).toBeNull();
   });
 
-  it("a REJECTED-PR task (closed on GitHub, no reviewer block) is NOT `ready` — it needs a rework/archive decision (NEW-1)", () => {
+  it("a REJECTED-PR task (closed on GitHub, no reviewer block) is NOT acceptable — it needs a rework/archive decision (NEW-1)", () => {
     const store = setupTestStore(ctx);
     writeTask(store.dataRoot, store.slug, {
-      frontmatter: baseTaskFrontmatter("VIB-7", {
+      frontmatter: owned(store, "VIB-7", {
         title: "Rejected on GitHub",
         stage: "review",
         waiting: "human",
@@ -518,7 +545,7 @@ describe("F10-11: acceptance readiness is revision-bound, not just human-waiting
       viewerUserId: store.users.arda.id,
     });
     // Human-waiting + no blockReason, but the PR was rejected → NOT acceptance-ready.
-    expect(q.ready.map((t) => t.key)).not.toContain("VIB-7");
+    expect(q.completions.map((t) => t.key)).not.toContain("VIB-7");
     const row = q.working.find((t) => t.key === "VIB-7")!;
     expect(row.pr).toEqual({ number: 77, state: "closed" }); // closed preserved, not coerced to "review"
   });
@@ -546,7 +573,7 @@ describe("R15-1: the verdict gate reaches the queue through the projection", () 
     patch: Partial<TaskFrontmatter> = {},
   ) {
     writeTask(store.dataRoot, store.slug, {
-      frontmatter: baseTaskFrontmatter(key, {
+      frontmatter: owned(store, key, {
         title: "Delivered, unreviewed",
         stage: "review",
         waiting: "human",
@@ -570,26 +597,26 @@ describe("R15-1: the verdict gate reaches the queue through the projection", () 
     rebuildAll(store.db, { dataRoot: store.dataRoot });
   }
 
-  it("a delivered revision with ZERO verdict-capable engagements is not `ready`", () => {
+  it("a delivered revision with ZERO verdict-capable engagements is not acceptable", () => {
     const store = setupTestStore(ctx);
     seedDelivered(store, "VIB-6");
     const q = getReviewQueue(store.db, store.slug, {
       dataRoot: store.dataRoot,
       viewerUserId: store.users.arda.id,
     });
-    expect(q.ready.map((t) => t.key)).not.toContain("VIB-6");
+    expect(q.completions.map((t) => t.key)).not.toContain("VIB-6");
     const row = q.working.find((t) => t.key === "VIB-6")!;
     expect(row.blockReason).toMatch(/no approving verdict yet/i);
   });
 
-  it("delivered work with NO review PR is not `ready` either", () => {
+  it("delivered work with NO review PR is not acceptable either", () => {
     const store = setupTestStore(ctx);
     seedDelivered(store, "VIB-5", { pr: null });
     const q = getReviewQueue(store.db, store.slug, {
       dataRoot: store.dataRoot,
       viewerUserId: store.users.arda.id,
     });
-    expect(q.ready.map((t) => t.key)).not.toContain("VIB-5");
+    expect(q.completions.map((t) => t.key)).not.toContain("VIB-5");
     expect(
       q.working.find((t) => t.key === "VIB-5")!.blockReason,
     ).toMatch(/no review pull request/i);
@@ -602,8 +629,8 @@ describe("R15-1: the verdict gate reaches the queue through the projection", () 
       dataRoot: store.dataRoot,
       viewerUserId: store.users.arda.id,
     });
-    expect(q.ready.map((t) => t.key)).toContain("VIB-4");
-    expect(q.ready.find((t) => t.key === "VIB-4")!.blockReason).toBeNull();
+    expect(q.completions.map((t) => t.key)).toContain("VIB-4");
+    expect(q.completions.find((t) => t.key === "VIB-4")!.blockReason).toBeNull();
   });
 });
 
@@ -623,7 +650,7 @@ describe("the row carries the canonical PR state, uncoerced", () => {
     state: "review" | "accepted" | "merged" | "closed",
   ) {
     writeTask(store.dataRoot, store.slug, {
-      frontmatter: baseTaskFrontmatter(key, {
+      frontmatter: owned(store, key, {
         title: `PR is ${state}`,
         stage: "review",
         waiting: "human",
@@ -640,7 +667,7 @@ describe("the row carries the canonical PR state, uncoerced", () => {
       dataRoot: store.dataRoot,
       viewerUserId: store.users.arda.id,
     });
-    const row = [...q.ready, ...q.working].find((t) => t.key === "VIB-21")!;
+    const row = rowsOf(q).find((t) => t.key === "VIB-21")!;
     // The point of the fix: "accepted", not "review". A coerced row renders the
     // blue "in review" pill over a PR whose merge is the outstanding human step.
     expect(row.pr).toEqual({ number: 44, state: "accepted" });
@@ -657,7 +684,7 @@ describe("the row carries the canonical PR state, uncoerced", () => {
       viewerUserId: store.users.arda.id,
     });
     const stateOf = (key: string) =>
-      [...q.ready, ...q.working].find((t) => t.key === key)!.pr!.state;
+      rowsOf(q).find((t) => t.key === key)!.pr!.state;
     expect(stateOf("VIB-22")).toBe("review");
     expect(stateOf("VIB-23")).toBe("merged");
     // NEW-1's original point: a rejected PR must not read as an open one.
@@ -679,7 +706,7 @@ describe("UX19-3: the acceptance panel asks the same questions the writer does",
   it("a task with an OPEN blocked decision is listed, but never as acceptance-ready", () => {
     const store = setupTestStore(ctx);
     writeTask(store.dataRoot, store.slug, {
-      frontmatter: baseTaskFrontmatter("VIB-31", {
+      frontmatter: owned(store, "VIB-31", {
         title: "Blocked at the boundary",
         stage: "review",
         // A blocked packet is what SET waiting to human (operator-packets).
@@ -702,10 +729,12 @@ describe("UX19-3: the acceptance panel asks the same questions the writer does",
       dataRoot: store.dataRoot,
       viewerUserId: store.users.arda.id,
     });
-    expect(q.ready.map((t) => t.key)).not.toContain("VIB-31");
-    expect(q.working.map((t) => t.key)).toContain("VIB-31");
-    // It stays visible with its packet header — this is a re-file, not a hide.
-    expect(q.working.find((t) => t.key === "VIB-31")!.packet).toEqual({
+    expect(q.acceptableKeys).not.toContain("VIB-31");
+    expect(q.completions.map((t) => t.key)).not.toContain("VIB-31");
+    // It stays visible as the decision it is, with its packet header — this is
+    // a re-file, not a hide.
+    expect(q.decisions.map((t) => t.key)).toEqual(["VIB-31"]);
+    expect(q.decisions[0]!.packet).toEqual({
       kind: "Blocked decision",
       title: "Pick a recovery path",
     });
@@ -715,7 +744,7 @@ describe("UX19-3: the acceptance panel asks the same questions the writer does",
   it("a task whose PR CONFLICTS with the base branch is not acceptance-ready", () => {
     const store = setupTestStore(ctx);
     writeTask(store.dataRoot, store.slug, {
-      frontmatter: baseTaskFrontmatter("VIB-32", {
+      frontmatter: owned(store, "VIB-32", {
         title: "Conflicting PR at the boundary",
         stage: "review",
         waiting: "human",
@@ -735,7 +764,7 @@ describe("UX19-3: the acceptance panel asks the same questions the writer does",
     });
     // GitHub cannot merge it, so the server refuses the accept — the panel that
     // names "your acceptance" must not claim otherwise.
-    expect(q.ready.map((t) => t.key)).not.toContain("VIB-32");
+    expect(q.completions.map((t) => t.key)).not.toContain("VIB-32");
     const row = q.working.find((t) => t.key === "VIB-32")!;
     expect(row.pr!.mergeable).toBe("conflicting");
   });
@@ -743,7 +772,7 @@ describe("UX19-3: the acceptance panel asks the same questions the writer does",
   it("the same task with a CLEAN PR and no blocked packet is still ready — the gate did not widen", () => {
     const store = setupTestStore(ctx);
     writeTask(store.dataRoot, store.slug, {
-      frontmatter: baseTaskFrontmatter("VIB-33", {
+      frontmatter: owned(store, "VIB-33", {
         title: "Mergeable at the boundary",
         stage: "review",
         waiting: "human",
@@ -761,7 +790,7 @@ describe("UX19-3: the acceptance panel asks the same questions the writer does",
       dataRoot: store.dataRoot,
       viewerUserId: store.users.arda.id,
     });
-    expect(q.ready.map((t) => t.key)).toEqual(["VIB-33"]);
+    expect(q.completions.map((t) => t.key)).toEqual(["VIB-33"]);
   });
 });
 
@@ -775,7 +804,7 @@ describe("the row carries GitHub's mergeability", () => {
   it("an unread mergeability is ABSENT, never coerced to a value", () => {
     const store = setupTestStore(ctx);
     writeTask(store.dataRoot, store.slug, {
-      frontmatter: baseTaskFrontmatter("VIB-12", {
+      frontmatter: owned(store, "VIB-12", {
         title: "Never reconciled",
         stage: "review",
         waiting: "human",
@@ -787,7 +816,7 @@ describe("the row carries GitHub's mergeability", () => {
       dataRoot: store.dataRoot,
       viewerUserId: store.users.arda.id,
     });
-    const row = [...q.ready, ...q.working].find((t) => t.key === "VIB-12")!;
+    const row = rowsOf(q).find((t) => t.key === "VIB-12")!;
     // Not "clean": nobody asked GitHub. The subline must not claim mergeability
     // it never read (prStateSub only speaks on an explicit "conflicting").
     expect("mergeable" in row.pr!).toBe(false);
@@ -802,11 +831,11 @@ describe("the row carries GitHub's mergeability", () => {
  * copying the two fields in the row builder.
  */
 describe("ruling 243: the queue row and the unpushed revision", () => {
-  it("carries both fields through the projection and keeps the task out of `ready`", () => {
+  it("carries both fields through the projection and keeps the task out of the completions", () => {
     const store = setupTestStore(ctx);
     const record = { revisionSha: "9".repeat(40), prHeadSha: "1".repeat(40), relation: "behind" as const };
     writeTask(store.dataRoot, store.slug, {
-      frontmatter: baseTaskFrontmatter("VIB-103", {
+      frontmatter: owned(store, "VIB-103", {
         title: "Unpushed rework",
         stage: "review",
         waiting: "human",
@@ -817,7 +846,7 @@ describe("ruling 243: the queue row and the unpushed revision", () => {
     });
     // A stale record (older revision) reads as nothing.
     writeTask(store.dataRoot, store.slug, {
-      frontmatter: baseTaskFrontmatter("VIB-104", {
+      frontmatter: owned(store, "VIB-104", {
         title: "Stale record",
         stage: "review",
         waiting: "human",
@@ -828,10 +857,10 @@ describe("ruling 243: the queue row and the unpushed revision", () => {
     });
     rebuildAll(store.db, { dataRoot: store.dataRoot });
     const queue = getReviewQueue(store.db, store.slug, { dataRoot: store.dataRoot, viewerUserId: store.users.arda.id });
-    const rows = [...queue.ready, ...queue.working];
+    const rows = rowsOf(queue);
     const unpushed = rows.find((r) => r.key === "VIB-103")!;
     expect(unpushed.pr).toEqual({ number: 320, state: "review", headSha: "1".repeat(40), unpushedRevision: record });
-    expect(queue.ready.map((r) => r.key)).not.toContain("VIB-103");
+    expect(queue.completions.map((r) => r.key)).not.toContain("VIB-103");
     const stale = rows.find((r) => r.key === "VIB-104")!;
     expect(stale.pr).toEqual({ number: 321, state: "review", headSha: "1".repeat(40) });
   });
@@ -845,7 +874,7 @@ describe("ruling 239: the queue row carries the whole drift record", () => {
     const store = setupTestStore(ctx);
     const record = { headSha: "b".repeat(40), authored: 0, baseRefresh: { merges: 1, commits: 4 } };
     writeTask(store.dataRoot, store.slug, {
-      frontmatter: baseTaskFrontmatter("VIB-105", {
+      frontmatter: owned(store, "VIB-105", {
         title: "Refreshed",
         stage: "review",
         waiting: "human",
@@ -854,7 +883,7 @@ describe("ruling 239: the queue row carries the whole drift record", () => {
     });
     rebuildAll(store.db, { dataRoot: store.dataRoot });
     const queue = getReviewQueue(store.db, store.slug, { dataRoot: store.dataRoot, viewerUserId: store.users.arda.id });
-    const row = [...queue.ready, ...queue.working].find((r) => r.key === "VIB-105")!;
+    const row = rowsOf(queue).find((r) => r.key === "VIB-105")!;
     expect(row.pr?.revisionDrift).toEqual(record);
   });
 });
@@ -865,7 +894,7 @@ describe("ruling 63: the queue row flags a decided edit_goal packet", () => {
   it("carries goalEditPending from the packet's awaiting stamp", () => {
     const store = setupTestStore(ctx);
     writeTask(store.dataRoot, store.slug, {
-      frontmatter: baseTaskFrontmatter("VIB-105", { title: "Scope pending", stage: "review", waiting: "human", validation: "changed" }),
+      frontmatter: owned(store, "VIB-105", { title: "Scope pending", stage: "review", waiting: "human", validation: "changed" }),
       packet: {
         type: "input",
         kind: "Decision required",
@@ -873,13 +902,16 @@ describe("ruling 63: the queue row flags a decided edit_goal packet", () => {
         title: "Scope needed",
         body: "",
         observations: [],
-        options: [{ kind: "edit_goal", t: "Specify the goal", d: "", rec: true }],
+        options: [
+          { kind: "accept_completion", t: "Accept it as it stands", d: "", rec: false },
+          { kind: "edit_goal", t: "Specify the goal", d: "", rec: true },
+        ],
         awaiting: "goal_edit",
-        decided: { optionIndex: 0, at: "2026-09-04T10:00:00.000Z", byUserId: store.users.arda.id },
+        decided: { optionIndex: 1, at: "2026-09-04T10:00:00.000Z", byUserId: store.users.arda.id },
       },
     });
     writeTask(store.dataRoot, store.slug, {
-      frontmatter: baseTaskFrontmatter("VIB-106", { title: "Undecided", stage: "review", waiting: "human", validation: "changed" }),
+      frontmatter: owned(store, "VIB-106", { title: "Undecided", stage: "review", waiting: "human", validation: "changed" }),
       packet: {
         type: "input",
         kind: "Decision required",
@@ -892,9 +924,14 @@ describe("ruling 63: the queue row flags a decided edit_goal packet", () => {
     });
     rebuildAll(store.db, { dataRoot: store.dataRoot });
     const queue = getReviewQueue(store.db, store.slug, { dataRoot: store.dataRoot, viewerUserId: store.users.arda.id });
-    const rows = [...queue.ready, ...queue.working];
+    const rows = rowsOf(queue);
     expect(rows.find((r) => r.key === "VIB-105")?.goalEditPending).toBe(true);
     expect(rows.find((r) => r.key === "VIB-106")?.goalEditPending).toBe(false);
+    // Ruling 304: what a decided packet owes is the goal, whatever it offered
+    // before the decision. CANARY: drop the `awaiting` check from the panel
+    // split and VIB-105 files under "Waiting on your acceptance".
+    expect(queue.decisions.map((r) => r.key)).toEqual(["VIB-105", "VIB-106"]);
+    expect(queue.completions).toEqual([]);
   });
 });
 
@@ -975,7 +1012,7 @@ describe("U35-5: review work before the boundary is listed on a custom board", (
     });
     const write = (key: string, patch: Partial<TaskFrontmatter>) =>
       writeTask(store.dataRoot, "k9c", {
-        frontmatter: baseTaskFrontmatter(key, patch),
+        frontmatter: owned(store, key, patch),
       });
     // (c) + (b): at Validation, PR open, reviewer engaged, no verdict yet.
     write("KNC-8", {
@@ -1083,15 +1120,15 @@ describe("U35-5: review work before the boundary is listed on a custom board", (
     );
   });
 
-  it("the Merge task with a healthy verdict is `ready`; nothing before the boundary ever is", () => {
+  it("the Merge task with a healthy verdict is a completion; nothing before the boundary ever is", () => {
     const store = seed();
     const q = getReviewQueue(store.db, "k9c", {
       dataRoot: store.dataRoot,
       viewerUserId: store.users.arda.id,
     });
-    expect(q.ready.map((t) => t.key)).toEqual(["KNC-3"]);
-    expect(q.ready[0]!.atAcceptanceBoundary).toBe(true);
-    expect(q.ready[0]!.stageName).toBe("Merge");
+    expect(q.completions.map((t) => t.key)).toEqual(["KNC-3"]);
+    expect(q.completions[0]!.atAcceptanceBoundary).toBe(true);
+    expect(q.completions[0]!.stageName).toBe("Merge");
     expect(q.working.map((t) => t.key)).toEqual(["KNC-5", "KNC-7", "KNC-8", "KNC-9"]);
   });
 
@@ -1104,7 +1141,7 @@ describe("U35-5: review work before the boundary is listed on a custom board", (
     // accept, and the board offers Accept on, under "Still in review" with a
     // "Review in progress" subline.
     // CANARY: set the row's `atAcceptanceBoundary` from `t.stage === reviewId`
-    // again — KNC-3 drops out of `ready` and reads as still in review.
+    // again — KNC-3 drops out of the completions and reads as still in review.
     const store = seed([
       ...WORKFLOW.filter((w) => w.to !== "done"),
       edge("review", "done", "human"),
@@ -1114,8 +1151,8 @@ describe("U35-5: review work before the boundary is listed on a custom board", (
       dataRoot: store.dataRoot,
       viewerUserId: store.users.arda.id,
     });
-    expect(q.ready.map((t) => t.key)).toEqual(["KNC-3"]);
-    expect(q.ready[0]!.stageName).toBe("Merge");
+    expect(q.completions.map((t) => t.key)).toEqual(["KNC-3"]);
+    expect(q.completions[0]!.stageName).toBe("Merge");
     expect(q.working.map((t) => t.key)).not.toContain("KNC-3");
   });
 });
@@ -1139,7 +1176,7 @@ describe("ruling 242: colliding pull requests are named in the queue", () => {
       truncated = false,
     ) =>
       writeTask(store.dataRoot, store.slug, {
-        frontmatter: baseTaskFrontmatter(key, {
+        frontmatter: owned(store, key, {
           title: key,
           stage: "review",
           waiting: "human",
@@ -1164,7 +1201,7 @@ describe("ruling 242: colliding pull requests are named in the queue", () => {
       viewerUserId: store.users.arda.id,
       dataRoot: store.dataRoot,
     });
-    return [...q.ready, ...q.working].find((r) => r.key === key);
+    return rowsOf(q).find((r) => r.key === key);
   }
 
   it("names the colliding task and the shared path, both ways", () => {
@@ -1200,7 +1237,7 @@ describe("ruling 242: colliding pull requests are named in the queue", () => {
   it("marks the overlap partial when either side's path list was capped", () => {
     const store = setupTestStore(ctx);
     writeTask(store.dataRoot, store.slug, {
-      frontmatter: baseTaskFrontmatter("VIB-411", {
+      frontmatter: owned(store, "VIB-411", {
         title: "VIB-411",
         stage: "review",
         waiting: "human",
@@ -1214,7 +1251,7 @@ describe("ruling 242: colliding pull requests are named in the queue", () => {
       }),
     });
     writeTask(store.dataRoot, store.slug, {
-      frontmatter: baseTaskFrontmatter("VIB-412", {
+      frontmatter: owned(store, "VIB-412", {
         title: "VIB-412",
         stage: "review",
         waiting: "human",

@@ -691,7 +691,7 @@ The file's `waiting` says who is next. The projection (`app/server/projections/r
 
 ### 46. "Blocked or waiting" selects stuck work; "Waiting on me" is the viewer's own
 
-- The board's "Waiting on me" chip and Home's waiting count are member-scoped (`waitingOnMe`: an open decision this viewer can act on). The review queue's rows are project-wide, split per viewer into "Waiting on your acceptance" and "Still in review" (`review-queue.server.ts`).
+- The board's "Waiting on me" chip and Home's waiting count are member-scoped (`waitingOnMe`: an open decision this viewer can act on, or an acceptance this viewer can give). The review queue's rows are the viewer's own tasks only, in "Waiting on your acceptance", "Open decisions" and "Still in review" (ruling 304, `review-queue.server.ts`).
 - "Blocked or waiting" (`?filter=risk`, `matchesBoardFilter` in `app/features/board/board-filters.ts`) is project-wide and selects work that cannot proceed: stored `blocked` or `inconsistency_risk_detected`; `input_required` unless an agent carries the task or it rests on a schedule; `waiting: human` with an open packet of either type, whatever the stored readiness; failing validation; urgent; a PR closed without merging. `waiting: human` without an open packet selects nothing by itself. Archived tasks match only the Archived filter.
 - A question asked while an agent works (an open `input` packet beside `waiting: agent`) does not hold the work: the card keeps the agent's seat and adds "waiting on you" for the viewer who owes it, the task page draws the packet as not blocking, and the task stays out of "Blocked or waiting".
 
@@ -939,7 +939,7 @@ A person accepts from the acceptance boundary (`canAcceptFromStage`). `acceptanc
 
 ### 97. Every person's acceptance passes the confirm ceremony, and the server checks what it showed
 
-Every door a person accepts through, a board drag or Move into the final stage included, first raises a confirm dialog (`accept-confirm.tsx`, `board-accept-confirm.tsx`) stating what merges (one-way), the revision, the standing verdict, the gates, skipped stages and the decision answered or withdrawn. Checks that are not green get a row saying checks are not a gate, so merging is the person's call. The confirmed request echoes the PR state, delivered head and validation shown (`AcceptanceDisclosure`, `app/shared/acceptance-disclosure.ts`); `assertAcceptanceDisclosure` refuses a missing echo (400) or a stale one (409), before merging and again in the lock. Operator acceptances carry their own disclosure (merge pending, ruling 244). While the branch is behind its base, Accept also offers `refreshAndReview`: bring the branch up to date as the person and re-run every reviewer whose verdict stands; nothing starts when it is current, conflicts, or has no standing verdict.
+Every door a person accepts through, a board drag, Move into the final stage and the Review queue's decision dialog (ruling 304) included, first raises a confirm dialog (`accept-confirm.tsx`, `board-accept-confirm.tsx`) stating what merges (one-way), the revision, the standing verdict, the gates, skipped stages and the decision answered or withdrawn. Checks that are not green get a row saying checks are not a gate, so merging is the person's call. The confirmed request echoes the PR state, delivered head and validation shown (`AcceptanceDisclosure`, `app/shared/acceptance-disclosure.ts`); `assertAcceptanceDisclosure` refuses a missing echo (400) or a stale one (409), before merging and again in the lock. Operator acceptances carry their own disclosure (merge pending, ruling 244). While the branch is behind its base, Accept also offers `refreshAndReview`: bring the branch up to date as the person and re-run every reviewer whose verdict stands; nothing starts when it is current, conflicts, or has no standing verdict.
 
 ### 98. Force-accept overrides process gates, never terminal facts, and records every bypass
 
@@ -2123,11 +2123,17 @@ Home, the workspace layout and the pathless `palette-shell` each mount the palet
 - **Policy page.** A role that cannot act reads members' roles and guardrail states as plain text. Controls render only for a role that can act. The check is the same `ACTION_ROLES` entry the action guard enforces (`manage-members`, `edit-policy`), never a second rule.
 - **Saves.** Every project settings panel posts through a fetcher with `useActionToast`, the File leases panel included, so both a save and a refusal show a toast.
 
-### 304. The Review queue is a triage list of links that say "Review"
+### 304. The Review queue lists the viewer's own tasks and answers each decision in a dialog
 
-The Review queue (`app/features/review/`) is for triage only. Acceptance stays on the task page, beside the diff, the verdict and the packet.
+The Review queue (`app/features/review/`, `getReviewQueue` in `app/server/projections/review-queue.server.ts`) lists only the tasks the viewer owns, whatever their role (owner, 2026-10-09). A task someone else owns is never a row, for a maintainer either; the board, Home and the epic pages still say what else waits on them (ruling 46). A row stands in one of three panels:
 
-Each row is a `<Link>` to its task, and it says "Review", never "Accept": acceptance is verdict-gated and may refuse, and a control must not name an outcome its surface cannot promise. A row's "waiting on you" comes from the same `waitingOnViewer` answer as the board card's.
+- **Waiting on your acceptance**: the decision moves the task to the terminal stage. An open packet offers `accept_completion`, or, with no packet open, the task stands at the acceptance boundary and nothing refuses its acceptance (ruling 95).
+- **Open decisions**: any other open packet, at any stage, a goal edit still awaited included (ruling 63).
+- **Still in review**: review work with nothing to decide yet. These rows only link.
+
+A plain click on a row of the first two panels opens the Review decision dialog (`review-decision-dialog.tsx`). It reads `projects/:slug/tasks/:key/decision` (`readTaskDecision`, `app/server/projections/task-decision.server.ts`), which reads what the task page's loader reads (`taskDecisionReads`), and draws the task page's own regions (`TaskDecisionDialogBody`, in the task page's module, so the dialog fetches the task page's own chunk on intent, ruling 11): the packet's description, observations and options with the operator's pick marked, the completion packet with its verdicts and diff, and the task page's Accept while the task stands at the boundary and no option offers acceptance. Every answer posts to the task page's action through the task page's hooks, and an acceptance passes the one ceremony (ruling 97), so a refusal, an audit row and a toast are the task page's. Asking the operator and editing a goal stay on the task page. The dialog carries "Open task", a link, in every state, its failed read included, and closes once its row leaves the queue.
+
+Each row stays a `<Link>` to its task, so a modified or middle click opens it in a new tab. It says "Review", never "Accept": acceptance is verdict-gated and may refuse, and a control must not name an outcome its surface cannot promise. A row's "waiting on you" comes from the same `waitingOnViewer` answer as the board card's.
 
 Anything that only navigates is a link, not a button calling `navigate()`. That covers the queue's policy chip and Activity's task keys.
 

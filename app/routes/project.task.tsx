@@ -3,11 +3,6 @@ import { formFiles } from "~/server/files/form-files.server";
 import { deliveryToast } from "~/features/task-detail/delivery-toast";
 import { goalDraftForOption } from "~/shared/packet-goal-draft";
 import {
-  causeFanOutDisclosure,
-  siblingPacketsSharingCause,
-} from "~/server/tasks/packet-fanout.server";
-import { similarOpenTasks } from "~/server/tasks/similar-tasks.server";
-import {
   data,
   isRouteErrorResponse,
   Link,
@@ -69,15 +64,13 @@ import {
   parsePanelReviewNotes,
 } from "~/server/tasks/review-notes.server";
 import { splitDependencyText } from "~/shared/dependencies";
-import { activeWorkRevision, coercePriority, deliveredAsFiles } from "~/schemas/task-file.schema";
+import { coercePriority } from "~/schemas/task-file.schema";
 import { readTaskFile } from "~/server/files/task-writer.server";
 import {
   countTaskAttachments,
   listTaskAttachments,
-  taskAttachmentExists,
   MAX_UPLOAD_BYTES,
 } from "~/server/files/task-attachments.server";
-import { completionView, sourcesRestedOn } from "~/server/tasks/completion-packet.server";
 import { readTaskSources } from "~/server/files/task-sources.server";
 import { taskSourceRows } from "~/server/tasks/task-sources.server";
 import {
@@ -96,11 +89,9 @@ import {
   latestTaskReconcileAt,
 } from "~/server/provenance/provenance-query.server";
 import { latestTaskReconcileCheckAt } from "~/server/audit/audit-query.server";
-import { taskMergeCollisions } from "~/server/projections/pr-collisions.server";
-import type { PrOverlap } from "~/shared/pr-overlaps";
+import { taskDecisionReads } from "~/server/projections/task-decision.server";
 import { interruptRun, listRunsForTask } from "~/server/runtimes/run-service.server";
 import { listRunsForTaskRows, liveRunStateByTask } from "~/server/runtimes/run-store.server";
-import { type TookShipped, whatItTook } from "~/server/tasks/what-it-took.server";
 import { queuedRunWait, withLiveRun } from "~/shared/mapping/task.server";
 import {
   runOperator,
@@ -351,100 +342,7 @@ export async function loader({ request, params }: Route.LoaderArgs) {
     decidedByLabel: q.decidedByLabel,
   }));
 
-  /**
-   * Ruling 65: this packet's `cause` says the failure that raised it belongs
-   * to an ACCOUNT, not to this task — so confirming here also answers every
-   * sibling packet the same failure raised. A decision that reaches four other
-   * tasks and says nothing about it on the card is precisely the un-disclosed
-   * one-way write ruling 97 exists to stop; the disclosure is computed here,
-   * beside the acceptance disclosure, and rendered above the options.
-   *
-   * Guarded: a search that fails must not 500 the task page over a sentence.
-   */
-  const packetCause = taskFile?.parsed.packet?.cause;
-  let packetAlsoAnswers: string | null = null;
-  if (packetCause) {
-    try {
-      packetAlsoAnswers = causeFanOutDisclosure(
-        siblingPacketsSharingCause(db, packetCause, {
-          projectSlug: params.slug,
-          taskKey: params.key,
-        }),
-        packetCause,
-      );
-    } catch (error) {
-      logger.warn("ruling 65 fan-out disclosure failed", {
-        projectSlug: params.slug,
-        taskKey: params.key,
-        error: toError(error),
-      });
-    }
-  }
-
-  // R15-1: the accept confirm names exactly what merges — the delivered
-  // revision (task file) and the merge target (project default branch).
-  const workRevisionSha =
-    activeWorkRevision(taskFile?.parsed.frontmatter.workRevision)?.headSha ?? null;
-  // R17-2: a verified no-change completion (empty branch, no PR) accepts to Done
-  // without a merge — the confirm says so instead of implying delivered work.
-  const noChanges = taskFile?.parsed.frontmatter.noChanges === true;
-  // Ruling 316: a task delivered as files says so in the confirm, rather than
-  // a merge it never had and a GitHub re-check that would call it unchanged.
-  // Sent only when it applies: every other task's payload stays as it was
-  // (ruling 11's console budget measures it).
-  const deliveredFm = taskFile?.parsed.frontmatter;
-  const filesDelivery =
-    deliveredFm && deliveredAsFiles(deliveredFm) && deliveredFm.deliveredAt
-      ? { filesDeliveredAt: deliveredFm.deliveredAt }
-      : {};
   const project = getProject(db, params.slug);
-  const defaultBranch = project?.defaultBranch || "main";
-
-  /**
-   * Ruling 67: a `create_task` option creates a real task on the person's
-   * confirm, and the card says what it will create without saying what already
-   * looks like it. Twice on the shopify-clone board a confirm was one click
-   * from a second owner for work a live task already held.
-   *
-   * Per option index, because a packet can carry more than one, and the person
-   * is choosing between them. Guarded for the same reason the fan-out
-   * disclosure is: a search must not 500 the task page.
-   */
-  const packetCreateTaskEchoes: Record<number, { key: string; title: string; stage: string }[]> =
-    {};
-  for (const [i, opt] of (taskFile?.parsed.packet?.options ?? []).entries()) {
-    if (opt.kind !== "create_task" || !opt.newTask) continue;
-    try {
-      const echoes = similarOpenTasks(db, params.slug, opt.newTask.title, [params.key]);
-      if (echoes.length > 0) {
-        packetCreateTaskEchoes[i] = echoes.map((e) => ({
-          key: e.key,
-          title: e.title,
-          stage: stageName(project?.stages ?? [], e.stageId),
-        }));
-      }
-    } catch (error) {
-      logger.warn("ruling 67 similar-task disclosure failed", {
-        projectSlug: params.slug,
-        taskKey: params.key,
-        error: toError(error),
-      });
-    }
-  }
-
-  // Ruling 244 (F40-55 (c)): the other open PRs this task's merge would likely
-  // put in conflict, for the accept dialog. Guarded like the disclosures
-  // above: a read that fails must not 500 the task page over a sentence.
-  let mergeCollisions: PrOverlap[] = [];
-  try {
-    mergeCollisions = taskMergeCollisions(db, params.slug, detail);
-  } catch (error) {
-    logger.warn("ruling 244 merge-collision disclosure failed", {
-      projectSlug: params.slug,
-      taskKey: params.key,
-      error: toError(error),
-    });
-  }
 
   // R15-2 safety net (b): manual delivery is maintainer+ (run-agents tier) or
   // the task's own owner — mirror of manualDeliverForReview's server gate.
@@ -489,58 +387,24 @@ export async function loader({ request, params }: Route.LoaderArgs) {
   });
   const ruleReviewerIds = new Set(standing.requiredReviewers.map((r) => r.profileId));
 
-  // Ruling 103: the completion packet, with each reviewer's verdict on the
-  // work under review and the change's size, built from what this loader has
-  // already read (the task file, the project's rules, the reviewers' and the
-  // deployed agents' names). A screenshot that has left the store is
-  // counted, not drawn, checked by name rather than against the list above,
-  // which stops at the newest 100. Ruling 103: an accepted task keeps it as
-  // its result, in the archive too.
-  const accepted = detail.stage === detail.stages[detail.stages.length - 1]?.id;
-  const completion =
-    taskFile && (!archived || accepted)
-      ? completionView(taskFile.parsed.frontmatter, {
-          canSee: (name) => taskAttachmentExists(params.slug, params.key, name),
-          nameOf: (profileId) => {
-            const engaged = detail.reviewers.find((r) => r.profileId === profileId);
-            return (
-              engaged?.profileName ??
-              deployedSpecialists.find((s) => s.id === profileId)?.name ??
-              engaged?.role ??
-              profileId
-            );
-          },
-          ruleReviewers: standing.requiredReviewers.map((r) => r.profileId),
-          // Ruling 82: what the work under review rests on, from the read above.
-          sources: sourcesRestedOn(keptSources, taskFile.parsed.frontmatter),
-        })
-      : null;
-
-  // Ruling 83: what the task took, as the card prints it: its facts and what
-  // they miss, from the run rows and the task file this loader has already
-  // read. It rides the card (no completion view, no figure), and is sent
-  // only then, so no other task's payload grows (ruling 11).
-  // Guarded like the disclosures above: a read of what a task cost must not
-  // 500 the task page.
-  const tookShipped: TookShipped = {};
-  if (completion && taskFile) {
-    try {
-      const took = whatItTook({
-        taskKey: params.key,
-        rows: runRows,
-        file: taskFile.parsed,
-        stages: detail.stages,
-        terminalStageId: detail.stages[detail.stages.length - 1]?.id ?? null,
-      });
-      tookShipped.whatItTook = { facts: took.facts, notes: took.notes };
-    } catch (error) {
-      logger.warn("ruling 83 what-it-took read failed", {
-        projectSlug: params.slug,
-        taskKey: params.key,
-        error: toError(error),
-      });
-    }
-  }
+  // The open decision as the page shows it, read the way the Review queue's
+  // decision dialog reads it (`taskDecisionReads`, ruling 304): the packet's
+  // disclosures (rulings 65 and 67), what the accept confirm names (R15-1,
+  // R17-2, ruling 316, ruling 244), the completion packet (ruling 103) and
+  // what the task took (ruling 83), each from what this loader has already
+  // read, and each guarded so a sentence that fails never 500s the page.
+  const decision = taskDecisionReads(db, {
+    projectSlug: params.slug,
+    taskKey: params.key,
+    detail,
+    taskFile,
+    project,
+    archived,
+    standing,
+    keptSources,
+    deployedSpecialists,
+    runRows,
+  });
 
   // Ruling 44: the hero and the rail read the run row, like the board card.
   const liveRun = liveRunStateByTask(db, params.slug).get(params.key) ?? null;
@@ -562,17 +426,17 @@ export async function loader({ request, params }: Route.LoaderArgs) {
     /** Ruling 317: the task's kept sources, when it keeps any. */
     ...sourcesShown,
     /** Ruling 103: the operator's completion packet as the page shows it. */
-    completion,
-    ...tookShipped,
+    completion: decision.completion,
+    ...decision.tookShipped,
     // Who saved each attachment and when, from the events that claim names.
     attachmentProducers: attachmentProducers(db, params.slug, params.key),
     recommendations,
     schedules,
     queuedQuestions,
     /** Ruling 65: what else this packet's confirm answers, or null. */
-    packetAlsoAnswers,
+    packetAlsoAnswers: decision.packetAlsoAnswers,
     /** Ruling 67: per create_task option, the tasks that already look like it. */
-    packetCreateTaskEchoes,
+    packetCreateTaskEchoes: decision.packetCreateTaskEchoes,
     archived,
     // P14-LV-06: the review queue counted this viewer under "Waiting on your
     // acceptance" while the page rendered acceptance ONLY as an operator
@@ -632,7 +496,7 @@ export async function loader({ request, params }: Route.LoaderArgs) {
     // click is. Null: never compared.
     baseBehindBy: createReconcileBehindByLookup(db)(detail.filePath),
     /** Ruling 244: the open PRs sharing a changed path with this one. */
-    mergeCollisions,
+    mergeCollisions: decision.mergeCollisions,
     // F19-22: the line above is the last pass that CHANGED something — DG-3
     // deliberately withholds the provenance row when a poller tick finds
     // nothing new (github-reconciler.server.ts), so it drifts to "1h ago" on a
@@ -645,10 +509,10 @@ export async function loader({ request, params }: Route.LoaderArgs) {
     // number cannot answer both questions.
     githubCheckedAt: latestTaskReconcileCheckAt(db, params.slug, params.key),
     // R15-1 accept confirm + R15-2 manual-delivery affordance.
-    workRevisionSha,
-    noChanges,
-    ...filesDelivery,
-    defaultBranch,
+    workRevisionSha: decision.workRevisionSha,
+    noChanges: decision.noChanges,
+    ...decision.filesDelivery,
+    defaultBranch: decision.defaultBranch,
     canDeliver,
     // Host for GitHub browse links (PR/branch/repo), derived server-side.
     // UI-11: today this always resolves to `https://github.com` — nothing

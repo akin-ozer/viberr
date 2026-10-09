@@ -22,7 +22,8 @@ import type { Mentionables } from "~/server/tasks/mention-suggestions.server";
 import type { RunView } from "~/features/runtime/runtime-types";
 import { useStableRows } from "~/ui/use-stable-rows";
 import type { PrOverlap } from "~/shared/pr-overlaps";
-import { CurrentStatePanel, GithubTrace } from "./task-side-panels";
+import type { TaskDecisionView } from "~/routes/task-decision";
+import { acceptanceActs, CurrentStatePanel, GithubTrace } from "./task-side-panels";
 import { TaskDetailsPanel } from "./task-details-panel";
 import type { EpicOption } from "~/ui/epic-chip";
 import { TaskHero } from "./task-main-sections";
@@ -71,7 +72,9 @@ import { TaskMainColumn } from "./task-main-column";
  * `task-detail-derive.ts`; the decision region and the acceptance ceremony in
  * `task-detail-regions.tsx`; the main column in `task-main-column.tsx`; the
  * run controls in `task-detail-hooks.ts`, and the panels in
- * `task-main-sections.tsx` and `task-side-panels.tsx`.
+ * `task-main-sections.tsx` and `task-side-panels.tsx`. The page's decision,
+ * composed on its own for the Review queue's dialog (ruling 304), is the
+ * other export (`TaskDecisionDialogBody`).
  */
 
 /** A run group's identity in the projection (`useStableRows`' key). */
@@ -511,11 +514,17 @@ export function TaskDetailPage({
           noChanges={noChanges}
           filesDeliveredAt={filesDeliveredAt}
           defaultBranch={defaultBranch}
-          accept={accept}
-          run={runConsole}
-          recs={recs}
-          resolution={resolution}
-          transition={transition}
+          doors={{
+            busy:
+              accept.busy || runConsole.runBusy || recs.busy || resolution.busy || transition.busy,
+            accept: accept.submitAccept,
+            refreshFirst: accept.submitRefreshFirst,
+            packet: resolution.submitResolve,
+            recommendation: recs.submitApply,
+            stageMove: transition.submitTransition,
+            force: runConsole.onForceAccept,
+            completeMerge: runConsole.onCompleteMerge,
+          }}
           onCancel={() => setPendingAccept(null)}
         />
       )}
@@ -524,6 +533,122 @@ export function TaskDetailPage({
       {runConsole.interruptDialog}
       {recs.dismissDialog}
     </div>
+    </AttachmentLightboxProvider>
+  );
+}
+
+/**
+ * Ruling 304: this page's decision as the Review queue's dialog draws it. The
+ * same regions, hooks and acceptance ceremony as the page above, every post
+ * aimed at this page's action (`taskHref`), with the page's own Accept while
+ * the task stands at the boundary and no option offers the acceptance. It
+ * leaves out what needs the rest of the page: "Ask operator" (the comment
+ * box) and the goal editor.
+ *
+ * It lives here, with the page it is a view of, so the dialog fetches this
+ * page's own chunk on intent (ruling 11): a home anywhere else cut the
+ * decision regions out of that chunk into one of their own, which the task
+ * page paid for on every load (ruling 12).
+ */
+export function TaskDecisionDialogBody({
+  view,
+  taskHref,
+}: {
+  view: Extract<TaskDecisionView, { ok: true }>;
+  taskHref: string;
+}) {
+  const { viewer, task, archived, recommendations, acceptance, completion } = view;
+  const csrf = useCsrfToken();
+  // The acceptance ceremony's pending door: the packet's accept option and the
+  // direct Accept open it instead of posting (ruling 97).
+  const [pendingAccept, setPendingAccept] = useState<PendingAccept | null>(null);
+  const resolution = usePacketResolution(csrf, task.packet, setPendingAccept, taskHref);
+  const accept = useAcceptCompletion(csrf, taskHref);
+  // F20-18: the escalation a stranded contributor-owner sends up.
+  const [escalateBusy, onRequestMaintainer] = useIntentPost(
+    "request-maintainer-decision",
+    csrf,
+    taskHref,
+  );
+  const can = taskPermissions(viewer.role, task, viewer.userId, archived);
+  const placement = completionPlacement(
+    task,
+    completion,
+    recommendations,
+    acceptance,
+    isClosedForWork(task, archived),
+    lastStageId(task),
+  );
+  const reader = completionReader(
+    task,
+    placement.card !== null,
+    `${taskHref}/changes`,
+    view.workRevisionSha,
+    view.githubHost,
+  );
+  const decides = task.packet !== null || placement.card !== null;
+  // The page's Accept, while the task stands at the boundary and no option of
+  // the decision offers the acceptance itself.
+  const accepts =
+    acceptance.atBoundary && !placement.acceptanceDecision
+      ? acceptanceActs({
+          task,
+          archived,
+          acceptance,
+          acceptInFlight: accept.inFlight,
+          dispositionBusy: resolution.busy,
+          onAccept: () => setPendingAccept({ mode: "accept" }),
+        })
+      : null;
+  return (
+    <AttachmentLightboxProvider attachmentsBase={`${taskHref}/attachments`}>
+      {decides ? (
+        <TaskDecisionRegion
+          task={task}
+          targeted={false}
+          placement={placement}
+          // The reader's notes go to the deliverer through the task page.
+          diff={reader && { ...reader, postTo: taskHref }}
+          attachmentsBase={`${taskHref}/attachments`}
+          sourcesBase={`${taskHref}/sources`}
+          took={view.whatItTook ?? null}
+          githubHost={view.githubHost}
+          acceptance={acceptance}
+          resolution={resolution}
+          can={can}
+          alsoAnswers={view.packetAlsoAnswers}
+          createTaskEchoes={view.packetCreateTaskEchoes}
+          pendingRecommendations={recommendations.length}
+          onRequestMaintainer={onRequestMaintainer}
+          escalateBusy={escalateBusy}
+        />
+      ) : null}
+      {accepts}
+      {decides || accepts ? null : (
+        <p className="empty sm">
+          Nothing on {task.key} waits on a decision now. The task page holds its record.
+        </p>
+      )}
+      {pendingAccept && (
+        <TaskAcceptConfirm
+          pending={pendingAccept}
+          task={task}
+          acceptance={acceptance}
+          workRevisionSha={view.workRevisionSha}
+          baseBehindBy={view.baseBehindBy}
+          mergeCollisions={view.mergeCollisions}
+          noChanges={view.noChanges}
+          filesDeliveredAt={view.filesDeliveredAt ?? null}
+          defaultBranch={view.defaultBranch}
+          doors={{
+            busy: accept.busy || resolution.busy,
+            accept: accept.submitAccept,
+            refreshFirst: accept.submitRefreshFirst,
+            packet: resolution.submitResolve,
+          }}
+          onCancel={() => setPendingAccept(null)}
+        />
+      )}
     </AttachmentLightboxProvider>
   );
 }

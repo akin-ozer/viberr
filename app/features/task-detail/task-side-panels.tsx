@@ -1218,8 +1218,11 @@ function heldOwnerSeat({
  * silently absent while the queue says "waiting on your acceptance".
  * F15-19: the refusal TEXT renders whenever one exists, boundary or not —
  * a silent refusal is how an unreviewed merge looked like a hang.
+ *
+ * Ruling 304: the Review queue's decision dialog draws the same control, so
+ * a completion is accepted from the queue through the page's own Accept.
  */
-function acceptanceActs({
+export function acceptanceActs({
   task,
   archived,
   acceptance,

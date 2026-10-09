@@ -281,9 +281,10 @@ describe("ruling 89: a required reviewer the project declares gates acceptance",
 
   it("ruling 81: the review queue agrees, so the two surfaces cannot drift", () => {
     const store = prepared([{ stageId: "review", profileId: "reviewer" }]);
+    // Ruling 304: arda's own task, so the queue lists it as her row.
     seed(
       store,
-      { stage: "review", waiting: "human", deliveredAt: REPORT_AT },
+      { stage: "review", waiting: "human", deliveredAt: REPORT_AT, ownerUserId: store.users.arda.id },
       null,
       [reportEvent()],
     );
@@ -291,7 +292,7 @@ describe("ruling 89: a required reviewer the project declares gates acceptance",
       dataRoot: store.dataRoot,
       viewerUserId: store.users.arda.id,
     });
-    expect(rows.ready.map((t) => t.key)).not.toContain("VIB-1");
+    expect(rows.acceptableKeys).not.toContain("VIB-1");
     expect(rows.working.find((t) => t.key === "VIB-1")?.blockReason).toContain(
       "Required reviewer Code Reviewer",
     );
@@ -411,20 +412,22 @@ describe("ruling 89: a required reviewer the project declares gates acceptance",
   it("the review queue reads the same rule: the task is listed as review work, never offered for acceptance, until the verdict lands", () => {
     // Canary: leave `requiredReviewers` out of `acceptanceBlockReason` (rebuilder).
     const store = prepared([{ stageId: "review", profileId: "reviewer" }]);
-    seed(store, reviewedByOther());
+    // Ruling 304: arda's own task, so the queue lists it as her row.
+    const owned = { ownerUserId: store.users.arda.id };
+    seed(store, reviewedByOther(owned));
     const held = getReviewQueue(store.db, store.slug, {
       dataRoot: store.dataRoot,
       viewerUserId: store.users.arda.id,
     });
-    expect(held.ready.map((t) => t.key)).not.toContain("VIB-1");
+    expect(held.acceptableKeys).not.toContain("VIB-1");
     expect(held.working.find((t) => t.key === "VIB-1")?.blockReason).toBe(RULE_SENTENCE);
 
-    seed(store, reviewedByOther({ verdicts: [approval("qa-bot"), approval("reviewer")] }));
+    seed(store, reviewedByOther({ ...owned, verdicts: [approval("qa-bot"), approval("reviewer")] }));
     const ready = getReviewQueue(store.db, store.slug, {
       dataRoot: store.dataRoot,
       viewerUserId: store.users.arda.id,
     });
-    expect(ready.ready.map((t) => t.key)).toEqual(["VIB-1"]);
+    expect(ready.completions.map((t) => t.key)).toEqual(["VIB-1"]);
   });
 });
 

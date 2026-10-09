@@ -65,8 +65,8 @@ export interface ReviewRowView {
   } | null;
   validation: ValidationValue;
   /** F10-11: why the current revision is NOT acceptance-ready (null when it is).
-   *  Only ever populated on "Still in review" rows — the acceptance panel holds
-   *  only rows with a null block reason. */
+   *  A row the acceptance panel lists with no packet open always has none; a
+   *  packet's row and a "Still in review" row may. */
   blockReason: string | null;
   /** Gap-10: ISO of the newest timeline event (`occurred_at`); null when the
    *  timeline is empty. */
@@ -179,6 +179,21 @@ function reviewInProgressSub(t: ReviewRowView): string {
   return parts.join(" · ");
 }
 
+/** Ruling 63: a decided edit_goal packet is not a decision still owed — the
+ *  row says what is owed instead of re-offering the packet. */
+const GOAL_EDIT_PENDING_SUB =
+  "Goal edit pending: save the edited goal to clear the decision packet.";
+
+/**
+ * Ruling 304: an "Open decisions" row names the decision it opens: the
+ * packet's kind and its question, wherever the task stands. Its stage, PR and
+ * verdict facts are the dialog's to show beside the options.
+ */
+export function decisionRowSub(t: ReviewRowView): string {
+  if (t.goalEditPending) return GOAL_EDIT_PENDING_SUB;
+  return t.packet ? t.packet.kind + ": " + t.packet.title : reviewRowSub(t);
+}
+
 /** The subline stripper is the shared `plainText` helper (same regexes as
  * the mock's `rqStripMd` — ruling 297, one stripper app-wide). */
 export function reviewRowSub(t: ReviewRowView): string {
@@ -205,11 +220,7 @@ export function reviewRowSub(t: ReviewRowView): string {
   // F10-11: a not-yet-acceptable task states WHY (failing / awaiting a reviewer /
   // no delivered revision) instead of a generic "needs a human decision".
   if (t.blockReason) return t.blockReason;
-  // Ruling 63: a decided edit_goal packet is not a decision still owed — the
-  // row says what is owed instead of re-offering the packet.
-  if (t.goalEditPending) {
-    return "Goal edit pending: save the edited goal to clear the decision packet.";
-  }
+  if (t.goalEditPending) return GOAL_EDIT_PENDING_SUB;
   if (t.packet) return t.packet.kind + ": " + t.packet.title;
   // P14-LV-05: live PR state outranks the newest timeline note.
   if (t.pr) return prStateSub(t.pr);

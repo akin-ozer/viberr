@@ -4,23 +4,25 @@ import {
   setupAppTest,
   type AppTestContext,
 } from "../../../test-support/test-app";
-import { reviewRowSub } from "./review-helpers";
+import { decisionRowSub, reviewRowSub } from "./review-helpers";
 
 /**
  * Route-level tests for /projects/:slug/review against the seeded demo
- * store: auth gating, the panel split (project-wide per ruling 46), and
+ * store: auth gating, the panels (each viewer's own tasks, ruling 304), and
  * the sublines the seeded rows get (the precedence itself is
  * review-helpers.test.ts's).
  */
 
 let app: AppTestContext;
 let ardaId: string;
+let muratId: string;
 
 beforeAll(async () => {
   app = await setupAppTest();
   const { runDemoSeed } = await import("../../../test-support/demo-seed");
   const { userIds } = await runDemoSeed(app.db, { dataRoot: app.dataRoot });
   ardaId = userIds.arda;
+  muratId = userIds.murat;
 });
 afterAll(() => app.cleanup());
 
@@ -46,45 +48,37 @@ describe("/projects/:slug/review", () => {
     expect(thrown?.init?.status ?? thrown?.status).toBe(404);
   });
 
-  it("splits the seeded review stage: VIB-142 waits on a human, VIB-145 with agents", async () => {
-    const { cookie } = await app.cookieFor(ardaId);
-    const result = await runLoader("viberr-core", cookie);
+  it("ruling 304: each viewer gets their own seeded tasks, by the decision each holds", async () => {
+    // Arda owns VIB-142, whose completion packet offers the acceptance. The
+    // seeded VIB-160 (murat's, blocked at In Progress) and VIB-145 (nobody's,
+    // with agents at Review) are not hers, however her admin role reaches them.
+    const arda = await runLoader("viberr-core", (await app.cookieFor(ardaId)).cookie);
+    expect(arda.completions.map((t) => t.key)).toEqual(["VIB-142"]);
+    expect(arda.decisions).toEqual([]);
+    expect(arda.working).toEqual([]);
 
-    // U35-5 (pass 35): three, not two. The seeded VIB-160 sits at In Progress
-    // with a verdict-capable reviewer whose verdict on the current revision is
-    // request_changes (validation "failing"), which is review work in flight
-    // wherever the stage is, so it is listed under "Still in review" naming
-    // its stage. It was invisible while the queue keyed on the review stage.
-    expect(result.total).toBe(3);
-    // F10-11/F10-15: acceptance readiness is revision-bound now. VIB-142 has a
-    // verdict-capable reviewer engaged but no approving verdict on its current
-    // revision (validation "changed"), so it is NOT acceptance-ready — it sits
-    // in "Still in review" with an honest block reason, not the acceptance
-    // panel. VIB-145 waits on agents.
-    expect(result.ready.map((t) => t.key)).toEqual([]);
-    expect(result.working.map((t) => t.key)).toEqual(["VIB-142", "VIB-145", "VIB-160"]);
-
-    const vib160 = result.working.find((t) => t.key === "VIB-160")!;
-    expect(vib160.atAcceptanceBoundary).toBe(false);
-    expect(vib160.stageName).toBe("In Progress");
-    expect(reviewRowSub(vib160)).toBe(
-      "Review in progress at In Progress · changes requested",
-    );
-
-    const vib142 = result.working.find((t) => t.key === "VIB-142")!;
+    const vib142 = arda.completions[0]!;
     expect(vib142.packet?.kind).toBe("Completion report");
     expect(vib142.pr).toEqual({ number: 318, state: "review" });
     expect(vib142.validation).toBe("changed");
-    // The subline states WHY it isn't ready (a required reviewer is outstanding).
+    // F10-11/F10-15: acceptance readiness is revision-bound. VIB-142 has a
+    // verdict-capable reviewer engaged but no approving verdict on its current
+    // revision, so the subline states WHY the acceptance the packet offers is
+    // not ready yet, rather than promising it.
     expect(vib142.blockReason).toMatch(/waiting on 1 required reviewer/i);
     expect(reviewRowSub(vib142)).toBe(vib142.blockReason);
 
-    const vib145 = result.working.find((t) => t.key === "VIB-145")!;
-    expect(vib145.packet).toBeNull();
-    // No revision / no required reviewer verdict yet → also not acceptance-ready.
-    const sub = reviewRowSub(vib145);
-    expect(sub).not.toContain("**");
-    expect(sub).not.toContain("`");
+    // Murat owns VIB-160: an open blocked packet before the review stage is
+    // his decision, listed wherever the task stands.
+    const murat = await runLoader("viberr-core", (await app.cookieFor(muratId)).cookie);
+    expect(murat.completions).toEqual([]);
+    expect(murat.decisions.map((t) => t.key)).toEqual(["VIB-160"]);
+    const vib160 = murat.decisions[0]!;
+    expect(vib160.atAcceptanceBoundary).toBe(false);
+    expect(vib160.stageName).toBe("In Progress");
+    expect(decisionRowSub(vib160)).toBe(
+      "Blocked decision: Continuity degraded — pick a recovery path",
+    );
   });
 
   it("ships the board's own waiting-on-you answer (interface review 2026-09-24, writ-3)", async () => {

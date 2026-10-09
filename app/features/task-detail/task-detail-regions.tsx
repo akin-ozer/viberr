@@ -74,7 +74,9 @@ export function TaskDecisionRegion({
   pendingRecommendations: number;
   onRequestMaintainer: () => void;
   escalateBusy: boolean;
-  onAsk: () => void;
+  /** Starts a comment to the operator below; absent where the region stands
+   *  without the page's comment box (ruling 304's decision dialog). */
+  onAsk?: () => void;
 }) {
   const { acceptanceDecision, resultShown, card } = placement;
   const completionPacket = card ? (
@@ -244,6 +246,23 @@ function ceremonyRefusal(
 }
 
 /**
+ * What the ceremony's confirm posts through, door by door, and whether any of
+ * its fetchers is in flight. The task page wires every door; the Review
+ * queue's decision dialog (ruling 304) wires the two it opens, the direct
+ * Accept and the packet's options, and a door it never opens stays absent.
+ */
+export interface CeremonyDoors {
+  busy: boolean;
+  accept: AcceptCompletion["submitAccept"];
+  refreshFirst: AcceptCompletion["submitRefreshFirst"];
+  packet: PacketResolution["submitResolve"];
+  recommendation?: RecommendationActions["submitApply"];
+  stageMove?: StageTransition["submitTransition"];
+  force?: RunConsole["onForceAccept"];
+  completeMerge?: RunConsole["onCompleteMerge"];
+}
+
+/**
  * The one acceptance ceremony, open on whichever door asked (`PendingAccept`).
  * It waits on every fetcher its confirm can post through.
  */
@@ -257,11 +276,7 @@ export function TaskAcceptConfirm({
   noChanges,
   filesDeliveredAt,
   defaultBranch,
-  accept,
-  run,
-  recs,
-  resolution,
-  transition,
+  doors,
   onCancel,
 }: {
   pending: PendingAccept;
@@ -273,11 +288,7 @@ export function TaskAcceptConfirm({
   noChanges: boolean;
   filesDeliveredAt: string | null;
   defaultBranch: string;
-  accept: AcceptCompletion;
-  run: RunConsole;
-  recs: RecommendationActions;
-  resolution: PacketResolution;
-  transition: StageTransition;
+  doors: CeremonyDoors;
   onCancel: () => void;
 }) {
   // Ruling 131 (pass 35, F35-14): the pending decision is the `force_accept`
@@ -314,12 +325,12 @@ export function TaskAcceptConfirm({
       ceremony={decision.ceremony}
       blockedGates={decision.blockedGates}
       blockedReason={ceremonyRefusal(pending, forced, task, acceptance)}
-      busy={accept.busy || run.runBusy || recs.busy || resolution.busy || transition.busy}
+      busy={doors.busy}
       // Ruling 97: only the direct Accept offers the re-review first; the
       // other doors are answering a decision someone already framed.
       {...(pending.mode === "accept"
         ? {
-            onRefreshFirst: accept.submitRefreshFirst,
+            onRefreshFirst: doors.refreshFirst,
           }
         : {})}
       onCancel={onCancel}
@@ -333,15 +344,15 @@ export function TaskAcceptConfirm({
         // exception: the acceptance already happened (R16-6) and its own
         // path re-verifies the PR head, so there is no acceptance state left
         // to echo.
-        if (pending.mode === "force") run.onForceAccept?.(disclosure);
-        else if (pending.mode === "complete-merge") run.onCompleteMerge?.();
+        if (pending.mode === "force") doors.force?.(disclosure);
+        else if (pending.mode === "complete-merge") doors.completeMerge?.();
         else if (pending.mode === "apply-recommendation")
-          recs.submitApply(pending.recId, disclosure);
+          doors.recommendation?.(pending.recId, disclosure);
         else if (pending.mode === "packet")
-          resolution.submitResolve(pending.option, pending.note, disclosure);
+          doors.packet(pending.option, pending.note, disclosure);
         else if (pending.mode === "stage-move")
-          transition.submitTransition(pending.toStageId, disclosure);
-        else accept.submitAccept(disclosure);
+          doors.stageMove?.(pending.toStageId, disclosure);
+        else doors.accept(disclosure);
       }}
     />
   );

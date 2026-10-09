@@ -57,6 +57,8 @@ export interface CompletionDiff {
   prNumber: number;
   revisionSha: string;
   delivererName: string | null;
+  /** Ruling 304: where the reader's notes post from another page. */
+  postTo?: string;
 }
 
 /** Ruling 103: the card as the result of an accepted task. */

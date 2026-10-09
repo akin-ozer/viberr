@@ -75,14 +75,20 @@ function intentForm(csrf: string, intent: string): FormData {
 }
 
 /** A bare intent posted on a fetcher of its own: whether it is in flight, and
- *  the press, which does nothing while the last one runs. Its answer toasts. */
-export function useIntentPost(intent: string, csrf: string): [busy: boolean, post: () => void] {
+ *  the press, which does nothing while the last one runs. Its answer toasts.
+ *  `action` is the task page's URL when the post leaves another page (ruling
+ *  304: the Review queue's decision dialog); unset, it is the page's own. */
+export function useIntentPost(
+  intent: string,
+  csrf: string,
+  action?: string,
+): [busy: boolean, post: () => void] {
   const fetcher = useFetcher<ActionResult>();
   useActionToast(fetcher);
   const busy = fetcher.state !== "idle";
   const post = () => {
     if (busy) return;
-    fetcher.submit(intentForm(csrf, intent), { method: "post" });
+    fetcher.submit(intentForm(csrf, intent), { method: "post", action });
   };
   return [busy, post];
 }
@@ -194,11 +200,13 @@ export function useOwnerControl(
 }
 
 /** The open decision packet: its resolution, the questionnaire's own answer,
- *  and the goal editor a decided edit_goal option opens. */
+ *  and the goal editor a decided edit_goal option opens. `action` is the task
+ *  page's URL when the decision is answered from another page (ruling 304). */
 export function usePacketResolution(
   csrf: string,
   packet: TaskDetail["packet"],
   openCeremony: OpenCeremony,
+  action?: string,
 ) {
   const resolveFetcher = useFetcher<ActionResult>();
   useActionToast(resolveFetcher);
@@ -233,7 +241,7 @@ export function usePacketResolution(
     fd.set("option", String(optionIndex));
     if (note.trim()) fd.set("note", note);
     setDisclosure(fd, disclosure);
-    resolveFetcher.submit(fd, { method: "post" });
+    resolveFetcher.submit(fd, { method: "post", action });
   };
   // Questionnaire packets (owner request 2026-08-20): resolve with the human's
   // OWN directive. No option index — the server runs the synthetic `custom`
@@ -243,7 +251,7 @@ export function usePacketResolution(
     const fd = intentForm(csrf, "resolve-packet");
     fd.set("option", "-1");
     fd.set("custom", custom.trim());
-    resolveFetcher.submit(fd, { method: "post" });
+    resolveFetcher.submit(fd, { method: "post", action });
   };
   // F19-7: an `accept_completion` packet option runs the full acceptance
   // contract — including the real, irreversible PR merge — from a button
@@ -339,8 +347,9 @@ export function useArchiveControl(
 }
 
 /** The direct acceptance, and the ceremony's offer to bring the work up to
- *  date first, on one fetcher. */
-export function useAcceptCompletion(csrf: string) {
+ *  date first, on one fetcher. `action` is the task page's URL when the
+ *  acceptance is given from another page (ruling 304). */
+export function useAcceptCompletion(csrf: string, action?: string) {
   const acceptFetcher = useFetcher<ActionResult>();
   useActionToast(acceptFetcher);
   const acceptBusy = acceptFetcher.state !== "idle";
@@ -351,7 +360,7 @@ export function useAcceptCompletion(csrf: string) {
     if (acceptBusy) return;
     const fd = intentForm(csrf, "accept-completion");
     setDisclosure(fd, disclosure);
-    acceptFetcher.submit(fd, { method: "post" });
+    acceptFetcher.submit(fd, { method: "post", action });
   };
 
   // Ruling 97 (O39-c): the dialog's "bring it up to date and re-review
@@ -359,7 +368,7 @@ export function useAcceptCompletion(csrf: string) {
   // toast are the acceptance's own.
   const submitRefreshFirst = () => {
     if (acceptBusy) return;
-    acceptFetcher.submit(intentForm(csrf, "refresh-and-review"), { method: "post" });
+    acceptFetcher.submit(intentForm(csrf, "refresh-and-review"), { method: "post", action });
   };
   return {
     busy: acceptBusy,

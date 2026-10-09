@@ -408,6 +408,7 @@ export function CompletionChanges({
           prNumber={diff.prNumber}
           revisionSha={diff.revisionSha}
           delivererName={diff.delivererName}
+          postTo={diff.postTo}
         />
       ) : null}
     </>

@@ -30,41 +30,47 @@ import { prPathOverlaps, type PrDiffPaths, type PrOverlap } from "~/shared/pr-ov
 /**
  * Review-queue read model (review-queue.md §1/§3, Phase 9C).
  *
- * Qualification (U35-5, pass 35). The queue has two halves that answer two
- * different questions, and they key on different facts:
+ * Ruling 304 (owner, 2026-10-09): the queue is its viewer's own. A row is a
+ * task the viewer OWNS (the human owner seat, held with `own-task`, the owner
+ * exception's own condition), whatever their project role, and a task owned by
+ * anybody else is never a row, a maintainer's included. Each row stands in one
+ * of three panels:
  *
- * - `ready` ("Waiting on your acceptance") is about the ACCEPTANCE boundary:
- *   a task at the project's RESOLVED review stage (the stage with a workflow
- *   edge into the terminal stage — `resolveStageRoles().reviewId`, NOT the
- *   literal id "review") whose acceptance nothing blocks.
- * - `working` ("Still in review") is about REVIEW WORK, which the board
- *   defines by engagements and verdicts, not by one stage id. A non-archived,
- *   non-terminal task is review work when ANY of these holds:
- *     (a) it sits at `reviewId` and is not `ready`;
- *     (b) its pull request is open for review (`pr.state === "review"`);
- *     (c) a verdict-capable engagement (a required reviewer, F10-15) has not
- *         approved the current work revision: the derived `validation` is
- *         `changed` (verdict pending) or `failing` (changes requested).
- *   All three read the projection row (`pr_json`, `reviewers_json`,
- *   `validation`), so the query stays one pass over `task_projections`.
+ * - `completions` ("Waiting on your acceptance"): the decision moves the task
+ *   to the terminal stage. Either an open packet offers `accept_completion`,
+ *   or, with no packet open, the task stands at the acceptance boundary waiting
+ *   on its owner and nothing refuses the acceptance (`isReady` below).
+ * - `decisions` ("Open decisions"): an open decision packet that asks anything
+ *   else, at any stage. One open packet per task, so one row.
+ * - `working` ("Still in review"): review work with nothing for the owner to
+ *   decide yet.
  *
- * The old predicate was `stage === reviewId` for BOTH halves. On the default
- * board that is Review and the two rules coincide; on a board whose reviews
- * happen at Validation and Review while the edge into Done leaves Merge
- * (`triage, design, impl, validation, review, merge, done`), it printed
- * "0 tasks at the review boundary" and "No review work in flight" while eight
- * tasks sat at Validation with open PRs and engaged reviewers (FINDINGS U35-5).
+ * REVIEW WORK (U35-5, pass 35) is what the board defines by engagements and
+ * verdicts, not by one stage id. A non-archived, non-terminal task is review
+ * work when ANY of these holds:
+ *   (a) it sits at the RESOLVED review stage (the stage with a workflow edge
+ *       into the terminal stage — `resolveStageRoles().reviewId`, NOT the
+ *       literal id "review");
+ *   (b) its pull request is open for review (`pr.state === "review"`);
+ *   (c) a verdict-capable engagement (a required reviewer, F10-15) has not
+ *       approved the current work revision: the derived `validation` is
+ *       `changed` (verdict pending) or `failing` (changes requested).
+ * All three read the projection row (`pr_json`, `reviewers_json`,
+ * `validation`), so the query stays one pass over `task_projections`. On a
+ * board whose reviews happen at Validation and Review while the edge into Done
+ * leaves Merge, (b) and (c) are what list the work (FINDINGS U35-5).
+ *
  * `total` counts every row and is what the workspace rail badge shows
  * (routes/project.tsx reads this queue's `total`), so the two cannot drift —
  * a literal-"review" filter once left this queue permanently empty while the
- * rail showed a count (pass-4 WI-1). Panel split (R8-3, member-scoped): a
- * review-stage task waiting on a human lands in "Waiting on your acceptance"
- * ONLY for a viewer who can ACCEPT it — maintainer+ (resolve-packet tier) or
- * the task owner (owner exception, R6-2). Everything else — waiting on an agent,
- * the legal `review + none` combination, a human-waiting task another human
- * must accept, OR review work at an earlier stage — lands in "Still in review",
- * where the page labels a human-waiting row "waiting on a human" (never the
- * false "agent working") and an off-boundary row names its stage.
+ * rail showed a count (pass-4 WI-1).
+ *
+ * `acceptableKeys` is wider than the rows on purpose: every task this viewer
+ * may accept now, theirs or not (maintainer+, the resolve-packet tier, or the
+ * owner, R6-2). It is the acceptance half of the "waiting on you" answer the
+ * board, the epic pages and the rows' tags share (`waitingOnViewer`, R8-3), and
+ * a maintainer can still accept a task they do not own there; only this queue
+ * is the owner's alone.
  *
  * E5: `viewerUserId` is REQUIRED. It used to be optional, and the acceptance
  * predicate opened with `if (viewerUserId === undefined) return true` — an
@@ -72,13 +78,16 @@ import { prPathOverlaps, type PrDiffPaths, type PrOverlap } from "~/shared/pr-ov
  * app omitted it, so the permissive branch existed purely for test convenience
  * while standing ready to hand the next caller an unfiltered "ready for
  * acceptance" list. Naming a viewer is now the type-level cost of asking the
- * question, and an unknown/non-member id resolves to no acceptance authority.
+ * question, and an unknown/non-member id resolves to no acceptance authority
+ * and no rows.
  *
  * Ordering (spec §8.2 decision): deterministic task-key number ASC — the
  * order `listProjectTasks` already guarantees, which reproduces the mock's
  * seed rendering (VIB-142 above VIB-145).
  *
- * Rows are read-only projections; the queue performs zero mutations.
+ * Rows are read-only projections, and the queue's route has no action: a
+ * decision is answered in the queue's dialog, which reads the task page's
+ * decision (`routes/task-decision.ts`) and posts to the task page's action.
  */
 
 /** Ruling 242 / 116: the pairwise path intersection lives in
@@ -179,14 +188,24 @@ export interface ReviewQueueRow {
 }
 
 export interface ReviewQueueData {
-  /** At the review stage, waiting on a human this viewer can accept for, and
-   *  nothing blocking the acceptance — panel 1. */
-  ready: ReviewQueueRow[];
-  /** Every other row: review-stage tasks that are not `ready`, and review work
-   *  at any earlier stage (an open review PR, or a required reviewer's verdict
-   *  outstanding on the current revision) — panel 2 (U35-5). */
+  /** Ruling 304: the viewer's own tasks whose decision moves them to the
+   *  terminal stage — a packet offering `accept_completion`, or an acceptance
+   *  nothing refuses — panel 1, "Waiting on your acceptance". */
+  completions: ReviewQueueRow[];
+  /** Ruling 304: the viewer's own tasks with any other open decision packet,
+   *  at any stage — panel 2, "Open decisions". */
+  decisions: ReviewQueueRow[];
+  /** The viewer's own review work with nothing to decide yet: review-stage
+   *  tasks, and review work at any earlier stage (an open review PR, or a
+   *  required reviewer's verdict outstanding on the current revision) —
+   *  panel 3 (U35-5). */
   working: ReviewQueueRow[];
-  /** All rows (header "N in review", "X of Y", and rail-badge parity). */
+  /** Every task this viewer may accept now, theirs or not (maintainer+, or
+   *  the owner): the acceptance half of `waitingOnViewer` (UI-48), which the
+   *  board, the epic pages and the rows' tags read. Wider than the rows. */
+  acceptableKeys: string[];
+  /** All rows, in every panel: the rail badge's count, so the badge and the
+   *  queue it opens are one number. */
   total: number;
 }
 
@@ -223,7 +242,7 @@ export function getReviewQueue(
       ? resolveStageRoles(project.stages, project.workflow).reviewId
       : null;
   const stages = project ? project.stages : [];
-  // U35-5: membership is the union of the three rules the header comment
+  // U35-5: review work is the union of the three rules the header comment
   // names. `listProjectTasks` already drops archived tasks (R14-3); the
   // terminal stage is dropped here because a task in Done is an ending, not
   // review work, whatever its PR or verdict state still says (LV-20 normalises
@@ -243,16 +262,89 @@ export function getReviewQueue(
       (t.validation === "changed" || t.validation === "failing")
     );
   };
-  const inReview = reviewId
-    ? (opts.tasks ?? listProjectTasks(db, slug)).filter(isReviewWork)
+  // An archived project has no review boundary (D-1 above) and nothing on it
+  // anybody can act on (R6-3), so it lists nothing. A task in the terminal
+  // stage is an ending, not a decision or review work.
+  const live = reviewId
+    ? (opts.tasks ?? listProjectTasks(db, slug)).filter((t) => !isTerminalStage(t.stage, stages))
     : [];
 
-  // F10-11/F10-15: acceptance readiness comes from the revision-bound review
-  // model, not just `waiting`. The reason (a failing verdict, an outstanding
-  // required reviewer, no delivered revision, or R15-1's verdict gate on
-  // delivered work) is PROJECTED into `task_projections.validation_block_reason`
-  // at rebuild time (P11-50), so this read model no longer re-reads task files
-  // on a loader path — and reads the SAME gate the server enforces.
+  // R8-3: acceptance is member-scoped by ACCEPTANCE AUTHORITY, not by
+  // decision-object presence — a review-stage task waiting on a human can have
+  // no packet/recommendation (the operator couldn't open a completion packet)
+  // yet still need a human to accept it. A viewer can accept iff they are
+  // maintainer+ (resolve-packet tier) OR the task's owner (owner exception,
+  // R6-2, which requires the own-task role). Fail closed: an id with no
+  // membership row — a non-member, a deleted account, or (a JS caller) no id at
+  // all — holds neither role, so nothing is acceptance-ready for them and no
+  // task is theirs.
+  // SAFETY: `project_members.role` is CHECK-constrained to exactly
+  // PROJECT_ROLES ('admin' | 'maintainer' | 'contributor' | 'viewer') by
+  // 0001_baseline.sql; the row is undefined when the viewer is not a member.
+  const viewerRole: ProjectRole | null = opts.viewerUserId
+    ? ((
+        db
+          .prepare(
+            `SELECT role FROM project_members WHERE project_slug = ? AND user_id = ?`,
+          )
+          .get(slug, opts.viewerUserId) as { role: ProjectRole } | undefined
+      )?.role ?? null)
+    : null;
+  const viewerCanGovern = roleCan(viewerRole, "resolve-packet");
+  const viewerCanOwn = roleCan(viewerRole, "own-task");
+  /** Ruling 304: the task is the viewer's — the human owner seat, held with
+   *  `own-task`, the owner exception's own condition (R6-2). */
+  const isOwn = (t: TaskSummary): boolean =>
+    viewerCanOwn &&
+    t.owner !== null &&
+    t.owner.kind === "human" &&
+    t.owner.userId === opts.viewerUserId;
+  // UX19-3: the projected `blockReason` column carries only PART of the
+  // acceptance gate. `acceptanceBlockReason` (rebuilder.server.ts) deliberately
+  // omits two refusals `acceptanceRefusalReason` enforces on every writer
+  // (task-acceptance.server.ts) — an OPEN blocked decision, and a CONFLICTING PR —
+  // and this filter re-checked neither. Live shape: a row sat under "Waiting on
+  // your acceptance" wearing the "your acceptance" tag while the task page one
+  // click away read "Acceptance is blocked". Both facts are on the task summary
+  // this queue already reads, so the panel split now asks the same questions the
+  // writer does. The panel is a promise: it must not name an acceptance the
+  // server refuses. (When the projected column grows these gates too,
+  // `blockReason` catches them first and this stays harmless belt-and-braces.)
+  const gateBlocked = (t: TaskSummary): boolean =>
+    // Same predicate the acceptance writers pass as `blockedPacket`
+    // (task-acceptance.server.ts): an operator-raised blocked decision is still
+    // open, and accepting would bury it.
+    (t.readiness === "blocked" && t.packet?.type === "blocked") ||
+    // Ruling 243: the delivered revision is not on the PR.
+    unpushedRevisionBlockedReason(t.pr, t.workRevisionSha ?? null, t.key) !== null ||
+    // P14-LV-07, via the SAME helper the server gate calls — a PR GitHub
+    // cannot merge cannot be accepted.
+    conflictingPrBlockedReason(t, t.key) !== null;
+  // Ready-for-acceptance requires acceptance authority, an acceptable current
+  // revision (F10-11/F10-15: no failing/awaiting/no-revision block, the
+  // revision-bound reason PROJECTED into `validation_block_reason` at rebuild
+  // time, P11-50, so this reads the SAME gate the server enforces without
+  // re-reading task files on a loader path), the rest of the server's refusal
+  // set (UX19-3), AND that the review PR was not REJECTED (closed unmerged) — a
+  // rejected-PR task can't be accepted (its work was declined); it needs a
+  // rework/reopen/archive decision, so it is not offered for acceptance (NEW-1).
+  // U35-5: only a stage acceptance is legal FROM earns it
+  // (`acceptanceStageBlockedReason`, task-acceptance.server.ts, whose predicate
+  // this is); review work before the boundary is listed, never offered for
+  // acceptance.
+  const isReady = (t: TaskSummary): boolean =>
+    isReviewWork(t) &&
+    t.atAcceptanceBoundary &&
+    t.waiting === "human" &&
+    (viewerCanGovern || isOwn(t)) &&
+    t.blockReason === null &&
+    !gateBlocked(t) &&
+    t.pr?.state !== "closed";
+  const acceptableKeys = live.filter(isReady).map((t) => t.key);
+  const acceptable = new Set(acceptableKeys);
+  // Ruling 304: the rows are the viewer's own tasks that carry an open packet,
+  // at any stage, or are review work.
+  const listed = live.filter((t) => isOwn(t) && (t.packet !== null || isReviewWork(t)));
 
   // Newest event per task in one shot (position 0 = newest, file order).
   const latestByKey = new Map<string, string>();
@@ -266,7 +358,7 @@ export function getReviewQueue(
     .all(slug) as { task_key: string; text: string }[];
   for (const row of latestRows) latestByKey.set(row.task_key, row.text);
 
-  const rows: ReviewQueueRow[] = inReview.map((t) => {
+  const rows: ReviewQueueRow[] = listed.map((t) => {
     let pr: ReviewQueueRow["pr"] = null;
     if (t.pr) {
       // F19-32: pass the parsed state THROUGH. The old ladder preserved
@@ -327,112 +419,43 @@ export function getReviewQueue(
     };
   });
 
-  // R8-3: "Waiting on your acceptance" is member-scoped by ACCEPTANCE AUTHORITY,
-  // not by decision-object presence — a review-stage task waiting on a human can
-  // have no packet/recommendation (the operator couldn't open a completion
-  // packet) yet still need a human to accept it. A viewer can accept iff they are
-  // maintainer+ (resolve-packet tier) OR the task's owner (owner exception, R6-2,
-  // which requires the own-task role). Fail closed: an id with no membership row
-  // — a non-member, a deleted account, or (a JS caller) no id at all — holds
-  // neither role, so nothing is acceptance-ready for them.
-  // SAFETY: `project_members.role` is CHECK-constrained to exactly
-  // PROJECT_ROLES ('admin' | 'maintainer' | 'contributor' | 'viewer') by
-  // 0001_baseline.sql; the row is undefined when the viewer is not a member.
-  const viewerRole: ProjectRole | null = opts.viewerUserId
-    ? ((
-        db
-          .prepare(
-            `SELECT role FROM project_members WHERE project_slug = ? AND user_id = ?`,
-          )
-          .get(slug, opts.viewerUserId) as { role: ProjectRole } | undefined
-      )?.role ?? null)
-    : null;
-  const viewerCanGovern = roleCan(viewerRole, "resolve-packet");
-  const viewerCanOwn = roleCan(viewerRole, "own-task");
-  const ownerByKey = new Map(
-    inReview.map((t) => [
-      t.key,
-      t.owner && t.owner.kind === "human" ? t.owner.userId : null,
-    ]),
-  );
-  const canAccept = (key: string): boolean => {
-    if (viewerCanGovern) return true;
-    if (!viewerCanOwn) return false;
-    const owner = ownerByKey.get(key) ?? null;
-    return owner !== null && owner === opts.viewerUserId;
-  };
-  // UX19-3: the projected `blockReason` column carries only PART of the
-  // acceptance gate. `acceptanceBlockReason` (rebuilder.server.ts) deliberately
-  // omits two refusals `acceptanceRefusalReason` enforces on every writer
-  // (task-acceptance.server.ts) — an OPEN blocked decision, and a CONFLICTING PR —
-  // and this filter re-checked neither. Live shape: a row sat under "Waiting on
-  // your acceptance" wearing the "your acceptance" tag while the task page one
-  // click away read "Acceptance is blocked". Both facts are on the task summary
-  // this queue already reads, so the panel split now asks the same questions the
-  // writer does. R15-11 keeps the ROW a triage link ("Review", never "Accept"),
-  // but the PANEL is still a promise — it must not name an acceptance the server
-  // refuses. (When the projected column grows these gates too, `blockReason`
-  // catches them first and this stays harmless belt-and-braces.)
-  const gateBlockedByKey = new Map<string, boolean>(
-    inReview.map((t) => [
-      t.key,
-      // Same predicate the acceptance writers pass as `blockedPacket`
-      // (task-acceptance.server.ts): an operator-raised blocked decision is still
-      // open, and accepting would bury it.
-      (t.readiness === "blocked" && t.packet?.type === "blocked") ||
-        // Ruling 243: the delivered revision is not on the PR.
-        unpushedRevisionBlockedReason(t.pr, t.workRevisionSha ?? null, t.key) !== null ||
-        // P14-LV-07, via the SAME helper the server gate calls — a PR GitHub
-        // cannot merge cannot be accepted.
-        conflictingPrBlockedReason(t, t.key) !== null,
-    ]),
-  );
-  // Ready-for-acceptance requires acceptance authority, an acceptable current
-  // revision (F10-11: no failing/awaiting/no-revision block), the rest of the
-  // server's refusal set (UX19-3), AND that the review PR was not REJECTED
-  // (closed unmerged) — a rejected-PR task can't be accepted (its work was
-  // declined); it needs a rework/reopen/archive decision, so it belongs in
-  // "Still in review", not the acceptance panel (NEW-1).
-  // U35-5: only a stage acceptance is legal FROM earns the acceptance half
-  // (`acceptanceStageBlockedReason`, task-acceptance.server.ts, whose predicate
-  // this is); review work before the boundary is listed, never offered for
-  // acceptance.
-  // Ruling 242: pairwise path intersection across the OPEN review PRs. Done
-  // here, over rows already loaded, rather than in the UI: it is a question
-  // about the project's pull requests, not about one card, and a surface that
-  // recomputed it per row would need every other row anyway.
-  const diffs = new Map<string, { changed: string[]; truncated: boolean }>();
-  for (const t of inReview) {
+  // Ruling 242: pairwise path intersection across the board's OPEN review PRs,
+  // every one of them and not only the viewer's: a merge of someone else's PR
+  // puts this row's in conflict just the same. Done here, over tasks already
+  // loaded, rather than in the UI: it is a question about the project's pull
+  // requests, not about one card, and a surface that recomputed it per row
+  // would need every other row anyway.
+  const sides: PrDiffPaths[] = live.flatMap((t) => {
     const paths = t.pr?.paths;
-    if (t.pr?.state === "review" && paths && paths.changed.length > 0) {
-      diffs.set(t.key, { changed: paths.changed, truncated: paths.truncated });
-    }
-  }
-  const sides: PrDiffPaths[] = rows.flatMap((row) => {
-    const diff = row.pr ? diffs.get(row.key) : undefined;
-    return diff
-      ? [{ taskKey: row.key, prNumber: row.pr!.number, changed: diff.changed, truncated: diff.truncated }]
+    return t.pr?.state === "review" && paths && paths.changed.length > 0
+      ? [{ taskKey: t.key, prNumber: t.pr.number, changed: paths.changed, truncated: paths.truncated }]
       : [];
   });
+  const sideByKey = new Map(sides.map((side) => [side.taskKey, side]));
   for (const row of rows) {
-    const mineDiff = diffs.get(row.key);
-    if (!row.pr || !mineDiff) continue;
-    row.pr.overlaps = prPathOverlaps(
-      { taskKey: row.key, prNumber: row.pr.number, changed: mineDiff.changed, truncated: mineDiff.truncated },
-      sides,
-    );
+    const mine = sideByKey.get(row.key);
+    if (!row.pr || !mine) continue;
+    row.pr.overlaps = prPathOverlaps(mine, sides);
   }
 
-  const isReady = (r: ReviewQueueRow): boolean =>
-    r.atAcceptanceBoundary &&
-    r.waiting === "human" &&
-    canAccept(r.key) &&
-    r.blockReason === null &&
-    !gateBlockedByKey.get(r.key) &&
-    r.pr?.state !== "closed";
-  return {
-    ready: rows.filter(isReady),
-    working: rows.filter((r) => !isReady(r)),
-    total: rows.length,
-  };
+  // Ruling 304: the panel is what the decision does. An open packet is the
+  // task's decision wherever it stands; it moves the task to the terminal
+  // stage when it offers `accept_completion` (a decided `edit_goal` offers
+  // nothing: what it owes is the goal). With no packet open, an acceptance
+  // nothing refuses is the decision, and review work waits for one.
+  const completions: ReviewQueueRow[] = [];
+  const decisions: ReviewQueueRow[] = [];
+  const working: ReviewQueueRow[] = [];
+  for (const [i, row] of rows.entries()) {
+    const packet = listed[i].packet;
+    if (packet) {
+      const offersAcceptance =
+        packet.awaiting === undefined &&
+        packet.options.some((o) => o.kind === "accept_completion");
+      (offersAcceptance ? completions : decisions).push(row);
+    } else {
+      (acceptable.has(row.key) ? completions : working).push(row);
+    }
+  }
+  return { completions, decisions, working, acceptableKeys, total: rows.length };
 }

@@ -384,17 +384,21 @@ describe("decisionsRequiring — acceptance-ready tasks (B-FD5)", () => {
         viewerUserId: store.users.murat.id,
       });
 
-    it("a CONFLICTING PR: no acceptance decision, and NOT in the queue's ready panel", () => {
+    it("a CONFLICTING PR: no acceptance decision, and NOT acceptable in the queue", () => {
       const store = setupTestStore(ctx);
+      // Ruling 304: murat owns it, so the queue lists it as his row too.
+      const owned = { ownerUserId: store.users.murat.id };
       // Baseline: approved, mergeable PR → both surfaces promise the acceptance.
-      seedAcceptanceReady(store, "VIB-320");
+      seedAcceptanceReady(store, "VIB-320", owned);
       expect(
         decisionsRequiring(store.db, store.users.murat.id).mine.map((d) => d.kind),
       ).toEqual(["acceptance"]);
-      expect(queue(store).ready.map((r) => r.key)).toEqual(["VIB-320"]);
+      expect(queue(store).acceptableKeys).toEqual(["VIB-320"]);
+      expect(queue(store).completions.map((r) => r.key)).toEqual(["VIB-320"]);
 
       // Same task, GitHub now reports the head conflicts with the base branch.
       seedAcceptanceReady(store, "VIB-320", {
+        ...owned,
         pr: {
           number: 300,
           state: "review",
@@ -404,7 +408,8 @@ describe("decisionsRequiring — acceptance-ready tasks (B-FD5)", () => {
       });
       expect(decisionsRequiring(store.db, store.users.murat.id).mine).toHaveLength(0);
       const after = queue(store);
-      expect(after.ready).toHaveLength(0);
+      expect(after.acceptableKeys).toHaveLength(0);
+      expect(after.completions).toHaveLength(0);
       expect(after.working.map((r) => r.key)).toEqual(["VIB-320"]);
       // And the projected reason NAMES the conflict on both surfaces.
       expect(after.working[0]!.blockReason).toContain(
@@ -457,11 +462,11 @@ describe("decisionsRequiring — acceptance-ready tasks (B-FD5)", () => {
       expect(
         decisionsRequiring(store.db, store.users.murat.id).mine.map((d) => d.kind),
       ).toEqual(["recommendation"]);
-      expect(queue(store).ready.map((r) => r.key)).toEqual(["VIB-322"]);
+      expect(queue(store).acceptableKeys).toEqual(["VIB-322"]);
 
       // The PR now conflicts. The acceptance the card offers is refused.
       withOffer("conflicting");
-      expect(queue(store).ready).toHaveLength(0);
+      expect(queue(store).acceptableKeys).toHaveLength(0);
       // CANARY: this is the shipped state — the card walks back in through the
       // recommendation query and the inbox demands a decision nobody can make.
       expect(decisionsRequiring(store.db, store.users.murat.id).mine).toHaveLength(0);
@@ -505,6 +510,8 @@ describe("decisionsRequiring — acceptance-ready tasks (B-FD5)", () => {
           stage: "review",
           waiting: "human",
           readiness: "blocked",
+          // Ruling 304: murat's own, so the queue lists the packet as his row.
+          ownerUserId: store.users.murat.id,
           branch: REVISION.branch,
           pr: { number: 300, state: "review", title: "Task VIB-321" },
           workRevision: REVISION,
@@ -537,10 +544,10 @@ describe("decisionsRequiring — acceptance-ready tasks (B-FD5)", () => {
       // not an acceptance the accept action would refuse.
       const mine = decisionsRequiring(store.db, store.users.murat.id).mine;
       expect(mine.map((d) => [d.taskKey, d.kind])).toEqual([["VIB-321", "packet"]]);
-      // The queue agrees: not acceptance-ready.
+      // The queue agrees: not acceptance-ready, and the row is the packet's.
       const after = queue(store);
-      expect(after.ready).toHaveLength(0);
-      expect(after.working.map((r) => r.key)).toEqual(["VIB-321"]);
+      expect(after.acceptableKeys).toHaveLength(0);
+      expect(after.decisions.map((r) => r.key)).toEqual(["VIB-321"]);
     });
   });
 });

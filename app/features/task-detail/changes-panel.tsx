@@ -52,6 +52,10 @@ export interface ChangesBodyProps {
   /** The delivered revision the page knows now (SSE keeps it current). */
   revisionSha: string;
   githubHost: string;
+  /** Ruling 304: the task page's URL, when the reader stands on another page
+   *  (the Review queue's decision dialog), so the notes still reach the task
+   *  page's action. Unset, they post to the route that renders the panel. */
+  postTo?: string;
 }
 
 /** One pending note, bound to the revision it was written on. It covers the
@@ -125,7 +129,7 @@ function postedNote({ path, start, end, body }: PanelNote) {
   return start.row === end.row ? note : { ...note, startLine: start.line, startSide: start.side };
 }
 
-export function ChangesBody({ url, revisionSha, githubHost }: ChangesBodyProps) {
+export function ChangesBody({ url, revisionSha, githubHost, postTo }: ChangesBodyProps) {
   const read = useFetcher<TaskChangesView>();
   const loadRead = read.load;
   useEffect(() => {
@@ -225,7 +229,7 @@ export function ChangesBody({ url, revisionSha, githubHost }: ChangesBodyProps) 
     fd.set("intent", "review-notes");
     fd.set("headSha", view.headSha);
     fd.set("notes", JSON.stringify(notes.map(postedNote)));
-    void send.submit(fd, { method: "post" });
+    void send.submit(fd, { method: "post", action: postTo });
   };
 
   return (

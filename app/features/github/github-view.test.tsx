@@ -677,10 +677,10 @@ describe("PullRequestsPanel", () => {
     // A merged / clean PR shows no conflict pill.
     expect(rows[1]!.textContent).not.toContain("conflicts");
     // Footer note is verbatim contract (B10: honest about the offline path).
-    // F19-34: it used to say "in the review queue". The queue is a read-only
-    // triage list — it performs no mutation at all, which is exactly why ruling
-    // 304 (R15-11) labels its row "Review" and not "Accept". Naming it as the
-    // surface that merges pointed a reader at a page with no such control.
+    // F19-34: it used to say "in the review queue", when the queue had no
+    // control that accepts, so it pointed a reader at a page with no such
+    // control. The acceptance that merges is the task page's, which the
+    // queue's decision dialog posts to (ruling 304).
     expect(list.querySelector(".pol-note")!.textContent).toContain(
       "Merging stays reserved for humans. Accepting a completion on its task page merges its PR when GitHub is reachable; otherwise it records accepted (merge pending).",
     );

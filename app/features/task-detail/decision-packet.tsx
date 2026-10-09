@@ -236,7 +236,10 @@ interface DecisionPacketProps {
   /** Ruling 286: the escalation {@link onRequestMaintainer} sent is in flight,
    *  so its button says so instead of staying live and silent. */
   escalating?: boolean;
-  onAsk: () => void;
+  /** "Ask operator": starts a comment mentioning @operator in the page's
+   *  comment box. Absent where the card stands without one (ruling 304's
+   *  decision dialog), and the card then offers no Ask. */
+  onAsk?: () => void;
 }
 export function DecisionPacket({
   packet,
@@ -394,7 +397,7 @@ function OpenPacketContent({
   createTaskEchoes: Record<number, { key: string; title: string; stage: string }[]>;
   onRequestMaintainer: (() => void) | undefined;
   escalating: boolean;
-  onAsk: () => void;
+  onAsk: (() => void) | undefined;
   completion: ReactNode;
   aside: boolean;
 }) {

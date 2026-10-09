@@ -12,10 +12,12 @@ import { resolveAcceptanceAuthority } from "~/features/review/review-acceptance-
 import { ReviewQueuePage } from "~/features/review/review-page";
 
 /**
- * /projects/:slug/review — the Review queue (Phase 9C, review-queue.md).
- * Read-only projection loader; the shell's SSE revalidation (Phase 6)
- * refreshes it live, so accepted tasks leave panel 1 without any local
- * state. The rail badge and this loader read the same projection.
+ * /projects/:slug/review — the Review queue (Phase 9C, review-queue.md;
+ * ruling 304: the viewer's own tasks, each open decision answered in a dialog
+ * beside a link to its task). Read-only projection loader; the shell's SSE
+ * revalidation (Phase 6) refreshes it live, so an answered decision leaves its
+ * panel without any local state. The rail badge and this loader read the same
+ * projection.
  */
 
 export function meta({ params }: Route.MetaArgs) {
@@ -35,8 +37,8 @@ export async function loader({ request, params }: Route.LoaderArgs) {
   if (!project) {
     throw data(`No project at projects/${params.slug}.`, { status: 404 });
   }
-  // R8-3: "Waiting on your acceptance" is member-scoped by acceptance authority
-  // (maintainer+ / owner), computed per review-stage task inside getReviewQueue.
+  // Ruling 304: the rows are the viewer's own tasks; R8-3 scopes acceptance
+  // by authority inside getReviewQueue.
   const queue = getReviewQueue(db, params.slug, { viewerUserId: ctx.user.id });
   // UI-49: the page used to hardcode "Review → Done". Stages are per-project and
   // renameable (a board's review stage need not be named `review`), and the queue
@@ -52,12 +54,12 @@ export async function loader({ request, params }: Route.LoaderArgs) {
   // Interface review 2026-09-24 (writ-3): a row's "waiting on you" is the
   // board's own answer (`waitingOnViewer`, the one helper both loaders call),
   // so the queue and the board cannot disagree about the same task.
-  const waitingOnMe = [
-    ...waitingOnViewer(db, ctx.user.id, params.slug, queue.ready.map((r) => r.key)),
-  ];
+  const waitingOnMe = [...waitingOnViewer(db, ctx.user.id, params.slug, queue.acceptableKeys)];
   return {
     slug: params.slug,
-    ...queue,
+    completions: queue.completions,
+    decisions: queue.decisions,
+    working: queue.working,
     waitingOnMe,
     stageNames: {
       review: nameOf(roles.reviewId) ?? "the review stage",
@@ -68,14 +70,14 @@ export async function loader({ request, params }: Route.LoaderArgs) {
 }
 
 export default function ReviewView({ loaderData }: Route.ComponentProps) {
-  const { slug, ready, working, total, stageNames, acceptance } = loaderData;
+  const { slug, completions, decisions, working, stageNames, acceptance } = loaderData;
   const waitingOnMe = new Set(loaderData.waitingOnMe);
   return (
     <ReviewQueuePage
       projectSlug={slug}
-      ready={ready}
+      completions={completions}
+      decisions={decisions}
       working={working}
-      total={total}
       stageNames={stageNames}
       acceptance={acceptance}
       waitingOnMe={waitingOnMe}

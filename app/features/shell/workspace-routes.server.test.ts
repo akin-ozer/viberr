@@ -320,10 +320,10 @@ describe("workspace layout loader (seeded)", () => {
       "done",
     ]);
     expect(result.taskCount).toBe(10);
-    // U35-5 (pass 35): the badge is the review queue's own `total`, and the
-    // queue lists review work wherever it sits: VIB-142 and VIB-145 at Review,
-    // plus VIB-160 at In Progress with changes requested by its reviewer.
-    expect(result.reviewCount).toBe(3);
+    // U35-5 (pass 35): the badge is the review queue's own `total`. Ruling
+    // 304: the queue is the viewer's own tasks, so arda's badge counts VIB-142
+    // alone; VIB-145 (nobody's) and VIB-160 (murat's) are not hers.
+    expect(result.reviewCount).toBe(1);
     expect(result.violations).toBe(1); // seeded VIB-142 PAT-scope violation
     expect(result.myRole).toBe("admin");
     // Ruling 300 (owner, 2026-09-24): the bell's counts, not its list.
@@ -367,8 +367,8 @@ describe("workspace layout loader (seeded)", () => {
       "~/server/projections/review-queue.server"
     );
     // A review-stage task waiting on a human with NO packet and NO
-    // recommendations — exactly the shape the review queue calls "ready" and
-    // `decisionsRequiring` cannot see.
+    // recommendations — exactly the shape the review queue counts acceptable
+    // (`acceptableKeys`) and `decisionsRequiring` cannot see.
     writeTask(app.dataRoot, "viberr-core", {
       frontmatter: baseTaskFrontmatter("VIB-990", {
         stage: "review",
@@ -379,7 +379,7 @@ describe("workspace layout loader (seeded)", () => {
 
     const ready = getReviewQueue(app.db, "viberr-core", {
       viewerUserId: seedIds.arda,
-    }).ready.map((r) => r.key);
+    }).acceptableKeys;
     expect(ready).toContain("VIB-990");
     // B-FD5 (pass 15) moved the acceptance predicate INTO the shared helper, so
     // it now sees this task too — but only as an `acceptance` decision: the task

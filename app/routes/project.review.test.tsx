@@ -40,9 +40,9 @@ const row = (key: string): Row => ({
 
 const LOADER_DATA: Route.ComponentProps["loaderData"] = {
   slug: "viberr-core",
-  ready: [],
+  completions: [],
+  decisions: [],
   working: [row("VIB-150"), row("VIB-151"), row("VIB-153")],
-  total: 3,
   stageNames: { review: "Review", terminal: "Done" },
   acceptance: { operatorCanAccept: false, operatorName: "Operator" },
   waitingOnMe: [],
