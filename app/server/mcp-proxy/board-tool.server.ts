@@ -737,9 +737,9 @@ export function pageMeasureArgsRefusal(): CallToolResult {
  */
 export function pageCaptureArgsRefusal(): CallToolResult {
   return textResult(
-    `capture_page takes \`name\` as text, \`view\` as \`desktop\` or \`phone\`, \`from\` as a whole number of px up to ${PAGE_CAPTURE_MAX_FROM}, ` +
+    `capture_page takes \`name\` as text, \`view\` as \`desktop\` or \`phone\` and \`from\` as a whole number of px up to ${PAGE_CAPTURE_MAX_FROM}; ` +
       `for a picture of an exact size, \`width\` and \`height\` as whole numbers of px from ${CAPTURE_PAGE_BOX.minSide} to ${CAPTURE_PAGE_BOX.maxSide} ` +
-      `and \`scale\` as one of ${SCALES_TEXT}, and, for the page in a state, \`press\` and \`hover\` as text of up to ${CAPTURE_PAGE_ACT.maxChars} characters, ` +
+      `and \`scale\` as one of ${SCALES_TEXT}; and for the page in a state, \`press\` and \`hover\` as text of up to ${CAPTURE_PAGE_ACT.maxChars} characters, ` +
       `\`tab\` as a whole number from ${CAPTURE_PAGE_ACT.minTab} to ${CAPTURE_PAGE_ACT.maxTab}, \`motion\` as \`reduce\` and \`moving\` as true or false. Nothing was pictured.`,
     true,
   );

@@ -793,6 +793,7 @@ describe("ruling 194: the gateway's board server pictures a page for a Codex run
         "read_task_attachment",
         "read_task_source",
         "capture_page",
+        "measure_page",
         "keep_source",
       ]);
       const result = await client.callTool({ name: "capture_page", arguments: { name: "post.html", view: "desktop" } });
@@ -823,9 +824,10 @@ describe("ruling 194: the gateway's board server pictures a page for a Codex run
       // is. CANARY: answer with the board server's own "takes ... as text"
       // and a run that sent 99 for a width is told to send text.
       const notTheTools =
-        "capture_page takes `name` as text, `view` as `desktop` or `phone`, `from` as a whole number of px up to 40000, " +
-        "and, for a picture of an exact size, `width` and `height` as whole numbers of px from 100 to 4000 " +
-        "and `scale` as one of 0.25, 0.5, 1, 1.5 and 2. Nothing was pictured.";
+        "capture_page takes `name` as text, `view` as `desktop` or `phone` and `from` as a whole number of px up to 40000; " +
+        "for a picture of an exact size, `width` and `height` as whole numbers of px from 100 to 4000 " +
+        "and `scale` as one of 0.25, 0.5, 1, 1.5 and 2; and for the page in a state, `press` and `hover` as text of up to 200 characters, " +
+        "`tab` as a whole number from 1 to 60, `motion` as `reduce` and `moving` as true or false. Nothing was pictured.";
       const refused = await client.callTool({ name: "capture_page", arguments: { name: "post.html", view: "tablet" } });
       expect(refused.isError).toBe(true);
       expect(z.array(z.object({ text: z.string() })).parse(refused.content)[0]!.text).toBe(notTheTools);
