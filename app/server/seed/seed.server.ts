@@ -43,8 +43,9 @@ import { SEED_DEFAULT_PASSWORD } from "./seed-credentials";
  *
  * Projects, tasks, notifications, extra users — none are seeded. The old mock
  * dataset lives on ONLY as a test fixture (test-support/demo-seed.ts). Org
- * resources (KBs with real files, skills, the domain allowlist) are seeded
- * separately by seedOrgResources (org-seed.server.ts).
+ * resources (KBs with real files, and skills) are seeded separately by
+ * seedOrgResources (org-seed.server.ts), which allowlists no Google sign-in
+ * domain (ruling 28(c)): its `--reset` only clears the domains an admin added.
  *
  * Idempotent: profile templates are overwritten, the rescan reconciles
  * projections, and an existing admin is never touched — except the P11-01
