@@ -631,7 +631,7 @@ const PRIOR_SHIPPED_HASHES: PriorShippedHashes = {
   ],
   [path.join("skills", "editor-expertise", "SKILL.md")]: [
     // Ruling 706 (2026-10-09): before the manual read a record that grows
-    // past the entry cited, for a later one that changes what the piece says.
+    // beyond the entry cited, for a later one that changes what the piece says.
     "4db16badd8b3fccd4e2e0bcbe9a09709da677d53584de03baf77adb230a18709",
     // Ruling 699 (2026-10-08): before the manual had the Editor open every
     // picture and judge a diagram against the sources and a cover against

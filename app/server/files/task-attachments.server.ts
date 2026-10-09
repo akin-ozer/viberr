@@ -1049,6 +1049,30 @@ export function attachmentWholeText(name: string, bytes: Buffer): string | null 
   return "unreadable" in whole ? null : whole.text;
 }
 
+/**
+ * Ruling 706: the kinds of file whose indentation is nesting, by their names:
+ * data and markup. A search of one takes no indented line to continue the
+ * line above it, so no place in a printed JSON list is headed by the list's
+ * first line. A workbook is searched as the CSV a read renders it to.
+ */
+const INDENT_IS_NESTING = new Set([
+  ".json",
+  ".jsonl",
+  ".ndjson",
+  ".yaml",
+  ".yml",
+  ".toml",
+  ".xml",
+  ".atom",
+  ".rss",
+  ".html",
+  ".htm",
+  ".svg",
+  ".csv",
+  ".tsv",
+  ".xlsx",
+]);
+
 /** Ruling 706: what a search of one file answers: the places that hold the
  *  words, or a sentence saying why the file has no text to search. */
 export type AttachmentFind =
@@ -1085,7 +1109,8 @@ export function findInAttachmentContent(
   const whole = wholeText(name, ext, bytes, where);
   if ("unreadable" in whole) return whole;
   if (offset > 0 && offset >= whole.text.length) return pastTheEnd(name, whole.text.length, offset);
-  return { ...findInText(whole.text, words, offset), truncated: whole.truncated, leftOut: whole.leftOut };
+  const prose = !INDENT_IS_NESTING.has(ext);
+  return { ...findInText(whole.text, words, offset, prose), truncated: whole.truncated, leftOut: whole.leftOut };
 }
 
 /**

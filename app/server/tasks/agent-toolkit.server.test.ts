@@ -1209,6 +1209,19 @@ describe("report_outcome's evidence field (P13-D-26)", () => {
     // Nothing of a picture's bytes is found. CANARY: search the file's bytes.
     expect((await find({ id: "S3", find: "AAAAAAAAAAAAAAAA" })).found).toBe(0);
 
+    // A file of data is searched as data: its indents are nesting, so no
+    // place is headed by the first line of the file. CANARY: search every
+    // source as prose, and each place in a printed JSON list opens with the
+    // list's first item.
+    const item = (tag: string, body: string) => `  {\n    "tag_name": "${tag}",\n    "body": "${body}"\n  }`;
+    const releases = `[\n${[...Array.from({ length: 12 }, (_, i) => item(`v3.${12 - i}.0`, "Nothing about it.")), item("v2.9.0", "The cache is on by default.")].join(",\n")}\n]\n`;
+    keep("releases.json", Buffer.from(releases), "The releases, as the API lists them");
+    const inData = await find({ id: "S4", find: "cache is on" });
+    expect(inData.hits).toHaveLength(1);
+    expect(inData.hits[0]!.offset).toBe(releases.indexOf('    "body": "The cache is on'));
+    expect(inData.hits[0]!.text).toContain('"tag_name": "v2.9.0"');
+    expect(inData.hits[0]!.text).not.toContain("v3.12.0");
+
     // What a search cannot answer, said in a sentence. CANARY: answer a
     // search with no `id` with the list of sources, and it reads as "found in
     // none of them".
@@ -1216,7 +1229,7 @@ describe("report_outcome's evidence field (P13-D-26)", () => {
       "[noop] `find` searches one source: pass that source's `id` with it. read_task_source without `id` and without `find` lists the sources.",
     );
     expect(await text({ id: "S9", find: "cached part" })).toBe(
-      "[noop] VIB-9 keeps no source `S9`. It keeps S1 to S3; call read_task_source without `id` to list them.",
+      "[noop] VIB-9 keeps no source `S9`. It keeps S1 to S4; call read_task_source without `id` to list them.",
     );
     expect(await text({ id: "S2", find: "cached part" })).toBe(
       "[noop] `chart.png` is an image: it has no text to search. Read it without `find` to look at it.",

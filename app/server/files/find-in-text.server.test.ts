@@ -9,7 +9,8 @@ import { FIND_HITS_MAX, findInText, findWords } from "./find-in-text.server";
  * a file that is one line from end to end.
  */
 
-const find = (whole: string, phrase: string, from?: number) => findInText(whole, findWords(phrase), from);
+const find = (whole: string, phrase: string, from?: number, hangingIndent?: boolean) =>
+  findInText(whole, findWords(phrase), from, hangingIndent);
 
 /** A record with one entry to a line, each longer than an excerpt. */
 function record(entries: { head: string; body: string }[]): string {
@@ -188,13 +189,16 @@ describe("ruling 706: the places in a text that hold a phrase", () => {
     expect(second!.text).toBe("5. **An entry of two paragraphs (2026-01-01).** Its first runs on\nunder a hanging indent.\nIts second paragraph holds the needle.");
     // The head is looked for 200,000 characters up and no further: no entry
     // is that long, and a file indented from end to end would cost each
-    // place a walk to its top. Canary: walk up without a bound, and this
-    // place is lent the first line of a quarter-megabyte block.
-    const endless = `0. **The only unindented line (2026-01-01).**\n${Array.from({ length: 5_000 }, (_, i) => `    indented line ${i} of a file indented from end to end.`).join("\n")}\n    the needle is here\n`;
-    expect(endless.length).toBeGreaterThan(250_000);
-    const [lost] = find(endless, "the needle is here").hits;
+    // place a walk to its top. Canary: walk up without a bound, or to
+    // 100,000.
+    const under = (lines: number) =>
+      `0. **The only unindented line.**\n${`    ${"x".repeat(45)}\n`.repeat(lines)}    the needle is here\n`;
+    const [reached] = find(under(4_000), "the needle is here").hits;
+    expect(reached!.text.startsWith("0. **The only unindented line.**\nxxxx")).toBe(true);
+    expect(reached!.text).toContain(" … ");
+    const [lost] = find(under(4_001), "the needle is here").hits;
     expect(lost!.text).not.toContain("The only unindented line");
-    expect(lost!.offset).toBe(endless.indexOf("    the needle is here"));
+    expect(lost!.offset).toBe(under(4_001).indexOf("    the needle is here"));
     // Paragraphs wrapped with no indent are no block: the last line of one
     // is shown with the lines above it. Canary: take a blank line under the
     // words for an indented line, and the excerpt is cut to its own line.
@@ -207,6 +211,127 @@ describe("ruling 706: the places in a text that hold a phrase", () => {
     const [own] = find(flat, "turned off").hits;
     expect(own!.offset).toBe(flat.indexOf("- 2.3.0"));
     expect(own!.text).not.toContain(" … ");
+  });
+
+  it("returns for a text that opens with a line break and is indented under it", () => {
+    // The shape of a test runner's output saved to a file: a blank first
+    // line, then every line indented. Walking up from index 1 for the line
+    // above, `lastIndexOf` was asked for a break "at or before -1", looked at
+    // index 0, found the one the text opens with and answered index 1 again.
+    // Canary: take the line above as `lastIndexOf("\n", at - 2) + 1` at
+    // every index, and this call never comes back: a search of such a source
+    // held the one server process for good.
+    const run = "\n RUN  v5.0.3 /repo\n\n Test Files  548 passed (548)\n      Tests  9750 passed | 2 skipped (9752)\n";
+    const found = find(run, "passed");
+    expect(found.found).toBe(2);
+    expect(found.hits[0]!.line).toBe(4);
+    expect(found.hits[0]!.offset).toBe(run.indexOf(" Test Files"));
+    expect(find("\n  needle here\n", "needle").hits).toEqual([{ line: 2, offset: 1, text: "needle here" }]);
+    expect(find("\n\n\n    indented needle\n", "needle").hits[0]!.line).toBe(4);
+    expect(find("  needle on an indented first line\n", "needle").hits[0]!.offset).toBe(0);
+  });
+
+  it("a phrase that wraps inside an indented entry is shown with what follows it, and with nothing of the entries beside it", () => {
+    const entries =
+      "505. **The entry before (2026-09-25).** It ends here, and on, and on.\n\n" +
+      "506. **A cached prefix no longer moves between sessions (2026-09-26).** Its tokens are added to the\n" +
+      "    run's totals. How much of it is cached is not said, and the next sentences go on for a while\n" +
+      "    under the same hanging indent, to the entry's last line.\n\n" +
+      "507. **The entry after (2026-09-26).** It begins here.\n";
+    // Canary: take the middle of the line the phrase ends on for the end of
+    // a line, and the excerpt stops at the phrase's last word.
+    const [wrapped] = find(entries, "added to the run's totals").hits;
+    expect(wrapped!.line).toBe(3);
+    expect(wrapped!.text).toBe(
+      "506. **A cached prefix no longer moves between sessions (2026-09-26).** Its tokens are added to the\n" +
+        "run's totals. How much of it is cached is not said, and the next sentences go on for a while\n" +
+        "under the same hanging indent, to the entry's last line.",
+    );
+    // A phrase that starts on an entry's first line and ends on its last,
+    // indented one: the block is looked for under the line the phrase starts
+    // on. Canary: look under the line it ends on, where the next entry
+    // begins, and the excerpt opens with the entry above and closes with the
+    // entry below.
+    const twoLines =
+      "11. **The entry above (2026-01-01).** Its last words.\n" +
+      "12. **A two-line entry (2026-01-02).** Its tokens are added to the\n    run's totals, and that is all of it.\n" +
+      "13. **The entry below (2026-01-03).** Its first words.\n";
+    const [span] = find(twoLines, "added to the run's totals").hits;
+    expect(span!.text).toBe("12. **A two-line entry (2026-01-02).** Its tokens are added to the\nrun's totals, and that is all of it.");
+    // A phrase that runs from an entry's last line into the next entry's
+    // first: the excerpt reaches to where that line ends. Canary: take the
+    // place the phrase ends for the end of its line, and the excerpt stops
+    // at the phrase's last word with a mark of a cut.
+    const over = "21. **An entry (2026-01-01).** It runs on\n    under an indent, to its end\n22. **The next entry (2026-01-02).** begins here and goes on a little.\n";
+    const [spill] = find(over, "to its end 22. **The next entry").hits;
+    expect(spill!.text).toBe("21. **An entry (2026-01-01).** It runs on\nunder an indent, to its end\n22. **The next entry (2026-01-02).** begins here and goes on a little.");
+    // Words on an entry's first line whose line is longer than the excerpt
+    // reaches: the line under it is still looked at, so the block is seen.
+    // Canary: look below only as far as the excerpt reaches, and the excerpt
+    // opens with the last words of the entry above.
+    const head = `2. **The second entry turns the needle (2026-02-01).** ${"Its first line runs long. ".repeat(11)}`.trim();
+    expect(head.length).toBeGreaterThan(300);
+    expect(head.length).toBeLessThan(400);
+    const two = `1. **The first entry.** Its last lines say the cache is off by default,\nand that nothing else changed.\n${head}\n    and it runs on under a hanging indent.\n`;
+    const [onHead] = find(two, "second entry turns").hits;
+    expect(onHead!.text.startsWith("2. **The second entry turns the needle")).toBe(true);
+    expect(onHead!.text).not.toContain("nothing else changed");
+  });
+
+  it("reads a place from its own line when its entry starts more than a page above it", () => {
+    // The middle of the three: the entry's start is too far for one page,
+    // the words' own line is not. Canary: go straight from the entry's start
+    // to 2,000 characters before the words.
+    const deep =
+      `7. **A long entry (2026-01-01).**\n${"    forty characters of an indented line..\n".repeat(900)}` +
+      `    ${"word ".repeat(600)}the needle\n`;
+    const [hit] = find(deep, "the needle").hits;
+    const line = deep.lastIndexOf("\n", deep.indexOf("the needle")) + 1;
+    expect(deep.indexOf("the needle") - line).toBeGreaterThan(2_500);
+    expect(hit!.offset).toBe(line);
+    expect(hit!.text.startsWith("7. **A long entry (2026-01-01).**\nforty characters")).toBe(true);
+    expect(hit!.text).toContain(" … ");
+  });
+
+  it("holds its three measures: 400 characters for a line of its own, 200 for an entry shown from its start", () => {
+    // A line of exactly 400 characters is a wrapped one, and its excerpt
+    // takes the line under it; one more character and it is an entry of its
+    // own. Canary: move the measure to 300 or to 450.
+    const line = (length: number) => `${"ab ".repeat(60)}needle ${"cd ".repeat(200)}`.slice(0, length);
+    const [wrapped] = find(`${line(400)}\nthe line under it\n`, "needle").hits;
+    expect(wrapped!.text).toContain("\nthe line");
+    const [own] = find(`${line(401)}\nthe line under it\n`, "needle").hits;
+    expect(own!.text).not.toContain("the line");
+    // An entry that starts within 200 characters of the excerpt is shown from
+    // its start, once; one character further and its head is lent instead.
+    // Canary: move the measure to 100, or to 300.
+    const entry = (words: number) => `E. ${"ab ".repeat(words)}needle ${"cd ".repeat(200)}`;
+    const [near] = find(entry(118), "needle").hits;
+    expect(near!.text.startsWith("E. ab ab")).toBe(true);
+    expect(near!.text).not.toContain(" … ");
+    const [far] = find(entry(119), "needle").hits;
+    expect(far!.text.startsWith("E. ab ab")).toBe(true);
+    expect(far!.text).toContain(" … ");
+  });
+
+  it("takes no indented line to continue another in a file of data, where an indent is nesting", () => {
+    // What `curl` of an API's releases saves. The nearest unindented line
+    // above any value is the list's opening bracket, and a head lent from
+    // there names the first release for every place.
+    const release = (tag: string, body: string) =>
+      `  {\n    "tag_name": "${tag}",\n    "published_at": "2026-01-01T10:00:00Z",\n    "body": "${body} More of the notes."\n  }`;
+    const json = `[\n${[...Array.from({ length: 12 }, (_, i) => release(`v3.${12 - i}.0`, "Nothing about it.")), release("v2.9.0", "The cache is on by default.")].join(",\n")}\n]\n`;
+    const body = json.indexOf('    "body": "The cache is on');
+    // Canary: lend heads in a JSON file as in prose.
+    const [data] = find(json, "cache is on", 0, false).hits;
+    expect(data!.offset).toBe(body);
+    expect(data!.text).toContain('"tag_name": "v2.9.0"');
+    expect(data!.text).not.toContain("v3.12.0");
+    // As prose, the same place is headed by the top of the file and read
+    // from there.
+    const [prose] = find(json, "cache is on").hits;
+    expect(prose!.text.startsWith("[\n{\n\"tag_name\": \"v3.12.0\"")).toBe(true);
+    expect(prose!.offset).toBe(0);
   });
 
   it("a phrase that runs off the end of a long line is shown whole, and a line under 400 characters is a wrapped one", () => {

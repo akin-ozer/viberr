@@ -237,7 +237,7 @@ describe("ruling 706: a record that grows is read to its latest entry on the sub
   const said = (dataRoot: string, name: string) =>
     readFileSync(path.join(dataRoot, "skills", name, "SKILL.md"), "utf8").replace(/\s+/g, " ");
 
-  it("has the Writer state what the latest entry says, and the Editor read past the entry cited", () => {
+  it("has the Writer state what holds after the latest entry, and the Editor read beyond the entry cited", () => {
     // CANARY: drop the Writer's bullet, or the Editor's, or the sentence that
     // says reading the kept record further is not research.
     const dataRoot = ctx.makeTempDir();
@@ -261,14 +261,16 @@ describe("ruling 706: a record that grows is read to its latest entry on the sub
     // rehearsal the sentence's own words led back to the entry it cited, and
     // the later entry, whose title is about cost, came up only under the
     // feature's name.
+    // What is gone through is the places found, not every later entry: the
+    // entries after ruling 506 are twenty-six pages of a read.
     expect(editor).toContain(
-      "Search the whole kept record, not a cut of it, for the thing that sentence is about, under the name the record gives it, " +
-        "and go through every entry dated after the one cited: a later entry seldom repeats the earlier one's words.",
+      "Search the whole kept record, not a cut of it, for the thing that sentence is about, under the name the record gives it and not the sentence's own words, " +
+        "which a later entry seldom repeats, and go through every place found in an entry dated after the one cited.",
     );
     // What the manual says of the tool is what the tool does: a page of
     // places, not every one. CANARY: restore "lists every place".
     expect(editor).toContain(
-      "`read_task_source` with `find` lists the places that hold a word or phrase, forty to a call, each with its line and the words around it; " +
+      "`read_task_source` with `find` lists the places that hold a word or phrase, up to forty to a call, each with its line and the words around it; " +
         "search on from `nextOffset` while it gives one.",
     );
     expect(editor).not.toContain("lists every place");

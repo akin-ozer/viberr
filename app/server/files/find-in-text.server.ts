@@ -23,12 +23,12 @@ import { escapeRegExp } from "~/shared/text/regexp";
  * longer than this is read, not sought.
  *
  * The word limit is what bounds a search's time, which grows with the words
- * times the text. Measured on Node 26, one scan of 10 MB made of one letter
- * and a space repeated, the worst text for it, by a phrase that fails on its
- * last word: 15 ms for 2 words, 160 ms for 12, 1.8 s for 100 (which 200
- * characters allow). One scan of 10 MB of prose by a 20-word phrase took
- * 6 ms. The server is one process and a search holds it, so the limit is
- * twelve.
+ * times the text. Measured on Node 26 on texts built to be slow for it, 10 MB
+ * of one letter and one to fifty spaces repeated, one scan by a phrase that
+ * fails on its last word took at most 19 ms for 2 words, 234 ms for 12 and
+ * 2.4 s for 100 (which 200 characters allow). One scan of 10 MB of prose by
+ * a 20-word phrase took 6 ms. The server is one process and a search holds
+ * it, so the limit is twelve.
  */
 export const FIND_MAX_WORDS = 12;
 export const FIND_MAX_CHARS = 200;
@@ -59,9 +59,9 @@ const EDGE_SLACK = 24;
 export interface TextHit {
   /** The line they start on, counted from 1. */
   line: number;
-  /** Where to read them from: the start of their entry (their own line, or
-   *  the line an indented one continues) when a page read from there reaches
-   *  them, and otherwise a little before the words. */
+  /** Where to read them from: the start of their entry (the line an indented
+   *  one continues) when a page read from there reaches them, else the start
+   *  of their own line, else a little before the words. */
   offset: number;
   /** The words where they stand, with what surrounds them and, when they
    *  stand far into an entry, the head of that entry before them. */
@@ -137,7 +137,10 @@ function entryStartOf(text: string, lineStart: number): number {
   if (!isSpace(text, lineStart)) return lineStart;
   let at = lineStart;
   while (at > 0 && lineStart - at <= ENTRY_HEAD_REACH) {
-    at = text.lastIndexOf("\n", at - 2) + 1;
+    // The start of the line above. From index 1 that is index 0: asked for a
+    // line break "at or before -1", `lastIndexOf` looks at index 0, finds the
+    // one a text opens with, and the walk would stand still for ever.
+    at = at < 2 ? 0 : text.lastIndexOf("\n", at - 2) + 1;
     if (startsAnEntry(text, at)) return at;
   }
   return lineStart;
@@ -150,16 +153,18 @@ function startsAnEntry(text: string, at: number): boolean {
 }
 
 /**
- * Where an entry runs on to below the line its words stand on, when the
+ * Where an entry runs on to below the line its words start on, when the
  * lines under that one are indented: the end of the last line before the
  * next one that starts an entry, looked for as far as `reach`. `lineEnd` is
- * where the words' line ends. Null when the next line that is not blank
- * starts an entry itself, or there is none.
+ * where that line ends, and the line under it is looked at wherever `reach`
+ * lies. Null when the next line that is not blank starts an entry itself, or
+ * there is none.
  */
 function entryRunsTo(text: string, lineEnd: number, reach: number): number | null {
   let last: number | null = null;
   let lineBreak = lineEnd;
-  while (lineBreak < text.length && lineBreak <= reach) {
+  const until = Math.max(reach, lineEnd);
+  while (lineBreak < text.length && lineBreak <= until) {
     const nextStart = lineBreak + 1;
     const nextBreak = text.indexOf("\n", nextStart);
     const nextEnd = nextBreak === -1 ? text.length : nextBreak;
@@ -188,8 +193,14 @@ function shown(text: string): string {
  * dotless i matches only itself); between two words any run of white space
  * matches, so a phrase a record wraps over two lines is found. Nothing else
  * is loosened: no pattern syntax, no stemming.
+ *
+ * `hangingIndent` says whether an indented line continues the line above it,
+ * which is how prose is wrapped. In data and markup an indent is nesting: the
+ * nearest unindented line above a value in a printed JSON list is the list's
+ * opening bracket, and a head lent from there would name the first item for
+ * every place. The caller that knows the file's kind says which it is.
  */
-export function findInText(whole: string, words: readonly string[], from = 0): TextFind {
+export function findInText(whole: string, words: readonly string[], from = 0, hangingIndent = true): TextFind {
   const hits: TextHit[] = [];
   const find: TextFind = { words: [...words], found: 0, hits };
   // No words would be an empty pattern, which matches everywhere and moves
@@ -227,12 +238,15 @@ export function findInText(whole: string, words: readonly string[], from = 0): T
     // Where the words stand in an indented block, the excerpt stays inside
     // that too: the lines before its head and after its last line are
     // another entry's.
-    const entryStart = entryStartOf(whole, lineStart);
-    const wordsLineEnd = Math.max(end, lineEnd);
-    const runsTo = ownLine ? null : entryRunsTo(whole, wordsLineEnd, end + HIT_AFTER);
+    const entryStart = hangingIndent ? entryStartOf(whole, lineStart) : lineStart;
+    // A phrase may end on a later line than it starts on: the excerpt reaches
+    // at least to where that line ends.
+    const lastBreak = end <= lineEnd ? lineEnd : whole.indexOf("\n", end);
+    const wordsLineEnd = lastBreak === -1 ? whole.length : lastBreak;
+    const runsTo = ownLine || !hangingIndent ? null : entryRunsTo(whole, lineEnd, end + HIT_AFTER);
     const inBlock = entryStart < lineStart || runsTo !== null;
     const floor = ownLine ? lineStart : inBlock ? entryStart : 0;
-    const ceiling = ownLine ? lineEnd : inBlock ? (runsTo ?? wordsLineEnd) : whole.length;
+    const ceiling = ownLine ? lineEnd : inBlock ? Math.max(runsTo ?? 0, wordsLineEnd) : whole.length;
     let windowStart = wordStart(whole, Math.max(floor, start - HIT_BEFORE), start);
     const windowEnd = wordEnd(whole, Math.min(ceiling, end + HIT_AFTER), end);
     // An entry that starts a little before the excerpt is shown from its
