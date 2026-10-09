@@ -49,6 +49,7 @@ function row(patch: Partial<TaskProjectionRow> = {}): TaskProjectionRow {
     goal: "",
     packet_json: null,
     recommendation_count: 0,
+    recommendation_kinds: "",
     event_count: 0,
     comment_count: 0,
     diagnostic_count: 0,

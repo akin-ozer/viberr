@@ -277,12 +277,11 @@ function PullRequestsPanel({
           );
         })}
       </div>
-      {/* F19-34: this used to say "accepting a completion in the review queue".
-          The queue performs zero mutations — it is a read-only triage list whose
-          rows navigate to task detail, which is exactly why ruling 304 (R15-11)
-          labels its row "Review" and not "Accept". Acceptance happens on the
-          task page, next to the evidence it is judged against, so the note names
-          that surface. */}
+      {/* F19-34: this used to say "accepting a completion in the review queue",
+          when the queue had no control that accepts. The note names the task
+          page, whose acceptance, next to the evidence it is judged against, is
+          the one that merges: the Review queue's decision dialog draws that
+          page's regions and posts to its action (ruling 304). */}
       <div className="pol-note after last">
         <Icon name="lock" />
         <span>

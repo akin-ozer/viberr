@@ -77,6 +77,9 @@ async function writeReviewTask(key: string, archived: boolean) {
     frontmatter: baseTaskFrontmatter(key, {
       stage: "review",
       waiting: "human",
+      // Ruling 304: the review badge counts the viewer's own tasks, so this
+      // one is arda's, who reads the rail.
+      ownerUserId: ardaId,
       archived,
     }),
   });

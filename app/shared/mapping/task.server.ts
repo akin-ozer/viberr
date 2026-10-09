@@ -123,6 +123,8 @@ export type TaskProjectionRow = {
   packet_json: string | null;
   /** Pending operator recommendations on the task file (F7-NOTIF1). */
   recommendation_count: number;
+  /** F37-71: their distinct kinds, sorted and comma-joined ('' for none). */
+  recommendation_kinds: string;
   event_count: number;
   comment_count: number;
   diagnostic_count: number;
@@ -162,9 +164,9 @@ export interface AgentRender {
   pinnedBackend?: "codex" | "claude" | null;
   /** U35-5 (pass 35): true when this engagement is a REQUIRED reviewer (an
    *  explicit `report-validation-verdict: direct` grant snapshotted at engage
-   *  time, F10-15). The review queue's "Still in review" membership reads it:
-   *  a task whose required reviewer has not approved the current revision is
-   *  review work wherever its stage is. Optional like `pinnedBackend`:
+   *  time, F10-15). The review queue's review-work test reads it: a task
+   *  whose required reviewer has not approved the current revision is review
+   *  work wherever its stage is. Optional like `pinnedBackend`:
    *  `mapAgentRef` always sets it, and a render built by hand without it
    *  reads as not verdict-capable, which fails CLOSED (the row is not
    *  claimed as review work on the strength of a missing key). */

@@ -137,7 +137,7 @@ export function getEpicPage(
   if (!epic) throw data(`No epic ${epicId} in projects/${slug}.`, { status: 404 });
   const { workspace, viewer } = input;
   const inEpic = workspace.tasks.filter((t) => t.epicId === epicId);
-  const statuses = boardStatuses(db, viewer.id, slug, inEpic, workspace.reviewQueue.ready.map((r) => r.key));
+  const statuses = boardStatuses(db, viewer.id, slug, inEpic, workspace.reviewQueue.acceptableKeys);
   const others = listOtherEpics(db, slug, epicId);
   return {
     epic,

@@ -89,6 +89,12 @@ export interface TaskActivitySummary extends TaskSummary {
   lastActivityAt: string | null;
   /** Past its threshold, no run in flight, not archived, not terminal. */
   quiet: boolean;
+  /** Ruling 304: the operator's pending recommendations on the task file, as
+   *  the projection counts them (`recommendation_count`, and the distinct
+   *  `recommendation_kinds`), for the Review queue to list its owner's task by.
+   *  Read off the row this list already selects, so the queue asks nothing
+   *  more; every loader picks the fields it ships, so no payload carries it. */
+  pendingRecommendations: { count: number; kinds: string[] };
 }
 
 export interface BoardColumn {
@@ -292,6 +298,10 @@ function mapProjectTasks(
       ...summary,
       lastActivityAt: facts.lastActivityAt,
       quiet: isQuiet(quietAt),
+      pendingRecommendations: {
+        count: row.recommendation_count,
+        kinds: row.recommendation_kinds ? row.recommendation_kinds.split(",") : [],
+      },
     };
   });
 }

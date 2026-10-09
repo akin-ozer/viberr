@@ -35,7 +35,7 @@ export interface WorkspaceRead {
   /** D2 (R7-1): an org admin viewing a project they are not a member of. */
   orgAdminOverride: boolean;
   /** U35-5: the review queue, read once — `total` is the rail badge and
-   *  `ready` feeds the board's "waiting on me" (UI-48). */
+   *  `acceptableKeys` feeds the board's "waiting on me" (UI-48). */
   reviewQueue: ReviewQueueData;
 }
 

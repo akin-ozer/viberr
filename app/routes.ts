@@ -103,6 +103,10 @@ export default [
     "projects/:slug/tasks/:key/dependency-candidates",
     "routes/task-dependency-candidates.ts",
   ),
+  // Ruling 304: the Review queue's decision dialog read (the task's open
+  // decision, the completion it offers and what the accept dialog names),
+  // loaded by the dialog itself, member-only.
+  route("projects/:slug/tasks/:key/decision", "routes/task-decision.ts"),
 
   // Bare /projects → home (the project list lives at `/`), not a 404 (N5).
   route("projects", "routes/projects.tsx"),

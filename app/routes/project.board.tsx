@@ -65,14 +65,11 @@ export async function loader({ request, params }: Route.LoaderArgs) {
   // waiting on a human can have no packet). A maintainer therefore saw VIB-142
   // under "Waiting on your acceptance" while the board's chip excluded it.
   // Union the two predicates here so both surfaces read one answer; the review
-  // queue's `ready` list is already viewer-scoped by acceptance authority.
+  // queue's `acceptableKeys` are viewer-scoped by acceptance authority, and
+  // reach every task the viewer may accept, not only the ones the queue lists
+  // as theirs (ruling 304).
   // U35-5: the queue is read ONCE per request, with the layout's rail badge.
-  const myDecisions = waitingOnViewer(
-    db,
-    user.id,
-    params.slug,
-    reviewQueue.ready.map((r) => r.key),
-  );
+  const myDecisions = waitingOnViewer(db, user.id, params.slug, reviewQueue.acceptableKeys);
   // Ruling 44: a card says "agent queued" for a run the cap parked; the fact
   // is on the run row, read once for the project.
   const liveRuns = liveRunStateByTask(db, params.slug);

@@ -15,7 +15,7 @@ import ReviewView from "./project.review";
 
 afterEach(cleanup);
 
-type Row = Route.ComponentProps["loaderData"]["working"][number];
+type Row = Route.ComponentProps["loaderData"]["decisions"][number];
 
 const row = (key: string): Row => ({
   key,
@@ -28,6 +28,7 @@ const row = (key: string): Row => ({
   waiting: "human",
   resumesAt: null,
   packet: null,
+  recommendations: 1,
   goalEditPending: false,
   latestEventText: null,
   pr: null,
@@ -40,9 +41,8 @@ const row = (key: string): Row => ({
 
 const LOADER_DATA: Route.ComponentProps["loaderData"] = {
   slug: "viberr-core",
-  ready: [],
-  working: [row("VIB-150"), row("VIB-151"), row("VIB-153")],
-  total: 3,
+  completions: [],
+  decisions: [row("VIB-150"), row("VIB-151"), row("VIB-153")],
   stageNames: { review: "Review", terminal: "Done" },
   acceptance: { operatorCanAccept: false, operatorName: "Operator" },
   waitingOnMe: [],

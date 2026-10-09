@@ -174,6 +174,16 @@ function seed(
  *  delivery, and the identity its review binds to. */
 const REPORT_AT = "2026-09-22T06:23:28.646Z";
 
+/** Ruling 304: the operator's recommendation to run the project's reviewer,
+ *  which makes the task its owner's decision in the Review queue. */
+const RUN_REVIEWER = {
+  id: "rec_review",
+  kind: "run_agent" as const,
+  profileId: "reviewer",
+  label: "Run Code Reviewer",
+  detail: "",
+};
+
 /** An agent reply that saved a report into the task's `attachments/` dir. */
 function reportEvent(): TaskFileEvent {
   return {
@@ -281,9 +291,17 @@ describe("ruling 89: a required reviewer the project declares gates acceptance",
 
   it("ruling 81: the review queue agrees, so the two surfaces cannot drift", () => {
     const store = prepared([{ stageId: "review", profileId: "reviewer" }]);
+    // Ruling 304: arda's own task, with the operator's recommendation to run
+    // the reviewer waiting on her, so the queue lists it as her decision.
     seed(
       store,
-      { stage: "review", waiting: "human", deliveredAt: REPORT_AT },
+      {
+        stage: "review",
+        waiting: "human",
+        deliveredAt: REPORT_AT,
+        ownerUserId: store.users.arda.id,
+        recommendations: [RUN_REVIEWER],
+      },
       null,
       [reportEvent()],
     );
@@ -291,8 +309,8 @@ describe("ruling 89: a required reviewer the project declares gates acceptance",
       dataRoot: store.dataRoot,
       viewerUserId: store.users.arda.id,
     });
-    expect(rows.ready.map((t) => t.key)).not.toContain("VIB-1");
-    expect(rows.working.find((t) => t.key === "VIB-1")?.blockReason).toContain(
+    expect(rows.acceptableKeys).not.toContain("VIB-1");
+    expect(rows.decisions.find((t) => t.key === "VIB-1")?.blockReason).toContain(
       "Required reviewer Code Reviewer",
     );
   });
@@ -408,23 +426,26 @@ describe("ruling 89: a required reviewer the project declares gates acceptance",
     expect(String(forced[0]!.details?.bypassed)).toContain("Required reviewer Code Reviewer (project rule at Review)");
   });
 
-  it("the review queue reads the same rule: the task is listed as review work, never offered for acceptance, until the verdict lands", () => {
+  it("the review queue reads the same rule: the task is never offered for acceptance until the verdict lands", () => {
     // Canary: leave `requiredReviewers` out of `acceptanceBlockReason` (rebuilder).
     const store = prepared([{ stageId: "review", profileId: "reviewer" }]);
-    seed(store, reviewedByOther());
+    // Ruling 304: arda's own task, with the operator's recommendation to run
+    // the reviewer waiting on her, so the queue lists it as her decision.
+    const owned = { ownerUserId: store.users.arda.id, recommendations: [RUN_REVIEWER] };
+    seed(store, reviewedByOther(owned));
     const held = getReviewQueue(store.db, store.slug, {
       dataRoot: store.dataRoot,
       viewerUserId: store.users.arda.id,
     });
-    expect(held.ready.map((t) => t.key)).not.toContain("VIB-1");
-    expect(held.working.find((t) => t.key === "VIB-1")?.blockReason).toBe(RULE_SENTENCE);
+    expect(held.acceptableKeys).not.toContain("VIB-1");
+    expect(held.decisions.find((t) => t.key === "VIB-1")?.blockReason).toBe(RULE_SENTENCE);
 
-    seed(store, reviewedByOther({ verdicts: [approval("qa-bot"), approval("reviewer")] }));
+    seed(store, reviewedByOther({ ...owned, verdicts: [approval("qa-bot"), approval("reviewer")] }));
     const ready = getReviewQueue(store.db, store.slug, {
       dataRoot: store.dataRoot,
       viewerUserId: store.users.arda.id,
     });
-    expect(ready.ready.map((t) => t.key)).toEqual(["VIB-1"]);
+    expect(ready.completions.map((t) => t.key)).toEqual(["VIB-1"]);
   });
 });
 

@@ -120,7 +120,7 @@ export function DecidedPacketContent({
   decided: NonNullable<PacketRender["decided"]>;
   busy: boolean;
   canEditGoal: boolean;
-  onAsk: () => void;
+  onAsk: (() => void) | undefined;
   onEditGoal: ((draft: string) => void) | undefined;
 }) {
   const chosen = p.options[decided.optionIndex];
@@ -172,7 +172,7 @@ export function DecidedPacketContent({
         </figure>
       )}
       <div className="packet-actions">
-        <AskOperatorButton onAsk={onAsk} />
+        {onAsk && <AskOperatorButton onAsk={onAsk} />}
         {canEditGoal && chosen && draft && onEditGoal && (
           <button
             type="button"
@@ -667,13 +667,13 @@ export function PacketActions({
   choice: PacketChoice;
   canResolve: boolean;
   busy: boolean;
-  onAsk: () => void;
+  onAsk: (() => void) | undefined;
 }) {
   const { blockReason } = choice;
   return (
     <div className="packet-actions">
       {/* FIRST in the row: actions end on the primary commit (flex-end). */}
-      <AskOperatorButton onAsk={onAsk} />
+      {onAsk && <AskOperatorButton onAsk={onAsk} />}
       {canResolve && (
         <button
           type="button"

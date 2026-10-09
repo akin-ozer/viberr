@@ -19,9 +19,8 @@ export interface ReviewRowView {
   /** U35-5: the display name of the stage the task sits at; the subline names
    *  it for a row that is not at the review boundary. */
   stageName: string;
-  /** U35-5: at the project's resolved review stage (the acceptance boundary).
-   *  False for review work listed from an earlier stage: an open review PR, or
-   *  a required reviewer's verdict outstanding on the current revision. */
+  /** U35-5: at a stage acceptance is legal from (the acceptance boundary).
+   *  False for a decision on a task that stands earlier. */
   atAcceptanceBoundary: boolean;
   /** F26-14: the same lightweight triage metadata the board card shows, carried
    *  to the acceptance boundary (where a forgotten high/overdue task costs most).
@@ -38,6 +37,8 @@ export interface ReviewRowView {
    *  itself back up. */
   resumesAt?: string | null;
   packet: { kind: string; title: string } | null;
+  /** Ruling 304: the operator's recommendations waiting on the task. */
+  recommendations: number;
   /** Ruling 63: the packet is decided and waits for the edited goal. */
   goalEditPending: boolean;
   latestEventText: string | null;
@@ -65,8 +66,8 @@ export interface ReviewRowView {
   } | null;
   validation: ValidationValue;
   /** F10-11: why the current revision is NOT acceptance-ready (null when it is).
-   *  Only ever populated on "Still in review" rows — the acceptance panel holds
-   *  only rows with a null block reason. */
+   *  A row the acceptance panel lists with no packet open always has none; a
+   *  packet's row and a recommendation's row may. */
   blockReason: string | null;
   /** Gap-10: ISO of the newest timeline event (`occurred_at`); null when the
    *  timeline is empty. */
@@ -179,6 +180,27 @@ function reviewInProgressSub(t: ReviewRowView): string {
   return parts.join(" · ");
 }
 
+/** Ruling 63: a decided edit_goal packet is not a decision still owed — the
+ *  row says what is owed instead of re-offering the packet. */
+const GOAL_EDIT_PENDING_SUB =
+  "Goal edit pending: save the edited goal to clear the decision packet.";
+
+/**
+ * Ruling 304: an "Open decisions" row names the decision it opens: the
+ * packet's kind and its question, wherever the task stands, or the operator's
+ * recommendations waiting on it. Its stage, PR and verdict facts are the
+ * dialog's to show beside the choices.
+ */
+export function decisionRowSub(t: ReviewRowView): string {
+  if (t.goalEditPending) return GOAL_EDIT_PENDING_SUB;
+  if (t.packet) return t.packet.kind + ": " + t.packet.title;
+  if (t.recommendations === 1) return "Operator recommendation: apply or dismiss it.";
+  if (t.recommendations > 1) {
+    return `${t.recommendations} operator recommendations: apply or dismiss them.`;
+  }
+  return reviewRowSub(t);
+}
+
 /** The subline stripper is the shared `plainText` helper (same regexes as
  * the mock's `rqStripMd` — ruling 297, one stripper app-wide). */
 export function reviewRowSub(t: ReviewRowView): string {
@@ -205,11 +227,7 @@ export function reviewRowSub(t: ReviewRowView): string {
   // F10-11: a not-yet-acceptable task states WHY (failing / awaiting a reviewer /
   // no delivered revision) instead of a generic "needs a human decision".
   if (t.blockReason) return t.blockReason;
-  // Ruling 63: a decided edit_goal packet is not a decision still owed — the
-  // row says what is owed instead of re-offering the packet.
-  if (t.goalEditPending) {
-    return "Goal edit pending: save the edited goal to clear the decision packet.";
-  }
+  if (t.goalEditPending) return GOAL_EDIT_PENDING_SUB;
   if (t.packet) return t.packet.kind + ": " + t.packet.title;
   // P14-LV-05: live PR state outranks the newest timeline note.
   if (t.pr) return prStateSub(t.pr);
