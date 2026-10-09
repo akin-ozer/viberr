@@ -1030,7 +1030,10 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
         requireOrgAdmin("read the org knowledge bases");
         const target = resolveStoreTarget(db, "kb", args.id, { dataRoot });
         if (!target) return `[denied] No knowledge base with id ${args.id}.`;
-        const doc = readStoreDoc(target, [args.path]);
+        // Ruling 212: read the whole file, past `readStoreDoc`'s 256 KB cap.
+        // The `version` below is hashed from the whole file, so pages that
+        // stopped at the cap let a replace naming it delete the unread tail.
+        const doc = readStoreDoc(target, [args.path], Number.POSITIVE_INFINITY);
         if (!doc) {
           return (
             `[denied] ${args.path} is not a document in that knowledge base. ` +
@@ -1047,7 +1050,6 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
           path: args.path,
           // Ruling 18(b): UTF-8 bytes, the unit the write replies use.
           bytes: utf8Bytes(doc.text),
-          truncated: doc.truncated,
           // Ruling 212(a): hand back the version this text IS, so a replace can
           // say which one it is replacing and Viberr can refuse when the
           // document moved underneath it.

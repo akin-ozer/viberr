@@ -827,6 +827,37 @@ describe("list_decisions briefs the person and decides nothing (ruling 263)", ()
     expect(second.nextOffset).toBeNull();
   });
 
+  it("ruling 212: a document past 256 KB reads page by page to its end, so a replace never drops a tail it did not read", async () => {
+    // The version a replace names is hashed from the whole file, so the pages
+    // must reach the whole file too: pages that stopped at the store reader's
+    // 256 KB cap ended with `nextOffset: null`, and a replace built from them
+    // deleted everything past it under a version that matched.
+    // CANARY: read through `readStoreDoc`'s default cap again and the joined
+    // pages stop at 262,144 characters, without the tail.
+    const tail = "\n## Tail\n\n- the last ruling, past 256 KB\n";
+    const body = "- a ruling line\n".repeat(17_000) + tail;
+    const created = await call(ids.orgAdmin, "save_knowledge_base", {
+      name: "past-the-cap",
+      doc: { path: "rulings.md", content: body },
+    });
+    const kb = /id (kb_[\w-]+)/.exec(created)?.[1];
+    expect(kb, created).toBeTruthy();
+    type Page = { text: string; characters: number; nextOffset: number | null };
+    const pages: string[] = [];
+    let offset: number | null = 0;
+    while (offset !== null && pages.length < 20) {
+      // SAFETY: `read_knowledge_base_doc` answers the JSON it built; these are its own fields.
+      const page = JSON.parse(
+        await call(ids.orgAdmin, "read_knowledge_base_doc", { id: kb!, path: "rulings.md", offset }),
+      ) as Page;
+      expect(page.characters).toBe(body.length);
+      pages.push(page.text);
+      offset = page.nextOffset;
+    }
+    expect(offset).toBeNull();
+    expect(pages.join("")).toBe(body);
+  });
+
   it("ruling 212(b): edit_knowledge_base_doc changes one passage of a long document in place", async () => {
     // Live, three sentences into a 104 KB document cost a replace that cut it
     // to 19,587 bytes and eight appends that typed the rest back in. The tool
