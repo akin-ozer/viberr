@@ -33,6 +33,17 @@ const shotSchema = z.object({
   /** On a frame of a moving view: ms after the screen came into view. */
   moment: z.number().optional(),
 });
+/** What moves on a page: on every page on the web and every measured one. */
+const motionSchema = z.strictObject({
+  running: z.array(z.strictObject({ name: z.string(), target: z.string(), durationMs: z.number().nullable(), loops: z.boolean() })),
+  runningCount: z.number(),
+  videos: z.array(
+    z.strictObject({ autoplay: z.boolean(), loop: z.boolean(), playing: z.boolean(), width: z.number(), height: z.number() }),
+  ),
+  sticky: z.strictObject({ what: z.string(), position: z.enum(["fixed", "sticky"]) }).nullable(),
+  onScroll: z.number(),
+  hover: z.array(z.strictObject({ what: z.string(), changes: z.array(z.string()), durationMs: z.number().nullable() })),
+});
 const reportSchema = z.object({
   pages: z.array(
     z.object({
@@ -46,6 +57,7 @@ const reportSchema = z.object({
       askedCount: z.number(),
       missing: z.array(z.string()),
       error: z.string().nullable(),
+      motion: motionSchema.optional(),
     }),
   ),
 });
@@ -960,7 +972,8 @@ describe("a page on the web, pictured by the renderer child (ruling 327)", () =>
     // Chromium behind the dead proxy, fetches nothing from the other host
     // (`status: null`).
     const [first] = b.browser.pages();
-    expect(b.browser.pages().map((page) => page.url)).toEqual(Array.from({ length: 3 }, () => `${reference.origin}/`));
+    // One load a view, and the one on which what moves on it is read.
+    expect(b.browser.pages().map((page) => page.url)).toEqual(Array.from({ length: 4 }, () => `${reference.origin}/`));
     expect(first!.resources).toEqual([
       { src: `${other.origin}/logo.png`, status: 200, bytes: 8 },
       { src: "/hero.png", status: 200, bytes: 8 },
@@ -991,6 +1004,80 @@ describe("a page on the web, pictured by the renderer child (ruling 327)", () =>
     // waited for ahead of them. CANARY: wait for quiet there too and the
     // first frame comes over a second after the load.
     expect(report.pages[0]!.shots[3]!.moment).toBeLessThan(1000);
+  });
+
+  it("reads what moves on a page on the web once, on a load of its own at the first width that is not a phone's: what runs a second after the load, what animates in as it is scrolled to, a bar that stays, and the controls whose look changes under the real pointer", async () => {
+    const running = Array.from({ length: 14 }, (_, at) => ({ name: `pulse-${at}`, target: "div.dot", durationMs: 1200, loops: true }));
+    const videos = Array.from({ length: 7 }, (_, at) => ({ autoplay: true, loop: at === 0, playing: true, width: 640, height: 360 }));
+    const hover = [
+      { what: "a.nav-link", at: [100, 20], changes: ["color", "text-decoration-line"], durationMs: 150 },
+      { what: "button.cta", at: [300, 400], changes: ["background-color", "transform"] },
+      // A control whose look does not change is tried and left out.
+      { what: "label.quiet", at: [50, 600], changes: [] },
+    ];
+    const reference = await site({
+      "/": [
+        `<p>fake-animations:${JSON.stringify(running)}</p>`,
+        `<p>fake-videos:${JSON.stringify(videos)}</p>`,
+        '<p>fake-sticky:{"what":"header.site","position":"sticky"}</p>',
+        "<p>fake-on-scroll:5</p>",
+        `<p>fake-hover:${JSON.stringify(hover)}</p>`,
+      ].join("\n"),
+    });
+    const b = bench({ "page.html": "<p>a task page nobody asked to measure</p>" });
+    const report = await b.run({ pages: [], web: [{ file: "the reference", url: `${reference.origin}/` }], views: [PHONE, DESKTOP] });
+    expect(report.pages[0]).toMatchObject({ error: null });
+    // CANARY: hand on every animation and video the page names and these are
+    // 14 and 7 long.
+    expect(report.pages[0]!.motion).toEqual({
+      running: running.slice(0, 12),
+      runningCount: 14,
+      videos: videos.slice(0, 6),
+      sticky: { what: "header.site", position: "sticky" },
+      onScroll: 5,
+      hover: [
+        { what: "a.nav-link", changes: ["color", "text-decoration-line"], durationMs: 150 },
+        { what: "button.cta", changes: ["background-color", "transform"], durationMs: null },
+      ],
+    });
+    // Its own load, after both pictures, at the desktop's width: a pointer
+    // means nothing at a phone's. CANARY: read it at the first view whatever
+    // it is and the third load is 390 px wide.
+    expect(b.browser.pages().map((page) => page.metrics.width)).toEqual([390, 1280, 1280]);
+    // That load is not walked first: what animates in as a reader scrolls to
+    // it plays once, and is counted on the page's first walk. Measured on a
+    // real page: a second walk counted none of three. CANARY: read motion on
+    // a view's own load, after its walk, and a `walk` comes third here.
+    const reading = b.browser.asks().slice(2);
+    expect(reading.map((asked) => asked.ask)).toEqual([
+      "animations",
+      "on-scroll",
+      "sticky",
+      "hover-list",
+      "hover-rest",
+      "hover-read",
+      "hover-rest",
+      "hover-read",
+      "hover-rest",
+      "hover-read",
+    ]);
+    // What still runs a second after the load is what moves on a page: an
+    // entrance is over by then. CANARY: read without that wait and this is
+    // the half second a page on the web is given to go quiet.
+    expect(reading[0]!.sinceLoadMs).toBeGreaterThanOrEqual(1000);
+    // The real pointer, onto each control in turn. CANARY: read each look
+    // twice with the pointer left where it was and no control's changes (the
+    // stand-in's change only under the pointer, as a page's `:hover` does).
+    expect(b.browser.inputs()).toEqual([
+      { method: "Input.dispatchMouseEvent", type: "mouseMoved", x: 100, y: 20 },
+      { method: "Input.dispatchMouseEvent", type: "mouseMoved", x: 300, y: 400 },
+      { method: "Input.dispatchMouseEvent", type: "mouseMoved", x: 50, y: 600 },
+    ]);
+
+    // A task page nobody asked to measure is pictured and nothing more.
+    const plain = await b.run({ pages: ["page.html"], views: [DESKTOP] });
+    expect(plain.pages[0]).not.toHaveProperty("motion");
+    expect(b.browser.pages()).toHaveLength(4);
   });
 
   it("says in the browser's own words when a page on the web does not load, refuses one that ends up off the web, and holds a press to the site the page is on", async () => {

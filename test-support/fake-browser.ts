@@ -74,7 +74,8 @@ import { z } from "zod";
  * `dialogs.jsonl` (each dialog it opened: its type and how it
  * was answered), `inputs.jsonl` (each pointer and key event), `emulations.jsonl`
  * (each change of the emulated media, the cache and the line) and `asks.jsonl`
- * (each marked expression: its name and what it was asked with).
+ * (each marked expression: its name, what it was asked with and how long
+ * after the page's load event).
  *
  * A suite whose door refuses a loopback address stands a loopback server in
  * for a name on the web with a `host:look.example=127.0.0.1:4100` rule, as a
@@ -150,6 +151,8 @@ let lastRequestAt = 0;
 let lateLeft = 0;
 /** When the last pointer or key event arrived. */
 let lastInputAt = 0;
+/** When the page's load event was sent. */
+let loadedAt = 0;
 
 /** The names a suite's loopback server stands in for, as a hosts file would
  *  name them: a \`host:look.example=127.0.0.1:4100\` rule each. */
@@ -302,6 +305,7 @@ async function navigate(message) {
   lateLeft = declared("trickle", 0);
   evidence("pages.jsonl", { url, status: main.status, headers: main.headers, html, metrics: { ...metrics }, resources, reducedMotion });
   send({ id: message.id, sessionId: message.sessionId, result: { frameId: "F1" } });
+  loadedAt = Date.now();
   send({ method: "Page.loadEventFired", sessionId: message.sessionId, params: { timestamp: 1 } });
   while (lateLeft > 0 && page.url === url) {
     await pause(200);
@@ -324,7 +328,7 @@ function evaluate(message) {
   if (!marked) return reply({ result: { type: "string", value: moved || page.url } });
   const ask = marked[1];
   const args = JSON.parse(marked[2]);
-  evidence("asks.jsonl", { ask, args });
+  evidence("asks.jsonl", { ask, args, sinceLoadMs: Date.now() - loadedAt });
   switch (ask) {
     case "walk":
       return reply({ result: { type: "string", value: told("lands", null) || moved || page.url } });
@@ -603,6 +607,8 @@ export type FakeBrowserEmulation = z.infer<typeof emulationSchema>;
 const askSchema = z.object({
   ask: z.string(),
   args: z.record(z.string(), z.union([z.string(), z.number(), z.boolean()])),
+  /** How long after the page's load event it was asked. */
+  sinceLoadMs: z.number(),
 });
 export type FakeBrowserAsk = z.infer<typeof askSchema>;
 

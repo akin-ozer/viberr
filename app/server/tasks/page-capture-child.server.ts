@@ -73,6 +73,10 @@ import { z } from "zod";
  *    kind `web`): opened at its own address in a browser with the network
  *    open, once it has asked for nothing for half a second. A job holds such
  *    pages or task pages, never both, so no task page meets the open network.
+ *  - **Reads what moves on it** (a page on the web, and any page of a
+ *    measured job): once every view is pictured, on a load of its own, what
+ *    is running a second after the load, what animates in as the page is
+ *    scrolled, a bar that stays, and what changes under the pointer.
  *  - **Dismisses a dialog the page opens.** `alert()`, `confirm()` and
  *    `prompt()` stop a page until somebody answers, and nobody is there: each
  *    is dismissed and counted, so the page loads on and the report says so.
@@ -257,6 +261,34 @@ interface Act {
   error: string | null;
 }
 
+/** One thing that was running on a page a second after it loaded. */
+interface Running {
+  /** A CSS animation's name, a transition's property, or "script
+   *  animation". */
+  name: string;
+  /** The element it moves, as `tag.firstClass` or `tag#id`. */
+  target: string;
+  /** How long one run of it lasts, when that is a number of ms. */
+  durationMs: number | null;
+  /** It never ends by itself. */
+  loops: boolean;
+}
+
+/** What moves on a page: on every page on the web (ruling 327) and on every
+ *  page of a measured job (ruling 328). */
+interface Motion {
+  running: Running[];
+  /** How many were running in all; `running` names the first of them. */
+  runningCount: number;
+  videos: Array<{ autoplay: boolean; loop: boolean; playing: boolean; width: number; height: number }>;
+  /** A bar that stays at the top of the screen while the page scrolls. */
+  sticky: { what: string; position: "fixed" | "sticky" } | null;
+  /** How many elements began to animate as they were scrolled into view. */
+  onScroll: number;
+  /** The controls whose look changes under the pointer, and what changes. */
+  hover: Array<{ what: string; changes: string[]; durationMs: number | null }>;
+}
+
 /** One page as the report states it. */
 interface PageReport {
   file: string;
@@ -274,6 +306,7 @@ interface PageReport {
    *  among the files, or (starting with `/`) a path outside its own folder. */
   missing: string[];
   error: string | null;
+  motion?: Motion;
 }
 
 /** A markdown source past this is not set as a page. */
@@ -306,6 +339,29 @@ const AFTER_PRESS_MS = 700;
  *  is never waited on for longer than the second. */
 const QUIET_MS = 500;
 const QUIET_MAX_MS = 5_000;
+/** What is still running this long after the load event is what moves on a
+ *  page: an entrance is over by then. */
+const SETTLE_MS = 1_000;
+/** How much of what moves a report names: animations, videos, and the
+ *  controls a pointer is tried on. */
+const RUNNING_MAX = 12;
+const VIDEOS_MAX = 6;
+const HOVER_MAX = 8;
+/** How long a control gets under the pointer before its look is read again. */
+const HOVER_WAIT_MS = 350;
+/** What of a control's look is read at rest and again under the pointer. */
+const HOVER_LOOK = ["color", "background-color", "border-color", "box-shadow", "transform", "opacity", "text-decoration-line", "filter"];
+/** The most screens a page is walked for what animates in, and how long each
+ *  stop lasts. */
+const ON_SCROLL_SCREENS = 40;
+const ON_SCROLL_STOP_MS = 250;
+/** How far down a page is sent to see what stays at the top of the screen. */
+const STICKY_SCROLL_PX = 600;
+/** What no one step of reading a page may run past, so that a slow one leaves
+ *  time for the rest, and how much of a page's time is kept back for ending
+ *  its browser and writing the report. */
+const STEP_MAX_MS = 15_000;
+const CLOSING_MS = 1_000;
 /** The longest reason an act carries: the name asked for, and every control
  *  the page named in its place. */
 const ACT_ERROR_MAX = SENTENCE_MAX + ACT_NAMES_MAX * (ACT_NAME_MAX + 4);
@@ -791,8 +847,13 @@ type PageArgs = { [key: string]: string | number | boolean };
  *  - `kind`: what a control is, in a word: its `role`, else "link" for an
  *    `a`, "button" for a button-like `input`, "field" for any other, else its
  *    tag.
+ *  - `spot`: which element, as its author would point at it: its tag and
+ *    first class, else its tag and id.
  *  - `jump`: send the window to a height in one step, whatever
  *    `scroll-behavior` the page sets.
+ *  - `KEPT`: where a reading keeps what a later expression of it needs (the
+ *    controls it noted), on the window, under a symbol no page script meets
+ *    by accident.
  */
 const PAGE_HELPERS = `
 const flat = (text) => String(text == null ? "" : text).replace(/\\s+/g, " ").trim();
@@ -801,6 +862,7 @@ const visible = (el) => {
   return box.width > 0 && box.height > 0 && getComputedStyle(el).visibility !== "hidden";
 };
 const tagOf = (el) => el.tagName.toLowerCase();
+const spot = (el) => tagOf(el) + (el.classList.length > 0 ? "." + el.classList[0] : el.id ? "#" + el.id : "");
 const words = (el) => {
   const label = flat(el.getAttribute("aria-label"));
   if (label) return label;
@@ -940,6 +1002,207 @@ function scrollExpression(y: number): string {
   return inPage("scroll", { y }, "jump(args.y); return JSON.stringify({ y: window.scrollY });");
 }
 
+/**
+ * What is running in the page now, and its videos. An animation's name is its
+ * CSS name, a transition's the property it moves, and one a script started
+ * has none. A scroll-driven one is listed too, with no duration: its length
+ * is a share of the scroll, not a time.
+ */
+const ANIMATIONS_EXPRESSION = inPage(
+  "animations",
+  {},
+  `
+  const running = document.getAnimations().filter((animation) => animation.playState === "running");
+  const told = running.slice(0, 200).map((animation) => {
+    const effect = animation.effect;
+    const timing = effect && effect.getComputedTiming ? effect.getComputedTiming() : {};
+    const el = effect ? effect.target : null;
+    return {
+      name: flat(animation.animationName || animation.transitionProperty || "script animation"),
+      target: el ? spot(el) + (effect.pseudoElement || "") : "",
+      durationMs: Number.isFinite(timing.duration) ? Math.round(timing.duration) : null,
+      loops: timing.iterations === Infinity,
+    };
+  });
+  const videos = Array.from(document.querySelectorAll("video")).slice(0, 50).map((video) => {
+    const box = video.getBoundingClientRect();
+    return { autoplay: video.autoplay, loop: video.loop, playing: !video.paused && !video.ended, width: Math.round(box.width), height: Math.round(box.height) };
+  });
+  return JSON.stringify({ count: running.length, running: told, videos });
+`,
+);
+
+/**
+ * Walk the page one screen at a time and count the elements that begin to
+ * animate on the way: the ones with a running animation or transition at a
+ * stop that had none at any stop before it, the top of the page included. It
+ * has to be the page's first walk. What animates in as a reader scrolls to it
+ * plays once: measured on a page of three such sections (Chrome 153), the
+ * first walk counted three and a second walk none.
+ */
+const ON_SCROLL_EXPRESSION = inPage(
+  "on-scroll",
+  {},
+  `
+  const moving = () => new Set(document.getAnimations().filter((animation) => animation.playState === "running" && animation.effect && animation.effect.target).map((animation) => animation.effect.target));
+  const before = moving();
+  const began = new Set();
+  const note = () => {
+    for (const el of moving()) {
+      if (before.has(el)) continue;
+      before.add(el);
+      began.add(el);
+    }
+  };
+  const root = document.documentElement;
+  const height = () => Math.max(root ? root.scrollHeight : 0, document.body ? document.body.scrollHeight : 0);
+  const step = window.innerHeight;
+  for (let y = step, stops = 1; y < height() && stops < ${ON_SCROLL_SCREENS}; y += step, stops += 1) {
+    jump(y);
+    // Twice a stop: a short transition is over before the stop is.
+    await pause(${Math.round(ON_SCROLL_STOP_MS * 0.4)});
+    note();
+    await pause(${Math.round(ON_SCROLL_STOP_MS * 0.6)});
+    note();
+  }
+  jump(0);
+  await pause(100);
+  return JSON.stringify({ count: began.size });
+`,
+);
+
+/**
+ * Send the page down and say what stays at the top of the screen: an element
+ * that is `fixed` or `sticky`, at least half the screen wide, with its box
+ * still at the top. A bar, so no taller than half the screen: a backdrop
+ * fixed over the whole of it is not one. It is looked for at two heights and
+ * has to be in the same place at both, or a sticky element that only happens
+ * to be passing the top would be named. A page that does not scroll has
+ * nothing to stay.
+ */
+const STICKY_EXPRESSION = inPage(
+  "sticky",
+  {},
+  `
+  const bars = () => {
+    const found = new Map();
+    for (const el of Array.from(document.querySelectorAll("body *")).slice(0, 5000)) {
+      const style = getComputedStyle(el);
+      if ((style.position !== "fixed" && style.position !== "sticky") || style.visibility === "hidden") continue;
+      const box = el.getBoundingClientRect();
+      const wide = box.width >= window.innerWidth / 2 && box.height > 0 && box.height <= window.innerHeight / 2;
+      if (wide && box.top >= -1 && box.top <= 24) found.set(el, { top: box.top, position: style.position });
+    }
+    return found;
+  };
+  jump(${STICKY_SCROLL_PX});
+  await pause(150);
+  const at = window.scrollY;
+  let bar = null;
+  if (at >= 1) {
+    const first = bars();
+    jump(at + 200);
+    await pause(150);
+    const second = window.scrollY - at >= 1 ? bars() : first;
+    for (const [el, was] of first) {
+      const now = second.get(el);
+      if (now && Math.abs(now.top - was.top) <= 1) {
+        bar = { what: spot(el), position: was.position };
+        break;
+      }
+    }
+  }
+  jump(0);
+  await pause(50);
+  return JSON.stringify({ sticky: bar });
+`,
+);
+
+/** The controls a pointer is tried on: the visible ones on the page's first
+ *  two screens, one of each `tag.firstClass`, kept for the two expressions
+ *  below. */
+const HOVER_LIST_EXPRESSION = inPage(
+  "hover-list",
+  {},
+  `
+  const picked = [];
+  const seen = new Set();
+  for (const el of document.querySelectorAll(${JSON.stringify(CONTROLS)})) {
+    if (picked.length >= ${HOVER_MAX}) break;
+    if (!visible(el) || el.getBoundingClientRect().top + window.scrollY >= 2 * window.innerHeight) continue;
+    const what = spot(el);
+    if (seen.has(what)) continue;
+    seen.add(what);
+    picked.push(el);
+  }
+  window[KEPT] = { hover: picked, rest: [] };
+  return JSON.stringify({ controls: picked.map(spot) });
+`,
+);
+
+/**
+ * A control's look, property by property. The colour of a border that is not
+ * drawn is left out: with no colour of its own it is the text's, so a link
+ * that only changed colour would be said to have changed its border too
+ * (measured, Chrome 153).
+ */
+const HOVER_LOOK_SOURCE = `
+  const lookOf = (el) => {
+    const style = getComputedStyle(el);
+    const bordered = ["top", "right", "bottom", "left"].some((side) => Number.parseFloat(style.getPropertyValue("border-" + side + "-width")) > 0);
+    return ${JSON.stringify(HOVER_LOOK)}.map((name) => (name === "border-color" && !bordered ? "" : style.getPropertyValue(name)));
+  };
+`;
+
+/** Bring one of those controls to the middle of the screen, keep its look at
+ *  rest, and say where its centre is. */
+function hoverRestExpression(index: number): string {
+  return inPage(
+    "hover-rest",
+    { index },
+    `${HOVER_LOOK_SOURCE}
+  const kept = window[KEPT];
+  const el = kept.hover[args.index];
+  el.scrollIntoView({ block: "center", inline: "center", behavior: "instant" });
+  kept.rest[args.index] = lookOf(el);
+  return JSON.stringify(centre(el));
+`,
+  );
+}
+
+/** What of its look is no longer as it was at rest, and the longest of its
+ *  transitions when it has one. */
+function hoverReadExpression(index: number): string {
+  return inPage(
+    "hover-read",
+    { index },
+    `${HOVER_LOOK_SOURCE}
+  const kept = window[KEPT];
+  const el = kept.hover[args.index];
+  const now = lookOf(el);
+  const changes = ${JSON.stringify(HOVER_LOOK)}.filter((name, at) => now[at] !== kept.rest[args.index][at]);
+  const style = getComputedStyle(el);
+  const times = style.transitionDuration.split(",").map((time) => (time.trim().endsWith("ms") ? Number.parseFloat(time) : Number.parseFloat(time) * 1000));
+  const longest = Math.max(0, ...times.filter(Number.isFinite));
+  return JSON.stringify({ changes, durationMs: longest > 0 ? Math.round(longest) : null });
+`,
+  );
+}
+
+const runningSchema = z.object({ name: z.string(), target: z.string(), durationMs: z.number().nullable(), loops: z.boolean() });
+const animationsSchema = z.object({
+  count: z.number().int().nonnegative(),
+  running: z.array(runningSchema),
+  videos: z.array(
+    z.object({ autoplay: z.boolean(), loop: z.boolean(), playing: z.boolean(), width: z.number(), height: z.number() }),
+  ),
+});
+const stickySchema = z.object({ sticky: z.object({ what: z.string(), position: z.enum(["fixed", "sticky"]) }).nullable() });
+const countSchema = z.object({ count: z.number().int().nonnegative() });
+const hoverListSchema = z.object({ controls: z.array(z.string()) });
+const pointSchema = z.object({ x: z.number(), y: z.number() });
+const hoverReadSchema = z.object({ changes: z.array(z.string()), durationMs: z.number().nullable() });
+
 const foundSchema = z.object({
   found: z.object({ x: z.number(), y: z.number(), name: z.string() }).nullable(),
   names: z.array(z.string()).optional(),
@@ -1071,7 +1334,15 @@ interface ViewContext {
   pictures: Pictures;
 }
 
-const pause = (ms: number): Promise<void> => new Promise((done) => setTimeout(done, ms));
+/** Resolves once `ms` have passed by this process's clock, and not before: a
+ *  timer alone fires up to a millisecond early by it (a frame due 3,000 ms
+ *  after its screen came into view was stamped 2,999). */
+async function pause(ms: number): Promise<void> {
+  const until = Date.now() + ms;
+  for (let left = ms; left > 0; left = until - Date.now()) {
+    await new Promise((done) => setTimeout(done, left));
+  }
+}
 /** A number of px as a sentence prints it. */
 const count = (n: number): string => n.toLocaleString("en-US");
 
@@ -1576,6 +1847,173 @@ async function pictureMoving(ctx: ViewContext, view: JobView, files: readonly st
   }
 }
 
+// ------------------------------------------------- reading a pictured page
+
+/** A page's time ran out under a reading of it. */
+class TimeUp extends Error {}
+
+/**
+ * What is left of a page's time once its pictures are taken. The pictures are
+ * what a capture is for, so what is read of a page beyond them (what moves on
+ * it, how it measures) comes after every one of them, on loads of its own,
+ * and may use this time and no more: a reading that ran into the page's limit
+ * would turn a pictured page into a failed one. A step is cut off when the
+ * time is up, and after `STEP_MAX_MS` whatever is left.
+ */
+class Budget {
+  private readonly endsAt: number;
+
+  constructor(endsAt: number) {
+    this.endsAt = endsAt;
+  }
+
+  left(): number {
+    return this.endsAt - Date.now();
+  }
+
+  /** What `start` resolves with, or a `TimeUp` once it has run for `most` ms
+   *  or the page's time is up. Nothing is started with no time left. */
+  async within<T>(start: () => Promise<T>, most: number = STEP_MAX_MS): Promise<T> {
+    const left = this.left();
+    if (left <= 0) throw new TimeUp("the page's time ran out first");
+    let timer: NodeJS.Timeout | null = null;
+    const up = new Promise<never>((_, reject) => {
+      timer = setTimeout(
+        () => reject(new TimeUp(left <= most ? "the page's time ran out" : `it ran past ${Math.round(most / 1000)} seconds`)),
+        Math.min(left, most),
+      );
+    });
+    try {
+      return await Promise.race([start(), up]);
+    } finally {
+      if (timer) clearTimeout(timer);
+    }
+  }
+}
+
+/** A pictured page being read: its browser, and the time the reading has. */
+interface Study {
+  ctx: ViewContext;
+  budget: Budget;
+}
+
+function askWithin<T>(study: Study, expression: string, schema: z.ZodType<T>): Promise<T> {
+  return study.budget.within(() => askPage(study.ctx, expression, schema));
+}
+
+async function waitWithin(study: Study, ms: number): Promise<void> {
+  if (ms > 0) await study.budget.within(() => pause(ms), ms + STEP_MAX_MS);
+}
+
+/**
+ * One part of a reading, which may fail by itself: what it came to, or
+ * `missed` when the page threw under it. A part that ran out of time is not
+ * caught here. The page is then still busy with it, so it ends the whole
+ * reading on that load.
+ */
+async function part<T>(work: Promise<T>, missed: T): Promise<T> {
+  try {
+    return await work;
+  } catch (caught) {
+    if (caught instanceof TimeUp) throw caught;
+    return missed;
+  }
+}
+
+/** A view's viewport with nothing else of it: how a page is loaded to be
+ *  read at that width, from the top, with no motion preference of the
+ *  view's. */
+function atRest(view: JobView): JobView {
+  return { id: view.id, width: view.width, height: view.height, maxHeight: view.maxHeight, mobile: view.mobile, from: 0 };
+}
+
+/** The controls whose look changes under the pointer: each brought to the
+ *  middle of the screen, read at rest, given the real pointer and read again.
+ *  One whose look does not change is left out. */
+async function readHover(study: Study): Promise<Motion["hover"]> {
+  const listed = await askWithin(study, HOVER_LIST_EXPRESSION, hoverListSchema);
+  const hover: Motion["hover"] = [];
+  for (const [index, what] of listed.controls.slice(0, HOVER_MAX).entries()) {
+    const read = await part(
+      (async () => {
+        const at = await askWithin(study, hoverRestExpression(index), pointSchema);
+        await study.budget.within(() => pointer(study.ctx, "mouseMoved", at));
+        await waitWithin(study, HOVER_WAIT_MS);
+        return askWithin(study, hoverReadExpression(index), hoverReadSchema);
+      })(),
+      null,
+    );
+    if (!read || read.changes.length === 0) continue;
+    hover.push({
+      what: clip(what, NAME_MAX),
+      changes: read.changes.slice(0, HOVER_LOOK.length).map((name) => clip(name, NAME_MAX)),
+      durationMs: read.durationMs === null ? null : Math.round(read.durationMs),
+    });
+  }
+  return hover;
+}
+
+/**
+ * What moves on a page (rulings 327 and 328), read once, at one width, on a
+ * load of its own: what is still running a second after the load event, the
+ * videos, how many elements animate in as the page is scrolled, a bar that
+ * stays at the top, and the controls whose look changes under the pointer.
+ *
+ * On a load of its own and not on a view's, for two reasons. The count of
+ * what animates in has to be taken on the page's first walk (see
+ * `ON_SCROLL_EXPRESSION`), and every pictured view but a moving one has
+ * already walked its page. And a view's own load may be in no state to read:
+ * an act has pressed something on it, a moving one is mid-flight. For the
+ * same reason the count comes before the bar is looked for, which scrolls the
+ * page. Null when the page did not load for it.
+ */
+async function readMotion(study: Study, view: JobView): Promise<Motion | null> {
+  let loadedAt: number;
+  try {
+    loadedAt = await study.budget.within(() => openView(study.ctx, atRest(view), 1));
+  } catch {
+    return null;
+  }
+  const motion: Motion = { running: [], runningCount: 0, videos: [], sticky: null, onScroll: 0, hover: [] };
+  try {
+    await waitWithin(study, loadedAt + SETTLE_MS - Date.now());
+    const moving = await part(askWithin(study, ANIMATIONS_EXPRESSION, animationsSchema), null);
+    if (moving) {
+      motion.running = moving.running.slice(0, RUNNING_MAX).map(asRunning);
+      motion.runningCount = Math.max(moving.count, moving.running.length);
+      motion.videos = moving.videos.slice(0, VIDEOS_MAX);
+    }
+    motion.onScroll = (await part(askWithin(study, ON_SCROLL_EXPRESSION, countSchema), { count: 0 })).count;
+    const stays = (await part(askWithin(study, STICKY_EXPRESSION, stickySchema), { sticky: null })).sticky;
+    motion.sticky = stays ? { what: clip(stays.what, NAME_MAX), position: stays.position } : null;
+    motion.hover = await part(readHover(study), []);
+  } catch {
+    // Out of time part way: what was read stands.
+  }
+  return motion;
+}
+
+/** An animation as the page told it, in the report's own bounds. */
+function asRunning(told: z.infer<typeof runningSchema>): Running {
+  return {
+    name: clip(told.name, NAME_MAX),
+    target: clip(told.target, NAME_MAX),
+    durationMs: told.durationMs === null ? null : Math.round(told.durationMs),
+    loops: told.loops,
+  };
+}
+
+/** What is read of a page once it is pictured: null where it was not. */
+interface Readings {
+  motion: Motion | null;
+}
+
+/** The view a page's motion is read at: the first that is not a phone's,
+ *  where a pointer means something, else the first. */
+function motionView(views: readonly JobView[]): JobView | null {
+  return views.find((view) => !view.mobile) ?? views[0] ?? null;
+}
+
 /** The browser of the page being pictured, so a stop ends it too. */
 let current: Browser | null = null;
 
@@ -1594,17 +2032,22 @@ async function picturePage(job: Job, server: PageServer, page: JobPage, index: n
   // page server (asked, missing) is not its to report.
   const web = page.kind === "web";
   const traffic = { last: 0 };
-  const report = (error: string | null): PageReport => ({
-    file: page.file,
-    shots,
-    ended,
-    acts,
+  const read: Readings = { motion: null };
+  /** What the page's pictures asked of the network and of the page server,
+   *  and the dialogs they met. Fixed once the last picture is taken: the
+   *  loads a reading makes after that are not the page's own. */
+  const pictured = (): Pick<PageReport, "dialogs" | "asked" | "askedCount" | "missing"> => ({
     dialogs: dialogs.count,
     asked: web ? [] : [...asked.hosts].slice(0, REPORT_LIST_MAX),
     askedCount: web ? 0 : asked.urls.size,
     missing: web ? [] : server.missing(),
-    error,
   });
+  let settled: ReturnType<typeof pictured> | null = null;
+  const report = (error: string | null): PageReport => {
+    const said: PageReport = { file: page.file, shots, ended, acts, ...(settled ?? pictured()), error };
+    if (read.motion) said.motion = read.motion;
+    return said;
+  };
 
   let url = server.base + encodeURIComponent(page.file);
   let setPage: string | null = null;
@@ -1643,6 +2086,7 @@ async function picturePage(job: Job, server: PageServer, page: JobPage, index: n
   mkdirSync(profile, { recursive: true });
   const browser = new Browser(job.browser, browserArgs(profile, server.port, web));
   current = browser;
+  const startedAt = Date.now();
   let timer: NodeJS.Timeout | null = null;
   const expired = new Promise<never>((_, reject) => {
     timer = setTimeout(
@@ -1701,6 +2145,12 @@ async function picturePage(job: Job, server: PageServer, page: JobPage, index: n
         else if (view.moving === true) await pictureMoving(ctx, view, files);
         else await pictureView(ctx, view, files);
       }
+      settled = pictured();
+      // Every picture is taken. What is read of the page beyond them has
+      // what is left of its time, and costs it nothing when that runs out.
+      const study: Study = { ctx, budget: new Budget(startedAt + job.pageTimeoutMs - CLOSING_MS) };
+      const moves = web || job.measure === true ? motionView(job.views) : null;
+      if (moves) read.motion = await readMotion(study, moves);
     } finally {
       stop();
     }
